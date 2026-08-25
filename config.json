@@ -226,9 +226,18 @@
         "supports_balance_query": false,
         "supports_quota_query": false,
         "supports_usage_query": false,
-        "supports_scrape_balance": false,
+        "supports_scrape_balance": true,
         "endpoints": {
           "models": "https://open.bigmodel.cn/api/paas/v4/models"
+        },
+        "scrape": {
+          "paygo": {
+            "console_url": "https://www.bigmodel.cn/finance-center/resource-package/package-mgmt?tab=my",
+            "interceptor_js": "(()=>{try{if(window.location.origin!=='https://www.bigmodel.cn')return'ok-not-target';const TS=['/api/biz/tokenaccounts/list/my','/api/biz/account/query-customer-account-report'];const I=(...a)=>Promise.resolve().then(()=>window.__TAURI_INTERNALS__?.invoke?.(...a)).catch(()=>{});const m=u=>{const n=u.toLowerCase().replace(/%2f/g,'/');return TS.some(t=>n.includes(t.toLowerCase()));};const oF=window.fetch;window.fetch=async function(...a){const r=await oF.apply(this,a);const u=typeof a[0]==='string'?a[0]:a[0]?.url||'';if(m(u)){r.clone().text().then(b=>{(window.__flowlet_scrape_stash=window.__flowlet_scrape_stash||[]).push({url:u,body:b});I('handle_intercepted_response',{channelId:'zhipu',url:u,body:b}).catch(()=>{});}).catch(()=>{});}return r;};const OX=window.XMLHttpRequest;window.XMLHttpRequest=function(){const x=new OX();const oo=x.open;x.open=function(m,u){this._url=u;return oo.apply(this,arguments);};x.addEventListener('readystatechange',()=>{if(x.readyState===4&&x.status===200&&m(x._url||'')){(window.__flowlet_scrape_stash=window.__flowlet_scrape_stash||[]).push({url:x._url,body:x.responseText});I('handle_intercepted_response',{channelId:'zhipu',url:x._url,body:x.responseText}).catch(()=>{});}});return x;};return'ok-injected';}catch(e){return'err:'+e.message;}})();",
+            "extractor_js": "function extract(bundle){try{var report=(bundle&&bundle.account_report&&bundle.account_report.data)||{};var bv=typeof report.availableBalance==='number'?report.availableBalance:(typeof report.balance==='number'?report.balance:null);var rows=(bundle&&bundle.token_packs_list&&bundle.token_packs_list.rows)||[];if(!Array.isArray(rows))rows=[];var packs=[];var total=0,used=0,remaining=0,expireAt=null,hasTokenPacks=false;for(var i=0;i<rows.length;i++){var r=rows[i]||{};var status=r.status||'';var effective=status==='EFFECTIVE';var totalN=typeof r.tokensMagnitude==='number'?r.tokensMagnitude:(Number(r.tokensMagnitude)||0);var availN=typeof r.availableBalance==='number'?r.availableBalance:(Number(r.availableBalance)||0);var usedN=Math.max(0,totalN-availN);var isTokens=(r.consumeType||'TOKENS')==='TOKENS';var expire=r.packageExpirationTime||r.expirationTime||null;packs.push({packageId:r.id!=null?String(r.id):(r.tokenNo||''),tokenNo:r.tokenNo||'',packageName:r.resourcePackageName||'',totalToken:totalN,consumedToken:usedN,remainingToken:availN,frozenToken:typeof r.frozenBalance==='number'?r.frozenBalance:(Number(r.frozenBalance)||0),consumeType:r.consumeType||'TOKENS',suitableModel:r.suitableModel||'',suitableScene:r.suitableScene||'',status:status,statusText:status==='EFFECTIVE'?'生效中':(status==='EXPIRED'?'已失效':status),type:r.type||'',effectiveTime:r.effectiveTime||null,expireTime:expire,purchaseTime:r.purchaseTime||null});if(effective&&isTokens){hasTokenPacks=true;total+=totalN;used+=usedN;remaining+=availN;if(expire&&(!expireAt||expire<expireAt))expireAt=expire;}}return{balance:bv,currency:'CNY',plan_name:'API 按量付费',token_total:hasTokenPacks?total:null,token_used:hasTokenPacks?used:null,token_remaining:hasTokenPacks?remaining:null,token_expire_at:expireAt,token_packs:packs};}catch(e){return null;}}",
+            "aggregate": true,
+            "required_slots": ["token_packs_list", "account_report"]
+          }
         }
       },
       {

@@ -2,11 +2,12 @@ import { useEffect, useState } from "react";
 import { Badge, Button, Dropdown, Switch, Tag, Tooltip, Typography } from "@douyinfe/semi-ui-19";
 import { IconDelete, IconEdit, IconMore, IconPlay, IconPlus, IconStop } from "@douyinfe/semi-icons";
 import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
-import { CHATGPT_CHANNEL_ID, OPENROUTER_CHANNEL_ID, isQwenTokenPlanAccount, isQwenPayAsYouGoAccount, isChatGptAccount } from "../../domains/channel/types";
+import { CHATGPT_CHANNEL_ID, OPENROUTER_CHANNEL_ID, isQwenTokenPlanAccount, isQwenPayAsYouGoAccount, isZhipuPayAsYouGoAccount, isChatGptAccount } from "../../domains/channel/types";
 import type { ChannelPreset } from "../../domains/channel/types";
 import type { CodexAccountReport } from "../../domains/agent/types";
 import { parseQwenTokenPlanDetails, isQwenSubscriptionActive, qwenSubscriptionInactiveKind } from "./qwenTokenPlanDetails";
 import { parseQwenFreeTierDetails } from "./qwenFreetierDetails";
+import { parseStoredZhipuPacks, summarizeZhipuPacks } from "./zhipuPacks";
 import {
   codexAccountToPseudoChannelAccount,
   getCodexUsageDisplay,
@@ -267,6 +268,16 @@ function resourceSummary(account: ChannelAccount, snapshot: AccountBalanceSnapsh
       : details?.unsettledAmount != null
         ? t("未结清 {amount}", { amount: formatBalance(details.unsettledAmount, details.currency, language) })
         : "";
+    return { label: snapshot?.balance == null ? "" : t("余额"), value: balanceText, secondary };
+  }
+  // Z.AI API 按量付费：余额来自资源包管理页抓取，副列展示生效中额度包剩余。
+  if (isZhipuPayAsYouGoAccount(account)) {
+    const balanceText = snapshot?.balance == null ? "" : `${formatBalance(snapshot.balance, snapshot.currency, language)}${snapshot.currency ? ` ${snapshot.currency}` : ""}`;
+    const summary = summarizeZhipuPacks(parseStoredZhipuPacks(snapshot?.token_packs));
+    const packCount = summary.effectivePackCount;
+    const secondary = packCount > 0
+      ? t("额度包剩余 {value} Tokens", { value: formatCompactNumber(summary.remaining, language, { fallback: "-" }) })
+      : "";
     return { label: snapshot?.balance == null ? "" : t("余额"), value: balanceText, secondary };
   }
   if (

@@ -2,6 +2,13 @@ use crate::core::config::{
     ChannelAccount, ChannelPreset, ProtocolType, RequestLogInput, RouteCandidate, RouteRule,
     ACCOUNT_CREDENTIAL_HEALTHY,
 };
+pub(super) struct CandidateSelection {
+    pub matched: Vec<RouteCandidate>,
+    /// 与请求模型一致、账号可用，但未声明支持当前请求协议的候选。
+    /// 只有没有任何匹配候选时，上层才把它作为“已跳过”降级节点写入尝试链路。
+    pub protocol_skipped: Vec<RouteCandidate>,
+}
+
 pub(super) fn match_candidates(
     routes: &[RouteCandidate],
     rules: &[RouteRule],
@@ -12,9 +19,13 @@ pub(super) fn match_candidates(
     accounts: &[ChannelAccount],
     channels: &[ChannelPreset],
     round_robin: &mut std::collections::HashMap<String, usize>,
-) -> Vec<RouteCandidate> {
+) -> CandidateSelection {
+    let empty = CandidateSelection {
+        matched: Vec::new(),
+        protocol_skipped: Vec::new(),
+    };
     let Some(public_model) = public_model.filter(|model| !model.trim().is_empty()) else {
-        return Vec::new();
+        return empty;
     };
     let is_flowlet_model = matches!(public_model, "flowlet-pro" | "flowlet-flash");
 
@@ -23,18 +34,21 @@ pub(super) fn match_candidates(
         if let Some(rule) =
             find_matching_rule(rules, client_id, Some(public_model), protocol, accounts)
         {
-            return vec![RouteCandidate {
-                id: format!("rule-{}", rule.id),
-                virtual_model_id: public_model.to_string(),
-                channel_id: rule.target_channel_id,
-                account_id: rule.target_account_id,
-                upstream_model: rule.target_upstream_model,
-                client_protocol: protocol.clone(),
-                priority: rule.priority,
-                enabled: true,
-                created_at: String::new(),
-                updated_at: String::new(),
-            }];
+            return CandidateSelection {
+                matched: vec![RouteCandidate {
+                    id: format!("rule-{}", rule.id),
+                    virtual_model_id: public_model.to_string(),
+                    channel_id: rule.target_channel_id,
+                    account_id: rule.target_account_id,
+                    upstream_model: rule.target_upstream_model,
+                    client_protocol: protocol.clone(),
+                    priority: rule.priority,
+                    enabled: true,
+                    created_at: String::new(),
+                    updated_at: String::new(),
+                }],
+                protocol_skipped: Vec::new(),
+            };
         }
     }
 
@@ -59,36 +73,27 @@ pub(super) fn match_candidates(
         .map(|channel| channel.id.as_str())
         .collect();
 
-    let mut matched: Vec<RouteCandidate> = routes
-        .iter()
-        .filter(|route| {
-            route.enabled
-                && route.virtual_model_id == public_model
-                && route.client_protocol == *protocol
-                && account_by_id.contains_key(route.account_id.as_str())
-                && (!is_flowlet_model || dual_protocol_channels.contains(route.channel_id.as_str()))
-        })
-        .cloned()
-        .collect();
+    let mut matched: Vec<RouteCandidate> = Vec::new();
+    let mut protocol_skipped: Vec<RouteCandidate> = Vec::new();
+    for route in routes {
+        if !route.enabled || route.virtual_model_id != public_model {
+            continue;
+        }
+        if !account_by_id.contains_key(route.account_id.as_str()) {
+            continue;
+        }
+        if route.client_protocol != *protocol {
+            protocol_skipped.push(route.clone());
+            continue;
+        }
+        if is_flowlet_model && !dual_protocol_channels.contains(route.channel_id.as_str()) {
+            continue;
+        }
+        matched.push(route.clone());
+    }
 
-    matched.sort_by(|a, b| {
-        let account_a = account_by_id.get(a.account_id.as_str());
-        let account_b = account_by_id.get(b.account_id.as_str());
-        a.priority
-            .cmp(&b.priority)
-            .then_with(|| a.channel_id.cmp(&b.channel_id))
-            .then_with(|| a.upstream_model.cmp(&b.upstream_model))
-            .then_with(|| {
-                account_a
-                    .map(|account| account.priority)
-                    .cmp(&account_b.map(|account| account.priority))
-            })
-            .then_with(|| {
-                account_a
-                    .map(|account| account.created_at.as_str())
-                    .cmp(&account_b.map(|account| account.created_at.as_str()))
-            })
-    });
+    sort_route_candidates(&mut matched, &account_by_id);
+    sort_route_candidates(&mut protocol_skipped, &account_by_id);
 
     // 每个“档位 + 协议 + 底层模型”的账号池独立轮询；模型池之间仍按 priority 固定 fallback。
     let mut cursor = 0;
@@ -120,7 +125,34 @@ pub(super) fn match_candidates(
 
     // 动态评分本期不参与默认路由。
     let _ = scores;
-    matched
+    CandidateSelection {
+        matched,
+        protocol_skipped,
+    }
+}
+
+fn sort_route_candidates(
+    candidates: &mut [RouteCandidate],
+    account_by_id: &std::collections::HashMap<&str, &ChannelAccount>,
+) {
+    candidates.sort_by(|a, b| {
+        let account_a = account_by_id.get(a.account_id.as_str());
+        let account_b = account_by_id.get(b.account_id.as_str());
+        a.priority
+            .cmp(&b.priority)
+            .then_with(|| a.channel_id.cmp(&b.channel_id))
+            .then_with(|| a.upstream_model.cmp(&b.upstream_model))
+            .then_with(|| {
+                account_a
+                    .map(|account| account.priority)
+                    .cmp(&account_b.map(|account| account.priority))
+            })
+            .then_with(|| {
+                account_a
+                    .map(|account| account.created_at.as_str())
+                    .cmp(&account_b.map(|account| account.created_at.as_str()))
+            })
+    });
 }
 /// 查找第一个匹配的规则
 pub(super) fn find_matching_rule(

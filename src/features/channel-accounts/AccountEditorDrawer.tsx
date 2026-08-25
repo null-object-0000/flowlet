@@ -16,9 +16,11 @@ import {
   QWEN_CHANNEL_ID,
   QWEN_TOKEN_PLAN_ANTHROPIC_BASE_URL,
   QWEN_TOKEN_PLAN_OPENAI_BASE_URL,
+  ZHIPU_CHANNEL_ID,
   canonicalModelId,
   canonicalModelKey,
   isCustomChannel,
+  isZhipuPayAsYouGoAccount,
   resolveSelectedUpstreamModelIds,
 } from "../../domains/channel/types";
 import {
@@ -46,6 +48,11 @@ import {
   qwenFreeQuotaByModel,
   type QwenFreeQuotaInstance,
 } from "./qwenFreetierDetails";
+import {
+  parseStoredZhipuPacks,
+  summarizeZhipuPacks,
+  type ZhipuPack,
+} from "./zhipuPacks";
 import {
   ACCOUNT_NAME_MAX_DISPLAY_UNITS,
   getAccountNameDisplayUnits,
@@ -146,8 +153,10 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
   const isQwenTokenPlan = draft.channel_id === QWEN_CHANNEL_ID && resourceMode === "token_plan";
   // Qwen API 按量付费：福利页（权益）提供官方余额与免费额度抓取，同样固定自动同步。
   const isQwenPayAsYouGo = draft.channel_id === QWEN_CHANNEL_ID && resourceMode === "pay_as_you_go";
+  // Z.AI API 按量付费：资源包管理页提供官方余额与额度包抓取，固定自动同步。
+  const isZhipuPayAsYouGo = isZhipuPayAsYouGoAccount(draft);
   const supportsScrape = channel?.supports_scrape_balance === true && !autoSyncBalance;
-  const resourceSyncMode = isLongCatHybrid || isQwenTokenPlan || isQwenPayAsYouGo
+  const resourceSyncMode = isLongCatHybrid || isQwenTokenPlan || isQwenPayAsYouGo || isZhipuPayAsYouGo
     ? "auto"
     : (draft.resource_sync_mode ?? "manual");
   const isResourceAutoSync = supportsScrape && resourceSyncMode === "auto";
@@ -174,7 +183,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
       channel_id: channelId,
       name: count === 0 ? t("{name} 主账号", { name: next?.name ?? t("渠道") }) : t("{name} 账号 {count}", { name: next?.name ?? t("渠道"), count: count + 1 }),
       resource_mode: defaultResourceMode(channelId),
-      resource_sync_mode: channelId === "longcat" || nextIsQwen ? "auto" : "manual",
+      resource_sync_mode: channelId === "longcat" || nextIsQwen || channelId === ZHIPU_CHANNEL_ID ? "auto" : "manual",
       base_url_override: nextIsQwen && defaultResourceMode(channelId) === "token_plan" ? QWEN_TOKEN_PLAN_OPENAI_BASE_URL : null,
       anthropic_base_url_override: nextIsQwen && defaultResourceMode(channelId) === "token_plan" ? QWEN_TOKEN_PLAN_ANTHROPIC_BASE_URL : null,
       management_key: channelId === OPENROUTER_CHANNEL_ID ? currentDraft.management_key ?? null : null,
@@ -380,7 +389,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
           name: normalizedName,
           api_key: currentDraft.api_key.trim(),
           management_key: currentDraft.management_key?.trim() || null,
-          resource_sync_mode: isQwenTokenPlan || isLongCatHybrid || isQwenPayAsYouGo ? "auto" : currentDraft.resource_sync_mode,
+          resource_sync_mode: isQwenTokenPlan || isLongCatHybrid || isQwenPayAsYouGo || isZhipuPayAsYouGo ? "auto" : currentDraft.resource_sync_mode,
           base_url_override: currentDraft.base_url_override?.trim() || null,
           anthropic_base_url_override: currentDraft.anthropic_base_url_override?.trim() || null,
         },
@@ -518,8 +527,8 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
         {!isChatGptCreate ? (
         <section className={styles.section}>
           <div className={`${styles.sectionHeading} ${styles.resourceModeHeading}`}>
-            <span><h3>{t("资源模式")}</h3><small>{t(isOpenRouter ? (hasManagementKey ? "按量付费，自动同步账户 Credits" : "按量付费，自动同步 API Key 消费限额") : autoSyncBalance ? "按量付费，余额自动同步" : isLongCatHybrid ? "优先使用资源包，用尽后自动扣除余额" : isQwenTokenPlan ? "订阅额度自动同步" : resourceOptions.length ? "选择资源类型以及资源信息的维护方式" : "手动维护按量付费余额")}</small></span>
-            {isEdit && (resourceOptions.length || isLongCatHybrid) ? (
+            <span><h3>{t("资源模式")}</h3><small>{t(isOpenRouter ? (hasManagementKey ? "按量付费，自动同步账户 Credits" : "按量付费，自动同步 API Key 消费限额") : autoSyncBalance ? "按量付费，余额自动同步" : isLongCatHybrid ? "优先使用资源包，用尽后自动扣除余额" : isQwenTokenPlan ? "订阅额度自动同步" : isZhipuPayAsYouGo ? "按量付费，余额与额度包自动同步" : resourceOptions.length ? "选择资源类型以及资源信息的维护方式" : "手动维护按量付费余额")}</small></span>
+            {isEdit && (resourceOptions.length || isLongCatHybrid || isZhipuPayAsYouGo) ? (
               <div className={styles.resourceModeMeta}>
                 <span>{t("计费模式")}</span>
                 <Tag color="blue">{t(resourceMode === "hybrid" ? "混合" : resourceMode === "token_pack" ? "Token 资源包" : resourceMode === "token_plan" ? "Token Plan" : "API 按量付费")}</Tag>
@@ -583,6 +592,15 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
                 />
               ) : isQwenPayAsYouGo ? (
                 <QwenFreeTierPanel
+                  account={draft}
+                  enabled={isEdit}
+                  snapshot={snapshot}
+                  onScrape={onScrape}
+                  language={language}
+                  t={t}
+                />
+              ) : isZhipuPayAsYouGo ? (
+                <ZhipuPayAsYouGoPanel
                   account={draft}
                   enabled={isEdit}
                   snapshot={snapshot}
@@ -847,6 +865,7 @@ function ModeOption({ selected, disabled, title, description, onClick }: { selec
 function defaultResourceMode(channelId: string): AccountResourceMode {
   if (channelId === "longcat") return "hybrid";
   if (channelId === QWEN_CHANNEL_ID) return "pay_as_you_go";
+  if (channelId === ZHIPU_CHANNEL_ID) return "pay_as_you_go";
   if (channelId === CHATGPT_CHANNEL_ID) return "codex";
   return "pay_as_you_go";
 }
@@ -879,9 +898,10 @@ function resourceSyncModeOptions(): { value: AccountResourceSyncMode; title: str
 
 function createDraft(mode: Mode, accounts: ChannelAccount[], presets: ChannelPreset[], language: "zh-CN" | "en-US"): ChannelAccount {
   if (mode.kind === "edit") {
-    // 千问双资源模式（按量付费 / Token Plan）都由官方控制台自动同步。
+    // 千问双资源模式（按量付费 / Token Plan）与 Z.AI 按量付费都由官方控制台自动同步。
     const forceAutoSync = mode.account.channel_id === "longcat"
-      || mode.account.channel_id === QWEN_CHANNEL_ID;
+      || mode.account.channel_id === QWEN_CHANNEL_ID
+      || mode.account.channel_id === ZHIPU_CHANNEL_ID;
     return { ...mode.account, resource_sync_mode: forceAutoSync ? "auto" : mode.account.resource_sync_mode };
   }
   const channel = presets.find((item) => item.id === mode.channelId);
@@ -903,7 +923,7 @@ function createDraft(mode: Mode, accounts: ChannelAccount[], presets: ChannelPre
     priority: accounts.length,
     remark: "",
     resource_mode: nextQwenMode,
-    resource_sync_mode: mode.channelId === "longcat" || qwenAnyMode ? "auto" : "manual",
+    resource_sync_mode: mode.channelId === "longcat" || qwenAnyMode || mode.channelId === ZHIPU_CHANNEL_ID ? "auto" : "manual",
     base_url_override: qwenTokenPlanDefault ? QWEN_TOKEN_PLAN_OPENAI_BASE_URL : null,
     anthropic_base_url_override: qwenTokenPlanDefault ? QWEN_TOKEN_PLAN_ANTHROPIC_BASE_URL : null,
     workspace_default_base_url: null,
@@ -1480,6 +1500,174 @@ function QwenFreeTierPanel({
       </div>
     </div>
   );
+}
+
+/** Z.AI API 按量付费：资源包管理页抓取结果面板——官方钱包余额与额度包（资源包）
+ *  明细。余额来自 account/query-customer-account-report，额度包来自
+ *  tokenAccounts/list/my。 */
+function ZhipuPayAsYouGoPanel({
+  account,
+  enabled,
+  snapshot,
+  onScrape,
+  language,
+  t,
+}: {
+  account: ChannelAccount;
+  enabled: boolean;
+  snapshot?: AccountBalanceSnapshot;
+  onScrape?: (accountId: string) => Promise<ScrapeBalanceResult>;
+  language: "zh-CN" | "en-US";
+  t: (k: string, params?: Record<string, string | number> | undefined) => string;
+}) {
+  const {
+    startScrape,
+    retryScrape,
+    lastResult,
+    isScraping,
+    needLogin,
+    consoleActionMessage,
+    error,
+    statusText,
+  } = useScrapeConsole(onScrape);
+  const freshResult = lastResult;
+  const packs = parseStoredZhipuPacks(freshResult?.token_packs ?? snapshot?.token_packs);
+  const summary = summarizeZhipuPacks(packs);
+  const balance = freshResult?.balance ?? snapshot?.balance;
+  const currency = freshResult?.currency ?? snapshot?.currency;
+  const syncedAt = freshResult?.synced_at ?? snapshot?.synced_at;
+  const hasData = packs.length > 0 || balance != null;
+  const remainingPercent = summary.total > 0
+    ? Math.max(0, Math.min(100, (summary.remaining / summary.total) * 100))
+    : 0;
+
+  async function handleScrape() {
+    await startScrape(account.id);
+  }
+
+  async function handleRetry() {
+    await retryScrape(account.id);
+  }
+
+  return (
+    <div className={styles.longCatResourcePanel}>
+      <div className={styles.longCatSummaryCard}>
+        <div className={styles.longCatSummaryHeading}>
+          <strong>{t("API 按量付费 · 额度包")}</strong>
+          <Tag size="small" color="green">{t("自动同步")}</Tag>
+        </div>
+        <div className={styles.longCatSummaryGrid}>
+          <div className={styles.longCatRemaining}>
+            <small>{t("额度包剩余")}</small>
+            <strong>{summary.effectivePackCount > 0 ? formatResourceTokenValue(summary.remaining, language) : "-"}</strong>
+          </div>
+          <div className={styles.longCatProgress}>
+            <strong>{summary.effectivePackCount > 0 ? t("剩余 {percent}%", { percent: remainingPercent.toFixed(1) }) : "-"}</strong>
+            <Progress aria-label={t("额度包剩余比例")} percent={remainingPercent} size="small" showInfo={false} />
+            <small>{t("总量")} {summary.effectivePackCount > 0 ? formatResourceTokenValue(summary.total, language) : "-"}</small>
+          </div>
+          <div>
+            <small>{t("账户余额")}</small>
+            <strong>{balance == null ? "-" : `${balance.toLocaleString(language === "en-US" ? "en-US" : "zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currency ?? ""}`}</strong>
+          </div>
+          <div>
+            <small>{t("最早到期")}</small>
+            <strong>{summary.expireAt?.slice(0, 10) ?? "-"}</strong>
+          </div>
+          <div>
+            <small>{t("最近同步")}</small>
+            <strong>{syncedAt ? formatLocalDate(syncedAt) : "-"}</strong>
+          </div>
+        </div>
+      </div>
+
+      <div className={styles.longCatSyncSection}>
+        <div className={styles.longCatSyncControls}>
+          <Button
+            icon={<IconRefresh />}
+            loading={isScraping}
+            disabled={!enabled}
+            onClick={() => void handleScrape()}
+          >
+            {t("立即刷新")}
+          </Button>
+          <ScrapeSyncFeedback
+            isScraping={isScraping}
+            statusText={statusText}
+            needLogin={needLogin}
+            consoleActionMessage={consoleActionMessage}
+            error={error}
+            onRetry={() => void handleRetry()}
+            showIdleHint={!hasData}
+            t={t}
+          />
+        </div>
+      </div>
+
+      <div className={styles.longCatDetails}>
+        <strong>{t("额度包明细")}</strong>
+        {packs.length ? (
+          <div className={styles.longCatTableScroll}>
+            <table className={styles.longCatTable}>
+              <thead>
+                <tr>
+                  <th>{t("额度包名称")}</th>
+                  <th>{t("适用模型")}</th>
+                  <th>{t("总量")}</th>
+                  <th>{t("已用")}</th>
+                  <th>{t("剩余")}</th>
+                  <th>{t("到期日期")}</th>
+                  <th>{t("状态")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {packs.map((pack, index) => {
+                  const displayStatus = zhipuPackDisplayStatus(pack, t);
+                  return (
+                    <tr key={pack.packageId ?? pack.tokenNo ?? index}>
+                      <td>{pack.packageName ?? "-"}</td>
+                      <td>{pack.suitableModel || pack.suitableScene || "-"}</td>
+                      <td>{formatZhipuPackAmount(pack, pack.totalToken, language)}</td>
+                      <td>{formatZhipuPackAmount(pack, pack.consumedToken, language)}</td>
+                      <td>{formatZhipuPackAmount(pack, pack.remainingToken, language)}</td>
+                      <td>{pack.expireTime?.slice(0, 10) ?? "-"}</td>
+                      <td><Tag size="small" color={displayStatus.color}>{displayStatus.label}</Tag></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <span className={styles.packEmpty}>{t("尚未同步额度包，请点击“立即刷新”。")}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function zhipuPackDisplayStatus(
+  pack: ZhipuPack,
+  t: (key: string) => string,
+): { label: string; color: "green" | "grey" } {
+  if (pack.statusText) {
+    return { label: t(pack.statusText), color: pack.status === "EFFECTIVE" ? "green" : "grey" };
+  }
+  return pack.status === "EFFECTIVE"
+    ? { label: t("生效中"), color: "green" }
+    : { label: t("已失效"), color: "grey" };
+}
+
+function formatZhipuPackAmount(
+  pack: ZhipuPack,
+  value: number | undefined,
+  language: "zh-CN" | "en-US",
+): string {
+  if (value == null) return "-";
+  const isTimes = (pack.consumeType ?? "TOKENS") === "TIMES";
+  return isTimes
+    ? `${Math.max(0, value).toLocaleString(language)} 次`
+    : formatResourceTokenAmount(value, language);
 }
 
 function QwenQuotaProgress({

@@ -963,8 +963,8 @@ pub(crate) async fn handle_intercepted_response(
 mod scrape_capture_tests {
     use super::{
         channel_resource_sync_completion_status, channel_resource_sync_method,
-        is_explicit_login_url, merge_longcat_token_packs, record_stash_items, scrape_responses_complete,
-        ChannelResourceSyncMethod,
+        is_explicit_login_url, merge_longcat_token_packs, normalize_scrape_token_packs,
+        record_stash_items, scrape_responses_complete, ChannelResourceSyncMethod,
     };
     use crate::core::channels_config::{ChannelsConfig, DEFAULT_CONFIG_JSON};
     use crate::core::config::ChannelAccount;
@@ -1163,6 +1163,55 @@ mod scrape_capture_tests {
         );
         assert_eq!(
             channel_resource_sync_method(&config, &pay_as_you_go_manual),
+            None
+        );
+    }
+
+    #[test]
+    fn zhipu_console_sync_covers_pay_as_you_go() {
+        let config = default_channels_config();
+        let pay_as_you_go = ChannelAccount {
+            channel_id: "zhipu".to_string(),
+            resource_mode: Some("pay_as_you_go".to_string()),
+            resource_sync_mode: "auto".to_string(),
+            ..Default::default()
+        };
+        let pay_as_you_go_manual = ChannelAccount {
+            resource_sync_mode: "manual".to_string(),
+            ..pay_as_you_go.clone()
+        };
+        // 历史账号 resource_mode 为 NULL 时回退到按量付费。
+        let legacy_null_mode = ChannelAccount {
+            channel_id: "zhipu".to_string(),
+            resource_mode: None,
+            resource_sync_mode: "auto".to_string(),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            channel_resource_sync_method(&config, &pay_as_you_go),
+            Some(ChannelResourceSyncMethod::ConsoleScrape)
+        );
+        assert_eq!(
+            channel_resource_sync_method(&config, &pay_as_you_go_manual),
+            None
+        );
+        assert_eq!(
+            channel_resource_sync_method(&config, &legacy_null_mode),
+            Some(ChannelResourceSyncMethod::ConsoleScrape)
+        );
+    }
+
+    #[test]
+    fn zhipu_token_packs_pass_through_extractor_output() {
+        let slots = std::collections::HashMap::<String, String>::new();
+        let extracted = r#"[{"packageId":"1","packageName":"包"}]"#;
+        assert_eq!(
+            normalize_scrape_token_packs("zhipu", &slots, Some(extracted)).as_deref(),
+            Some(extracted)
+        );
+        assert_eq!(
+            normalize_scrape_token_packs("zhipu", &slots, None),
             None
         );
     }
@@ -1469,6 +1518,22 @@ fn merge_longcat_token_packs(
     } else {
         serde_json::to_string(&packs).ok()
     }
+}
+
+/// 按渠道归一化控制台抓取到的资源包数组。
+///
+/// - LongCat：summary / list 两份响应需要按内部身份去重合并（见 `merge_longcat_token_packs`）。
+/// - Z.AI：extractor 已从 `tokenAccounts/list/my` 归一化为数组，直接透传。
+/// - 其他渠道：若 extractor 产出了 `token_packs` 数组则透传，否则回退 LongCat 合并逻辑。
+fn normalize_scrape_token_packs(
+    channel_id: &str,
+    slots: &std::collections::HashMap<String, String>,
+    extracted: Option<&str>,
+) -> Option<String> {
+    if channel_id == "zhipu" {
+        return extracted.map(ToOwned::to_owned);
+    }
+    merge_longcat_token_packs(slots, extracted)
 }
 
 fn longcat_list_item_as_pack(item: &serde_json::Value) -> Option<serde_json::Value> {
@@ -2075,7 +2140,7 @@ pub(crate) async fn scrape_balance(
         return Err("账号正在等待控制台登录或人工处理，本轮自动同步已跳过".to_string());
     }
     // 1. 解析模式配置。
-    let mode = {
+    let (channel_id, mode) = {
         let snapshot = state.runtime_config.snapshot();
         let account = snapshot
             .accounts
@@ -2086,12 +2151,13 @@ pub(crate) async fn scrape_balance(
             .channels_config
             .lock()
             .map_err(|_| "锁定渠道配置失败".to_string())?;
-        resolve_scrape_mode(
+        let mode = resolve_scrape_mode(
             &config,
             &account.channel_id,
             account.resource_mode.as_deref(),
         )
-        .ok_or("该账号所属渠道不支持控制台抓取")?
+        .ok_or("该账号所属渠道不支持控制台抓取")?;
+        (account.channel_id.clone(), mode)
     };
 
     // 2. 前端通常已调用 probe_scrape_login 完成一次“清缓冲 → 刷新 → 捕获”。
@@ -2213,7 +2279,7 @@ pub(crate) async fn scrape_balance(
         .get("token_packs")
         .filter(|value| value.is_array())
         .and_then(|value| serde_json::to_string(value).ok());
-    let token_packs = merge_longcat_token_packs(&slots, extracted_token_packs.as_deref());
+    let token_packs = normalize_scrape_token_packs(&channel_id, &slots, extracted_token_packs.as_deref());
 
     let now = chrono::Utc::now().to_rfc3339();
     let raw_scraped_json = if mode.aggregate {

@@ -35,6 +35,7 @@ describe("OverviewExposedModelsCard", () => {
         accounts={[]}
         channels={channels}
         onManage={vi.fn()}
+        onOpenModel={vi.fn()}
       />,
     );
 
@@ -54,6 +55,7 @@ describe("OverviewExposedModelsCard", () => {
         accounts={accounts}
         channels={channels}
         onManage={onManage}
+        onOpenModel={vi.fn()}
       />,
     );
 
@@ -68,5 +70,23 @@ describe("OverviewExposedModelsCard", () => {
 
     await user.click(screen.getByRole("button", { name: "管理模型" }));
     expect(onManage).toHaveBeenCalledOnce();
+  });
+
+  it("opens the model service page for the clicked aggregate model", async () => {
+    const user = userEvent.setup();
+    const onOpenModel = vi.fn();
+
+    render(
+      <OverviewExposedModelsCard
+        routes={routes}
+        accounts={accounts}
+        channels={channels}
+        onManage={vi.fn()}
+        onOpenModel={onOpenModel}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "查看 flowlet-pro 模型详情" }));
+    expect(onOpenModel).toHaveBeenCalledWith("flowlet-pro");
   });
 });

@@ -110,6 +110,19 @@ describe("hasChannelAutoSync", () => {
     ).toBe(true);
   });
 
+  it("auto-syncs Z.AI pay-as-you-go accounts in auto mode (including legacy NULL resource_mode)", () => {
+    const zhipu = makePreset({ id: "zhipu" });
+    expect(
+      hasChannelAutoSync(makeAccount({ channel_id: "zhipu", resource_mode: "pay_as_you_go", resource_sync_mode: "auto" }), zhipu),
+    ).toBe(true);
+    expect(
+      hasChannelAutoSync(makeAccount({ channel_id: "zhipu", resource_mode: "pay_as_you_go", resource_sync_mode: "manual" }), zhipu),
+    ).toBe(false);
+    expect(
+      hasChannelAutoSync(makeAccount({ channel_id: "zhipu", resource_mode: null, resource_sync_mode: "auto" }), zhipu),
+    ).toBe(true);
+  });
+
   it("auto-syncs DeepSeek / Kimi / OpenRouter official-balance-api accounts regardless of sync mode", () => {
     const deepseek = makePreset({ id: "deepseek", supports_balance_query: true, supports_scrape_balance: false });
     expect(

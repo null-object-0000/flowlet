@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Button, Modal, Select, Toast } from "@douyinfe/semi-ui-19";
 import { IconCopy, IconInfoCircle } from "@douyinfe/semi-icons";
 import { ModelsServiceCapabilityListView, ModelsServiceDetailView, ModelsServiceInfoBannerView, ModelsServiceMetricGridView, ModelsServiceRefreshActionView, ModelsServiceRelationListView, ModelsServiceRouteListView, ModelsServiceRouteOverviewView, ModelsServiceSectionView, ModelsServiceTabContentView, ModelsServiceToolbarView, ModelsServiceView, type ModelsServiceItemModel, type ModelsServiceRouteModel } from "@flowlet/product-ui";
@@ -204,9 +205,11 @@ export function ModelServicesPage() {
   const modelsDevCatalogEntry = useLocalModelsDevCatalog();
   const syncModelCatalogs = useModelCatalogsSync();
   const actions = useModelActions();
+  const [searchParams] = useSearchParams();
   const [search, setSearch] = useState("");
   const [channelFilter, setChannelFilter] = useState("all");
-  const [selectedModel, setSelectedModel] = useState<string | null>(null);
+  // 支持从概览页聚合模型入口跳转并自动选中对应模型（?model=flowlet-pro / flowlet-flash）。
+  const [selectedModel, setSelectedModel] = useState<string | null>(() => searchParams.get("model"));
 
   const models = useMemo(
     () => buildModelServiceItems(routes.data ?? [], accounts.data ?? [], channels.data ?? []),

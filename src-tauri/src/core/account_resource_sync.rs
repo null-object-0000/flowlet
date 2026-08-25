@@ -65,6 +65,13 @@ fn has_automatic_resource_sync(account: &ChannelAccount, preset: &ChannelPreset)
                 && matches!(
                     account.resource_mode.as_deref(),
                     Some("token_plan") | Some("pay_as_you_go")
+                ))
+            // Z.AI 只有 API 按量付费一种资源模式（历史账号 resource_mode 为 NULL 时
+            // 同样按按量付费兜底，与 resolve_scrape_mode 的 default_resource_mode 一致）。
+            || (account.channel_id == "zhipu"
+                && matches!(
+                    account.resource_mode.as_deref(),
+                    Some("pay_as_you_go") | None
                 )));
     official_api || console
 }
@@ -96,6 +103,20 @@ fn channel_resource(
             .raw_scraped_json
             .as_deref()
             .and_then(parse_qwen_freetier_details)
+        {
+            plan = details.plan.or(plan);
+        }
+    }
+    if account.channel_id == "zhipu"
+        && matches!(
+            account.resource_mode.as_deref(),
+            Some("pay_as_you_go") | None
+        )
+    {
+        if let Some(details) = snapshot
+            .raw_scraped_json
+            .as_deref()
+            .and_then(parse_zhipu_paygo_details)
         {
             plan = details.plan.or(plan);
         }
@@ -189,6 +210,25 @@ struct QwenDetails {
 /// 按量付费；免费额度实例明细留在 raw_scraped_json 由桌面端解析展示。
 struct QwenFreetierDetails {
     plan: Option<String>,
+}
+
+/// Z.AI API 按量付费抓取摘要：只取钱包报告的可用余额证明数据到位，套餐名固定为
+/// 按量付费；资源包明细留在 raw_scraped_json / token_packs 由桌面端解析展示。
+struct ZhipuPaygoDetails {
+    plan: Option<String>,
+}
+
+fn parse_zhipu_paygo_details(raw: &str) -> Option<ZhipuPaygoDetails> {
+    let bundle: Value = serde_json::from_str(raw).ok()?;
+    let report = bundle.get("account_report")?.get("data")?;
+    report
+        .get("availableBalance")
+        .or_else(|| report.get("balance"))
+        .and_then(Value::as_f64)
+        .is_some()
+        .then(|| ZhipuPaygoDetails {
+            plan: Some("API 按量付费".to_string()),
+        })
 }
 
 fn parse_qwen_freetier_details(raw: &str) -> Option<QwenFreetierDetails> {
@@ -372,6 +412,23 @@ mod tests {
         assert!(parse_qwen_freetier_details(r#"{"code":"UNAUTHORIZED"}"#).is_none());
         assert!(parse_qwen_freetier_details(
             &serde_json::json!({ "fq_instance": {"data": {"Data": []}} }).to_string()
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn zhipu_paygo_payload_exposes_pay_as_you_go_plan() {
+        let raw = serde_json::json!({
+            "token_packs_list": {"code": 200, "rows": []},
+            "account_report": {"code": 200, "data": {"availableBalance": 0.0, "balance": 0.0}}
+        })
+        .to_string();
+        let details = parse_zhipu_paygo_details(&raw).expect("zhipu paygo details");
+        assert_eq!(details.plan.as_deref(), Some("API 按量付费"));
+        // 缺少钱包报告可用余额数据时视为未抓全。
+        assert!(parse_zhipu_paygo_details(r#"{"code":401}"#).is_none());
+        assert!(parse_zhipu_paygo_details(
+            &serde_json::json!({ "account_report": {"code": 200, "data": {"availableBalance": "n/a"}} }).to_string()
         )
         .is_none());
     }

@@ -52,5 +52,6 @@ describe("request log presentation", () => {
     expect(formatEntryRequestUrl(row)).toBe("http://127.0.0.1:18640/v1/chat/completions");
     expect(isPreRoutingFailure(row)).toBe(true);
     expect(isPreRoutingFailure({ ...row, route_reason: "model_input_modality_unsupported" })).toBe(true);
+    expect(isPreRoutingFailure({ ...row, route_reason: "model_protocol_unsupported" })).toBe(true);
   });
 });

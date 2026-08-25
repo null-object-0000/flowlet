@@ -16,9 +16,10 @@ type Props = {
   accounts: ChannelAccount[];
   channels: ChannelPreset[];
   onManage: () => void;
+  onOpenModel: (publicModel: string) => void;
 };
 
-export function OverviewExposedModelsCard({ routes, accounts, channels, onManage }: Props) {
+export function OverviewExposedModelsCard({ routes, accounts, channels, onManage, onOpenModel }: Props) {
   const { t } = useAppPreferences();
   const models = buildOverviewAggregateModels(routes, accounts, channels);
 
@@ -50,6 +51,8 @@ export function OverviewExposedModelsCard({ routes, accounts, channels, onManage
                       })
                     : t("尚无候选模型")}</span>}
               trailing={<Tag color={status.color}>{t(status.label)}</Tag>}
+              onClick={() => onOpenModel(model.publicModel)}
+              ariaLabel={t("查看 {model} 模型详情", { model: model.publicModel })}
             />
           );
         })}

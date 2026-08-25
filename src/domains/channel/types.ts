@@ -171,6 +171,20 @@ export function isQwenPayAsYouGoAccount(account: { channel_id: string; resource_
     (account.resource_mode === "pay_as_you_go" || account.resource_mode === null);
 }
 
+// ─── Z.AI 按量付费 ───────────────────────────────────────────────────────────
+// 智谱（BigModel）渠道只有 API 按量付费一种资源模式：官方控制台的资源包管理页
+// 会同时发起 tokenAccounts/list/my（资源包）与 account/query-customer-account-report
+// （钱包余额），因此账号余额与额度包均由官方控制台自动同步。
+
+export const ZHIPU_CHANNEL_ID = "zhipu";
+
+/** 判断账号是否为 Z.AI API 按量付费模式。历史账号 resource_mode 未写入(NULL)时
+ *  按默认处理，与前端 defaultResourceMode 及 Rust default_resource_mode 兜底一致。 */
+export function isZhipuPayAsYouGoAccount(account: { channel_id: string; resource_mode: string | null }): boolean {
+  return account.channel_id === ZHIPU_CHANNEL_ID &&
+    (account.resource_mode === "pay_as_you_go" || account.resource_mode === null);
+}
+
 /** 判断是否为 ChatGPT (Codex) 伪账号。Codex 账号由 Rust 端同步，
  *  前端不可编辑、不参与路由，仅在概览页底部作为非交互展示项。 */
 export function isChatGptAccount(account: { channel_id: string; resource_mode: string | null }): boolean {

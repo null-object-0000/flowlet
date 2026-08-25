@@ -261,12 +261,25 @@ mod tests {
             console_scrape_mode_key("qwen", Some("pay_as_you_go")),
             Some("freetier")
         );
+        assert_eq!(
+            console_scrape_mode_key("zhipu", Some("pay_as_you_go")),
+            Some("paygo")
+        );
         assert_eq!(console_scrape_mode_key("qwen", None), None);
+        assert_eq!(console_scrape_mode_key("zhipu", None), None);
         assert_eq!(console_scrape_mode_key("deepseek", None), None);
     }
 
     #[test]
     fn login_page_policy_is_adapter_driven() {
+        assert!(is_explicit_login_url(
+            "zhipu",
+            "https://www.bigmodel.cn/login?redirect=%2Ffinance-center"
+        ));
+        assert!(!is_explicit_login_url(
+            "zhipu",
+            "https://www.bigmodel.cn/finance-center/finance/overview"
+        ));
         assert!(is_explicit_login_url(
             "longcat",
             "https://longcat.chat/login"

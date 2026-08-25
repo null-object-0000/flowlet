@@ -1536,6 +1536,12 @@ impl Storage {
             "UPDATE channel_accounts SET resource_sync_mode = 'auto' WHERE channel_id = 'qwen' AND resource_mode = 'pay_as_you_go'",
             [],
         )?;
+        // Z.AI API 按量付费：资源包管理页抓取上线后有了官方余额与资源包来源，
+        // 存量账号（含 resource_mode 为 NULL 的历史账号）统一切到自动同步。
+        connection.execute(
+            "UPDATE channel_accounts SET resource_sync_mode = 'auto' WHERE channel_id = 'zhipu'",
+            [],
+        )?;
 
         // 旧版本 request_logs 只记录了少量字段；后续索引和日志页面依赖这些基础列。
         add_column_if_missing(

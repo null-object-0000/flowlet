@@ -89,6 +89,7 @@ export function isPreRoutingFailure(
     "no_available_model",
     "model_not_exposed",
     "model_input_modality_unsupported",
+    "model_protocol_unsupported",
   ].includes(row.route_reason ?? "");
 }
 

@@ -402,6 +402,15 @@ Key 一样包含在端到端加密的账号目录中。
   官方控制台抓取固定自动同步（见第 8 节 `scrape`）：Token Plan 抓套餐订阅端点；
   API 按量付费账号抓福利页 `/home/benefits` 的免费额度实例与账单余额，存量账号
   启动时统一迁移为 `resource_sync_mode = "auto"`。
+- Z.AI（`id = "zhipu"`）只有一种资源模式：**API 按量付费**
+  （`resource_mode = "pay_as_you_go"`）。账号由官方控制台抓取固定自动同步
+  （scrape 模式 `paygo`，控制台 `/finance-center/resource-package/package-mgmt?tab=my`），
+  单页面同时拦截两个业务接口：`tokenAccounts/list/my`（槽位 `token_packs_list`，
+  资源包/额度包列表，extractor 归一化为 `token_packs` 数组并汇总生效中按 tokens
+  计费的包到 `token_total` / `token_used` / `token_remaining` / `token_expire_at`）与
+  `account/query-customer-account-report`（槽位 `account_report`，钱包报告的
+  `availableBalance` → 快照 `balance`）。历史账号（含 `resource_mode` 为 NULL）启动时
+  统一迁移为 `resource_sync_mode = "auto"`。
 
 ### 6.2 `model_prices` — 模型价格预设
 

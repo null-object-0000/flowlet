@@ -181,6 +181,67 @@ describe("RequestLogsPage", () => {
     expect(screen.queryByText("旧日志未记录")).not.toBeInTheDocument();
   });
 
+  it("shows protocol-mismatch skips as local fallback nodes before the terminal error", async () => {
+    const user = userEvent.setup();
+    const skipped: RequestLogRow = {
+      ...row,
+      id: "log-skipped",
+      channel_id: "deepseek",
+      channel_name: "DeepSeek",
+      account_id: "account-ds",
+      account_name: "DeepSeek 账号",
+      upstream_model: "deepseek-v4-flash",
+      upstream_url: null,
+      status: null,
+      latency_ms: 0,
+      duration_ms: 0,
+      error_message: null,
+      fallback_count: 1,
+      route_reason: "protocol_unsupported",
+      attempt_seq: 0,
+      req_headers_json: null,
+      req_body_b64: null,
+      res_headers_json: null,
+      res_body_b64: null,
+      is_last_attempt: false,
+    };
+    mocks.useDetail.mockReturnValue({
+      data: [
+        skipped,
+        {
+          ...row,
+          channel_id: null,
+          channel_name: null,
+          account_id: null,
+          account_name: null,
+          upstream_model: null,
+          upstream_url: null,
+          status: 404,
+          route_reason: "model_protocol_unsupported",
+          error_message: "model_protocol_unsupported: The requested model is not exposed under the requested protocol",
+          fallback_count: 1,
+          attempt_seq: 1,
+          is_last_attempt: true,
+        },
+      ],
+      isLoading: false,
+      isError: false,
+      isSuccess: true,
+      refetch: mocks.refetch,
+    });
+
+    render(<RequestLogsPage />);
+    await user.click(screen.getByRole("button", { name: `查看请求 ${row.request_id}` }));
+
+    expect(await screen.findByText("已跳过")).toBeInTheDocument();
+    expect(screen.getByText("未请求上游")).toBeInTheDocument();
+    expect(screen.getByText("flowlet-pro → deepseek-v4-flash · 不支持当前协议，已跳过")).toBeInTheDocument();
+
+    await user.click(screen.getByText("flowlet-pro → deepseek-v4-flash · 不支持当前协议，已跳过").closest("button")!);
+    expect(screen.getByText("未请求上游（协议不支持）")).toBeInTheDocument();
+    expect(screen.getByText("未请求")).toBeInTheDocument();
+  });
+
   it("distinguishes the inbound URL from a missing upstream route", async () => {
     const user = userEvent.setup();
     mocks.useDetail.mockReturnValue({

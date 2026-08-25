@@ -84,6 +84,7 @@ pub(crate) fn default_resource_mode(channel_id: &str) -> Option<&'static str> {
     match channel_id {
         "longcat" => Some("hybrid"),
         "qwen" => Some("pay_as_you_go"),
+        "zhipu" => Some("pay_as_you_go"),
         _ => Some("pay_as_you_go"),
     }
 }

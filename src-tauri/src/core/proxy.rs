@@ -1,11 +1,9 @@
 use super::agent_session_identity::{from_http_headers, AgentSessionIdentity};
 use super::channels_config::openai_path_strips_v1;
 use super::config::{
-    classify_request, ChannelAccount, LogCaptureConfig, ProtocolType, ProxyBindConfig,
-    RequestLogInput, UsageRecordInput,
+    classify_request, ChannelAccount, ChannelPreset, LogCaptureConfig, ProtocolType, ProxyBindConfig,
+    RequestLogInput, RouteCandidate, UsageRecordInput,
 };
-#[cfg(test)]
-use super::config::{ChannelPreset, RouteCandidate};
 use super::power::{ActivityPermit, ActivityTracker};
 use super::rate_limiter::RateLimiter;
 #[cfg(test)]
@@ -623,9 +621,9 @@ async fn forward_request(
     }
 
     // 匹配路由候选（用 token 身份，保证现有多 UA 共用一 token 的规则不破坏）
-    let mut candidates = {
+    let (mut candidates, protocol_skipped) = {
         let mut round_robin = state.shared.round_robin.lock().unwrap();
-        match_candidates(
+        let selection = match_candidates(
             &routes,
             &rules,
             &scores,
@@ -635,7 +633,16 @@ async fn forward_request(
             &accounts,
             &channels,
             &mut round_robin,
-        )
+        );
+        (selection.matched, selection.protocol_skipped)
+    };
+
+    // 协议不匹配的候选仅在没有任何匹配候选时作为本地降级节点记录：
+    // 存在匹配候选时，其它协议的路由与本请求无关，不展示，避免噪音。
+    let skipped_for_protocol = if candidates.is_empty() {
+        protocol_skipped
+    } else {
+        Vec::new()
     };
 
     // 图片请求只保留模型目录明确声明支持 image 输入的候选。未知能力不冒险放行；
@@ -650,56 +657,48 @@ async fn forward_request(
         Vec::new()
     };
     let image_input_unsupported = !skipped_for_input_modality.is_empty() && candidates.is_empty();
+    let protocol_unsupported = !skipped_for_protocol.is_empty();
 
     // 识别请求类型
     let request_type = classify_request(&body_bytes, &detected_protocol);
 
-    // 能力不匹配属于路由降级节点，但没有真正发起第三方请求。单独落一条非终态日志，
+    // 能力/协议不匹配属于路由降级节点，但没有真正发起第三方请求。单独落一条非终态日志，
     // 让尝试链路能解释为什么跳过候选，同时不伪造 HTTP 状态、上游 URL 或请求报文。
-    for (index, candidate) in skipped_for_input_modality.iter().enumerate() {
-        let account = accounts.iter().find(|account| account.id == candidate.account_id);
-        let channel = channels.iter().find(|channel| channel.id == candidate.channel_id);
-        record_request_log(
-            state.storage.clone(),
-            RequestLogInput {
-                request_id: request_id.clone(),
-                agent_type: agent_session.as_ref().map(|value| value.agent_type.clone()),
-                agent_session_id: agent_session.as_ref().map(|value| value.session_id.clone()),
-                parent_agent_session_id: agent_session
-                    .as_ref()
-                    .and_then(|value| value.parent_session_id.clone()),
-                client_id: client_id.clone(),
-                client_name: client_name.clone(),
-                channel_id: Some(candidate.channel_id.clone()),
-                channel_name: channel.map(|value| value.name.clone()),
-                account_id: Some(candidate.account_id.clone()),
-                account_name: account.map(|value| value.name.clone()),
-                client_protocol: detected_protocol.as_str().to_string(),
-                upstream_protocol: detected_protocol.as_str().to_string(),
-                virtual_model: public_model.clone(),
-                public_model: public_model.clone(),
-                upstream_model: Some(candidate.upstream_model.clone()),
-                request_type: request_type.as_str().to_string(),
-                method: method.clone(),
-                path: path.clone(),
-                upstream_url: None,
-                status: None,
-                latency_ms: Some(0),
-                is_stream: false,
-                error_message: None,
-                fallback_count: index as i64 + 1,
-                route_reason: Some("input_modality_image_unsupported".to_string()),
-                ttfb_ms: None,
-                duration_ms: Some(0),
-                attempt_seq: index as i64,
-                req_headers_json: None,
-                req_body_b64: None,
-                res_headers_json: None,
-                res_body_b64: None,
-                is_last_attempt: false,
-            },
-        );
-    }
+    // 协议跳过与图片能力跳过不会同时出现：前者仅在没有匹配候选时记录，后者只在有匹配
+    // 候选时才执行分区，因此这里按顺序记录即可得到连续的 attempt_seq。
+    let skipped_total = skipped_for_protocol.len() + skipped_for_input_modality.len();
+    record_skipped_route_logs(
+        state.storage.clone(),
+        &request_id,
+        agent_session.as_ref(),
+        client_id.as_deref(),
+        client_name.as_deref(),
+        &accounts,
+        channels,
+        public_model.as_deref(),
+        request_type.as_str(),
+        &method,
+        &path,
+        &detected_protocol,
+        &skipped_for_protocol,
+        "protocol_unsupported",
+    );
+    record_skipped_route_logs(
+        state.storage.clone(),
+        &request_id,
+        agent_session.as_ref(),
+        client_id.as_deref(),
+        client_name.as_deref(),
+        &accounts,
+        channels,
+        public_model.as_deref(),
+        request_type.as_str(),
+        &method,
+        &path,
+        &detected_protocol,
+        &skipped_for_input_modality,
+        "input_modality_image_unsupported",
+    );
 
     if candidates.is_empty() {
         let has_available_account = accounts
@@ -713,7 +712,13 @@ async fn forward_request(
                         && !account.api_key.trim().is_empty()
                 })
         });
-        let (error_code, error_message, error_status) = if image_input_unsupported {
+        let (error_code, error_message, error_status) = if protocol_unsupported {
+            (
+                "model_protocol_unsupported",
+                "The requested model is not exposed under the requested protocol",
+                StatusCode::NOT_FOUND,
+            )
+        } else if image_input_unsupported {
             (
                 "model_input_modality_unsupported",
                 "No enabled route for the requested model supports image input",
@@ -781,11 +786,11 @@ async fn forward_request(
             latency_ms: Some(0),
             is_stream: false,
             error_message: Some(format!("{error_code}: {error_message}")),
-            fallback_count: skipped_for_input_modality.len() as i64,
+            fallback_count: skipped_total as i64,
             route_reason: Some(error_code.to_string()),
             ttfb_ms: None,
             duration_ms: None,
-            attempt_seq: skipped_for_input_modality.len() as i64,
+            attempt_seq: skipped_total as i64,
             req_headers_json: capture_headers(&parts.headers, &state.capture, true),
             req_body_b64: capture_body(&body_bytes, &state.capture, true),
             res_headers_json: capture_headers(response.headers(), &state.capture, false),
@@ -802,7 +807,7 @@ async fn forward_request(
     let activity_permit = state.activity.track();
 
     let mut last_network_error: Option<ProxyForwardError> = None;
-    let mut fallback_count = skipped_for_input_modality.len() as i64;
+    let mut fallback_count = skipped_total as i64;
 
     // accounts / channels 已在上面从共享锁 clone，直接复用
     let storage = state.storage.clone();
@@ -1676,6 +1681,69 @@ fn record_request_log(storage: Storage, log: RequestLogInput) {
             tracing::warn!("写入请求日志失败: {err}");
         }
     });
+}
+
+/// 为在发起第三方请求前就被过滤的候选记录非终态“已跳过”降级节点。
+/// 不伪造 HTTP 状态、上游 URL 或请求/响应捕获，attempt 详情以“未请求上游”区分。
+#[allow(clippy::too_many_arguments)]
+fn record_skipped_route_logs(
+    storage: Storage,
+    request_id: &str,
+    agent_session: Option<&AgentSessionIdentity>,
+    client_id: Option<&str>,
+    client_name: Option<&str>,
+    accounts: &[ChannelAccount],
+    channels: &[ChannelPreset],
+    public_model: Option<&str>,
+    request_type: &str,
+    method: &str,
+    path: &str,
+    detected_protocol: &ProtocolType,
+    skipped: &[RouteCandidate],
+    reason: &'static str,
+) {
+    for (index, candidate) in skipped.iter().enumerate() {
+        let account = accounts.iter().find(|account| account.id == candidate.account_id);
+        let channel = channels.iter().find(|channel| channel.id == candidate.channel_id);
+        record_request_log(
+            storage.clone(),
+            RequestLogInput {
+                request_id: request_id.to_string(),
+                agent_type: agent_session.map(|value| value.agent_type.clone()),
+                agent_session_id: agent_session.map(|value| value.session_id.clone()),
+                parent_agent_session_id: agent_session.and_then(|value| value.parent_session_id.clone()),
+                client_id: client_id.map(str::to_string),
+                client_name: client_name.map(str::to_string),
+                channel_id: Some(candidate.channel_id.clone()),
+                channel_name: channel.map(|value| value.name.clone()),
+                account_id: Some(candidate.account_id.clone()),
+                account_name: account.map(|value| value.name.clone()),
+                client_protocol: detected_protocol.as_str().to_string(),
+                upstream_protocol: detected_protocol.as_str().to_string(),
+                virtual_model: public_model.map(str::to_string),
+                public_model: public_model.map(str::to_string),
+                upstream_model: Some(candidate.upstream_model.clone()),
+                request_type: request_type.to_string(),
+                method: method.to_string(),
+                path: path.to_string(),
+                upstream_url: None,
+                status: None,
+                latency_ms: Some(0),
+                is_stream: false,
+                error_message: None,
+                fallback_count: index as i64 + 1,
+                route_reason: Some(reason.to_string()),
+                ttfb_ms: None,
+                duration_ms: Some(0),
+                attempt_seq: index as i64,
+                req_headers_json: None,
+                req_body_b64: None,
+                res_headers_json: None,
+                res_body_b64: None,
+                is_last_attempt: false,
+            },
+        );
+    }
 }
 
 async fn record_request_log_and_wait(storage: Storage, log: RequestLogInput) {

@@ -2079,7 +2079,8 @@ fn flowlet_pool_round_robins_accounts_before_next_model() {
         &accounts,
         &channels,
         &mut round_robin,
-    );
+    )
+    .matched;
     assert_eq!(
         first
             .iter()
@@ -2097,7 +2098,8 @@ fn flowlet_pool_round_robins_accounts_before_next_model() {
         &accounts,
         &channels,
         &mut round_robin,
-    );
+    )
+    .matched;
     assert_eq!(
         second
             .iter()
@@ -2145,6 +2147,7 @@ fn flowlet_pool_rejects_single_protocol_channels() {
         &channels,
         &mut round_robin
     )
+    .matched
     .is_empty());
 }
 
@@ -2187,7 +2190,8 @@ fn match_candidates_filters_routes_by_responses_protocol() {
         &accounts,
         &channels,
         &mut round_robin,
-    );
+    )
+    .matched;
     assert_eq!(matched.len(), 1);
     assert_eq!(matched[0].id, "responses-route");
     assert_eq!(matched[0].client_protocol, ProtocolType::Responses);
@@ -2220,7 +2224,44 @@ fn match_candidates_excludes_channels_without_responses_routes() {
         &channels,
         &mut round_robin
     )
+    .matched
     .is_empty());
+}
+
+#[test]
+fn match_candidates_reports_protocol_mismatched_routes_as_skipped() {
+    // 模型只在 OpenAI 协议下开放，Responses 请求没有任何匹配候选；
+    // 但协议不匹配的候选必须被单独返回，供上层写入“已跳过”降级节点。
+    let channels = vec![dual_protocol_channel("deepseek", "DeepSeek", "http://upstream")];
+    let accounts = vec![test_account("a", "deepseek", "key", 0)];
+    let routes = vec![test_route(
+        "openai-route",
+        "deepseek-v4-flash",
+        "deepseek",
+        "a",
+        "deepseek-v4-flash",
+        ProtocolType::OpenAi,
+        0,
+    )];
+    let mut round_robin = std::collections::HashMap::new();
+    let selection = match_candidates(
+        &routes,
+        &[],
+        &[],
+        Some("deepseek-v4-flash"),
+        &ProtocolType::Responses,
+        None,
+        &accounts,
+        &channels,
+        &mut round_robin,
+    );
+    assert!(selection.matched.is_empty());
+    assert_eq!(selection.protocol_skipped.len(), 1);
+    assert_eq!(selection.protocol_skipped[0].id, "openai-route");
+    assert_eq!(
+        selection.protocol_skipped[0].client_protocol,
+        ProtocolType::OpenAi
+    );
 }
 
 // ─── End-to-end routing test helpers ─────────────────────────────────────────
@@ -2852,6 +2893,73 @@ async fn e2e_image_request_logs_modality_skip_before_supported_route() {
     );
     assert_eq!(attempts[1].route_reason.as_deref(), Some("fallback_success"));
     assert_eq!(attempts[1].fallback_count, 1);
+    assert!(attempts[1].is_last_attempt);
+}
+
+#[tokio::test]
+async fn e2e_unsupported_protocol_logs_skipped_route_and_terminal_error() {
+    // deepseek-v4-flash 只以 OpenAI 协议开放；Anthropic 请求没有任何匹配候选，
+    // 尝试链路必须记录协议不匹配的“已跳过”节点，并以 model_protocol_unsupported 结束。
+    let (addr, seen) = spawn_spy_upstream(status_map(&[])).await;
+    let channels = vec![dual_protocol_channel("deepseek", "DeepSeek", &addr)];
+    let accounts = vec![test_account("ds", "deepseek", "key-ds", 0)];
+    let routes = vec![test_route(
+        "openai-route",
+        "deepseek-v4-flash",
+        "deepseek",
+        "ds",
+        "deepseek-v4-flash",
+        ProtocolType::OpenAi,
+        0,
+    )];
+    let state = build_test_state(channels, accounts, routes);
+    let storage = state.storage.clone();
+    let request = Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            r#"{"model":"deepseek-v4-flash","max_tokens":10,"messages":[]}"#,
+        ))
+        .unwrap();
+    let response = forward_request(state, request, ProtocolType::Anthropic)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert!(seen.lock().unwrap().is_empty());
+
+    let attempts = tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            let final_rows = storage.list_request_logs().unwrap();
+            if let Some(final_row) = final_rows.first() {
+                let rows = storage
+                    .list_request_logs_by_request_id(&final_row.request_id)
+                    .unwrap();
+                if rows.len() == 2 {
+                    break rows;
+                }
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        attempts[0].upstream_model.as_deref(),
+        Some("deepseek-v4-flash")
+    );
+    assert_eq!(
+        attempts[0].route_reason.as_deref(),
+        Some("protocol_unsupported")
+    );
+    assert_eq!(attempts[0].status, None);
+    assert_eq!(attempts[0].upstream_url, None);
+    assert!(!attempts[0].is_last_attempt);
+    assert_eq!(
+        attempts[1].route_reason.as_deref(),
+        Some("model_protocol_unsupported")
+    );
+    assert_eq!(attempts[1].status, Some(404));
     assert!(attempts[1].is_last_attempt);
 }
 

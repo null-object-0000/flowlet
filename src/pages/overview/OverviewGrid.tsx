@@ -58,6 +58,7 @@ export function OverviewGrid({
           accounts={accounts}
           channels={channels}
           onManage={() => navigate("/models")}
+          onOpenModel={(publicModel) => navigate(`/models?model=${encodeURIComponent(publicModel)}`)}
         />}
       agents={<OverviewAgentAccessCard baseUrl={baseUrl} clientToken={bindConfig?.default_client_token} />}
     />

@@ -26,6 +26,7 @@ import {
 import { errorMessage } from "../../../shared/errors/AppError";
 import { formatFullTimestamp } from "../../../shared/formatters/datetime";
 import { formatCompactNumber } from "../../../shared/formatters/number";
+import { platformLabel } from "../../../shared/formatters/platform";
 import { queryKeys } from "../../../shared/query-keys";
 import { APP_OVERLAY_Z_INDEX } from "../../../shared/ui/overlayLayers";
 import { DETAIL_SHEET_WIDTH } from "../../../shared/ui/drawerWidth";
@@ -537,7 +538,7 @@ export function SyncTab() {
                 <div className={styles.deviceCopy}>
                   <strong>{device.displayName}</strong>
                   <span>
-                    {platformLabel(device.platform)}
+                    {platformLabel(device.platform) || "Flowlet"}
                     {device.appVersion !== "unknown" ? ` · Flowlet ${device.appVersion}` : ""}
                     {" · "}
                     {device.firstUsageDate && device.lastUsageDate ? `${device.firstUsageDate} — ${device.lastUsageDate}` : t("暂无用量")}
@@ -728,7 +729,7 @@ export function SyncTab() {
         {preview ? <div className={styles.preview}>
           <div><span>{t("来源设备")}</span><code>{preview.deviceId}</code></div>
           <div><span>{t("设备名称")}</span><strong>{preview.displayName}</strong></div>
-          <div><span>{t("设备环境")}</span><strong>{platformLabel(preview.platform)}{preview.appVersion !== "unknown" ? ` · Flowlet ${preview.appVersion}` : ""}</strong></div>
+          <div><span>{t("设备环境")}</span><strong>{platformLabel(preview.platform) || "Flowlet"}{preview.appVersion !== "unknown" ? ` · Flowlet ${preview.appVersion}` : ""}</strong></div>
           <div><span>{t("日期范围")}</span><strong>{preview.firstDate && preview.lastDate ? `${preview.firstDate} — ${preview.lastDate}` : t("无数据")}</strong></div>
           <div><span>{t("每日汇总")}</span><strong>{t("{count} 天", { count: preview.dayCount })}</strong></div>
           <div><span>{t("导入变化")}</span><strong>{t("新增 {newCount} · 更新 {updatedCount} · 不变 {sameCount}", { newCount: preview.newDays, updatedCount: preview.updatedDays, sameCount: preview.unchangedDays })}</strong></div>
@@ -872,15 +873,6 @@ function S3ConfigSideSheet({
       </div>
     </div> : null}
   </SideSheet>;
-}
-
-function platformLabel(platform: string) {
-  if (platform === "windows") return "Windows";
-  if (platform === "macos") return "macOS";
-  if (platform === "linux") return "Linux";
-  if (platform === "android") return "Android";
-  if (platform === "ios") return "iOS";
-  return "Flowlet";
 }
 
 function formatSyncTime(value: string | null | undefined) {

@@ -7,6 +7,7 @@ import type { LanPeerProbe } from "../../domains/device-sync/types";
 import { useMobileAccountResources, useMobileDeviceAgents, useMobileDevices, useMobileLanProbes, useMobileSessions } from "../../features/device-sync/useMobileDeviceSync";
 import { formatFullTimestamp } from "../../shared/formatters/datetime";
 import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
+import { platformLabel } from "../../shared/formatters/platform";
 import { MobileLastRefreshTime } from "../MobileLastRefreshTime";
 import { useMobileRefreshController } from "../useMobileRefreshController";
 import { MobilePullToRefresh } from "../MobilePullToRefresh";
@@ -68,7 +69,7 @@ export function MobileDevicesPage() {
       <MobileDeviceListView
         rows={(devices.data ?? []).map((device): MobileDeviceRowModel => {
           const status = lanState(probeByDevice.get(device.deviceId), lanProbes.isLoading, t);
-          return { id: device.deviceId, name: device.displayName, platform: platformLabel(device.platform), appVersion: device.appVersion, status: status.label, statusTone: status.tone, statusTitle: status.title, metrics: [`${formatCompactNumber(device.knownTokens, language)} Tokens`, t("{count} 次请求", { count: formatInteger(device.requestCount, language) })], lastSeen: t("最近快照：{time}", { time: formatFullTimestamp(device.lastSeenAt, language) }), details: <DeviceEntryCards deviceId={device.deviceId} /> };
+          return { id: device.deviceId, name: device.displayName, platform: platformLabel(device.platform) || "Desktop", appVersion: device.appVersion, status: status.label, statusTone: status.tone, statusTitle: status.title, metrics: [`${formatCompactNumber(device.knownTokens, language)} Tokens`, t("{count} 次请求", { count: formatInteger(device.requestCount, language) })], lastSeen: t("最近快照：{time}", { time: formatFullTimestamp(device.lastSeenAt, language) }), details: <DeviceEntryCards deviceId={device.deviceId} /> };
         })}
         expandedId={expandedDeviceId}
         onToggle={(id) => setExpandedDeviceId((current) => current === id ? null : id)}
@@ -158,11 +159,4 @@ function DeviceEntryCards({ deviceId }: { deviceId: string }) {
       </button>
     </div>
   );
-}
-
-function platformLabel(platform: string) {
-  if (/windows/i.test(platform)) return "Windows";
-  if (/darwin|macos/i.test(platform)) return "macOS";
-  if (/linux/i.test(platform)) return "Linux";
-  return platform || "Desktop";
 }

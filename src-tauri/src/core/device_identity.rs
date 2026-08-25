@@ -48,7 +48,7 @@ impl DeviceIdentity {
         }
 
         let device_id = uuid::Uuid::new_v4().to_string();
-        let platform = current_platform().to_string();
+        let platform = current_platform();
         let identity = Self {
             schema_version: DEVICE_IDENTITY_SCHEMA_VERSION,
             display_name: default_display_name(&platform, &device_id),
@@ -68,9 +68,8 @@ impl DeviceIdentity {
         }
         uuid::Uuid::parse_str(&identity.device_id)
             .map_err(|_| DeviceIdentityError::InvalidDeviceId(identity.device_id.clone()))?;
-        if identity.platform.trim().is_empty() {
-            identity.platform = current_platform().to_string();
-        }
+        let detected_platform = current_platform();
+        identity.platform = resolve_platform(&identity.platform, &detected_platform, std::env::consts::OS);
         if identity.display_name.trim().is_empty() {
             identity.display_name = default_display_name(&identity.platform, &identity.device_id);
         }
@@ -865,29 +864,99 @@ pub fn resolve_device_display_name(display_name: &str, platform: &str, device_id
     }
 }
 
-fn current_platform() -> &'static str {
+fn current_platform() -> String {
     match std::env::consts::OS {
-        "windows" => "windows",
-        "macos" => "macos",
-        "linux" => "linux",
-        _ => "unknown",
+        "windows" => "windows".to_string(),
+        "macos" => "macos".to_string(),
+        "linux" => linux_distro_id().unwrap_or_else(|| "linux".to_string()),
+        _ => "unknown".to_string(),
     }
 }
 
+/// 读取 Linux 发行版 ID（`/etc/os-release` 的 `ID=`，如 `ubuntu`、`debian`）。
+/// 读取失败时返回 `None`，由调用方回退到泛化的 `linux`。
+fn linux_distro_id() -> Option<String> {
+    let contents = fs::read_to_string("/etc/os-release").ok()?;
+    linux_distro_id_from(&contents)
+}
+
+fn linux_distro_id_from(contents: &str) -> Option<String> {
+    for line in contents.lines() {
+        let Some(rest) = line.strip_prefix("ID=") else {
+            continue;
+        };
+        let id = rest.trim().trim_matches('"');
+        if !id.is_empty() && !id.chars().any(char::is_control) {
+            return Some(id.to_string());
+        }
+    }
+    None
+}
+
+/// 迁移或首次识别后，把旧平台键收敛为当前系统应使用的值：
+/// - 空值或与当前系统不匹配（例如从 Windows 迁移到 Linux）→ 重新识别；
+/// - Linux 下泛化的 `linux` → 升级为具体发行版 ID；
+/// - 其余情况保留原值。
+fn resolve_platform(existing: &str, detected: &str, os: &str) -> String {
+    if existing.trim().is_empty() || !platform_matches_os(existing, os) {
+        return detected.to_string();
+    }
+    if os == "linux" && existing == "linux" {
+        return detected.to_string();
+    }
+    existing.to_string()
+}
+
+fn platform_matches_os(platform: &str, os: &str) -> bool {
+    match os {
+        "windows" => platform == "windows",
+        "macos" => platform == "macos",
+        "linux" => is_linux_platform(platform),
+        _ => false,
+    }
+}
+
+fn is_linux_platform(platform: &str) -> bool {
+    !matches!(platform, "" | "unknown" | "windows" | "macos" | "android" | "ios")
+}
+
 fn default_display_name(platform: &str, device_id: &str) -> String {
-    let platform_label = match platform {
-        "windows" => "Windows",
-        "macos" => "macOS",
-        "linux" => "Linux",
-        _ => "Flowlet",
-    };
     let suffix = device_id
         .chars()
         .filter(|character| *character != '-')
         .take(4)
         .collect::<String>()
         .to_uppercase();
-    format!("{platform_label} · {suffix}")
+    format!("{} · {suffix}", platform_label(platform))
+}
+
+/// 与前端 `src/shared/formatters/platform.ts` 保持一致的平台标签映射。
+fn platform_label(platform: &str) -> String {
+    match platform {
+        "windows" => "Windows".to_string(),
+        "macos" | "darwin" => "macOS".to_string(),
+        "linux" => "Linux".to_string(),
+        "ubuntu" => "Ubuntu".to_string(),
+        "debian" => "Debian".to_string(),
+        "fedora" => "Fedora".to_string(),
+        "arch" => "Arch".to_string(),
+        "manjaro" => "Manjaro".to_string(),
+        "linuxmint" => "Linux Mint".to_string(),
+        "centos" => "CentOS".to_string(),
+        "rhel" => "RHEL".to_string(),
+        "alpine" => "Alpine".to_string(),
+        "opensuse" | "opensuse-leap" | "opensuse-tumbleweed" => "openSUSE".to_string(),
+        "android" => "Android".to_string(),
+        "ios" => "iOS".to_string(),
+        "" | "unknown" => "Flowlet".to_string(),
+        other => {
+            let mut chars = other.chars();
+            match chars.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                None => "Flowlet".to_string(),
+            }
+        }
+    }
 }
 
 fn validate_display_name(display_name: &str) -> Result<(), DeviceIdentityError> {
@@ -1342,5 +1411,60 @@ mod tests {
         .expect_err("reject a value that is not aligned to the start of an hour");
 
         assert_eq!(error, "设备小时用量时间无效：2026-07-21T21:30:00");
+    }
+
+    #[test]
+    fn linux_distro_id_is_parsed_from_os_release() {
+        let contents = "NAME=\"Ubuntu\"\nVERSION_ID=\"26.04\"\nID=ubuntu\nID_LIKE=debian\n";
+        assert_eq!(linux_distro_id_from(contents).as_deref(), Some("ubuntu"));
+
+        let quoted = "ID=\"debian\"\n";
+        assert_eq!(linux_distro_id_from(quoted).as_deref(), Some("debian"));
+    }
+
+    #[test]
+    fn linux_distro_id_ignores_malformed_os_release() {
+        assert_eq!(linux_distro_id_from("NAME=Ubuntu\nVERSION=1\n").as_deref(), None);
+        assert_eq!(linux_distro_id_from("").as_deref(), None);
+    }
+
+    #[test]
+    fn resolve_platform_redetects_when_migrated_to_another_os() {
+        assert_eq!(resolve_platform("windows", "ubuntu", "linux"), "ubuntu");
+        assert_eq!(resolve_platform("linux", "windows", "windows"), "windows");
+    }
+
+    #[test]
+    fn resolve_platform_upgrades_generic_linux_to_distro() {
+        assert_eq!(resolve_platform("linux", "ubuntu", "linux"), "ubuntu");
+        assert_eq!(resolve_platform("linux", "linux", "linux"), "linux");
+    }
+
+    #[test]
+    fn resolve_platform_keeps_existing_distro_id() {
+        assert_eq!(resolve_platform("ubuntu", "ubuntu", "linux"), "ubuntu");
+        assert_eq!(resolve_platform("debian", "ubuntu", "linux"), "debian");
+        assert_eq!(resolve_platform("windows", "windows", "windows"), "windows");
+    }
+
+    #[test]
+    fn resolve_platform_fills_empty_platform() {
+        assert_eq!(resolve_platform("", "ubuntu", "linux"), "ubuntu");
+    }
+
+    #[test]
+    fn platform_label_maps_distro_ids() {
+        assert_eq!(platform_label("ubuntu"), "Ubuntu");
+        assert_eq!(platform_label("linux"), "Linux");
+        assert_eq!(platform_label("windows"), "Windows");
+        assert_eq!(platform_label("macos"), "macOS");
+        assert_eq!(platform_label("nixos"), "Nixos");
+        assert_eq!(platform_label("unknown"), "Flowlet");
+    }
+
+    #[test]
+    fn default_display_name_uses_distro_label() {
+        let name = default_display_name("ubuntu", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+        assert!(name.starts_with("Ubuntu · "), "unexpected default name: {name}");
     }
 }

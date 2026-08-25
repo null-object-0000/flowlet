@@ -155,22 +155,14 @@ pub fn build_scrape_webview(
     // 仅对 longcat 生效:千问控制台登录走阿里云 SSO,对 UA 变化更敏感,保持其默认 UA,
     // 避免影响已打通的控制台抓取。
     //
-    // 另外:WebKitGTK 对隐藏窗口(visible=false)不提供布局视口,`window.innerWidth` 为 0,
-    // 让按视口响应式的控制台(典型如 longcat)被当移动端渲染、不发桌面版 API。因此
-    // longcat 的抓取 webview 保持**可见**以获得真实视口;代价是抓取时会出现该窗口。
+    // 取舍:WebKitGTK 的隐藏窗口 `window.innerWidth=0`,会被按视口响应式的 longcat 当移动端、
+    // 抓不到桌面版 API;只有映射(可见)窗口才有真实视口,但会触发 WM 闪屏/通知。经与用户确认,
+    // longcat 选择**保持隐藏**(无闪屏/无通知);自动同步因此无法抓取,仅手动「抓取」弹出窗口
+    // (映射、有视口)时能按桌面渲染并抓到。
     if channel_id == "longcat" {
-        builder = builder
-            .user_agent(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-            )
-            // 保持可见以获得真实视口,但移到屏幕外、无边框、不抢焦点、不进任务栏,
-            // 避免每轮自动同步弹出窗口打扰用户;需要用户登录时由 surface_scrape_webview
-            // 保持隐藏创建,构建完成后移到屏幕外再 show,避免`visible(true)` 让窗口先出现在
-            // 默认/居中位置造成闪屏。需要用户登录时由 surface_scrape_webview 移回屏幕并聚焦。
-            .visible(false)
-            .decorations(false)
-            .skip_taskbar(true)
-            .focused(false);
+        builder = builder.user_agent(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+        );
     }
     #[cfg(windows)]
     let builder =
@@ -178,13 +170,6 @@ pub fn build_scrape_webview(
     let window = builder
         .build()
         .map_err(|e| format!("构建抓取 webview 失败: {e}"))?;
-    // longcat 需要真实视口(WebKitGTK 对隐藏窗口 innerWidth=0 会被当移动端渲染)。
-    // 保持窗口"可见"以获得视图,但先移到屏幕外再 show,避免先出现在屏幕中间闪一下;
-    // 需要用户登录时由 surface_scrape_webview 移回屏幕并聚焦。
-    if channel_id == "longcat" {
-        let _ = window.set_position(tauri::LogicalPosition::new(-32000.0, -32000.0));
-        let _ = window.show();
-    }
     tracing::info!(
         account_id,
         channel_id,

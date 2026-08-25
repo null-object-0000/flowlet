@@ -28,15 +28,18 @@ cp "$SCRIPT_DIR/flowlet.png" "$ICON_FILE"
   echo "Version=1.0"
   echo "Name=Flowlet"
   echo "Comment=Local AI model service console"
-  # Portable Tauri/GTK currently exposes a stable Flowlet WM_CLASS under X11.
-  # Force XWayland for this launcher only so GNOME can associate the running
-  # window with this desktop entry instead of showing a generic gear icon.
-  printf 'Exec=env GDK_BACKEND=x11 "%s/flowlet"\n' "$SCRIPT_DIR"
+  # 运行在原生 Wayland 后端：XWayland 下 GNOME Shell 最小化/恢复窗口时
+  # 会出现整窗闪烁，原生 Wayland 由合成器原生动画，不存在该问题。
+  # 不再强制 GDK_BACKEND=x11。
+  printf 'Exec="%s/flowlet"\n' "$SCRIPT_DIR"
   printf 'TryExec=%s/flowlet\n' "$SCRIPT_DIR"
   echo "Icon=$APP_ID"
   echo "Terminal=false"
   echo "StartupNotify=true"
-  echo "StartupWMClass=Flowlet"
+  # Wayland 下 GNOME 通过 app_id（= APP_ID，见 tauri.conf.json 的
+  # enableGTKAppId）关联窗口与桌面入口；X11 会话回退时 WM_CLASS 也取自
+  # GTK application id，因此统一填 APP_ID。
+  echo "StartupWMClass=$APP_ID"
   echo "Categories=Development;"
 } > "$DESKTOP_FILE"
 

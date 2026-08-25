@@ -361,7 +361,6 @@ function restartFlowlet(targetExe, shouldRestart) {
     env: process.platform === "linux"
       ? {
           ...process.env,
-          GDK_BACKEND: "x11",
           GIO_LAUNCHED_DESKTOP_FILE: join(
             process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"),
             "applications",

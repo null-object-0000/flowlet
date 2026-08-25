@@ -1192,8 +1192,9 @@ fn run_mobile() {
 }
 
 /// 切换主窗口显示/隐藏。显示时确保窗口被恢复到前台焦点状态。
-/// 仅 show + set_focus 可能无法把窗口带到前台，因此额外做 unminimize
-/// 和短暂置顶再取消的操作覆盖 Windows 等场景。
+/// Windows 上仅 show + set_focus 可能无法把窗口带到前台，因此额外做
+/// unminimize 和短暂置顶再取消；Linux/macOS 只做 show + unminimize +
+/// set_focus，避免反复切换置顶导致窗口 restack 闪烁。
 #[cfg(desktop)]
 fn toggle_window_to_front(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
@@ -1206,9 +1207,20 @@ fn toggle_window_to_front(app: &AppHandle) {
         }
         let _ = window.show();
         let _ = window.unminimize();
-        let _ = window.set_always_on_top(true);
-        let _ = window.set_focus();
-        let _ = window.set_always_on_top(false);
+        // Windows 上仅 show + set_focus 可能无法把窗口带到前台，因此需要短暂
+        // 置顶再取消。Linux/macOS 不需要这个变通：在 Linux 上反复切换
+        // always-on-top 会让窗口管理器反复 restack 窗口（X11/XWayland 下尤其
+        // 明显），显示主窗口时产生整窗闪烁。这里只在 Windows 上执行该序列。
+        #[cfg(target_os = "windows")]
+        {
+            let _ = window.set_always_on_top(true);
+            let _ = window.set_focus();
+            let _ = window.set_always_on_top(false);
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = window.set_focus();
+        }
     }
 }
 

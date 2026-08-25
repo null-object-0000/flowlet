@@ -61,9 +61,84 @@ fn acquire_single_instance() -> Option<SingleInstanceGuard> {
     Some(SingleInstanceGuard(handle))
 }
 
+/// Linux / macOS 的单例实现：对 exe 同级目录下的锁文件加 BSD `flock` 独占锁。
+///
+/// 与 Windows 的命名互斥量不同，这里必须落在文件系统上；选择 `flock` 而非
+/// `create_new`，是因为 `flock` 随进程退出（含崩溃）自动释放，不会留下需要
+/// 手动清理的脏锁文件。锁文件与 `flowlet.sqlite` / `logs` 一样放在 exe 同级，
+/// 保持“整个目录自包含、可随身拷贝”的语义——不同安装目录视为不同实例。
 #[cfg(not(windows))]
-struct SingleInstanceGuard;
+mod single_instance {
+    use std::fs::OpenOptions;
+    use std::os::fd::AsRawFd;
+    use std::path::{Path, PathBuf};
+
+    /// 持有独占锁的文件句柄；`Drop` 关闭文件即释放锁。
+    pub struct SingleInstanceGuard {
+        _file: std::fs::File,
+    }
+
+    pub fn acquire() -> Option<SingleInstanceGuard> {
+        let lock_path = lock_file_path()?;
+        acquire_at(&lock_path)
+    }
+
+    fn acquire_at(lock_path: &Path) -> Option<SingleInstanceGuard> {
+        if let Some(parent) = lock_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(lock_path)
+            .ok()?;
+
+        // LOCK_EX | LOCK_NB：抢不到立即返回，不阻塞。
+        let rc = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+        if rc != 0 {
+            return None;
+        }
+
+        Some(SingleInstanceGuard { _file: file })
+    }
+
+    fn lock_file_path() -> Option<PathBuf> {
+        std::env::current_exe()
+            .ok()
+            .and_then(|path| path.parent().map(|dir| dir.join(".flowlet.lock")))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn second_acquire_fails_while_first_is_held() {
+            let dir = std::env::temp_dir().join(format!(
+                "flowlet-single-instance-test-{}-{:?}",
+                std::process::id(),
+                std::thread::current().id()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            let lock_path = dir.join("flowlet.lock");
+
+            let first = acquire_at(&lock_path).expect("首次加锁应成功");
+            assert!(
+                acquire_at(&lock_path).is_none(),
+                "持锁期间第二次加锁应失败"
+            );
+
+            drop(first);
+            let _second = acquire_at(&lock_path).expect("释放后再次加锁应成功");
+
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+}
+
 #[cfg(not(windows))]
-fn acquire_single_instance() -> Option<SingleInstanceGuard> {
-    Some(SingleInstanceGuard)
+fn acquire_single_instance() -> Option<single_instance::SingleInstanceGuard> {
+    single_instance::acquire()
 }

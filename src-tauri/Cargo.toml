@@ -32,6 +32,8 @@ if-addrs = "0.14"
 jsonc-parser = { version = "0.33", features = ["cst", "serde", "serde_json"] }
 notify = "8.2"
 keyring = "4.1.5"
+# Linux / macOS 单例锁使用 BSD flock（见 main.rs 的 single_instance 模块）。
+libc = "0.2"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 rusty-s3 = "0.10.1"
 rusqlite = { version = "0.37", features = ["bundled", "backup"] }

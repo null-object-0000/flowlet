@@ -165,9 +165,9 @@ pub fn build_scrape_webview(
             )
             // 保持可见以获得真实视口,但移到屏幕外、无边框、不抢焦点、不进任务栏,
             // 避免每轮自动同步弹出窗口打扰用户;需要用户登录时由 surface_scrape_webview
-            // 把窗口移动回屏幕并聚焦。
-            .visible(true)
-            .position(-32000.0, -32000.0)
+            // 保持隐藏创建,构建完成后移到屏幕外再 show,避免`visible(true)` 让窗口先出现在
+            // 默认/居中位置造成闪屏。需要用户登录时由 surface_scrape_webview 移回屏幕并聚焦。
+            .visible(false)
             .decorations(false)
             .skip_taskbar(true)
             .focused(false);
@@ -178,6 +178,13 @@ pub fn build_scrape_webview(
     let window = builder
         .build()
         .map_err(|e| format!("构建抓取 webview 失败: {e}"))?;
+    // longcat 需要真实视口(WebKitGTK 对隐藏窗口 innerWidth=0 会被当移动端渲染)。
+    // 保持窗口"可见"以获得视图,但先移到屏幕外再 show,避免先出现在屏幕中间闪一下;
+    // 需要用户登录时由 surface_scrape_webview 移回屏幕并聚焦。
+    if channel_id == "longcat" {
+        let _ = window.set_position(tauri::LogicalPosition::new(-32000.0, -32000.0));
+        let _ = window.show();
+    }
     tracing::info!(
         account_id,
         channel_id,

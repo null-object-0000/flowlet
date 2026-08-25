@@ -963,7 +963,7 @@ pub(crate) async fn handle_intercepted_response(
 mod scrape_capture_tests {
     use super::{
         channel_resource_sync_completion_status, channel_resource_sync_method,
-        is_explicit_login_url, merge_longcat_token_packs, scrape_responses_complete,
+        is_explicit_login_url, merge_longcat_token_packs, record_stash_items, scrape_responses_complete,
         ChannelResourceSyncMethod,
     };
     use crate::core::channels_config::{ChannelsConfig, DEFAULT_CONFIG_JSON};
@@ -1184,6 +1184,32 @@ mod scrape_capture_tests {
     }
 
     #[test]
+    fn record_stash_items_merges_full_body_over_truncated() {
+        let url = "https://cs-data.qianwenai.com/data/api.json?api=zeldaHttp.apikeyMgr.%2Ftokenplan%2Fpersonal%2Fapi%2Fv2%2Fquota-config";
+        let complete = r#"{"data":{"DataV2":{"data":{"data":{"standard":{"weekly":10000}}}}}}"#;
+        let truncated = "{";
+        // 页面暂存里的完整体覆盖已有 1 字节残缺体。
+        let items: Vec<serde_json::Value> = serde_json::from_str(
+            &serde_json::to_string(&[serde_json::json!({ "url": url, "body": complete })]).unwrap(),
+        )
+        .unwrap();
+        let mut entry = vec![(url.to_string(), truncated.to_string())];
+        record_stash_items(&mut entry, items);
+        assert_eq!(entry.len(), 1);
+        assert_eq!(entry[0].1, complete);
+
+        // 只有残缺体并入时不破坏已满足槽位的完整体。
+        let items: Vec<serde_json::Value> = serde_json::from_str(
+            &serde_json::to_string(&[serde_json::json!({ "url": url, "body": truncated })]).unwrap(),
+        )
+        .unwrap();
+        let mut entry = vec![(url.to_string(), complete.to_string())];
+        record_stash_items(&mut entry, items);
+        assert_eq!(entry.len(), 1);
+        assert_eq!(entry[0].1, complete);
+    }
+
+    #[test]
     fn deduplicates_longcat_summary_and_list_by_cep_business_order() {
         let slots = std::collections::HashMap::from([
             (
@@ -1285,6 +1311,99 @@ fn collect_scrape_slots(
                 .then(|| (kind.to_string(), body.clone()))
         })
         .collect())
+}
+
+/// 把页面注入拦截器暂存(`window.__flowlet_scrape_stash`)回传的 `[{url, body}]` 列表
+/// 合并进抓取缓冲。WebKitGTK 的 `resource.data()` 对 fetch 类请求常只返回 1 字节残缺体
+/// (参见 WebKitGTK get_data 对 fetch 响应的限制),因此以页面 JS 读到的全量 body 为准;
+/// 这里的合并仍走 `record_captured_response`,保证“已满足槽位的完整体不被残缺体覆盖”。
+fn record_stash_items(entry: &mut Vec<(String, String)>, items: Vec<serde_json::Value>) {
+    for item in items {
+        let Some(url) = item.get("url").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        let Some(body) = item.get("body").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        scrape_console::record_captured_response(entry, url.to_string(), body.to_string());
+    }
+}
+
+/// 从抓取 webview 页面读取由注入拦截器暂存的完整响应体(`window.__flowlet_scrape_stash`),
+/// 清空页面全局后合并进 `scrape_pending` 缓冲。走 `eval_with_callback`(与 extractor 相同),
+/// 不依赖外部页面里可能不可用的 `__TAURI_INTERNALS__` IPC。best-effort:页面无暂存/取不到时
+/// 静默返回,不阻断抓取流程。
+async fn drain_scrape_page_stash(
+    state: &tauri::State<'_, AppState>,
+    account_id: &str,
+) -> Result<(), String> {
+    let stash_js = "(function(){try{var a=window.__flowlet_scrape_stash||[];window.__flowlet_scrape_stash=[];return {stash:a,device:{ua:(navigator.userAgent||''),iw:window.innerWidth,ih:window.innerHeight,sw:screen.width,sh:screen.height,tp:(navigator.maxTouchPoints||0),pf:(navigator.platform||'')}};}catch(e){return {stash:[],device:{err:String(e)}};}})()"
+        .to_string();
+    let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+    {
+        let guard = state
+            .scrape_webviews
+            .lock()
+            .map_err(|_| "锁定抓取 webview 失败".to_string())?;
+        let window = guard.get(account_id).ok_or("抓取 webview 不存在")?;
+        let tx_cell = std::cell::Cell::new(Some(tx));
+        let _ = window.eval_with_callback(stash_js, move |s| {
+            if let Some(tx) = tx_cell.take() {
+                let _ = tx.send(s.to_string());
+            }
+        });
+    }
+    // 先让出,等待页面回调(约 200ms 一档);超时/通道关闭都视作“无暂存”。
+    let raw = match tokio::time::timeout(std::time::Duration::from_secs(2), rx).await {
+        Ok(Ok(s)) => s,
+        Ok(Err(_)) | Err(_) => return Ok(()),
+    };
+    // eval_with_callback 与 extractor 一致:JS 返回的字符串会被再次 JSON 序列化。
+    // 这里兜底处理字符串双重编码,并同时兼容“直接返回数组”的旧结构与现在的
+    // {stash, device} 对象结构。
+    let value: serde_json::Value = serde_json::from_str(&raw).unwrap_or(serde_json::Value::Null);
+    let value = if let Some(encoded) = value.as_str() {
+        serde_json::from_str(encoded).unwrap_or(serde_json::Value::Null)
+    } else {
+        value
+    };
+    let items: Vec<serde_json::Value> = if let Some(array) = value.as_array() {
+        array.clone()
+    } else {
+        value
+            .get("stash")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+    };
+    let device = value.get("device").cloned().unwrap_or(serde_json::Value::Null);
+    if let Some(d) = device.as_object() {
+        let get = |k: &str| d.get(k).and_then(serde_json::Value::as_str).unwrap_or("-");
+        let num = |k: &str| d.get(k).and_then(serde_json::Value::as_f64).unwrap_or(-1.0);
+        tracing::info!(
+            account_id = %account_id,
+            stash_items = items.len(),
+            page_ua = get("ua"),
+            page_inner_width = num("iw"),
+            page_screen_width = num("sw"),
+            page_max_touch_points = num("tp"),
+            page_platform = get("pf"),
+            "控制台抓取页面暂存拉取"
+        );
+    } else {
+        tracing::info!(
+            account_id = %account_id,
+            stash_items = items.len(),
+            "控制台抓取页面暂存拉取"
+        );
+    }
+    let mut guard = state
+        .scrape_pending
+        .lock()
+        .map_err(|_| "锁定抓取缓冲失败".to_string())?;
+    let entry = guard.entry(account_id.to_string()).or_default();
+    record_stash_items(entry, items);
+    Ok(())
 }
 
 /// 从 LongCat 原始响应兜底提取并归一化完整资源包数组。
@@ -1766,6 +1885,7 @@ pub(crate) async fn probe_scrape_login(
                 if !interactive && scrape_interaction_required(&state, &account_id)? {
                     break;
                 }
+                drain_scrape_page_stash(&state, &account_id).await?;
                 let slots = collect_scrape_slots(&state, &account_id)?;
                 let phase_complete = if expected_slots.is_empty() {
                     !slots.is_empty()
@@ -1814,6 +1934,8 @@ pub(crate) async fn probe_scrape_login(
         }
     }
 
+    // 阶段循环后做一次收尾拉取，兜住最后到达的页面暂存响应。
+    drain_scrape_page_stash(&state, &account_id).await?;
     let ready = ready_for_last_phase;
     let captured = has_complete_scrape_capture(&state, &account_id, &mode)?;
     let current_page_url = explicit_login_page_url
@@ -1925,7 +2047,7 @@ fn surface_scrape_webview(
         .map_err(|_| "锁定抓取 webview 失败".to_string())?;
     let window = guard.get(account_id).ok_or("抓取 webview 不存在")?;
     window
-        .set_size(tauri::LogicalSize::new(1024.0, 768.0))
+        .set_size(tauri::LogicalSize::new(1440.0, 900.0))
         .map_err(|e| format!("设置窗口大小失败: {e}"))?;
     window
         .set_position(tauri::LogicalPosition::new(100.0, 100.0))

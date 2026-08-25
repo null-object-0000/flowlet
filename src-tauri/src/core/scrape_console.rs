@@ -57,7 +57,14 @@ pub fn resolve_scrape_mode(
     if !supports_scrape {
         return None;
     }
-    let mode_key = console_scrape_mode_key(channel_id, resource_mode)?;
+    // 历史账号可能未写入 resource_mode(如千问 API 按量付费、LongCat hybrid)，
+    // 或 resource_mode 无法映射到该渠道的抓取模式；此时回退到渠道默认资源模式,
+    // 与前端 defaultResourceMode 保持一致,避免把合法账号误判为“不支持控制台抓取”。
+    let mode_key = console_scrape_mode_key(channel_id, resource_mode)
+        .or_else(|| {
+            default_resource_mode(channel_id)
+                .and_then(|default| console_scrape_mode_key(channel_id, Some(default)))
+        })?;
     let cfg = channels_config.scrape_config(channel_id, mode_key)?;
     Some(ScrapeModeRuntime {
         console_url: cfg.console_url.clone(),
@@ -68,6 +75,17 @@ pub fn resolve_scrape_mode(
         aggregate: cfg.aggregate,
         required_slots: cfg.required_slots.clone(),
     })
+}
+
+/// 渠道默认资源模式(与前端 `defaultResourceMode` 保持一致)。
+/// 用于历史账号 `resource_mode` 缺失/无法映射时的兜底:千问 API 按量付费、
+/// LongCat hybrid 等。
+pub(crate) fn default_resource_mode(channel_id: &str) -> Option<&'static str> {
+    match channel_id {
+        "longcat" => Some("hybrid"),
+        "qwen" => Some("pay_as_you_go"),
+        _ => Some("pay_as_you_go"),
+    }
 }
 
 /// 构建 per-account 后台抓取 webview(隐藏)。
@@ -124,13 +142,30 @@ pub fn build_scrape_webview(
         data_dir = %data_dir.display(),
         "开始创建控制台抓取 WebView"
     );
-    let builder = tauri::webview::WebviewWindowBuilder::new(app, label, url)
+    let mut builder = tauri::webview::WebviewWindowBuilder::new(app, label, url)
         .title("Flowlet · 控制台抓取")
-        .inner_size(900.0, 720.0)
+        .inner_size(1440.0, 900.0)
         .visible(false)
         .data_directory(data_dir)
         .initialization_script(interceptor)
         .initialization_script_for_all_frames("window.__flowlet_scrape_active = true;".to_string());
+    // WebKitGTK 默认与 Linux 前缀的 User-Agent 会被部分消费站点的设备检测误判为
+    // 移动/安卓(仅凭 UA 里出现 "Linux" 就归为移动端),导致控制台以移动布局渲染、
+    // 抓不到桌面版控制台 API。这里给抓取 webview 固定一个**不含 "Linux" 的桌面 UA**。
+    // 仅对 longcat 生效:千问控制台登录走阿里云 SSO,对 UA 变化更敏感,保持其默认 UA,
+    // 避免影响已打通的控制台抓取。
+    //
+    // 另外:WebKitGTK 对隐藏窗口(visible=false)不提供布局视口,`window.innerWidth` 为 0,
+    // 让按视口响应式的控制台(典型如 longcat)被当移动端渲染、不发桌面版 API。因此
+    // longcat 的抓取 webview 保持**可见**以获得真实视口;代价是抓取时会出现该窗口。
+    if channel_id == "longcat" {
+        builder = builder
+            .user_agent(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+            )
+            .visible(true)
+            .position(80.0, 80.0);
+    }
     #[cfg(windows)]
     let builder =
         builder.additional_browser_args(super::webview_profile::WINDOWS_CACHE_LIMIT_BROWSER_ARGS);
@@ -396,6 +431,16 @@ pub fn record_captured_response(entry: &mut Vec<(String, String)>, url: String, 
             entry[index] = (url, merged);
             return;
         }
+        // 默认“同槽位最新覆盖旧”。但若已有响应已满足该槽位、而新到的响应不满足
+        // （例如 Linux WebKitGTK 原生监听对部分 XHR 响应只读到 1 字节残缺体），
+        // 保留已有完整响应，避免残缺体覆盖写回、把已抓到的套餐数据误判为缺失。
+        if captured_response_satisfies_slot(kind, &entry[index].1)
+            && !captured_response_satisfies_slot(kind, &body)
+        {
+            return;
+        }
+        entry[index] = (url, body);
+        return;
     }
     entry.retain(|(existing_url, _)| classify_response_url(existing_url) != kind);
     entry.push((url, body));
@@ -582,6 +627,37 @@ mod tests {
             ),
             "unknown"
         );
+    }
+
+    #[test]
+    fn retains_complete_body_when_native_capture_truncates_same_slot() {
+        let url = "https://cs-data.qianwenai.com/data/api.json?api=zeldaHttp.apikeyMgr.%2Ftokenplan%2Fpersonal%2Fapi%2Fv2%2Fquota-config";
+        // 满足 quota_config 槽位的完整响应（data.DataV2.data.data.standard.weekly 为数字）。
+        let complete = r#"{"data":{"DataV2":{"data":{"data":{"standard":{"weekly":10000}}}}}}"#;
+        // WebKitGTK resource.data / 其它异常时可能读到的残缺体（非完整 JSON，不满足槽位）。
+        let truncated = "{";
+
+        // 完整体先到、残缺体后到：保留完整体，不被 1 字节覆盖写回。
+        let mut entry = Vec::new();
+        record_captured_response(&mut entry, url.to_string(), complete.to_string());
+        record_captured_response(&mut entry, url.to_string(), truncated.to_string());
+        assert_eq!(entry.len(), 1);
+        assert_eq!(entry[0].1, complete);
+
+        // 残缺体先到、完整体后到：用完整体覆盖残缺体。
+        let mut entry = Vec::new();
+        record_captured_response(&mut entry, url.to_string(), truncated.to_string());
+        record_captured_response(&mut entry, url.to_string(), complete.to_string());
+        assert_eq!(entry.len(), 1);
+        assert_eq!(entry[0].1, complete);
+
+        // 两个都满足的同槽位响应仍保持“最新覆盖旧”，不破坏既有语义。
+        let latest = r#"{"data":{"DataV2":{"data":{"data":{"standard":{"weekly":22222}}}}}}"#;
+        let mut entry = Vec::new();
+        record_captured_response(&mut entry, url.to_string(), complete.to_string());
+        record_captured_response(&mut entry, url.to_string(), latest.to_string());
+        assert_eq!(entry.len(), 1);
+        assert_eq!(entry[0].1, latest);
     }
 
     #[test]
@@ -786,8 +862,18 @@ mod tests {
             mode.required_slots,
             vec!["freetier_list", "fq_instance", "billing_amount"]
         );
-        assert!(resolve_scrape_mode(&config, "qwen", None).is_none());
-        assert!(resolve_scrape_mode(&config, "qwen", Some("unknown_mode")).is_none());
+        // 历史账号 resource_mode 缺失(NULL)或无法映射时,回退到渠道默认(千问默认按量付费),
+        // 不再把合法账号误判为“不支持控制台抓取”。
+        let mode = resolve_scrape_mode(&config, "qwen", None).unwrap();
+        assert_eq!(
+            mode.required_slots,
+            vec!["freetier_list", "fq_instance", "billing_amount"]
+        );
+        let mode = resolve_scrape_mode(&config, "qwen", Some("unknown_mode")).unwrap();
+        assert_eq!(
+            mode.required_slots,
+            vec!["freetier_list", "fq_instance", "billing_amount"]
+        );
     }
 
     #[test]

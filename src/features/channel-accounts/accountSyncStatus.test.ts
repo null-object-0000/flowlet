@@ -89,7 +89,7 @@ describe("hasChannelAutoSync", () => {
     expect(hasChannelAutoSync(makeAccount({ resource_sync_mode: "manual" }), longcat)).toBe(false);
   });
 
-  it("auto-syncs Qwen Token Plan subscription accounts only, not pay-as-you-go API accounts", () => {
+  it("auto-syncs Qwen Token Plan subscription and API pay-as-you-go (freetier) accounts in auto mode", () => {
     const qwen = makePreset({ id: "qwen" });
     expect(
       hasChannelAutoSync(makeAccount({ channel_id: "qwen", resource_mode: "token_plan", resource_sync_mode: "auto" }), qwen),
@@ -97,11 +97,17 @@ describe("hasChannelAutoSync", () => {
     expect(
       hasChannelAutoSync(makeAccount({ channel_id: "qwen", resource_mode: "token_plan", resource_sync_mode: "manual" }), qwen),
     ).toBe(false);
-    // Qwen API 按量付费账号没有官方余额接口也没有可用的控制台抓取模式，
-    // 即使标记 auto 也不参与自动同步。
+    // Qwen API 按量付费账号（福利页免费额度抓取）同样参与控制台抓取自动同步。
     expect(
       hasChannelAutoSync(makeAccount({ channel_id: "qwen", resource_mode: "pay_as_you_go", resource_sync_mode: "auto" }), qwen),
+    ).toBe(true);
+    expect(
+      hasChannelAutoSync(makeAccount({ channel_id: "qwen", resource_mode: "pay_as_you_go", resource_sync_mode: "manual" }), qwen),
     ).toBe(false);
+    // 历史账号 resource_mode 未写入(NULL)时,按千问默认(按量付费)纳入自动同步。
+    expect(
+      hasChannelAutoSync(makeAccount({ channel_id: "qwen", resource_mode: null, resource_sync_mode: "auto" }), qwen),
+    ).toBe(true);
   });
 
   it("auto-syncs DeepSeek / Kimi / OpenRouter official-balance-api accounts regardless of sync mode", () => {

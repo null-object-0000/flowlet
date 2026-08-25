@@ -1068,7 +1068,7 @@ fn codex_command(executable: &Path) -> Command {
         "-NoProfile",
         "-NonInteractive",
         "-Command",
-        &format!("& '{escaped}' -s read-only -a untrusted app-server"),
+        &format!("& '{escaped}' -s read-only -a never app-server"),
     ]);
     super::agent_environment::configure_hidden_console(&mut command);
     command
@@ -1077,7 +1077,10 @@ fn codex_command(executable: &Path) -> Command {
 #[cfg(not(windows))]
 fn codex_command(executable: &Path) -> Command {
     let mut command = Command::new(executable);
-    command.args(["-s", "read-only", "-a", "untrusted", "app-server"]);
+    // `-a untrusted` 在新版 Codex CLI（如 0.149.x）已从 APPROVAL_POLICY 枚举移除，
+    // 只保留 `on-request` / `never`。app-server 仅服务 account/read 等只读 RPC，
+    // 不会运行模型会话，approval policy 不影响行为，统一使用 `never` 兼容新旧版本。
+    command.args(["-s", "read-only", "-a", "never", "app-server"]);
     command
 }
 

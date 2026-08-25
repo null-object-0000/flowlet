@@ -163,9 +163,12 @@ export function isQwenTokenPlanAccount(account: { channel_id: string; resource_m
   return account.channel_id === QWEN_CHANNEL_ID && account.resource_mode === "token_plan";
 }
 
-/** 判断账号是否为千问 API 按量付费模式（福利页免费额度抓取）。 */
+/** 判断账号是否为千问 API 按量付费模式（福利页免费额度抓取）。
+ *  千问渠道默认资源模式为按量付费；历史账号 resource_mode 未写入(NULL)时按默认处理,
+ *  与前端 defaultResourceMode 及 Rust default_resource_mode 兜底保持一致。 */
 export function isQwenPayAsYouGoAccount(account: { channel_id: string; resource_mode: string | null }): boolean {
-  return account.channel_id === QWEN_CHANNEL_ID && account.resource_mode === "pay_as_you_go";
+  return account.channel_id === QWEN_CHANNEL_ID &&
+    (account.resource_mode === "pay_as_you_go" || account.resource_mode === null);
 }
 
 /** 判断是否为 ChatGPT (Codex) 伪账号。Codex 账号由 Rust 端同步，

@@ -56,6 +56,7 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
   "log_capture": { ... },       // 请求日志捕获配置
   "bind": { ... },              // 代理监听地址
   "usage_cost": { ... },        // 用量费用展示与固定汇率
+  "network": { ... },           // 上游代理等网络配置
   "channels_config": { ... }    // 渠道、价格、模型配置
 }
 ```
@@ -66,6 +67,7 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 | `log_capture` | `object` | 是 | 请求/响应日志的捕获与脱敏配置 |
 | `bind` | `object` | 是 | 本地代理监听的 host/port |
 | `usage_cost` | `object` | 否 | 费用统一展示币种与手工维护的固定汇率；仅影响展示，不改写原始费用 |
+| `network` | `object` | 否 | Flowlet 自身对外请求的上游代理等网络配置 |
 | `channels_config` | `object` | 是 | 渠道模板、价格、默认开放模型、档位 |
 
 ### 2.1 `usage_cost` — 费用展示与固定汇率
@@ -89,6 +91,38 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 该汇率仅用于 UI 展示折算：原币金额始终保留，不写回 SQLite，不改变 API 公开价，
 也不用于推导套餐 Credits、周额度或实际结算金额。设置页保存时只合并顶层
 `usage_cost`，不会覆盖渠道、账号、捕获或代理配置。
+
+### 2.2 `network.upstream_proxy` — 上游代理
+
+```jsonc
+"network": {
+  "upstream_proxy": {
+    "enabled": false,          // 是否启用显式上游代理
+    "url": "",                 // 代理地址，仅支持 http/https
+    "no_proxy": ""             // 逗号分隔的直连白名单（可选）
+  }
+}
+```
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `enabled` | `bool` | `false` | 是否启用上游代理；`url` 为空时强制视为 `false` |
+| `url` | `string` | `""` | 代理地址，例如 `http://127.0.0.1:7890`。仅支持 `http` / `https`，不支持 socks 代理 |
+| `no_proxy` | `string` | `""` | 逗号分隔的直连白名单（host 或 host:port）。命中的目标不走代理；留空表示全部走代理 |
+
+**行为**：
+
+- 只作用于 **Flowlet 自身发起的对外 HTTP 请求**：Codex 官方用量
+  （`https://chatgpt.com/backend-api/wham/usage`）、渠道模型同步/余额查询、
+  Agent 版本检查、远程数据拉取（`storage_tasks`）。**不作用于**本地代理的
+  上游模型转发（`proxy.rs` 的 `Client` 仍直连各渠道上游），也不作用于局域网
+  设备直连（`lan_sync`）。
+- 桌面进程不会继承 shell 里 export 的 `HTTPS_PROXY` 等环境变量，因此需要在
+  这里显式配置；未启用时 Flowlet 走直连。
+- 配置进程内热更新：设置页保存后立即生效（`set_upstream_proxy_config` 同时
+  更新内存全局配置与 `config.json`）；手改 `config.json` 文件需重启应用生效。
+- 校验失败（空 `url` 却开启、非 http/https 协议）会在保存时返回明确错误，
+  不会写入文件。
 
 ## 3. `ua_rules` — 客户端身份识别
 
@@ -492,6 +526,7 @@ Key 一样包含在端到端加密的账号目录中。
 | `ua_rules` | **热更新**：下次请求立即生效 |
 | `log_capture` | **热更新**：下次请求立即生效 |
 | `usage_cost` | **前端热更新**：保存后费用展示查询立即使用新口径；不影响代理请求 |
+| `network.upstream_proxy` | **进程内热更新**：设置页保存后立即生效；手改文件需重启应用 |
 | `bind` | **需重启代理**：监听地址在启动时绑定 |
 | `channels_config` | **需重启应用**：仅在启动时解析一次；缺失渠道会追加，协议、Base URL 和鉴权字段会同步到 SQLite，模型价格只加载到运行时内存 |
 
@@ -544,6 +579,7 @@ LongCat、DeepSeek、Kimi 对照、SQLite 升级迁移、模型/余额同步、�
 | JSON 反序列化结构 | `src-tauri/src/core/channels_config.rs` |
 | 运行时配置结构（`ChannelPreset`、`ProxyBindConfig`、`LogCaptureConfig`、`UaClientRule`） | `src-tauri/src/core/config.rs` |
 | 配置读写与热加载 | `src-tauri/src/core/proxy.rs`、`src-tauri/src/core/proxy_http.rs` |
+| 上游代理配置解析与运行时全局 | `src-tauri/src/core/upstream_proxy.rs`、`src-tauri/src/core/services.rs`、`src-tauri/src/commands/maintenance.rs` |
 | 启动时加载与回退 | `src-tauri/src/lib.rs`（`build_app_state`、`load_channels_config_from`） |
 | 前端读写 command | `src-tauri/src/commands.rs`（`read_config`、`write_config`） |
 | 便携版打包 | `scripts/build-portable.mjs` |

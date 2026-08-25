@@ -58,6 +58,13 @@
     "usd_to_cny_rate": 7.2,
     "exchange_rate_note": ""
   },
+  "network": {
+    "upstream_proxy": {
+      "enabled": false,
+      "url": "",
+      "no_proxy": ""
+    }
+  },
   "channels_config": {
     "channels": [
       {

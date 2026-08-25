@@ -901,11 +901,18 @@ async fn query_codex_account_via_oauth_path(
         .filter(|value| !value.is_empty())
         .ok_or_else(|| "未找到 ChatGPT OAuth 会话".to_string())?;
 
-    let response = reqwest::Client::new()
+    let client = crate::core::upstream_proxy::apply_to(reqwest::Client::builder())
+        .and_then(|builder| {
+            builder
+                .timeout(RPC_TIMEOUT)
+                .build()
+                .map_err(|error| format!("创建 HTTP 客户端失败：{error}"))
+        })
+        .map_err(|error| format!("官方用量接口客户端创建失败：{error}"))?;
+    let response = client
         .get("https://chatgpt.com/backend-api/wham/usage")
         .bearer_auth(access_token)
         .header(reqwest::header::ACCEPT, "application/json")
-        .timeout(RPC_TIMEOUT)
         .send()
         .await
         .map_err(|error| format!("官方用量接口请求失败：{error}"))?;

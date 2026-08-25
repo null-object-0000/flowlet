@@ -1520,8 +1520,8 @@ async fn sync_catalog_file(
 
     // 1. 拉取远程数据。仅该无副作用网络阶段按 JobDefinition 执行超时和重试；
     //    JSON 校验与本地原子替换失败属于终止错误，不自动重试写入。
-    let client = reqwest::Client::builder()
-        .build()
+    let client = crate::core::upstream_proxy::apply_to(reqwest::Client::builder())
+        .and_then(|builder| builder.build().map_err(|e| e.to_string()))
         .map_err(|e| format!("创建 HTTP 客户端失败：{e}"))?;
     let body = crate::core::job_runtime::run_attempts(&lease, spec.job_definition, |_| async {
         let response = client

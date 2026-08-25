@@ -1967,6 +1967,19 @@ const english: Record<string, string> = {
   "目标设备": "Target device",
   "选择目标设备": "Select a target device",
   "尚未同步任何项目，或项目同步尚未完成。": "No projects have been synced yet, or project sync is still in progress.",
+  "网络": "Network",
+  "上游代理仅用于 Flowlet 自身的官方用量、模型/余额同步与版本检查等请求，不影响本地代理的上游模型转发。":
+    "The upstream proxy only applies to Flowlet's own requests (official usage, model/balance sync, version checks). It does not affect the local proxy's upstream model forwarding.",
+  "启用上游代理": "Enable upstream proxy",
+  "为 Flowlet 发起的对外请求启用显式代理；未启用时走直连":
+    "Use an explicit proxy for outgoing requests made by Flowlet; direct connection is used when disabled",
+  "请先填写代理地址": "Enter a proxy URL first",
+  "代理地址": "Proxy URL",
+  "仅支持 http/https，例如 http://127.0.0.1:7890": "Only http/https is supported, e.g. http://127.0.0.1:7890",
+  "直连白名单": "Bypass list",
+  "逗号分隔的主机名或主机:端口，命中的地址不走代理；留空表示全部走代理":
+    "Comma-separated hostnames or host:port entries that bypass the proxy; leave empty to proxy everything",
+  "代理地址需以 http:// 或 https:// 开头": "Proxy URL must start with http:// or https://",
 };
 
 export type TranslationVariables = Record<string, string | number>;

@@ -7,7 +7,7 @@ vi.mock("../../platform/tauri/client", () => ({
   toAppError: (error: unknown, code: string) => ({ code, message: String(error), retryable: true }),
 }));
 
-import { compactDatabase, getAutostartEnabled, getModelPriceCurrencies, getStorageUsage, getTaskReviewNotificationEnabled, getUsageCostDisplayConfig, parseModelPriceCurrencies, parseUsageCostDisplayConfig, setAutostartEnabled, setTaskReviewNotificationEnabled, setUsageCostDisplayConfig } from "./commands";
+import { compactDatabase, getAutostartEnabled, getModelPriceCurrencies, getStorageUsage, getTaskReviewNotificationEnabled, getUpstreamProxyConfig, getUsageCostDisplayConfig, parseModelPriceCurrencies, parseUpstreamProxyConfig, parseUsageCostDisplayConfig, setAutostartEnabled, setTaskReviewNotificationEnabled, setUpstreamProxyConfig, setUsageCostDisplayConfig } from "./commands";
 
 afterEach(() => invokeMock.mockReset());
 
@@ -136,6 +136,38 @@ describe("parseUsageCostDisplayConfig", () => {
       exchange_rate_note: "",
     });
     expect(parseUsageCostDisplayConfig(JSON.stringify({ usage_cost: { usd_to_cny_rate: -1 } })).usd_to_cny_rate).toBe(7.2);
+  });
+});
+
+describe("upstream proxy setting", () => {
+  it("reads the upstream proxy config through the typed command", async () => {
+    const config = { enabled: true, url: "http://127.0.0.1:7890", no_proxy: "localhost" };
+    invokeMock.mockResolvedValueOnce(config);
+    await expect(getUpstreamProxyConfig()).resolves.toEqual(config);
+    expect(invokeMock).toHaveBeenCalledWith("get_upstream_proxy_config");
+  });
+
+  it("writes the upstream proxy config through the typed command", async () => {
+    invokeMock.mockResolvedValueOnce(undefined);
+    const config = { enabled: true, url: " http://127.0.0.1:7890 ", no_proxy: " localhost " };
+    await expect(setUpstreamProxyConfig(config)).resolves.toEqual({
+      enabled: true,
+      url: "http://127.0.0.1:7890",
+      no_proxy: "localhost",
+    });
+    expect(invokeMock).toHaveBeenCalledWith("set_upstream_proxy_config", {
+      config: { enabled: true, url: "http://127.0.0.1:7890", no_proxy: "localhost" },
+    });
+  });
+
+  it("normalizes empty url to disabled and tolerates invalid shapes", () => {
+    expect(parseUpstreamProxyConfig({ enabled: true, url: "  ", no_proxy: "" })).toEqual({
+      enabled: false,
+      url: "",
+      no_proxy: "",
+    });
+    expect(parseUpstreamProxyConfig(null)).toEqual({ enabled: false, url: "", no_proxy: "" });
+    expect(parseUpstreamProxyConfig("nope")).toEqual({ enabled: false, url: "", no_proxy: "" });
   });
 });
 

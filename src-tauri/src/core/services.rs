@@ -50,6 +50,14 @@ impl FlowletServices {
             .as_ref()
             .and_then(parse_bind_config)
             .unwrap_or_else(|| load_bind_config_from_sqlite(&storage));
+        if let Some(config_value) = config_value.as_ref() {
+            let upstream_proxy =
+                super::upstream_proxy::from_config_json(config_value);
+            // 解析失败不阻断启动：默认关闭代理，后续可在设置页修正。
+            if let Err(error) = super::upstream_proxy::set(upstream_proxy) {
+                tracing::warn!(error = %error, "忽略无效的上游代理配置，回退直连");
+            }
+        }
 
         Ok(Self {
             proxy: ProxyController {

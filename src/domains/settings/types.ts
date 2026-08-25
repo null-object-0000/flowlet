@@ -46,6 +46,14 @@ export interface UsageCostDisplayConfig {
   exchange_rate_note: string;
 }
 
+/** 上游代理配置：Flowlet 自身对外请求（Codex 官方用量、渠道模型/余额同步、
+ *  Agent 版本检查、远程数据拉取）使用的显式代理。只支持 http/https。 */
+export interface UpstreamProxyConfig {
+  enabled: boolean;
+  url: string;
+  no_proxy: string;
+}
+
 export interface DatabaseMaintenanceStats {
   databaseBytes: number;
   pageSize: number;

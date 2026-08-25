@@ -74,9 +74,13 @@ pub async fn test_channel_connection(
         return Err("API Key 未配置".to_string());
     }
 
-    let client = Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
+    let client = crate::core::upstream_proxy::apply_to(Client::builder())
+        .and_then(|builder| {
+            builder
+                .timeout(std::time::Duration::from_secs(10))
+                .build()
+                .map_err(|err| err.to_string())
+        })
         .map_err(|err| format!("创建 HTTP 客户端失败: {err}"))?;
 
     // 自定义 OpenAI Base URL 必须参与连接测试；未覆盖时才使用渠道配置端点。
@@ -187,10 +191,13 @@ pub async fn sync_deepseek_models(
         };
     }
 
-    let client = match Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-    {
+    let client = match crate::core::upstream_proxy::apply_to(Client::builder())
+        .and_then(|builder| {
+            builder
+                .timeout(std::time::Duration::from_secs(15))
+                .build()
+                .map_err(|err| err.to_string())
+        }) {
         Ok(c) => c,
         Err(err) => {
             return ModelSyncResult {
@@ -308,12 +315,15 @@ pub async fn sync_openai_compatible_models(
         };
     };
     let url = models_url.unwrap_or_else(|| openai_models_url(base_url));
-    let client = match Client::builder()
-        .timeout(std::time::Duration::from_secs(
-            preset.timeout_seconds.unwrap_or(15),
-        ))
-        .build()
-    {
+    let client = match crate::core::upstream_proxy::apply_to(Client::builder())
+        .and_then(|builder| {
+            builder
+                .timeout(std::time::Duration::from_secs(
+                    preset.timeout_seconds.unwrap_or(15),
+                ))
+                .build()
+                .map_err(|error| error.to_string())
+        }) {
         Ok(client) => client,
         Err(error) => {
             return ModelSyncResult {
@@ -430,10 +440,13 @@ pub async fn sync_qwen_models(
         };
     }
 
-    let client = match Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-    {
+    let client = match crate::core::upstream_proxy::apply_to(Client::builder())
+        .and_then(|builder| {
+            builder
+                .timeout(std::time::Duration::from_secs(15))
+                .build()
+                .map_err(|err| err.to_string())
+        }) {
         Ok(c) => c,
         Err(err) => {
             return ModelSyncResult {

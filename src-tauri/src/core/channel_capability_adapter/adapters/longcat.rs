@@ -44,10 +44,13 @@ async fn sync_models(account: &ChannelAccount, config: &ChannelsConfig) -> Model
     if account.api_key.trim().is_empty() {
         return sync_error("API Key 未配置");
     }
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-    {
+    let client = match crate::core::upstream_proxy::apply_to(reqwest::Client::builder())
+        .and_then(|builder| {
+            builder
+                .timeout(std::time::Duration::from_secs(15))
+                .build()
+                .map_err(|error| error.to_string())
+        }) {
         Ok(client) => client,
         Err(error) => return sync_error(format!("创建 HTTP 客户端失败: {error}")),
     };

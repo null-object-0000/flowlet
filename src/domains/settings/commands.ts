@@ -1,5 +1,5 @@
 import { invokeCommand, toAppError } from "../../platform/tauri/client";
-import type { LogCaptureConfig, UsageCostDisplayConfig } from "./types";
+import type { LogCaptureConfig, UpstreamProxyConfig, UsageCostDisplayConfig } from "./types";
 import type { DatabaseCompactionResult, ModelPriceCurrencyEntry, ModelPriceInfo, ModelPriceTierInfo, StorageUsageSummary } from "./types";
 
 export async function getLogCaptureConfig(): Promise<LogCaptureConfig> {
@@ -80,6 +80,57 @@ function normalizeUsageCostDisplayConfig(config: Omit<UsageCostDisplayConfig, "u
     display_currency: config.display_currency === "USD" ? "USD" : "CNY",
     usd_to_cny_rate: rate,
     exchange_rate_note: config.exchange_rate_note.trim(),
+  };
+}
+
+export const DEFAULT_UPSTREAM_PROXY_CONFIG: UpstreamProxyConfig = {
+  enabled: false,
+  url: "",
+  no_proxy: "",
+};
+
+export async function getUpstreamProxyConfig(): Promise<UpstreamProxyConfig> {
+  try {
+    const config = await invokeCommand<UpstreamProxyConfig>("get_upstream_proxy_config");
+    return normalizeUpstreamProxyConfig(config);
+  } catch (error) {
+    throw toAppError(error, "upstream_proxy_config_read_failed");
+  }
+}
+
+export async function setUpstreamProxyConfig(
+  config: UpstreamProxyConfig,
+): Promise<UpstreamProxyConfig> {
+  const normalized = normalizeUpstreamProxyConfig(config);
+  try {
+    await invokeCommand<void>("set_upstream_proxy_config", { config: normalized });
+    return normalized;
+  } catch (error) {
+    throw toAppError(error, "upstream_proxy_config_update_failed");
+  }
+}
+
+export function parseUpstreamProxyConfig(raw: unknown): UpstreamProxyConfig {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return { ...DEFAULT_UPSTREAM_PROXY_CONFIG };
+  }
+  const value = raw as Record<string, unknown>;
+  return normalizeUpstreamProxyConfig({
+    enabled: value.enabled === true,
+    url: typeof value.url === "string" ? value.url : "",
+    no_proxy: typeof value.no_proxy === "string" ? value.no_proxy : "",
+  });
+}
+
+function normalizeUpstreamProxyConfig(
+  config: UpstreamProxyConfig | undefined,
+): UpstreamProxyConfig {
+  const url = typeof config?.url === "string" ? config.url.trim() : "";
+  const noProxy = typeof config?.no_proxy === "string" ? config.no_proxy.trim() : "";
+  return {
+    enabled: config?.enabled === true && url.length > 0,
+    url,
+    no_proxy: noProxy,
   };
 }
 

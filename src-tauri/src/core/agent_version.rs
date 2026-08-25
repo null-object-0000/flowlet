@@ -140,7 +140,9 @@ fn write_cache(agent_id: &str, entry: CachedEntry) {
 
 async fn fetch_latest_version(package: &str) -> Result<String, String> {
     let url = format!("https://registry.npmjs.org/{package}/latest");
-    let response = reqwest::Client::new()
+    let client = crate::core::upstream_proxy::build_client()
+        .map_err(|error| format!("版本检查客户端创建失败：{error}"))?;
+    let response = client
         .get(&url)
         .header(reqwest::header::ACCEPT, "application/json")
         .header(

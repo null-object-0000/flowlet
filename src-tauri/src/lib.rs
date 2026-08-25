@@ -1065,6 +1065,8 @@ fn run_desktop() {
             commands::get_total_body_size_bytes,
             commands::read_config,
             commands::write_config,
+            commands::get_upstream_proxy_config,
+            commands::set_upstream_proxy_config,
             commands::ipc_ping,
             commands::log_from_frontend,
         ])

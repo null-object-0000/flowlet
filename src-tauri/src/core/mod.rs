@@ -46,6 +46,7 @@ pub mod scrape_console;
 pub mod services;
 pub mod storage;
 pub mod sync;
+pub mod upstream_proxy;
 pub mod usage;
 pub mod web;
 pub mod webview_profile;

@@ -5,8 +5,9 @@ import { useAppPreferences, type ThemePreference } from "../../../app/preference
 import type { TokenUnit } from "../../../shared/formatters/number";
 import { useAutostartSetting } from "../../../features/settings/useAutostartSetting";
 import { useTaskReviewNotification } from "../../../features/settings/useTaskReviewNotification";
+import { useUpstreamProxySetting } from "../../../features/settings/useUpstreamProxySetting";
 import { useUsageCostDisplaySetting } from "../../../features/settings/useUsageCostDisplaySetting";
-import type { UsageCostDisplayConfig } from "../../../domains/settings/types";
+import type { UpstreamProxyConfig, UsageCostDisplayConfig } from "../../../domains/settings/types";
 import { SettingRow, SettingSection } from "../SettingRow";
 import styles from "./GeneralTab.module.css";
 
@@ -15,14 +16,23 @@ export function GeneralTab() {
   const autostart = useAutostartSetting();
   const taskReviewNotification = useTaskReviewNotification();
   const usageCost = useUsageCostDisplaySetting();
+  const upstreamProxy = useUpstreamProxySetting();
   const [rateDraft, setRateDraft] = useState<number | string>(7.2);
   const [noteDraft, setNoteDraft] = useState("");
+  const [proxyUrlDraft, setProxyUrlDraft] = useState("");
+  const [proxyNoProxyDraft, setProxyNoProxyDraft] = useState("");
 
   useEffect(() => {
     if (!usageCost.query.data) return;
     setRateDraft(usageCost.query.data.usd_to_cny_rate);
     setNoteDraft(usageCost.query.data.exchange_rate_note);
   }, [usageCost.query.data]);
+
+  useEffect(() => {
+    if (!upstreamProxy.query.data) return;
+    setProxyUrlDraft(upstreamProxy.query.data.url);
+    setProxyNoProxyDraft(upstreamProxy.query.data.no_proxy);
+  }, [upstreamProxy.query.data]);
 
   const saveUsageCost = async (patch: Partial<UsageCostDisplayConfig>) => {
     const current = usageCost.query.data;
@@ -45,6 +55,30 @@ export function GeneralTab() {
     }
     if (rate === usageCost.query.data?.usd_to_cny_rate) return;
     void saveUsageCost({ usd_to_cny_rate: rate });
+  };
+
+  const saveUpstreamProxy = async (patch: Partial<UpstreamProxyConfig>) => {
+    const current = upstreamProxy.query.data;
+    if (!current) return;
+    try {
+      await upstreamProxy.mutation.mutateAsync({ ...current, ...patch });
+      Toast.success(t("设置已自动保存"));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      Toast.error(t("保存失败：{message}", { message }));
+    }
+  };
+
+  const saveProxyUrlDraft = () => {
+    const url = proxyUrlDraft.trim();
+    const currentUrl = upstreamProxy.query.data?.url ?? "";
+    if (url === currentUrl) return;
+    if (url && !/^https?:\/\/.+/.test(url)) {
+      setProxyUrlDraft(currentUrl);
+      Toast.error(t("代理地址需以 http:// 或 https:// 开头"));
+      return;
+    }
+    void saveUpstreamProxy({ url });
   };
 
   return (
@@ -168,6 +202,73 @@ export function GeneralTab() {
                 const note = noteDraft.trim();
                 if (note === usageCost.query.data?.exchange_rate_note) return;
                 void saveUsageCost({ exchange_rate_note: note });
+              }}
+            />
+          )}
+        />
+      </SettingSection>
+
+      <SettingSection
+        title={t("网络")}
+        note={t("上游代理仅用于 Flowlet 自身的官方用量、模型/余额同步与版本检查等请求，不影响本地代理的上游模型转发。")}
+        keywords="网络 代理 上游代理 proxy 直连 白名单"
+      >
+        <SettingRow
+          name={t("启用上游代理")}
+          help={t("为 Flowlet 发起的对外请求启用显式代理；未启用时走直连")}
+          control={(
+            <Switch
+              aria-label={t("启用上游代理")}
+              checked={upstreamProxy.query.data?.enabled ?? false}
+              loading={upstreamProxy.query.isLoading || upstreamProxy.mutation.isPending}
+              disabled={upstreamProxy.query.isError}
+              onChange={(checked) => {
+                const url = upstreamProxy.query.data?.url ?? "";
+                if (checked && !url) {
+                  Toast.error(t("请先填写代理地址"));
+                  return;
+                }
+                void saveUpstreamProxy({ enabled: checked });
+              }}
+            />
+          )}
+        />
+        <SettingRow
+          name={t("代理地址")}
+          help={t("仅支持 http/https，例如 http://127.0.0.1:7890")}
+          control={(
+            <Input
+              aria-label={t("代理地址")}
+              className={styles.noteInput}
+              value={proxyUrlDraft}
+              placeholder="http://127.0.0.1:7890"
+              disabled={upstreamProxy.query.isLoading || upstreamProxy.mutation.isPending}
+              onChange={setProxyUrlDraft}
+              onBlur={saveProxyUrlDraft}
+              onEnterPress={saveProxyUrlDraft}
+            />
+          )}
+        />
+        <SettingRow
+          name={t("直连白名单")}
+          help={t("逗号分隔的主机名或主机:端口，命中的地址不走代理；留空表示全部走代理")}
+          control={(
+            <Input
+              aria-label={t("直连白名单")}
+              className={styles.noteInput}
+              value={proxyNoProxyDraft}
+              placeholder="localhost,127.0.0.1"
+              disabled={upstreamProxy.query.isLoading || upstreamProxy.mutation.isPending}
+              onChange={setProxyNoProxyDraft}
+              onBlur={() => {
+                const noProxy = proxyNoProxyDraft.trim();
+                if (noProxy === upstreamProxy.query.data?.no_proxy) return;
+                void saveUpstreamProxy({ no_proxy: noProxy });
+              }}
+              onEnterPress={() => {
+                const noProxy = proxyNoProxyDraft.trim();
+                if (noProxy === upstreamProxy.query.data?.no_proxy) return;
+                void saveUpstreamProxy({ no_proxy: noProxy });
               }}
             />
           )}

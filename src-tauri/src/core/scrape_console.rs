@@ -163,8 +163,14 @@ pub fn build_scrape_webview(
             .user_agent(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
             )
+            // 保持可见以获得真实视口,但移到屏幕外、无边框、不抢焦点、不进任务栏,
+            // 避免每轮自动同步弹出窗口打扰用户;需要用户登录时由 surface_scrape_webview
+            // 把窗口移动回屏幕并聚焦。
             .visible(true)
-            .position(80.0, 80.0);
+            .position(-32000.0, -32000.0)
+            .decorations(false)
+            .skip_taskbar(true)
+            .focused(false);
     }
     #[cfg(windows)]
     let builder =

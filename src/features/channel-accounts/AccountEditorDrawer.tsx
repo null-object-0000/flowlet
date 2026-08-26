@@ -4,6 +4,7 @@ import { Button, Checkbox, Input, Pagination, Progress, Select, SideSheet, Space
 import { IconChevronDown, IconChevronUp, IconExternalOpen, IconRefresh } from "@douyinfe/semi-icons";
 import { toAppError } from "../../platform/tauri/client";
 import { accountCommands } from "../../domains/account/commands";
+import { channelCommands } from "../../domains/channel/commands";
 import { modelCommands } from "../../domains/model/commands";
 import { effectiveOpenAiBaseUrl, type AccountBalanceResult, type AccountBalanceSnapshot, type AccountResourceMode, type AccountResourceSyncMode, type ChannelAccount, type ModelSyncResult } from "../../domains/account/types";
 import type { ChannelPreset } from "../../domains/channel/types";
@@ -20,6 +21,7 @@ import {
   canonicalModelId,
   canonicalModelKey,
   isCustomChannel,
+  isCustomScrapeAccount,
   isZhipuPayAsYouGoAccount,
   resolveSelectedUpstreamModelIds,
 } from "../../domains/channel/types";
@@ -119,6 +121,16 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
   );
   const channel = allPresets.find((item) => item.id === draft?.channel_id);
   const customChannel = isCustomChannel(channel);
+  const customScrapeChannelsQuery = useQuery({
+    queryKey: queryKeys.channel.customScrapeChannels(),
+    queryFn: () => channelCommands.listCustomScrapeChannels(),
+    networkMode: "always",
+    refetchOnWindowFocus: false,
+    staleTime: 60_000,
+  });
+  const customScrapeChannels = customScrapeChannelsQuery.data ?? [];
+  const hasCustomScrape = draft?.channel_id === CUSTOM_CHANNEL_ID
+    && isCustomScrapeAccount(draft?.name ?? "", customScrapeChannels);
   const isEdit = mode.kind === "edit";
   const isChatGptCreate = !isEdit && draft?.channel_id === CHATGPT_CHANNEL_ID;
   const isOpenRouter = draft?.channel_id === OPENROUTER_CHANNEL_ID;
@@ -155,8 +167,8 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
   const isQwenPayAsYouGo = draft.channel_id === QWEN_CHANNEL_ID && resourceMode === "pay_as_you_go";
   // Z.AI API 按量付费：资源包管理页提供官方余额与额度包抓取，固定自动同步。
   const isZhipuPayAsYouGo = isZhipuPayAsYouGoAccount(draft);
-  const supportsScrape = channel?.supports_scrape_balance === true && !autoSyncBalance;
-  const resourceSyncMode = isLongCatHybrid || isQwenTokenPlan || isQwenPayAsYouGo || isZhipuPayAsYouGo
+  const supportsScrape = (channel?.supports_scrape_balance === true || hasCustomScrape) && !autoSyncBalance;
+  const resourceSyncMode = isLongCatHybrid || isQwenTokenPlan || isQwenPayAsYouGo || isZhipuPayAsYouGo || hasCustomScrape
     ? "auto"
     : (draft.resource_sync_mode ?? "manual");
   const isResourceAutoSync = supportsScrape && resourceSyncMode === "auto";
@@ -389,7 +401,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
           name: normalizedName,
           api_key: currentDraft.api_key.trim(),
           management_key: currentDraft.management_key?.trim() || null,
-          resource_sync_mode: isQwenTokenPlan || isLongCatHybrid || isQwenPayAsYouGo || isZhipuPayAsYouGo ? "auto" : currentDraft.resource_sync_mode,
+          resource_sync_mode: isQwenTokenPlan || isLongCatHybrid || isQwenPayAsYouGo || isZhipuPayAsYouGo || hasCustomScrape ? "auto" : currentDraft.resource_sync_mode,
           base_url_override: currentDraft.base_url_override?.trim() || null,
           anthropic_base_url_override: currentDraft.anthropic_base_url_override?.trim() || null,
         },
@@ -527,7 +539,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
         {!isChatGptCreate ? (
         <section className={styles.section}>
           <div className={`${styles.sectionHeading} ${styles.resourceModeHeading}`}>
-            <span><h3>{t("资源模式")}</h3><small>{t(isOpenRouter ? (hasManagementKey ? "按量付费，自动同步账户 Credits" : "按量付费，自动同步 API Key 消费限额") : autoSyncBalance ? "按量付费，余额自动同步" : isLongCatHybrid ? "优先使用资源包，用尽后自动扣除余额" : isQwenTokenPlan ? "订阅额度自动同步" : isZhipuPayAsYouGo ? "按量付费，余额与额度包自动同步" : resourceOptions.length ? "选择资源类型以及资源信息的维护方式" : "手动维护按量付费余额")}</small></span>
+            <span><h3>{t("资源模式")}</h3><small>{t(isOpenRouter ? (hasManagementKey ? "按量付费，自动同步账户 Credits" : "按量付费，自动同步 API Key 消费限额") : autoSyncBalance ? "按量付费，余额自动同步" : isLongCatHybrid ? "优先使用资源包，用尽后自动扣除余额" : isQwenTokenPlan ? "订阅额度自动同步" : isZhipuPayAsYouGo ? "按量付费，余额与额度包自动同步" : hasCustomScrape ? "按量付费，余额与用量自动同步" : resourceOptions.length ? "选择资源类型以及资源信息的维护方式" : "手动维护按量付费余额")}</small></span>
             {isEdit && (resourceOptions.length || isLongCatHybrid || isZhipuPayAsYouGo) ? (
               <div className={styles.resourceModeMeta}>
                 <span>{t("计费模式")}</span>

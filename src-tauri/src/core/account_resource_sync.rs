@@ -72,7 +72,14 @@ fn has_automatic_resource_sync(account: &ChannelAccount, preset: &ChannelPreset)
                 && matches!(
                     account.resource_mode.as_deref(),
                     Some("pay_as_you_go") | None
-                )));
+                ))
+            // 自定义渠道：存在本机文件夹里的抓取描述符即可自动同步。
+            || crate::core::custom_scrape::resolve(
+                &account.channel_id,
+                Some(&account.name),
+                account.resource_mode.as_deref(),
+            )
+            .is_some());
     official_api || console
 }
 
@@ -119,6 +126,18 @@ fn channel_resource(
             .and_then(parse_zhipu_paygo_details)
         {
             plan = details.plan.or(plan);
+        }
+    }
+    if account.channel_id == "custom" {
+        if let Some(resolved) = crate::core::custom_scrape::resolve(
+            &account.channel_id,
+            Some(&account.name),
+            account.resource_mode.as_deref(),
+        ) {
+            plan = resolved
+                .summary
+                .plan
+                .or_else(|| Some("API 按量付费".to_string()));
         }
     }
     let observed_at = snapshot
@@ -220,13 +239,11 @@ struct ZhipuPaygoDetails {
 
 fn parse_zhipu_paygo_details(raw: &str) -> Option<ZhipuPaygoDetails> {
     let bundle: Value = serde_json::from_str(raw).ok()?;
-    let report = bundle.get("account_report")?.get("data")?;
-    report
-        .get("availableBalance")
-        .or_else(|| report.get("balance"))
-        .and_then(Value::as_f64)
-        .is_some()
-        .then(|| ZhipuPaygoDetails {
+    // 到达这里说明 account_report 槽位已通过成功信封校验并被收进 bundle；
+    // 余额可能为空或非数字（extractor 已兜底为 null），但账号仍是 API 按量付费。
+    bundle
+        .get("account_report")
+        .map(|_| ZhipuPaygoDetails {
             plan: Some("API 按量付费".to_string()),
         })
 }
@@ -425,12 +442,16 @@ mod tests {
         .to_string();
         let details = parse_zhipu_paygo_details(&raw).expect("zhipu paygo details");
         assert_eq!(details.plan.as_deref(), Some("API 按量付费"));
-        // 缺少钱包报告可用余额数据时视为未抓全。
+        // 没有 account_report 槽位（未抓全/未成功）时不产出计划。
         assert!(parse_zhipu_paygo_details(r#"{"code":401}"#).is_none());
-        assert!(parse_zhipu_paygo_details(
-            &serde_json::json!({ "account_report": {"code": 200, "data": {"availableBalance": "n/a"}} }).to_string()
-        )
-        .is_none());
+        // account_report 成功信封即使余额字段非数字，也标注为按量付费。
+        assert_eq!(
+            parse_zhipu_paygo_details(
+                &serde_json::json!({ "account_report": {"code": 200, "data": {"availableBalance": "n/a"}} }).to_string()
+            )
+            .and_then(|details| details.plan),
+            Some("API 按量付费".to_string())
+        );
     }
 
     #[test]

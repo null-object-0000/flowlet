@@ -124,7 +124,12 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 - 桌面进程不会继承 shell 里 export 的 `HTTPS_PROXY` 等环境变量，因此需要在
   这里显式配置；未启用时 Flowlet 走直连。
 - 配置进程内热更新：设置页保存后立即生效（`set_upstream_proxy_config` 同时
-  更新内存全局配置与 `config.json`）；手改 `config.json` 文件需重启应用生效。
+  更新内存全局配置、SQLite `app_meta` 与 `config.json`）。
+- **持久化优先级**：设置页保存的值写入 SQLite `app_meta`（键
+  `upstream_proxy_config`），重启后**优先**读取它；只有 SQLite 中没有该值时，
+  才回退读取 `config.json` 的 `network.upstream_proxy`。因此开发模式下重新构建
+  覆盖 `config.json` 不会丢失已保存的代理设置。手改 `config.json` 文件需重启
+  应用生效，且仅在未在设置页保存过时生效。
 - 校验失败（空 `url` 却开启、非 http/https 协议）会在保存时返回明确错误，
   不会写入文件。
 

@@ -782,5 +782,6 @@ src/
 | `docs/config.md` | `config.json` 字段与运行时行为说明 | 任何 `config.json` 字段变更时（见第 14 节） |
 | `docs/architecture.md` | 总体架构与核心模型 | 架构分层、核心数据模型变化时 |
 | `docs/roadmap.md` | 产品路线图 | 优先级或阶段目标调整时 |
+| `docs/custom-scrape-discovery.md` | 自定义渠道资源用量抓取的文件夹发现机制（设计） | 该机制落地实现、schema 变更或抓取/同步接入点变化时 |
 
 修改代码前先检查对应文档是否仍然准确；若已过时，一并更新。

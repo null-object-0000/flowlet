@@ -19,6 +19,7 @@ pub mod codex_account;
 pub mod codex_model_catalog;
 pub mod config;
 pub mod cost_ledger_source_probe;
+pub mod custom_scrape;
 pub(crate) mod detail_windows;
 pub mod device_identity;
 pub mod device_sync;

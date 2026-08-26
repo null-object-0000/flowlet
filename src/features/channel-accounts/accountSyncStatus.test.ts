@@ -154,41 +154,55 @@ describe("hasChannelAutoSync", () => {
     const custom = makePreset({ id: "custom", supports_balance_query: false, supports_scrape_balance: false });
     expect(hasChannelAutoSync(makeAccount({ channel_id: "custom", resource_sync_mode: "auto" }), custom)).toBe(false);
   });
+
+  it("auto-syncs custom-channel accounts that have a matching local scrape descriptor", () => {
+    const custom = makePreset({ id: "custom", supports_balance_query: false, supports_scrape_balance: false });
+    const channels = [{ channelId: "custom", accountName: "Friday" }];
+    expect(
+      hasChannelAutoSync(makeAccount({ channel_id: "custom", name: "Friday", resource_sync_mode: "auto" }), custom, channels),
+    ).toBe(true);
+    expect(
+      hasChannelAutoSync(makeAccount({ channel_id: "custom", name: "Friday", resource_sync_mode: "manual" }), custom, channels),
+    ).toBe(false);
+    expect(
+      hasChannelAutoSync(makeAccount({ channel_id: "custom", name: "Saturday", resource_sync_mode: "auto" }), custom, channels),
+    ).toBe(false);
+  });
 });
 
 describe("accountSyncStatus", () => {
   it("returns null for accounts without auto sync", () => {
-    expect(accountSyncStatus(makeAccount({ resource_sync_mode: "manual" }), makeSnapshot(), makePreset(), NOW)).toBeNull();
+    expect(accountSyncStatus(makeAccount({ resource_sync_mode: "manual" }), makeSnapshot(), makePreset(), [], NOW)).toBeNull();
   });
 
   it("is fresh when the last sync is within one sync cycle", () => {
     const freshSnapshot = makeSnapshot({ synced_at: new Date(NOW - CHANNEL_RESOURCE_SYNC_INTERVAL_MS + 1_000).toISOString() });
-    expect(accountSyncStatus(makeAccount(), freshSnapshot, makePreset(), NOW)).toBe("fresh");
+    expect(accountSyncStatus(makeAccount(), freshSnapshot, makePreset(), [], NOW)).toBe("fresh");
   });
 
   it("is still fresh when the last sync is between one and two sync cycles", () => {
     const betweenRounds = makeSnapshot({ synced_at: new Date(NOW - CHANNEL_RESOURCE_SYNC_INTERVAL_MS - 1_000).toISOString() });
-    expect(accountSyncStatus(makeAccount(), betweenRounds, makePreset(), NOW)).toBe("fresh");
+    expect(accountSyncStatus(makeAccount(), betweenRounds, makePreset(), [], NOW)).toBe("fresh");
   });
 
   it("is stale when the last sync exceeds two sync cycles", () => {
     const staleSnapshot = makeSnapshot({ synced_at: new Date(NOW - CHANNEL_RESOURCE_SYNC_INTERVAL_MS * 2 - 1_000).toISOString() });
-    expect(accountSyncStatus(makeAccount(), staleSnapshot, makePreset(), NOW)).toBe("stale");
+    expect(accountSyncStatus(makeAccount(), staleSnapshot, makePreset(), [], NOW)).toBe("stale");
   });
 
   it("is stale when the account has never been synced", () => {
-    expect(accountSyncStatus(makeAccount(), undefined, makePreset(), NOW)).toBe("stale");
+    expect(accountSyncStatus(makeAccount(), undefined, makePreset(), [], NOW)).toBe("stale");
   });
 
   it("is stale when the snapshot timestamp cannot be parsed", () => {
-    expect(accountSyncStatus(makeAccount(), makeSnapshot({ synced_at: "not-a-date" }), makePreset(), NOW)).toBe("stale");
+    expect(accountSyncStatus(makeAccount(), makeSnapshot({ synced_at: "not-a-date" }), makePreset(), [], NOW)).toBe("stale");
   });
 
   it("marks DeepSeek official-balance-api accounts stale when sync is overdue by more than two cycles", () => {
     const deepseek = makePreset({ id: "deepseek", supports_balance_query: true, supports_scrape_balance: false });
     const account = makeAccount({ channel_id: "deepseek", resource_sync_mode: "manual" });
     const stale = makeSnapshot({ synced_at: new Date(NOW - CHANNEL_RESOURCE_SYNC_INTERVAL_MS * 2 - 1_000).toISOString() });
-    expect(accountSyncStatus(account, stale, deepseek, NOW)).toBe("stale");
+    expect(accountSyncStatus(account, stale, deepseek, [], NOW)).toBe("stale");
   });
 });
 

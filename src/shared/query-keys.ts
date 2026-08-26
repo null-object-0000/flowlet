@@ -18,6 +18,7 @@ export const queryKeys = {
   channel: {
     all: ["channel"] as const,
     presets: () => [...queryKeys.channel.all, "presets"] as const,
+    customScrapeChannels: () => [...queryKeys.channel.all, "custom-scrape-channels"] as const,
   },
   account: {
     all: ["account"] as const,

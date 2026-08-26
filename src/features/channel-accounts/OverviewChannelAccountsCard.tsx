@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Badge, Button, Dropdown, Switch, Tag, Tooltip, Typography } from "@douyinfe/semi-ui-19";
 import { IconDelete, IconEdit, IconMore, IconPlay, IconPlus, IconStop } from "@douyinfe/semi-icons";
 import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
 import { CHATGPT_CHANNEL_ID, OPENROUTER_CHANNEL_ID, isQwenTokenPlanAccount, isQwenPayAsYouGoAccount, isZhipuPayAsYouGoAccount, isChatGptAccount } from "../../domains/channel/types";
 import type { ChannelPreset } from "../../domains/channel/types";
+import { channelCommands } from "../../domains/channel/commands";
 import type { CodexAccountReport } from "../../domains/agent/types";
 import { parseQwenTokenPlanDetails, isQwenSubscriptionActive, qwenSubscriptionInactiveKind } from "./qwenTokenPlanDetails";
 import { parseQwenFreeTierDetails } from "./qwenFreetierDetails";
@@ -23,6 +25,7 @@ import { formatCompactNumber } from "../../shared/formatters/number";
 import { formatFullTimestamp, formatTime, parseTimestamp } from "../../shared/formatters/datetime";
 import { accountSyncStatus, codexSyncStatus, type AccountSyncStatus } from "./accountSyncStatus";
 import { OverviewListRowView, OverviewListView } from "@flowlet/product-ui";
+import { queryKeys } from "../../shared/query-keys";
 
 const { Text } = Typography;
 
@@ -42,6 +45,14 @@ type Props = {
 export function OverviewChannelAccountsCard({ accounts, channels, snapshots, codexAccounts, onCreate, onEdit, onToggle = () => undefined, onDelete = () => undefined, onOpenCodexAgent, busy = false }: Props) {
   const { language, t } = useAppPreferences();
   const [showDisabledAccounts, setShowDisabledAccounts] = useState(false);
+  const customScrapeChannelsQuery = useQuery({
+    queryKey: queryKeys.channel.customScrapeChannels(),
+    queryFn: () => channelCommands.listCustomScrapeChannels(),
+    networkMode: "always",
+    refetchOnWindowFocus: false,
+    staleTime: 60_000,
+  });
+  const customScrapeChannels = customScrapeChannelsQuery.data ?? [];
   const snapshotByAccount = new Map(snapshots.map((snapshot) => [snapshot.account_id, snapshot]));
   const presetByChannelId = new Map(channels.map((preset) => [preset.id, preset]));
   const enabledCount = accounts.filter((a) => a.enabled).length;
@@ -97,7 +108,7 @@ export function OverviewChannelAccountsCard({ accounts, channels, snapshots, cod
             ? codexReport
               ? codexSyncStatus(codexReport)
               : null
-            : accountSyncStatus(account, snapshot, presetByChannelId.get(account.channel_id));
+            : accountSyncStatus(account, snapshot, presetByChannelId.get(account.channel_id), customScrapeChannels);
           const nameSummary = isCodex && codexReport
             ? getCodexNameSummary(codexReport)
             : nameLineSummary(account, snapshot, t, language);

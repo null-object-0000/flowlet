@@ -68,12 +68,27 @@ pub(crate) fn merge_scrape_response(kind: &str, existing: &str, incoming: &str) 
         .find_map(|adapter| (adapter.merge)(kind, existing, incoming))
 }
 
+/// 判断已捕获的响应是否满足槽位。
+///
+/// 同一槽位名可能被多个渠道共享（如 `token_packs_list` 同时用于 LongCat 与
+/// Z.AI，但两者业务信封不同：LongCat 用 `data.items`，Z.AI 用顶层 `rows`）。
+/// 不能用 `find_map` 取第一个 adapter 的结论——LongCat 的 `Some(false)` 会抢在
+/// Z.AI 的 `Some(true)` 之前返回，导致 Z.AI 的资源包响应被误判为未抓全。这里
+/// 改为「任一 adapter 判定满足即满足」；所有处理该槽位的 adapter 都判定不满足
+/// 才视为不满足；没有 adapter 处理该槽位时退回“合法 JSON 即视为到位”。
 pub(crate) fn scrape_response_satisfies_slot(kind: &str, body: &str) -> bool {
-    ADAPTERS
-        .iter()
-        .filter_map(|adapter| adapter.scrape_response)
-        .find_map(|adapter| (adapter.satisfies)(kind, body))
-        .unwrap_or_else(|| serde_json::from_str::<serde_json::Value>(body).is_ok())
+    let mut saw_rejection = false;
+    for adapter in ADAPTERS.iter().filter_map(|adapter| adapter.scrape_response) {
+        match (adapter.satisfies)(kind, body) {
+            Some(true) => return true,
+            Some(false) => saw_rejection = true,
+            None => {}
+        }
+    }
+    if saw_rejection {
+        return false;
+    }
+    serde_json::from_str::<serde_json::Value>(body).is_ok()
 }
 
 pub(crate) fn has_channel_capability_adapter(adapter_id: &str) -> bool {
@@ -296,6 +311,23 @@ mod tests {
             "deepseek",
             "https://example.com/login"
         ));
+    }
+
+    #[test]
+    fn shared_slot_satisfies_lets_any_adapter_accept() {
+        // Z.AI 的 token_packs_list 用顶层 `rows`；LongCat 的 token_packs_list 用
+        // `data.items`。两者共享槽位名，LongCat 先注册，其 `Some(false)` 不应抢在
+        // Z.AI 的 `Some(true)` 之前返回。
+        let zhipu_pack_list = r#"{"code":200,"rows":[{"tokenBalance":1000,"availableBalance":400}],"total":1}"#;
+        assert!(scrape_response_satisfies_slot("token_packs_list", zhipu_pack_list));
+
+        // LongCat 的完整历史列表仍按 LongCat 口径判定。
+        let longcat_history = r#"{"code":0,"data":{"activeCount":0,"historyCount":1,"total":1,"pageSize":9,"items":[{"resourceId":"h-1","statusCode":4}]}}"#;
+        assert!(scrape_response_satisfies_slot("token_packs_list", longcat_history));
+
+        // 鉴权错误（两种信封都判定不满足）不会被误判为已捕获。
+        let auth_error = r#"{"code":401,"msg":"unauthorized"}"#;
+        assert!(!scrape_response_satisfies_slot("token_packs_list", auth_error));
     }
 
     #[tokio::test]

@@ -9,10 +9,11 @@
 //! - 收齐后 Rust 侧 eval_with_callback 执行 extractor_js,拿到结构化结果。
 
 use crate::core::channel_capability_adapter::{
-    classify_scrape_response_url, console_scrape_mode_key, merge_scrape_response,
-    scrape_response_satisfies_slot,
+    classify_scrape_response_url, console_scrape_mode_key, is_explicit_login_url,
+    merge_scrape_response, scrape_response_satisfies_slot,
 };
 use crate::core::channels_config::ChannelsConfig;
+use crate::core::custom_scrape;
 use std::collections::HashMap;
 #[cfg(any(windows, target_os = "linux"))]
 use std::sync::{Arc, Mutex};
@@ -30,6 +31,105 @@ pub struct ScrapeModeRuntime {
     pub aggregate: bool,
     /// 聚合模式要求的响应槽位列表,全部到位才视为捕获完成。
     pub required_slots: Vec<String>,
+    /// 自定义抓取描述符的槽位规则。内置渠道为 `None`,走编译期 adapter 分派。
+    pub slot_rules: Option<Vec<custom_scrape::SlotRule>>,
+    /// 自定义抓取描述符的去敏摘要映射。内置渠道为 `None`。
+    pub summary: Option<custom_scrape::Summary>,
+    /// 自定义抓取描述符的登录页识别规则。内置渠道为 `None`。
+    pub login: Option<custom_scrape::LoginKind>,
+}
+
+/// 按 mode 分派 URL 分类 / 槽位校验 / 合并的引擎。
+///
+/// 内置渠道(`slot_rules == None`)继续委托给编译期 `ChannelCapabilityAdapter`；
+/// 自定义描述符(`slot_rules == Some`)使用描述符里的声明式规则。
+pub struct ScrapeSlotEngine<'a> {
+    mode: &'a ScrapeModeRuntime,
+}
+
+impl<'a> ScrapeSlotEngine<'a> {
+    pub fn new(mode: &'a ScrapeModeRuntime) -> Self {
+        Self { mode }
+    }
+
+    pub fn classify(&self, url: &str) -> String {
+        if let Some(rules) = &self.mode.slot_rules {
+            for rule in rules {
+                if let Some(matcher) = &rule.match_rule {
+                    if custom_scrape::url_matches(matcher, url) {
+                        return rule.key.clone();
+                    }
+                }
+            }
+            if let Some(rule) = rules.iter().find(|rule| rule.match_rule.is_none()) {
+                return rule.key.clone();
+            }
+            "unknown".to_string()
+        } else {
+            classify_response_url(url).to_string()
+        }
+    }
+
+    pub fn satisfies(&self, kind: &str, body: &str) -> bool {
+        if let Some(rules) = &self.mode.slot_rules {
+            match rules.iter().find(|rule| rule.key == kind) {
+                Some(rule) => custom_scrape::slot_satisfies(&rule.satisfies, body),
+                None => serde_json::from_str::<serde_json::Value>(body).is_ok(),
+            }
+        } else {
+            scrape_response_satisfies_slot(kind, body)
+        }
+    }
+
+    pub fn merge(&self, kind: &str, existing: &str, incoming: &str) -> Option<String> {
+        if let Some(rules) = &self.mode.slot_rules {
+            match rules.iter().find(|rule| rule.key == kind).map(|rule| &rule.merge) {
+                Some(custom_scrape::SlotMerge::MergeArrays {
+                    path,
+                    dedup_by,
+                    keep_fields,
+                }) => custom_scrape::merge_arrays(
+                    path,
+                    dedup_by,
+                    keep_fields,
+                    existing,
+                    incoming,
+                ),
+                _ => None,
+            }
+        } else {
+            merge_scrape_response(kind, existing, incoming)
+        }
+    }
+}
+
+/// mode 感知的登录页识别：自定义描述符优先，否则回退到内置 adapter。
+pub fn is_explicit_login_url_with_mode(
+    mode: &ScrapeModeRuntime,
+    channel_id: &str,
+    page_url: &str,
+) -> bool {
+    if let Some(login) = &mode.login {
+        return custom_scrape::login_matches(login, page_url);
+    }
+    is_explicit_login_url(channel_id, page_url)
+}
+
+/// 原生网络捕获回调中，账号 mode 理论上总是已由 `open_scrape_console` 写入；
+/// 极端情况下（例如窗口在写入前就发出请求）用空内置 mode 兜底，走编译期分派。
+pub(crate) fn empty_scrape_mode() -> ScrapeModeRuntime {
+    ScrapeModeRuntime {
+        console_url: String::new(),
+        console_url_secondary: None,
+        console_url_tertiary: None,
+        interceptor_js: String::new(),
+        extractor_js: String::new(),
+        aggregate: false,
+        required_slots: Vec::new(),
+        slot_rules: None,
+        summary: None,
+        login: None,
+    }
 }
 
 /// document-start 拦截器完成安装后的页面标识。
@@ -39,12 +139,37 @@ pub struct ScrapeInterceptorReady {
     pub page_url: String,
 }
 
-/// 根据账号的 resource_mode / 渠道,解析出本次抓取的模式配置。
+/// 根据账号的 resource_mode / 渠道 / 账号名,解析出本次抓取的模式配置。
+/// 先查内置渠道,内置无抓取能力时回退到自定义抓取描述符（文件夹发现）。
 /// LongCat 统一走 hybrid 模式(同时抓取 token 资源包与按量余额),不再按
 /// resource_mode 区分 token_pack / pay_as_you_go。
 /// Qwen 双资源模式均有控制台抓取：Token Plan 订阅抓套餐专属端点；
 /// API 按量付费账号抓福利页（权益）免费额度与账单余额（scrape 中按 mode_key 配置）。
 pub fn resolve_scrape_mode(
+    channels_config: &ChannelsConfig,
+    channel_id: &str,
+    resource_mode: Option<&str>,
+    account_name: Option<&str>,
+) -> Option<ScrapeModeRuntime> {
+    if let Some(mode) = resolve_builtin_scrape_mode(channels_config, channel_id, resource_mode) {
+        return Some(mode);
+    }
+    let resolved = custom_scrape::resolve(channel_id, account_name, resource_mode)?;
+    Some(ScrapeModeRuntime {
+        console_url: resolved.console_url,
+        console_url_secondary: resolved.console_url_secondary,
+        console_url_tertiary: resolved.console_url_tertiary,
+        interceptor_js: resolved.interceptor_js,
+        extractor_js: resolved.extractor_js,
+        aggregate: resolved.aggregate,
+        required_slots: resolved.required_slots,
+        slot_rules: Some(resolved.slots),
+        summary: Some(resolved.summary),
+        login: Some(resolved.login),
+    })
+}
+
+fn resolve_builtin_scrape_mode(
     channels_config: &ChannelsConfig,
     channel_id: &str,
     resource_mode: Option<&str>,
@@ -74,6 +199,9 @@ pub fn resolve_scrape_mode(
         extractor_js: cfg.extractor_js.clone(),
         aggregate: cfg.aggregate,
         required_slots: cfg.required_slots.clone(),
+        slot_rules: None,
+        summary: None,
+        login: None,
     })
 }
 
@@ -187,6 +315,7 @@ pub fn install_windows_response_capture(
     window: &tauri::WebviewWindow,
     account_id: String,
     pending: Arc<Mutex<HashMap<String, Vec<(String, String)>>>>,
+    modes: Arc<Mutex<HashMap<String, ScrapeModeRuntime>>>,
     native_ready: Arc<Mutex<std::collections::HashSet<String>>>,
 ) -> Result<(), String> {
     window
@@ -195,6 +324,7 @@ pub fn install_windows_response_capture(
                 platform_webview,
                 account_id.clone(),
                 Arc::clone(&pending),
+                Arc::clone(&modes),
             ) {
                 // 原生监听失败时仍可使用 document-start 注入，不阻断创建登录窗口。
                 tracing::warn!(
@@ -221,6 +351,7 @@ fn attach_webview2_response_capture(
     platform_webview: tauri::webview::PlatformWebview,
     account_id: String,
     pending: Arc<Mutex<HashMap<String, Vec<(String, String)>>>>,
+    modes: Arc<Mutex<HashMap<String, ScrapeModeRuntime>>>,
 ) -> Result<(), String> {
     use webview2_com::Microsoft::Web::WebView2::Win32::{ICoreWebView2, ICoreWebView2_2};
     use webview2_com::{
@@ -244,7 +375,13 @@ fn attach_webview2_response_capture(
             let mut raw_uri = PWSTR::null();
             unsafe { request.Uri(&mut raw_uri)? };
             let url = take_pwstr(raw_uri);
-            if classify_response_url(&url) == "unknown" {
+            let mode = modes
+                .lock()
+                .ok()
+                .and_then(|guard| guard.get(&account_id).cloned())
+                .unwrap_or_else(empty_scrape_mode);
+            let engine = ScrapeSlotEngine::new(&mode);
+            if engine.classify(&url) == "unknown" {
                 return Ok(());
             }
 
@@ -252,6 +389,7 @@ fn attach_webview2_response_capture(
             let response_url = url.clone();
             let response_account_id = account_id.clone();
             let response_pending = Arc::clone(&pending);
+            let response_mode = mode;
             let completed = WebResourceResponseViewGetContentCompletedHandler::create(Box::new(
                 move |result, content| {
                     if result.is_err() {
@@ -262,11 +400,12 @@ fn attach_webview2_response_capture(
                     };
                     match read_webview2_response_body(&content) {
                         Ok(body) => {
-                            let kind = classify_response_url(&response_url);
+                            let engine = ScrapeSlotEngine::new(&response_mode);
+                            let kind = engine.classify(&response_url);
                             let body_bytes = body.len();
                             if let Ok(mut guard) = response_pending.lock() {
                                 let entry = guard.entry(response_account_id.clone()).or_default();
-                                record_captured_response(entry, response_url.clone(), body);
+                                record_captured_response(entry, response_url.clone(), body, &engine);
                             }
                             tracing::info!(
                                 account_id = %response_account_id,
@@ -333,6 +472,7 @@ pub fn install_linux_response_capture(
     window: &tauri::WebviewWindow,
     account_id: String,
     pending: Arc<Mutex<HashMap<String, Vec<(String, String)>>>>,
+    modes: Arc<Mutex<HashMap<String, ScrapeModeRuntime>>>,
     native_ready: Arc<Mutex<std::collections::HashSet<String>>>,
 ) -> Result<(), String> {
     use webkit2gtk::{URIRequestExt, WebResourceExt, WebViewExt};
@@ -341,20 +481,29 @@ pub fn install_linux_response_capture(
         .with_webview(move |platform_webview| {
             let webview = platform_webview.inner();
             let listener_account_id = account_id.clone();
+            let listener_modes = Arc::clone(&modes);
             webview.connect_resource_load_started(move |_webview, resource, request| {
                 let Some(url) = request.uri().map(|value| value.to_string()) else {
                     return;
                 };
-                if classify_response_url(&url) == "unknown" {
+                let mode = listener_modes
+                    .lock()
+                    .ok()
+                    .and_then(|guard| guard.get(&listener_account_id).cloned())
+                    .unwrap_or_else(empty_scrape_mode);
+                let engine = ScrapeSlotEngine::new(&mode);
+                if engine.classify(&url) == "unknown" {
                     return;
                 }
                 let response_url = url.clone();
                 let response_account_id = listener_account_id.clone();
                 let response_pending = Arc::clone(&pending);
+                let response_mode = mode;
                 resource.connect_finished(move |resource| {
                     let response_url = response_url.clone();
                     let response_account_id = response_account_id.clone();
                     let response_pending = Arc::clone(&response_pending);
+                    let response_mode = response_mode.clone();
                     resource.data(
                         None::<&webkit2gtk::gio::Cancellable>,
                         move |result| match result {
@@ -362,12 +511,13 @@ pub fn install_linux_response_capture(
                                 let Ok(body) = String::from_utf8(bytes) else {
                                     return;
                                 };
-                                let kind = classify_response_url(&response_url);
+                                let engine = ScrapeSlotEngine::new(&response_mode);
+                                let kind = engine.classify(&response_url);
                                 let body_bytes = body.len();
                                 if let Ok(mut guard) = response_pending.lock() {
                                     let entry =
                                         guard.entry(response_account_id.clone()).or_default();
-                                    record_captured_response(entry, response_url.clone(), body);
+                                    record_captured_response(entry, response_url.clone(), body, &engine);
                                 }
                                 tracing::info!(
                                     account_id = %response_account_id,
@@ -414,34 +564,38 @@ pub fn classify_response_url(url: &str) -> &'static str {
     classify_scrape_response_url(url)
 }
 
-/// 把一条业务响应写入账号缓冲。
+/// 把一条业务响应写入账号缓冲。分类/校验/合并通过 `ScrapeSlotEngine` 按当前
+/// 抓取模式分派：内置渠道走编译期 adapter，自定义描述符走声明式规则。
 ///
 /// 大多数槽位仍采用“同类型最新响应覆盖旧响应”。LongCat 的 fuel_pack 页面会对
 /// `token-packs/list` 并行发出不同筛选条件的 POST 请求（例如完整历史列表，以及
 /// `statusCodes=[1], pageSize=1` 的活跃包探测），因此该槽位必须按 resourceId 合并，
 /// 不能让较小的筛选响应覆盖完整历史列表。
-pub fn record_captured_response(entry: &mut Vec<(String, String)>, url: String, body: String) {
-    let kind = classify_response_url(&url);
+pub fn record_captured_response(
+    entry: &mut Vec<(String, String)>,
+    url: String,
+    body: String,
+    engine: &ScrapeSlotEngine,
+) {
+    let kind = engine.classify(&url);
     if let Some(index) = entry
         .iter()
-        .position(|(existing_url, _)| classify_response_url(existing_url) == kind)
+        .position(|(existing_url, _)| engine.classify(existing_url) == kind)
     {
-        if let Some(merged) = merge_scrape_response(kind, &entry[index].1, &body) {
+        if let Some(merged) = engine.merge(&kind, &entry[index].1, &body) {
             entry[index] = (url, merged);
             return;
         }
         // 默认“同槽位最新覆盖旧”。但若已有响应已满足该槽位、而新到的响应不满足
         // （例如 Linux WebKitGTK 原生监听对部分 XHR 响应只读到 1 字节残缺体），
         // 保留已有完整响应，避免残缺体覆盖写回、把已抓到的套餐数据误判为缺失。
-        if captured_response_satisfies_slot(kind, &entry[index].1)
-            && !captured_response_satisfies_slot(kind, &body)
-        {
+        if engine.satisfies(&kind, &entry[index].1) && !engine.satisfies(&kind, &body) {
             return;
         }
         entry[index] = (url, body);
         return;
     }
-    entry.retain(|(existing_url, _)| classify_response_url(existing_url) != kind);
+    entry.retain(|(existing_url, _)| engine.classify(existing_url) != kind);
     entry.push((url, body));
 }
 
@@ -635,26 +789,28 @@ mod tests {
         let complete = r#"{"data":{"DataV2":{"data":{"data":{"standard":{"weekly":10000}}}}}}"#;
         // WebKitGTK resource.data / 其它异常时可能读到的残缺体（非完整 JSON，不满足槽位）。
         let truncated = "{";
+        let mode = empty_scrape_mode();
+        let engine = ScrapeSlotEngine::new(&mode);
 
         // 完整体先到、残缺体后到：保留完整体，不被 1 字节覆盖写回。
         let mut entry = Vec::new();
-        record_captured_response(&mut entry, url.to_string(), complete.to_string());
-        record_captured_response(&mut entry, url.to_string(), truncated.to_string());
+        record_captured_response(&mut entry, url.to_string(), complete.to_string(), &engine);
+        record_captured_response(&mut entry, url.to_string(), truncated.to_string(), &engine);
         assert_eq!(entry.len(), 1);
         assert_eq!(entry[0].1, complete);
 
         // 残缺体先到、完整体后到：用完整体覆盖残缺体。
         let mut entry = Vec::new();
-        record_captured_response(&mut entry, url.to_string(), truncated.to_string());
-        record_captured_response(&mut entry, url.to_string(), complete.to_string());
+        record_captured_response(&mut entry, url.to_string(), truncated.to_string(), &engine);
+        record_captured_response(&mut entry, url.to_string(), complete.to_string(), &engine);
         assert_eq!(entry.len(), 1);
         assert_eq!(entry[0].1, complete);
 
         // 两个都满足的同槽位响应仍保持“最新覆盖旧”，不破坏既有语义。
         let latest = r#"{"data":{"DataV2":{"data":{"data":{"standard":{"weekly":22222}}}}}}"#;
         let mut entry = Vec::new();
-        record_captured_response(&mut entry, url.to_string(), complete.to_string());
-        record_captured_response(&mut entry, url.to_string(), latest.to_string());
+        record_captured_response(&mut entry, url.to_string(), complete.to_string(), &engine);
+        record_captured_response(&mut entry, url.to_string(), latest.to_string(), &engine);
         assert_eq!(entry.len(), 1);
         assert_eq!(entry[0].1, latest);
     }
@@ -708,10 +864,12 @@ mod tests {
             r#"{"code":0,"data":{"activeCount":0,"historyCount":0,"total":0,"pageSize":9,"items":[]}}"#
         ));
 
+        let mode = empty_scrape_mode();
+        let engine = ScrapeSlotEngine::new(&mode);
         for responses in [[active_probe, history_list], [history_list, active_probe]] {
             let mut entry = Vec::new();
             for body in responses {
-                record_captured_response(&mut entry, url.to_string(), body.to_string());
+                record_captured_response(&mut entry, url.to_string(), body.to_string(), &engine);
             }
             assert_eq!(entry.len(), 1);
             assert!(captured_response_satisfies_slot(
@@ -748,6 +906,9 @@ mod tests {
                 "quota_config".to_string(),
                 "usage".to_string(),
             ],
+            slot_rules: None,
+            summary: None,
+            login: None,
         };
         assert_eq!(
             required_slots_for_phase(&qwen, 0, 1),
@@ -766,6 +927,9 @@ mod tests {
                 "api_usage_summary".to_string(),
                 "token_packs_list".to_string(),
             ],
+            slot_rules: None,
+            summary: None,
+            login: None,
         };
         assert_eq!(
             required_slots_for_phase(&longcat, 0, 3),
@@ -794,9 +958,9 @@ mod tests {
         };
         // scrape 为空时返回 None(真实场景会从 config.json 加载)
         // LongCat 统一走 hybrid,不再区分 token_pack / pay_as_you_go
-        assert!(resolve_scrape_mode(&config, "longcat", Some("token_pack")).is_none());
-        assert!(resolve_scrape_mode(&config, "longcat", Some("hybrid")).is_none());
-        assert!(resolve_scrape_mode(&config, "qwen", None).is_none());
+        assert!(resolve_scrape_mode(&config, "longcat", Some("token_pack"), None).is_none());
+        assert!(resolve_scrape_mode(&config, "longcat", Some("hybrid"), None).is_none());
+        assert!(resolve_scrape_mode(&config, "qwen", None, None).is_none());
     }
 
     #[test]
@@ -849,26 +1013,26 @@ mod tests {
             scrape,
         };
         // Token Plan 订阅账号走套餐控制台抓取。
-        let mode = resolve_scrape_mode(&config, "qwen", Some("token_plan")).unwrap();
+        let mode = resolve_scrape_mode(&config, "qwen", Some("token_plan"), None).unwrap();
         assert!(mode.aggregate);
         assert_eq!(
             mode.required_slots,
             vec!["subscription", "quota_config", "usage"]
         );
         // API 按量付费账号走福利页抓取。
-        let mode = resolve_scrape_mode(&config, "qwen", Some("pay_as_you_go")).unwrap();
+        let mode = resolve_scrape_mode(&config, "qwen", Some("pay_as_you_go"), None).unwrap();
         assert_eq!(
             mode.required_slots,
             vec!["freetier_list", "fq_instance", "billing_amount"]
         );
         // 历史账号 resource_mode 缺失(NULL)或无法映射时,回退到渠道默认(千问默认按量付费),
         // 不再把合法账号误判为“不支持控制台抓取”。
-        let mode = resolve_scrape_mode(&config, "qwen", None).unwrap();
+        let mode = resolve_scrape_mode(&config, "qwen", None, None).unwrap();
         assert_eq!(
             mode.required_slots,
             vec!["freetier_list", "fq_instance", "billing_amount"]
         );
-        let mode = resolve_scrape_mode(&config, "qwen", Some("unknown_mode")).unwrap();
+        let mode = resolve_scrape_mode(&config, "qwen", Some("unknown_mode"), None).unwrap();
         assert_eq!(
             mode.required_slots,
             vec!["freetier_list", "fq_instance", "billing_amount"]
@@ -908,7 +1072,7 @@ mod tests {
             endpoints: HashMap::new(),
             scrape,
         };
-        let mode = resolve_scrape_mode(&config, "longcat", Some("hybrid")).unwrap();
+        let mode = resolve_scrape_mode(&config, "longcat", Some("hybrid"), None).unwrap();
         assert!(mode.aggregate);
         assert_eq!(
             mode.console_url_secondary.as_deref(),
@@ -960,7 +1124,7 @@ mod tests {
             endpoints: HashMap::new(),
             scrape,
         };
-        let mode = resolve_scrape_mode(&config, "longcat", Some("hybrid")).unwrap();
+        let mode = resolve_scrape_mode(&config, "longcat", Some("hybrid"), None).unwrap();
         assert!(mode.aggregate);
         assert_eq!(
             mode.console_url_secondary.as_deref(),
@@ -987,6 +1151,9 @@ mod tests {
                 "quota_config".to_string(),
                 "usage".to_string(),
             ],
+            slot_rules: None,
+            summary: None,
+            login: None,
         };
         // 无重置卡响应时不阻断聚合完成。
         let mut slots = HashMap::new();
@@ -1026,6 +1193,9 @@ mod tests {
                 "quota_config".to_string(),
                 "usage".to_string(),
             ],
+            slot_rules: None,
+            summary: None,
+            login: None,
         };
         // LongCat hybrid:三阶段聚合模式,要求 token_packs_summary + api_usage_summary + token_packs_list
         let mode_longcat = ScrapeModeRuntime {
@@ -1040,6 +1210,9 @@ mod tests {
                 "api_usage_summary".to_string(),
                 "token_packs_list".to_string(),
             ],
+            slot_rules: None,
+            summary: None,
+            login: None,
         };
         let mode_single = ScrapeModeRuntime {
             console_url: "https://example.com".to_string(),
@@ -1049,6 +1222,9 @@ mod tests {
             extractor_js: String::new(),
             aggregate: false,
             required_slots: vec![],
+            slot_rules: None,
+            summary: None,
+            login: None,
         };
         let mut slots = HashMap::new();
         assert!(!aggregate_complete(&slots, &mode_qwen));

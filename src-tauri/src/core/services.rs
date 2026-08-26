@@ -50,13 +50,23 @@ impl FlowletServices {
             .as_ref()
             .and_then(parse_bind_config)
             .unwrap_or_else(|| load_bind_config_from_sqlite(&storage));
-        if let Some(config_value) = config_value.as_ref() {
-            let upstream_proxy =
-                super::upstream_proxy::from_config_json(config_value);
-            // 解析失败不阻断启动：默认关闭代理，后续可在设置页修正。
-            if let Err(error) = super::upstream_proxy::set(upstream_proxy) {
-                tracing::warn!(error = %error, "忽略无效的上游代理配置，回退直连");
-            }
+        // 运行时优先取 SQLite app_meta 中设置页保存的值；没有时才回退 config.json
+        // 的 `network.upstream_proxy`（首次默认值 / 手改文件入口）。这样开发模式下
+        // 重新构建覆盖 config.json 也不会丢失用户保存的代理设置。
+        let stored_proxy = storage
+            .get_app_meta(super::upstream_proxy::UPSTREAM_PROXY_META_KEY)
+            .ok()
+            .flatten();
+        let upstream_proxy = match stored_proxy.as_deref() {
+            Some(raw) => super::upstream_proxy::from_stored_json(raw),
+            None => config_value
+                .as_ref()
+                .map(super::upstream_proxy::from_config_json)
+                .unwrap_or_default(),
+        };
+        // 解析失败不阻断启动：默认关闭代理，后续可在设置页修正。
+        if let Err(error) = super::upstream_proxy::set(upstream_proxy) {
+            tracing::warn!(error = %error, "忽略无效的上游代理配置，回退直连");
         }
 
         Ok(Self {

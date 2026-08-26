@@ -1,8 +1,6 @@
 use super::proxy_status;
 use crate::AppState;
 use crate::core::upstream_proxy::UpstreamProxyConfig;
-use jsonc_parser::cst::{CstInputValue, CstRootNode};
-use jsonc_parser::ParseOptions;
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_autostart::ManagerExt;
 
@@ -124,46 +122,23 @@ pub(crate) fn set_upstream_proxy_config(
     let config = config.normalized();
     config.validate()?;
 
-    let source = std::fs::read_to_string(&state.config_path)
-        .map_err(|error| format!("读取 config.json 失败：{error}"))?;
-    let root = CstRootNode::parse(&source, &ParseOptions::default())
-        .map_err(|error| format!("解析 config.json 失败：{error}"))?;
-    let root_object = root
-        .object_value()
-        .ok_or_else(|| "config.json 顶层必须是 JSON 对象".to_string())?;
+    // 1. SQLite app_meta 为权威运行时存储，重启后优先读取，不受重新构建覆盖影响。
+    let stored = serde_json::to_string(&config).map_err(|error| error.to_string())?;
+    state
+        .storage
+        .set_app_meta(crate::core::upstream_proxy::UPSTREAM_PROXY_META_KEY, &stored)
+        .map_err(|error| error.to_string())?;
 
-    // 合并 network.upstream_proxy，保留 config.json 其余字段、键序与注释。
-    let network_object = match root_object.get("network") {
-        Some(property) => property.object_value_or_set(),
-        None => root_object
-            .append("network", CstInputValue::Object(Vec::new()))
-            .object_value_or_set(),
-    };
-    let proxy_value = CstInputValue::Object(vec![
-        (
-            "enabled".to_string(),
-            CstInputValue::Bool(config.enabled),
-        ),
-        ("url".to_string(), CstInputValue::String(config.url.clone())),
-        (
-            "no_proxy".to_string(),
-            CstInputValue::String(config.no_proxy.clone()),
-        ),
-    ]);
-    match network_object.get("upstream_proxy") {
-        Some(property) => property.set_value(proxy_value),
-        None => {
-            network_object.append("upstream_proxy", proxy_value);
+    // 2. 尽力同步到 config.json，保留手改文件入口与可读性；失败不阻断保存。
+    if let Ok(source) = std::fs::read_to_string(&state.config_path) {
+        if let Ok(content) = crate::core::upstream_proxy::merge_into_config_json(&source, &config) {
+            if let Err(error) = crate::core::proxy::write_config_raw(&state.config_path, &content) {
+                tracing::warn!(error = %error, "同步上游代理到 config.json 失败（已保存到 SQLite）");
+            }
         }
     }
 
-    let mut content = root.to_string();
-    if !content.ends_with('\n') {
-        content.push('\n');
-    }
-    crate::core::proxy::write_config_raw(&state.config_path, &content)?;
-
-    // 更新进程内全局配置（后续元数据请求立即生效）。
+    // 3. 更新进程内全局配置（后续元数据请求立即生效）。
     crate::core::upstream_proxy::set(config)
 }
 

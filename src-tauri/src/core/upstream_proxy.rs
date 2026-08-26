@@ -8,8 +8,17 @@
 //! 边界：只作用于 Flowlet 自己发起的元数据/能力请求；本地代理的上游模型转发
 //! （`proxy.rs` 的 `Client`）不经过本配置，继续直连各渠道上游。
 
+use jsonc_parser::cst::{CstInputValue, CstRootNode};
+use jsonc_parser::ParseOptions;
 use serde::{Deserialize, Serialize};
 use std::sync::{Mutex, OnceLock};
+
+/// SQLite `app_meta` 中保存运行时上游代理配置的键。
+///
+/// config.json 里的 `network.upstream_proxy` 只是「首次默认值」（以及手改文件的
+/// 入口）；设置页保存后以 SQLite 为准，避免开发模式下打包资源在重新构建时把
+/// 运行时改动的 config.json 覆盖掉。
+pub const UPSTREAM_PROXY_META_KEY: &str = "upstream_proxy_config";
 
 /// 上游代理配置。`url` 只支持 http/https 代理。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -89,6 +98,59 @@ pub fn current() -> UpstreamProxyConfig {
         .lock()
         .map(|guard| guard.clone())
         .unwrap_or_default()
+}
+
+/// 把上游代理配置合并进 config.json 的文本内容。
+///
+/// 使用 jsonc-parser 的 CST 做格式保留编辑：只新增/更新 `network.upstream_proxy`，
+/// 其余字段、键序与注释原样保留。返回合并后的文本（保证以单个换行结尾）。
+pub fn merge_into_config_json(
+    content: &str,
+    config: &UpstreamProxyConfig,
+) -> Result<String, String> {
+    let root = CstRootNode::parse(content, &ParseOptions::default())
+        .map_err(|error| format!("解析 config.json 失败：{error}"))?;
+    let root_object = root
+        .object_value()
+        .ok_or_else(|| "config.json 顶层必须是 JSON 对象".to_string())?;
+
+    let network_object = match root_object.get("network") {
+        Some(property) => property.object_value_or_set(),
+        None => root_object
+            .append("network", CstInputValue::Object(Vec::new()))
+            .object_value_or_set(),
+    };
+    let proxy_value = CstInputValue::Object(vec![
+        (
+            "enabled".to_string(),
+            CstInputValue::Bool(config.enabled),
+        ),
+        ("url".to_string(), CstInputValue::String(config.url.clone())),
+        (
+            "no_proxy".to_string(),
+            CstInputValue::String(config.no_proxy.clone()),
+        ),
+    ]);
+    match network_object.get("upstream_proxy") {
+        Some(property) => property.set_value(proxy_value),
+        None => {
+            network_object.append("upstream_proxy", proxy_value);
+        }
+    }
+
+    let mut merged = root.to_string();
+    if !merged.ends_with('\n') {
+        merged.push('\n');
+    }
+    Ok(merged)
+}
+
+/// 从 JSON 字符串解析配置（用于读取 SQLite app_meta 中的运行时值）；
+/// 解析失败或形状不符时返回默认值，不抛出错误。
+pub fn from_stored_json(raw: &str) -> UpstreamProxyConfig {
+    serde_json::from_str::<UpstreamProxyConfig>(raw)
+        .unwrap_or_default()
+        .normalized()
 }
 
 /// 从 config.json 顶层对象的 `network.upstream_proxy` 解析配置。缺失时返回默认值。
@@ -273,6 +335,45 @@ mod tests {
         )
         .expect_err("socks must be rejected");
         assert!(error.contains("仅支持 http/https"));
+    }
+
+    #[test]
+    fn merge_into_config_json_preserves_other_fields_and_round_trips() {
+        let source = r#"{
+  "bind": { "host": "127.0.0.1", "port": 18640 },
+  "usage_cost": { "currency_conversion_enabled": false }
+}
+"#;
+        let merged = merge_into_config_json(
+            source,
+            &UpstreamProxyConfig {
+                enabled: true,
+                url: "http://127.0.0.1:7890".to_string(),
+                no_proxy: "localhost".to_string(),
+            },
+        )
+        .expect("merge");
+        let value: serde_json::Value = serde_json::from_str(&merged).expect("valid json");
+        assert_eq!(value["bind"]["port"], 18640);
+        assert_eq!(value["usage_cost"]["currency_conversion_enabled"], false);
+        assert_eq!(value["network"]["upstream_proxy"]["enabled"], true);
+        assert_eq!(value["network"]["upstream_proxy"]["url"], "http://127.0.0.1:7890");
+        assert_eq!(value["network"]["upstream_proxy"]["no_proxy"], "localhost");
+
+        // 再次覆盖写入应更新而非产生重复键。
+        let merged_again = merge_into_config_json(
+            &merged,
+            &UpstreamProxyConfig {
+                enabled: false,
+                url: "http://127.0.0.1:7891".to_string(),
+                no_proxy: String::new(),
+            },
+        )
+        .expect("re-merge");
+        let value: serde_json::Value = serde_json::from_str(&merged_again).expect("valid json");
+        assert_eq!(value["network"]["upstream_proxy"]["enabled"], false);
+        assert_eq!(value["network"]["upstream_proxy"]["url"], "http://127.0.0.1:7891");
+        assert_eq!(value["bind"]["port"], 18640);
     }
 
     #[test]

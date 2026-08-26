@@ -1,5 +1,5 @@
 use crate::core::channel_capability_adapter::{
-    is_explicit_login_url, query_channel_balance, supports_official_balance, sync_channel_models,
+    query_channel_balance, supports_official_balance, sync_channel_models,
 };
 use crate::core::channels_config::ChannelsConfig;
 use crate::core::config::{
@@ -684,7 +684,8 @@ pub(crate) fn save_route_rules(
 // 后台 webview 登录控制台 + 拦截 API 抓取套餐余量。
 
 use crate::core::scrape_console::{
-    self, build_scrape_webview, classify_response_url, resolve_scrape_mode,
+    self, build_scrape_webview, is_explicit_login_url_with_mode, resolve_scrape_mode,
+    ScrapeSlotEngine,
 };
 
 /// 抓取结果(前端展示用)。
@@ -762,9 +763,17 @@ pub(crate) async fn open_scrape_console(
             &config,
             &account.channel_id,
             account.resource_mode.as_deref(),
+            Some(&account.name),
         )
         .ok_or("该账号所属渠道不支持控制台抓取")?
     };
+    {
+        let mut guard = state
+            .scrape_modes
+            .lock()
+            .map_err(|_| "锁定抓取模式失败".to_string())?;
+        guard.insert(account_id.clone(), mode.clone());
+    }
 
     let channel_id = {
         let snapshot = state.runtime_config.snapshot();
@@ -781,6 +790,7 @@ pub(crate) async fn open_scrape_console(
         &window,
         account_id.clone(),
         state.scrape_pending.clone(),
+        state.scrape_modes.clone(),
         state.scrape_native_ready.clone(),
     ) {
         tracing::warn!(
@@ -794,6 +804,7 @@ pub(crate) async fn open_scrape_console(
         &window,
         account_id.clone(),
         state.scrape_pending.clone(),
+        state.scrape_modes.clone(),
         state.scrape_native_ready.clone(),
     ) {
         tracing::warn!(
@@ -805,6 +816,7 @@ pub(crate) async fn open_scrape_console(
     let cleanup_account_id = account_id.clone();
     let scrape_webviews = state.scrape_webviews.clone();
     let scrape_pending = state.scrape_pending.clone();
+    let scrape_modes = state.scrape_modes.clone();
     let scrape_ready = state.scrape_ready.clone();
     let scrape_native_ready = state.scrape_native_ready.clone();
     window.on_window_event(move |event| {
@@ -813,6 +825,9 @@ pub(crate) async fn open_scrape_console(
                 guard.remove(&cleanup_account_id);
             }
             if let Ok(mut guard) = scrape_pending.lock() {
+                guard.remove(&cleanup_account_id);
+            }
+            if let Ok(mut guard) = scrape_modes.lock() {
                 guard.remove(&cleanup_account_id);
             }
             if let Ok(mut guard) = scrape_ready.lock() {
@@ -849,6 +864,9 @@ pub(crate) async fn close_scrape_console(
         let _ = window.close();
     }
     if let Ok(mut guard) = state.scrape_pending.lock() {
+        guard.remove(&account_id);
+    }
+    if let Ok(mut guard) = state.scrape_modes.lock() {
         guard.remove(&account_id);
     }
     if let Ok(mut guard) = state.scrape_ready.lock() {
@@ -940,14 +958,22 @@ pub(crate) async fn handle_intercepted_response(
             return Err("抓取响应渠道与账号不匹配".to_string());
         }
     }
+    let mode = state
+        .scrape_modes
+        .lock()
+        .map_err(|_| "锁定抓取模式失败".to_string())?
+        .get(&account_id)
+        .cloned()
+        .ok_or("抓取窗口未解析抓取模式")?;
+    let engine = ScrapeSlotEngine::new(&mode);
     let mut guard = state
         .scrape_pending
         .lock()
         .map_err(|_| "锁定抓取缓冲失败".to_string())?;
     let entry = guard.entry(account_id.clone()).or_default();
-    let kind = classify_response_url(&url);
+    let kind = engine.classify(&url);
     let body_bytes = body.len();
-    scrape_console::record_captured_response(entry, url.clone(), body);
+    scrape_console::record_captured_response(entry, url.clone(), body, &engine);
     tracing::info!(
         account_id = %account_id,
         channel_id = %channel_id,
@@ -963,9 +989,10 @@ pub(crate) async fn handle_intercepted_response(
 mod scrape_capture_tests {
     use super::{
         channel_resource_sync_completion_status, channel_resource_sync_method,
-        is_explicit_login_url, merge_longcat_token_packs, normalize_scrape_token_packs,
-        record_stash_items, scrape_responses_complete, ChannelResourceSyncMethod,
+        merge_longcat_token_packs, normalize_scrape_token_packs, record_stash_items,
+        scrape_responses_complete, ChannelResourceSyncMethod, ScrapeSlotEngine,
     };
+    use crate::core::channel_capability_adapter::is_explicit_login_url;
     use crate::core::channels_config::{ChannelsConfig, DEFAULT_CONFIG_JSON};
     use crate::core::config::ChannelAccount;
     use crate::core::scrape_console::ScrapeModeRuntime;
@@ -986,6 +1013,9 @@ mod scrape_capture_tests {
             extractor_js: String::new(),
             aggregate: false,
             required_slots: vec![],
+            slot_rules: None,
+            summary: None,
+            login: None,
         };
         let responses = vec![
             (
@@ -1005,7 +1035,7 @@ mod scrape_capture_tests {
     fn qwen_authentication_errors_do_not_count_as_complete_capture() {
         let config = default_channels_config();
         let mode =
-            crate::core::scrape_console::resolve_scrape_mode(&config, "qwen", Some("token_plan"))
+            crate::core::scrape_console::resolve_scrape_mode(&config, "qwen", Some("token_plan"), None)
                 .expect("qwen token plan scrape mode");
         let error = r#"{"code":"UNAUTHORIZED","message":"login required"}"#.to_string();
         let responses = vec![
@@ -1243,7 +1273,9 @@ mod scrape_capture_tests {
         )
         .unwrap();
         let mut entry = vec![(url.to_string(), truncated.to_string())];
-        record_stash_items(&mut entry, items);
+        let mode = crate::core::scrape_console::empty_scrape_mode();
+        let engine = ScrapeSlotEngine::new(&mode);
+        record_stash_items(&mut entry, items, &engine);
         assert_eq!(entry.len(), 1);
         assert_eq!(entry[0].1, complete);
 
@@ -1253,7 +1285,9 @@ mod scrape_capture_tests {
         )
         .unwrap();
         let mut entry = vec![(url.to_string(), complete.to_string())];
-        record_stash_items(&mut entry, items);
+        let mode = crate::core::scrape_console::empty_scrape_mode();
+        let engine = ScrapeSlotEngine::new(&mode);
+        record_stash_items(&mut entry, items, &engine);
         assert_eq!(entry.len(), 1);
         assert_eq!(entry[0].1, complete);
     }
@@ -1331,12 +1365,14 @@ fn scrape_responses_complete(
     responses: &[(String, String)],
     mode: &crate::core::scrape_console::ScrapeModeRuntime,
 ) -> bool {
+    let engine = ScrapeSlotEngine::new(mode);
     let slots = responses
         .iter()
         .filter_map(|(url, body)| {
-            let kind = classify_response_url(url);
-            scrape_console::captured_response_satisfies_slot(kind, body)
-                .then(|| (kind.to_string(), body.clone()))
+            let kind = engine.classify(url);
+            engine
+                .satisfies(&kind, body)
+                .then(|| (kind, body.clone()))
         })
         .collect::<std::collections::HashMap<_, _>>();
     scrape_console::aggregate_complete(&slots, mode)
@@ -1345,19 +1381,22 @@ fn scrape_responses_complete(
 fn collect_scrape_slots(
     state: &tauri::State<'_, AppState>,
     account_id: &str,
+    mode: &crate::core::scrape_console::ScrapeModeRuntime,
 ) -> Result<std::collections::HashMap<String, String>, String> {
     let guard = state
         .scrape_pending
         .lock()
         .map_err(|_| "锁定抓取缓冲失败".to_string())?;
+    let engine = ScrapeSlotEngine::new(mode);
     Ok(guard
         .get(account_id)
         .into_iter()
         .flatten()
         .filter_map(|(url, body)| {
-            let kind = classify_response_url(url);
-            scrape_console::captured_response_satisfies_slot(kind, body)
-                .then(|| (kind.to_string(), body.clone()))
+            let kind = engine.classify(url);
+            engine
+                .satisfies(&kind, body)
+                .then(|| (kind, body.clone()))
         })
         .collect())
 }
@@ -1366,7 +1405,11 @@ fn collect_scrape_slots(
 /// 合并进抓取缓冲。WebKitGTK 的 `resource.data()` 对 fetch 类请求常只返回 1 字节残缺体
 /// (参见 WebKitGTK get_data 对 fetch 响应的限制),因此以页面 JS 读到的全量 body 为准;
 /// 这里的合并仍走 `record_captured_response`,保证“已满足槽位的完整体不被残缺体覆盖”。
-fn record_stash_items(entry: &mut Vec<(String, String)>, items: Vec<serde_json::Value>) {
+fn record_stash_items(
+    entry: &mut Vec<(String, String)>,
+    items: Vec<serde_json::Value>,
+    engine: &ScrapeSlotEngine,
+) {
     for item in items {
         let Some(url) = item.get("url").and_then(serde_json::Value::as_str) else {
             continue;
@@ -1374,7 +1417,7 @@ fn record_stash_items(entry: &mut Vec<(String, String)>, items: Vec<serde_json::
         let Some(body) = item.get("body").and_then(serde_json::Value::as_str) else {
             continue;
         };
-        scrape_console::record_captured_response(entry, url.to_string(), body.to_string());
+        scrape_console::record_captured_response(entry, url.to_string(), body.to_string(), engine);
     }
 }
 
@@ -1385,8 +1428,9 @@ fn record_stash_items(entry: &mut Vec<(String, String)>, items: Vec<serde_json::
 async fn drain_scrape_page_stash(
     state: &tauri::State<'_, AppState>,
     account_id: &str,
+    mode: &crate::core::scrape_console::ScrapeModeRuntime,
 ) -> Result<(), String> {
-    let stash_js = "(function(){try{var a=window.__flowlet_scrape_stash||[];window.__flowlet_scrape_stash=[];return {stash:a,device:{ua:(navigator.userAgent||''),iw:window.innerWidth,ih:window.innerHeight,sw:screen.width,sh:screen.height,tp:(navigator.maxTouchPoints||0),pf:(navigator.platform||'')}};}catch(e){return {stash:[],device:{err:String(e)}};}})()"
+    let stash_js = "(function(){try{var a=window.__flowlet_scrape_stash||[];window.__flowlet_scrape_stash=[];return {stash:a,install:window.__flowlet_scrape_install_result||'',device:{ua:(navigator.userAgent||''),iw:window.innerWidth,ih:window.innerHeight,sw:screen.width,sh:screen.height,tp:(navigator.maxTouchPoints||0),pf:(navigator.platform||'')}};}catch(e){return {stash:[],install:'',device:{err:String(e)}};}})()"
         .to_string();
     let (tx, rx) = tokio::sync::oneshot::channel::<String>();
     {
@@ -1426,12 +1470,17 @@ async fn drain_scrape_page_stash(
             .unwrap_or_default()
     };
     let device = value.get("device").cloned().unwrap_or(serde_json::Value::Null);
+    let install = value
+        .get("install")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("-");
     if let Some(d) = device.as_object() {
         let get = |k: &str| d.get(k).and_then(serde_json::Value::as_str).unwrap_or("-");
         let num = |k: &str| d.get(k).and_then(serde_json::Value::as_f64).unwrap_or(-1.0);
         tracing::info!(
             account_id = %account_id,
             stash_items = items.len(),
+            interceptor_install = install,
             page_ua = get("ua"),
             page_inner_width = num("iw"),
             page_screen_width = num("sw"),
@@ -1443,6 +1492,7 @@ async fn drain_scrape_page_stash(
         tracing::info!(
             account_id = %account_id,
             stash_items = items.len(),
+            interceptor_install = install,
             "控制台抓取页面暂存拉取"
         );
     }
@@ -1451,7 +1501,8 @@ async fn drain_scrape_page_stash(
         .lock()
         .map_err(|_| "锁定抓取缓冲失败".to_string())?;
     let entry = guard.entry(account_id.to_string()).or_default();
-    record_stash_items(entry, items);
+    let engine = ScrapeSlotEngine::new(mode);
+    record_stash_items(entry, items, &engine);
     Ok(())
 }
 
@@ -1785,6 +1836,7 @@ pub(crate) async fn probe_scrape_login(
             &config,
             &account.channel_id,
             account.resource_mode.as_deref(),
+            Some(&account.name),
         )
         .ok_or("该账号所属渠道不支持控制台抓取")?;
         (account.channel_id.clone(), mode)
@@ -1889,7 +1941,7 @@ pub(crate) async fn probe_scrape_login(
         let ready_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         let ready = loop {
             if let Some(page_url) = current_scrape_page_url(&state, &account_id)? {
-                if is_explicit_login_url(&channel_id, &page_url) {
+                if is_explicit_login_url_with_mode(&mode, &channel_id, &page_url) {
                     explicit_login_page_url = Some(page_url);
                     break None;
                 }
@@ -1913,7 +1965,7 @@ pub(crate) async fn probe_scrape_login(
                 break Some(ready);
             }
             // 任意槽位已捕获也可作为监听已生效的证据(多阶段模式下全量聚合此时尚未齐备)。
-            if collect_scrape_slots(&state, &account_id)?
+            if collect_scrape_slots(&state, &account_id, &mode)?
                 .keys()
                 .next()
                 .is_some()
@@ -1942,7 +1994,7 @@ pub(crate) async fn probe_scrape_login(
             let capture_deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
             while std::time::Instant::now() < capture_deadline {
                 if let Some(page_url) = current_scrape_page_url(&state, &account_id)? {
-                    if is_explicit_login_url(&channel_id, &page_url) {
+                    if is_explicit_login_url_with_mode(&mode, &channel_id, &page_url) {
                         explicit_login_page_url = Some(page_url);
                         break;
                     }
@@ -1950,8 +2002,8 @@ pub(crate) async fn probe_scrape_login(
                 if !interactive && scrape_interaction_required(&state, &account_id)? {
                     break;
                 }
-                drain_scrape_page_stash(&state, &account_id).await?;
-                let slots = collect_scrape_slots(&state, &account_id)?;
+                drain_scrape_page_stash(&state, &account_id, &mode).await?;
+                let slots = collect_scrape_slots(&state, &account_id, &mode)?;
                 let phase_complete = if expected_slots.is_empty() {
                     !slots.is_empty()
                 } else {
@@ -1969,7 +2021,7 @@ pub(crate) async fn probe_scrape_login(
             break 'phases;
         }
 
-        let slots = collect_scrape_slots(&state, &account_id)?;
+        let slots = collect_scrape_slots(&state, &account_id, &mode)?;
         let captured_kinds = slots.keys().cloned().collect::<Vec<_>>();
         let missing_phase_slots = scrape_console::missing_required_slots(&slots, &expected_slots);
         if missing_phase_slots.is_empty() {
@@ -2000,7 +2052,7 @@ pub(crate) async fn probe_scrape_login(
     }
 
     // 阶段循环后做一次收尾拉取，兜住最后到达的页面暂存响应。
-    drain_scrape_page_stash(&state, &account_id).await?;
+    drain_scrape_page_stash(&state, &account_id, &mode).await?;
     let ready = ready_for_last_phase;
     let captured = has_complete_scrape_capture(&state, &account_id, &mode)?;
     let current_page_url = explicit_login_page_url
@@ -2016,7 +2068,7 @@ pub(crate) async fn probe_scrape_login(
         .unwrap_or_default();
     let probe_state = if captured {
         ScrapeProbeState::Captured
-    } else if is_explicit_login_url(&channel_id, &current_page_url) {
+    } else if is_explicit_login_url_with_mode(&mode, &channel_id, &current_page_url) {
         ScrapeProbeState::LoginRequired
     } else if ready.is_some() {
         ScrapeProbeState::ConsoleActionRequired
@@ -2032,7 +2084,7 @@ pub(crate) async fn probe_scrape_login(
         set_scrape_interaction_required(&state, &account_id, true)?;
     }
 
-    let captured_slots = collect_scrape_slots(&state, &account_id)?;
+    let captured_slots = collect_scrape_slots(&state, &account_id, &mode)?;
     let captured_kinds = captured_slots.keys().cloned().collect::<Vec<_>>();
     let missing_slots =
         scrape_console::missing_required_slots(&captured_slots, &mode.required_slots);
@@ -2051,12 +2103,53 @@ pub(crate) async fn probe_scrape_login(
             ?missing_slots,
             "控制台刷新后未捕获到完整业务响应"
         );
+        // 诊断：打印缓冲里的全部原始响应（含未被 satisfies 判通过的），用于确认
+        // 缺失槽位到底是“请求没发/没抓到”还是“抓到了但信封不符合预期”。
+        if let Ok(guard) = state.scrape_pending.lock() {
+            if let Some(responses) = guard.get(&account_id) {
+                for (url, body) in responses {
+                    let kind = scrape_console::classify_response_url(url);
+                    let snippet: String = body.chars().take(240).collect();
+                    tracing::warn!(
+                        account_id = %account_id,
+                        raw_kind = %kind,
+                        raw_url = %url,
+                        body_snippet = %snippet,
+                        "控制台抓取原始响应明细"
+                    );
+                }
+            }
+        }
     }
 
     let missing_hint = if missing_slots.is_empty() {
         String::new()
     } else {
-        format!("（缺少：{}）", missing_slots.join(", "))
+        // 顺带把缓冲里“原始响应”的槽位与 URL 拼进提示，便于区分“请求没抓到”
+        // 和“抓到了但信封不符合预期”（无需翻日志文件）。
+        let mut raw_summary = String::new();
+        if let Ok(guard) = state.scrape_pending.lock() {
+            if let Some(responses) = guard.get(&account_id) {
+                let parts: Vec<String> = responses
+                    .iter()
+                    .map(|(url, _)| {
+                        format!(
+                            "{}@{}",
+                            scrape_console::classify_response_url(url),
+                            url
+                        )
+                    })
+                    .collect();
+                if !parts.is_empty() {
+                    raw_summary = format!("（已捕获原始响应：{}）", parts.join("；"));
+                }
+            }
+        }
+        format!(
+            "（缺少：{}）{}",
+            missing_slots.join(", "),
+            raw_summary
+        )
     };
 
     let status = ScrapeLoginStatus {
@@ -2155,6 +2248,7 @@ pub(crate) async fn scrape_balance(
             &config,
             &account.channel_id,
             account.resource_mode.as_deref(),
+            Some(&account.name),
         )
         .ok_or("该账号所属渠道不支持控制台抓取")?;
         (account.channel_id.clone(), mode)
@@ -2188,7 +2282,7 @@ pub(crate) async fn scrape_balance(
     }
 
     // 3. 消费 probe 阶段捕获的同一批响应，不再二次刷新页面。
-    let slots = collect_scrape_slots(&state, &account_id)?;
+    let slots = collect_scrape_slots(&state, &account_id, &mode)?;
     if !scrape_console::aggregate_complete(&slots, &mode) {
         return Err("未收到完整的控制台业务响应，请重试".to_string());
     }
@@ -2400,6 +2494,7 @@ fn channel_resource_sync_method(
             config,
             &account.channel_id,
             account.resource_mode.as_deref(),
+            Some(&account.name),
         )
         .is_some())
     .then_some(ChannelResourceSyncMethod::ConsoleScrape)
@@ -2632,4 +2727,31 @@ pub(crate) async fn sync_scrape_balances(
             skipped
         ),
     })
+}
+
+/// 列出本机自定义渠道抓取描述符（供前端判断 custom 账号是否具备抓取能力）。
+#[tauri::command]
+pub(crate) fn list_custom_scrape_channels() -> Result<Vec<crate::core::custom_scrape::CustomScrapeChannelInfo>, String> {
+    Ok(crate::core::custom_scrape::list_channels())
+}
+
+/// 重新扫描自定义抓取描述符目录，并替换进程内注册表。返回重载后的描述符清单。
+#[tauri::command]
+pub(crate) fn reload_custom_scrape_registry(
+) -> Result<Vec<crate::core::custom_scrape::CustomScrapeChannelInfo>, String> {
+    let registry = crate::core::custom_scrape::reload()?;
+    if !registry.errors.is_empty() {
+        tracing::warn!(
+            errors = ?registry.errors,
+            "自定义抓取描述符重载完成，部分描述符被跳过"
+        );
+    }
+    Ok(registry
+        .descriptors
+        .iter()
+        .map(|descriptor| crate::core::custom_scrape::CustomScrapeChannelInfo {
+            channel_id: descriptor.channel_id.clone(),
+            account_name: descriptor.account_name.clone(),
+        })
+        .collect())
 }

@@ -1,7 +1,7 @@
 import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
 import { effectiveOpenAiBaseUrl } from "../../domains/account/types";
-import type { ChannelPreset } from "../../domains/channel/types";
-import { isQwenTokenPlanAccount, isQwenPayAsYouGoAccount, isZhipuPayAsYouGoAccount } from "../../domains/channel/types";
+import type { ChannelPreset, CustomScrapeChannel } from "../../domains/channel/types";
+import { isQwenTokenPlanAccount, isQwenPayAsYouGoAccount, isZhipuPayAsYouGoAccount, isCustomScrapeAccount } from "../../domains/channel/types";
 import type { CodexAccountReport } from "../../domains/agent/types";
 import { CHANNEL_RESOURCE_SYNC_INTERVAL_MS } from "../background-tasks/ChannelResourceAutoSync";
 import { CODEX_ACCOUNT_SYNC_INTERVAL_MS } from "../background-tasks/CodexAccountAutoSync";
@@ -19,10 +19,13 @@ export type AccountSyncStatus = "fresh" | "stale";
  *    `resource_sync_mode === "auto"` 时均参与控制台抓取自动同步；
  *  - Z.AI 按量付费账号（资源包管理页抓取余额与额度包）在
  *    `resource_sync_mode === "auto"` 时参与控制台抓取自动同步；
+ *  - 自定义渠道账号在本机存在匹配抓取描述符时，`resource_sync_mode === "auto"`
+ *    时参与控制台抓取自动同步；
  *  - 未启用账号不参与自动同步。 */
 export function hasChannelAutoSync(
   account: ChannelAccount,
   preset: ChannelPreset | undefined,
+  customScrapeChannels: readonly CustomScrapeChannel[] = [],
 ): boolean {
   if (!account.enabled) return false;
 
@@ -36,7 +39,8 @@ export function hasChannelAutoSync(
     (account.channel_id === "longcat"
       || isQwenTokenPlanAccount(account)
       || isQwenPayAsYouGoAccount(account)
-      || isZhipuPayAsYouGoAccount(account))
+      || isZhipuPayAsYouGoAccount(account)
+      || isCustomScrapeAccount(account.name, customScrapeChannels))
   );
 }
 
@@ -46,9 +50,10 @@ export function accountSyncStatus(
   account: ChannelAccount,
   snapshot: AccountBalanceSnapshot | undefined,
   preset: ChannelPreset | undefined,
+  customScrapeChannels: readonly CustomScrapeChannel[] = [],
   now: number = Date.now(),
 ): AccountSyncStatus | null {
-  if (!hasChannelAutoSync(account, preset)) return null;
+  if (!hasChannelAutoSync(account, preset, customScrapeChannels)) return null;
   if (!snapshot?.synced_at) return "stale";
 
   const syncedAtMs = new Date(snapshot.synced_at).getTime();

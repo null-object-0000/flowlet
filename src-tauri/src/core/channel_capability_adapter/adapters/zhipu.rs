@@ -46,6 +46,22 @@ fn merge_scrape_response(_kind: &str, _existing: &str, _incoming: &str) -> Optio
     None
 }
 
+/// 诊断：account_report 被判定为未满足时，每个进程只记录一次原始响应片段，
+/// 用于定位真实信封结构（避免每次循环重复刷日志）。
+fn log_account_report_rejection(body: &str) {
+    use std::sync::OnceLock;
+    static LOGGED: OnceLock<()> = OnceLock::new();
+    if LOGGED.get().is_some() {
+        return;
+    }
+    let _ = LOGGED.set(());
+    let sample: String = body.chars().take(400).collect();
+    tracing::warn!(
+        sample = %sample,
+        "Z.AI account_report 响应未通过业务成功校验"
+    );
+}
+
 fn scrape_response_satisfies(kind: &str, body: &str) -> Option<bool> {
     let Ok(root) = serde_json::from_str::<serde_json::Value>(body) else {
         return None;
@@ -57,15 +73,25 @@ fn scrape_response_satisfies(kind: &str, body: &str) -> Option<bool> {
                 || root.get("code").and_then(Value::as_u64) == Some(200);
             Some(code_ok && root.get("rows").and_then(Value::as_array).is_some())
         }
-        // 钱包报告：data.availableBalance 或 data.balance 必须是数字。
-        "account_report" => root
-            .get("data")
-            .and_then(|data| {
-                data.get("availableBalance")
-                    .or_else(|| data.get("balance"))
-                    .and_then(Value::as_f64)
-            })
-            .map(|_| true),
+        // 钱包报告：判定“业务调用成功”即可，不要求余额字段必须是数字。
+        // 官方信封是 `{code: 200, data: {...}}`（控制台）或 `{success: true,
+        // data: {...}}`（开放平台），余额为空时 `data` 可能是 `{}` —— 这也是合法
+        // 的成功响应，余额交给 extractor 兜底（缺失则为 null）。返回 Some(false)
+        // 而不是 None，避免外层回退到“合法 JSON 即到位”，把 401 等误判成已捕获。
+        "account_report" => {
+            let code = root.get("code");
+            let code_ok = code.and_then(Value::as_i64) == Some(200)
+                || code.and_then(Value::as_u64) == Some(200)
+                || code
+                    .and_then(Value::as_str)
+                    .is_some_and(|text| text.trim() == "200");
+            let success_ok = root.get("success").and_then(Value::as_bool) == Some(true);
+            let ok = code_ok || success_ok;
+            if !ok {
+                log_account_report_rejection(body);
+            }
+            Some(ok)
+        }
         _ => None,
     }
 }
@@ -120,14 +146,53 @@ mod tests {
         );
         assert_eq!(
             scrape_response_satisfies("account_report", r#"{"code":401,"msg":"unauthorized"}"#),
-            None
+            Some(false)
         );
+        assert_eq!(
+            scrape_response_satisfies(
+                "account_report",
+                r#"{"code":500,"msg":"server error","success":false}"#
+            ),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn accepts_zhipu_account_report_success_envelope() {
+        // 成功信封（code 200 或 success:true）即视为已捕获；余额字段缺失/非数字
+        // 时交给 extractor 兜底为 null，不应阻断整个抓取。
         assert_eq!(
             scrape_response_satisfies(
                 "account_report",
                 r#"{"code":200,"data":{"availableBalance":"n/a"},"success":true}"#
             ),
-            None
+            Some(true)
+        );
+        assert_eq!(
+            scrape_response_satisfies("account_report", r#"{"success":true,"data":{}}"#),
+            Some(true)
+        );
+        assert_eq!(
+            scrape_response_satisfies("account_report", r#"{"code":"200","data":{}}"#),
+            Some(true)
+        );
+        assert_eq!(
+            scrape_response_satisfies(
+                "account_report",
+                r#"{"code":200,"data":{"balance":123.45,"availableBalance":null}}"#
+            ),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn accepts_zhipu_numeric_string_balance() {
+        assert_eq!(
+            scrape_response_satisfies(
+                "account_report",
+                r#"{"code":200,"data":{"availableBalance":"70.50"},"success":true}"#
+            ),
+            Some(true)
         );
     }
 }

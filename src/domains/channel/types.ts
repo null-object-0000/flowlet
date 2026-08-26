@@ -105,6 +105,29 @@ export function isCustomChannel(channel: Pick<ChannelPreset, "id" | "vendor"> | 
   return channel?.id === CUSTOM_CHANNEL_ID || channel?.vendor === "custom";
 }
 
+/** 本机文件夹发现的自定义渠道抓取描述符（Rust `CustomScrapeChannelInfo` 对应）。 */
+export type CustomScrapeChannel = {
+  channelId: string;
+  accountName: string | null;
+};
+
+/** 判断某个账号名是否被自定义抓取描述符覆盖（channelId=custom + accountName 匹配，
+ *  匹配口径与 Rust `custom_scrape::account_name_matches` 一致：trim、大小写不敏感、
+ *  先精确后子串）。 */
+export function isCustomScrapeAccount(
+  accountName: string,
+  channels: readonly CustomScrapeChannel[],
+): boolean {
+  const actual = accountName.trim().toLowerCase();
+  if (!actual) return false;
+  return channels.some((channel) => {
+    if (channel.channelId !== CUSTOM_CHANNEL_ID) return false;
+    const expected = (channel.accountName ?? "").trim().toLowerCase();
+    if (!expected) return false;
+    return actual === expected || actual.includes(expected) || expected.includes(actual);
+  });
+}
+
 // ─── Qwen Token Plan ─────────────────────────────────────────────────────────
 // 千问 AI 平台的一种账号资源模式：订阅制（Credits 计量），API Key 为 sk-sp- 前缀，
 // 与按量付费（sk- 前缀）端点完全隔离。账号选择 token_plan 模式时，编辑器会把

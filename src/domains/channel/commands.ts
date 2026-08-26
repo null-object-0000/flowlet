@@ -1,6 +1,6 @@
 import { invokeCommand, toAppError } from "../../platform/tauri/client";
 import type { AppError } from "../../shared/errors/AppError";
-import type { ChannelPreset } from "./types";
+import type { ChannelPreset, CustomScrapeChannel } from "./types";
 
 /** 单条渠道预设变更项。 */
 export type PresetDiffItem = {
@@ -44,5 +44,13 @@ export const channelCommands = {
   applySyncPresets: (): Promise<void> =>
     invokeCommand<void>("apply_sync_channel_presets").catch((err) => {
       throw toAppError(err, "channel_sync_apply_failed");
+    }),
+  listCustomScrapeChannels: (): Promise<CustomScrapeChannel[]> =>
+    invokeCommand<CustomScrapeChannel[]>("list_custom_scrape_channels").catch((err) => {
+      throw toAppError(err, "channel_custom_scrape_list_failed");
+    }),
+  reloadCustomScrapeRegistry: (): Promise<CustomScrapeChannel[]> =>
+    invokeCommand<CustomScrapeChannel[]>("reload_custom_scrape_registry").catch((err) => {
+      throw toAppError(err, "channel_custom_scrape_reload_failed");
     }),
 };

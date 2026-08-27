@@ -48,7 +48,7 @@
 | 余额端点 | — | `GET /user/balance` | `GET /v1/users/me/balance` | — | — | 普通 Key：`GET /api/v1/key`；Management Key：`GET /api/v1/credits` | — |
 | 自动余额 | 否 | 是 | 是 | 否 | 否 | 是 | 否 |
 | 资源模式 | Token 资源包 UI | 否 | 否 | API 按量付费 + Token Plan 订阅双模式（两种模式均由官方控制台自动同步：按量付费抓福利页余额与免费额度，Token Plan 抓订阅套餐端点） | API 按量付费（官方控制台自动同步余额与额度包） | 手动维护（按量付费） | 手动维护 |
-| 默认 Flowlet 档位 | `LongCat-2.0 → pro + flash` | `v4-pro → pro`、`v4-flash → flash` | `kimi-k3 → pro`、`kimi-k2.7-code → pro` | `qwen3.8-max → pro`、`qwen3.7-max → pro`、`qwen3.7-flash → flash`、`qwen3.6-flash → flash`；Token Plan 账号为 `qwen3.8-max → pro`、`qwen3.6-flash → flash` | `glm-5.3 → pro`、`glm-5.2 → pro`、`glm-4.7 → pro`、`glm-4.5-air → flash` | 天然支持全部白名单模型（`/models` 返回全部主流模型，用户显式勾选） | 无 |
+| 默认 Flowlet 档位 | `LongCat-2.0 → pro + flash` | `v4-pro → pro`、`v4-flash → flash` | `kimi-k3 → pro`、`kimi-k2.7-code → pro` | `qwen3.8-max → pro`、`qwen3.7-max → pro`、`qwen3.7-flash → flash`、`qwen3.6-flash → flash`；Token Plan 账号为 `qwen3.8-max → pro`、`qwen3.6-flash → flash` | `glm-5.3 → pro`、`glm-5.3-flash → flash`、`glm-5.2 → pro`、`glm-4.7 → pro`、`glm-4.5-air → flash` | 天然支持全部白名单模型（`/models` 返回全部主流模型，用户显式勾选） | 无 |
 
 这些差异应由能力字段和小型渠道适配函数表达，不要把 LongCat、DeepSeek 或 Kimi 的特殊响应结构扩散到通用代理代码。
 

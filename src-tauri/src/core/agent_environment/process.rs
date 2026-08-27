@@ -15,8 +15,18 @@ pub(super) fn parse_package_version(content: &str) -> Option<String> {
 }
 
 pub(super) async fn read_version(path: &Path) -> Result<String, String> {
+    read_version_with_extra_path(path, &[]).await
+}
+
+pub(super) async fn read_version_with_extra_path(
+    path: &Path,
+    extra_path_dirs: &[PathBuf],
+) -> Result<String, String> {
     let mut command = version_command(path);
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    for directory in extra_path_dirs {
+        super::prepend_path(&mut command, directory);
+    }
 
     let output = tokio::time::timeout(VERSION_TIMEOUT, command.output())
         .await

@@ -261,6 +261,7 @@ Flowlet 支持的模型（全局白名单，不按渠道区分）：
 - qwen3.6-plus
 - qwen3.6-flash
 - glm-5.3
+- glm-5.3-flash
 - glm-5.2
 - glm-4.7
 - glm-4.5-air

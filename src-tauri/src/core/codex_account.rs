@@ -707,6 +707,11 @@ async fn start_codex_rpc(home_override: Option<&Path>) -> Result<CodexRpc, Strin
     if let Some(home) = home_override {
         command.env("CODEX_HOME", home);
     }
+    // npm 安装的 Codex CLI 入口是 `#!/usr/bin/env node` 脚本；桌面进程 PATH 中
+    // 没有 nvm 等版本管理器的 bin 目录时无法解析 node。补进含 node 的 bin 目录。
+    for directory in crate::core::agent_environment::codex_node_bin_dirs() {
+        crate::core::agent_environment::prepend_path(&mut command, &directory);
+    }
     // Codex CLI 的 OAuth token exchange 在 app-server 子进程内完成，不受 Flowlet
     // 自身 reqwest 客户端的影响。这里把上游代理配置注入子进程环境，使登录的
     // token 交换也走用户配置的代理（enabled=false 时为空，保留父进程 env 继承）。

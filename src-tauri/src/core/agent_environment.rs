@@ -12,7 +12,7 @@ mod process;
 use process::decode_windows_acp;
 #[cfg(test)]
 use process::{decode_process_output, parse_package_version};
-use process::{parse_version, read_version};
+use process::{parse_version, read_version, read_version_with_extra_path};
 // CREATE_NO_WINDOW：用于 Windows 子进程。非 Windows 平台剥离 cfg 函数后该
 // import 在 `cargo check`（Linux）下会被误报未使用，故显式放行。
 #[cfg(windows)]
@@ -529,6 +529,41 @@ fn npm_global_codex_bin_dirs(home: &Path) -> Vec<PathBuf> {
     directories
 }
 
+/// 把目录前置到子进程的 `PATH` 列表。桌面进程从桌面图标启动时 PATH 里没有
+/// nvm/pnpm 等版本管理器的 bin 目录，而 npm 安装的 Agent 入口通常是
+/// `#!/usr/bin/env node` 脚本，没有系统 node 时就无法启动；这些目录里的
+/// `node` 需要被补进子进程 PATH。
+pub(crate) fn prepend_path(command: &mut Command, directory: &Path) {
+    let separator = if cfg!(windows) { ";" } else { ":" };
+    let current = std::env::var_os("PATH")
+        .map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    command.env(
+        "PATH",
+        format!("{}{}{}", directory.display(), separator, current),
+    );
+}
+
+/// 返回含 `node` 可执行文件的全局 bin 目录（nvm 等版本管理器布局），用于在
+/// 运行 npm 安装的 Codex CLI 入口（`#!/usr/bin/env node`）时补进子进程 PATH。
+pub(crate) fn codex_node_bin_dirs() -> Vec<PathBuf> {
+    let Some(home) = dirs::home_dir() else {
+        return Vec::new();
+    };
+    codex_node_bin_dirs_from(&home)
+}
+
+fn codex_node_bin_dirs_from(home: &Path) -> Vec<PathBuf> {
+    npm_global_codex_bin_dirs(home)
+        .into_iter()
+        .filter(|directory| {
+            executable_names("node")
+                .iter()
+                .any(|name| directory.join(name).is_file())
+        })
+        .collect()
+}
+
 // Pi 官方安装脚本优先使用 npm 全局前缀，不可写时回退到 `$HOME/.local`，
 // 因此独立安装的二进制通常位于 `~/.local/bin/pi`。
 #[cfg(windows)]
@@ -978,6 +1013,30 @@ mod tests {
         assert!(directories.contains(&root.join(".npm-global").join("bin")));
         assert!(directories.contains(&root.join("node_modules").join(".bin")));
         assert!(directories.contains(&root.join(".bun").join("bin")));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn codex_node_bin_dirs_only_includes_directories_with_node() {
+        let root = std::env::temp_dir().join(format!(
+            "flowlet-codex-node-dirs-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let nvm_bin = root
+            .join(".nvm")
+            .join("versions")
+            .join("node")
+            .join("v24.19.0")
+            .join("bin");
+        std::fs::create_dir_all(&nvm_bin).unwrap();
+        // nvm bin 里有 node，应该被收录；.npm-global/bin 没有 node，应被排除。
+        std::fs::write(nvm_bin.join(executable_names("node")[0].as_str()), "").unwrap();
+
+        let directories = codex_node_bin_dirs_from(&root);
+        assert!(directories.contains(&nvm_bin));
+        assert!(!directories.contains(&root.join(".npm-global").join("bin")));
+        assert!(!directories.contains(&root.join(".bun").join("bin")));
 
         std::fs::remove_dir_all(root).unwrap();
     }

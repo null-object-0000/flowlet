@@ -10,11 +10,12 @@ import {
 
 describe("model identity catalog", () => {
   it("provides the complete supported-model whitelist without duplicates", () => {
-    expect(FLOWLET_SUPPORTED_MODELS).toHaveLength(20);
-    expect(new Set(FLOWLET_SUPPORTED_MODELS.map((model) => model.toLowerCase())).size).toBe(20);
+    expect(FLOWLET_SUPPORTED_MODELS).toHaveLength(21);
+    expect(new Set(FLOWLET_SUPPORTED_MODELS.map((model) => model.toLowerCase())).size).toBe(21);
     expect(FLOWLET_SUPPORTED_MODELS).toContain("LongCat-2.0");
     expect(FLOWLET_SUPPORTED_MODELS).toContain("deepseek-v4-flash-vision-exp");
     expect(FLOWLET_SUPPORTED_MODELS).toContain("glm-5.3");
+    expect(FLOWLET_SUPPORTED_MODELS).toContain("glm-5.3-flash");
     expect(FLOWLET_SUPPORTED_MODELS).toContain("glm-4.5-air");
     expect(FLOWLET_SUPPORTED_MODELS).toContain("ox-alpha");
     expect(FLOWLET_SUPPORTED_MODELS).toContain("nemotron-3.5-lightning");
@@ -30,6 +31,7 @@ describe("model identity catalog", () => {
     ]);
     expect(DEFAULT_EXPOSED_MODELS_BY_CHANNEL.zhipu).toEqual([
       "glm-5.3",
+      "glm-5.3-flash",
       "glm-5.2",
       "glm-4.7",
       "glm-4.5-air",

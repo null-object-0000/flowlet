@@ -14,6 +14,7 @@
     { "id": "qwen3.6-plus", "ownerChannelId": "qwen", "modelsCnProviderId": "qwen-cn", "aliases": [] },
     { "id": "qwen3.6-flash", "ownerChannelId": "qwen", "modelsCnProviderId": "qwen-cn", "aliases": [] },
     { "id": "glm-5.3", "ownerChannelId": "zhipu", "modelsCnProviderId": "zhipu-cn", "aliases": [] },
+    { "id": "glm-5.3-flash", "ownerChannelId": "zhipu", "modelsCnProviderId": "zhipu-cn", "aliases": [] },
     { "id": "glm-5.2", "ownerChannelId": "zhipu", "modelsCnProviderId": "zhipu-cn", "aliases": [] },
     { "id": "glm-4.7", "ownerChannelId": "zhipu", "modelsCnProviderId": "zhipu-cn", "aliases": [] },
     { "id": "glm-4.5-air", "ownerChannelId": "zhipu", "modelsCnProviderId": "zhipu-cn", "aliases": [] },

@@ -40,7 +40,10 @@ async fn codex_cli_installations() -> Vec<AgentInstallation> {
         let install_method = classify_codex_cli_method(&candidate.path);
         let install_dir = resolve_codex_install_dir(&candidate.path, &install_method);
         let package_version = read_package_version(&install_dir);
-        let version_result = read_version(&candidate.path).await;
+        // npm 安装的 codex 是 `#!/usr/bin/env node` 脚本，桌面进程 PATH 里可能没有
+        // node（nvm 只在 shell rc 注入），补进含 node 的 bin 目录再读版本。
+        let version_result =
+            read_version_with_extra_path(&candidate.path, &codex_node_bin_dirs()).await;
         let (version, version_output, error) = match version_result {
             Ok(output) => (
                 parse_version(&output).or(package_version),

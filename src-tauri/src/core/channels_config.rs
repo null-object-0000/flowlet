@@ -1271,7 +1271,7 @@ mod tests {
         let supported: std::collections::HashSet<String> =
             config.supported_models().into_iter().collect();
         // 即使传入配置只声明部分 Qwen 模型，内置目录仍提供完整白名单。
-        for expected in ["qwen3.7-max", "qwen3.6-flash", "qwen3.8-max"] {
+        for expected in ["qwen3.7-max", "qwen3.6-flash", "qwen3.8-max", "qwen3.8-flash"] {
             assert!(supported.contains(expected), "缺少支持的模型: {expected}");
         }
         // 目录校验保证规范模型 ID 唯一。

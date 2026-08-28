@@ -241,8 +241,8 @@ describe("OverviewAgentAccessCard", () => {
     expect(screen.getByText("尚未添加 MCP 服务器。从下方预设开始，或填写自定义配置。")).toBeInTheDocument();
     expect(screen.queryByText("精确会话关联")).not.toBeInTheDocument();
 
-    // 从预设添加 Chrome DevTools（默认无头 + 隔离临时 Profile），再整块写回。
-    fireEvent.click(screen.getByRole("button", { name: "Chrome DevTools" }));
+    // 从预设添加 Chrome DevTools（隔离无头 + 临时 Profile），再整块写回。
+    fireEvent.click(screen.getByRole("button", { name: "Chrome DevTools（隔离）" }));
     // Semi 带图标按钮的可访问名包含图标 label，用正则匹配文本部分。
     fireEvent.click(screen.getByRole("button", { name: /添加/ }));
     expect(screen.getByText("chrome")).toBeInTheDocument();
@@ -257,7 +257,7 @@ describe("OverviewAgentAccessCard", () => {
           serverName: "chrome",
           transport: "stdio",
           command: "npx",
-          args: ["-y", "chrome-devtools-mcp@latest", "--headless", "--isolated"],
+          args: ["-y", "chrome-devtools-mcp@latest", "--headless", "--isolated", "--no-usage-statistics"],
         },
       ],
     });

@@ -189,16 +189,29 @@ serverName 语法与长度、同列表唯一、stdio 必须有 command、http �
 重连，无需重启 DSH。开关关闭移除受管块后，已注册工具注销、已有连接断开。
 
 前端在接入抽屉提供独立的「MCP 服务器」Tab（仅 DeepSeek Harness 显示，高级配置区不再
-重复渲染该能力）：面板内置预置 Chrome DevTools
-（`npx -y chrome-devtools-mcp@latest --headless --isolated`；Windows 下 npx 偶尔起不来，
-可改用 `command: cmd`、`args: ['/c', 'npx', ...]`）、GitHub（需 `GITHUB_TOKEN`）、
+重复渲染该能力）：面板内置预置 Chrome DevTools、GitHub（需 `GITHUB_TOKEN`）、
 Sequential Thinking，以及自定义模式（逐字段填写 transport / command / args / env / cwd /
 url / headers）。面板本地维护草稿列表，点「写回 Flowlet」一次性提交；inspect 从受管块按 id
 跨 Profile 合并回读当前列表并展示。
 
+Chrome DevTools 预置两种连接方式（点击预置后仍可继续编辑 args）：
+
+- 「隔离」：`npx -y chrome-devtools-mcp@latest --headless --isolated --no-usage-statistics`。
+  由 chrome-devtools-mcp 启动一次性无头 Chrome + 临时 Profile，关闭即清理，不携带任何
+  登录态，适合隐私敏感场景；
+- 「连接登录」：`npx -y chrome-devtools-mcp@latest --autoConnect --no-usage-statistics`。
+  连接本机**正在运行**的 Chrome（Chrome 144+）以复用现有登录态，前提是先在该 Chrome 打开
+  `chrome://inspect/#remote-debugging` 并启用远程调试；首次连接时 Chrome 会弹出授权确认。
+
+需要更精确地指定连接目标时，可在 args 里改用 `--browserUrl http://127.0.0.1:9222`
+（按 HTTP 调试端口连接）或 `--wsEndpoint ws://127.0.0.1:9222/devtools/browser/<id>`
+（按 WebSocket 端点连接，可搭配 `--wsHeaders '{"Authorization":"Bearer x"}'`）。
+Windows 下 npx 偶尔起不来，可改用 `command: cmd`、`args: ['/c', 'npx', ...]`。
+
 隐私注意：MCP 工具是真实环境能力（浏览器导航/截图等），连接后 DSH 可执行这些操作；
-chrome 预设默认使用 `--isolated` 临时 Profile 与无头模式，正式账号请勿在暴露登录态的
-会话中使用。
+Chrome 预置默认附带 `--no-usage-statistics` 关闭 Google 用量统计，需要进一步关闭性能
+CrUX 上报时可追加 `--no-performance-crux`。「连接登录」模式会暴露现有浏览器的登录态，
+正式账号请只在可信会话中使用；「隔离」模式使用临时 Profile，不携带登录态。
 
 契约测试：真实上游 `cordis.patch.yml` fixture 走 inspect → apply（含 stdio 与
 streamable-http 服务器）→ reapply（幂等）→ disable（空列表只移除 MCP 块，保留会话桥

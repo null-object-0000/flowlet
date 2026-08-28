@@ -6,21 +6,38 @@ import styles from "./McpServersPanel.module.css";
 
 const { Text } = Typography;
 
-export type McpServerPresetId = "chrome" | "github" | "sequential" | "custom";
+export type McpServerPresetId =
+  | "chrome"
+  | "chromeExisting"
+  | "github"
+  | "sequential"
+  | "custom";
 
 export const MCP_SERVER_PRESETS: Record<
   McpServerPresetId,
   { label: string; description: string; spec: McpServerSpec }
 > = {
   chrome: {
-    label: "Chrome DevTools",
-    description: "浏览器导航、截图与性能分析；默认无头 + 隔离临时 Profile",
+    label: "Chrome DevTools（隔离）",
+    description: "一次性无头浏览器 + 临时 Profile，不携带登录态；适合隐私敏感场景",
     spec: {
       id: "chrome",
       serverName: "chrome",
       transport: "stdio",
       command: "npx",
-      args: ["-y", "chrome-devtools-mcp@latest", "--headless", "--isolated"],
+      args: ["-y", "chrome-devtools-mcp@latest", "--headless", "--isolated", "--no-usage-statistics"],
+    },
+  },
+  chromeExisting: {
+    label: "Chrome（连接登录）",
+    description:
+      "连接正在运行的 Chrome 复用登录态；需先在 chrome://inspect/#remote-debugging 开启远程调试（Chrome 144+）",
+    spec: {
+      id: "chrome",
+      serverName: "chrome",
+      transport: "stdio",
+      command: "npx",
+      args: ["-y", "chrome-devtools-mcp@latest", "--autoConnect", "--no-usage-statistics"],
     },
   },
   github: {
@@ -162,24 +179,28 @@ export function McpServersPanel({
   const [editIndex, setEditIndex] = useState<number | null>(null);
   const [form, setForm] = useState<FormState>(() => specToForm(MCP_SERVER_PRESETS.custom.spec));
   const [error, setError] = useState<string | null>(null);
+  const [presetHint, setPresetHint] = useState<string>(MCP_SERVER_PRESETS.custom.description);
 
   useEffect(() => {
     setDraft(servers);
     setEditIndex(null);
     setError(null);
     setForm(specToForm(MCP_SERVER_PRESETS.custom.spec));
+    setPresetHint(MCP_SERVER_PRESETS.custom.description);
   }, [servers]);
 
-  const resetForm = (preset: McpServerSpec) => {
+  const resetForm = (preset: McpServerSpec, description?: string) => {
     setEditIndex(null);
     setError(null);
     setForm(specToForm(preset));
+    setPresetHint(description ?? MCP_SERVER_PRESETS.custom.description);
   };
 
   const startEdit = (index: number) => {
     setEditIndex(index);
     setError(null);
     setForm(specToForm(draft[index]));
+    setPresetHint("");
   };
 
   const commitForm = () => {
@@ -238,7 +259,7 @@ export function McpServersPanel({
     <div className={styles.panel}>
       <Text type="tertiary" size="small">
         已保存的服务器会注册为原生工具（mcp__服务器名__工具名），DSH 热替换连接、无需重启。
-        Chrome 预设默认无头并隔离临时 Profile；正式账号请在隔离会话中使用。
+        Chrome 预设提供「隔离无头」和「连接登录浏览器」两种方式；连接登录浏览器会复用现有登录态，请仅在可信会话中使用。
       </Text>
       {draft.length === 0 ? (
         <div className={styles.empty}>
@@ -286,7 +307,9 @@ export function McpServersPanel({
                 key={id}
                 size="small"
                 theme="light"
-                onClick={() => resetForm(MCP_SERVER_PRESETS[id].spec)}
+                onClick={() =>
+                  resetForm(MCP_SERVER_PRESETS[id].spec, MCP_SERVER_PRESETS[id].description)
+                }
               >
                 {MCP_SERVER_PRESETS[id].label}
               </Button>
@@ -294,7 +317,7 @@ export function McpServersPanel({
           </div>
           {editIndex === null ? (
             <Text type="tertiary" size="small">
-              {MCP_SERVER_PRESETS.custom.description}
+              {presetHint}
             </Text>
           ) : null}
         </div>
@@ -339,7 +362,7 @@ export function McpServersPanel({
                 args（每行一个参数）
                 <TextArea
                   value={form.argsText}
-                  placeholder="-y&#10;chrome-devtools-mcp@latest"
+                  placeholder={"-y\nchrome-devtools-mcp@latest\n--autoConnect"}
                   autosize={{ minRows: 2, maxRows: 6 }}
                   onChange={(value) => setForm({ ...form, argsText: value })}
                 />

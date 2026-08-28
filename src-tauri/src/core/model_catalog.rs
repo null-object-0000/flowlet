@@ -154,7 +154,7 @@ mod tests {
     #[test]
     fn embedded_catalog_is_valid_and_has_expected_models() {
         let catalog = model_catalog();
-        assert_eq!(catalog.supported_models().len(), 21);
+        assert_eq!(catalog.supported_models().len(), 22);
         assert_eq!(
             catalog.find("LongCat-2.0").unwrap().owner_channel_id,
             "longcat"
@@ -163,6 +163,7 @@ mod tests {
             catalog.find("deepseek-v4-flash-vision-exp").unwrap().owner_channel_id,
             "deepseek"
         );
+        assert_eq!(catalog.find("qwen3.8-flash").unwrap().owner_channel_id, "qwen");
         assert_eq!(catalog.find("GLM-5.3").unwrap().owner_channel_id, "zhipu");
         assert_eq!(catalog.find("GLM-5.3-FLASH").unwrap().owner_channel_id, "zhipu");
         assert_eq!(catalog.find("GLM-5.2").unwrap().owner_channel_id, "zhipu");

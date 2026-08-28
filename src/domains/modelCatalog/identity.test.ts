@@ -10,10 +10,11 @@ import {
 
 describe("model identity catalog", () => {
   it("provides the complete supported-model whitelist without duplicates", () => {
-    expect(FLOWLET_SUPPORTED_MODELS).toHaveLength(21);
-    expect(new Set(FLOWLET_SUPPORTED_MODELS.map((model) => model.toLowerCase())).size).toBe(21);
+    expect(FLOWLET_SUPPORTED_MODELS).toHaveLength(22);
+    expect(new Set(FLOWLET_SUPPORTED_MODELS.map((model) => model.toLowerCase())).size).toBe(22);
     expect(FLOWLET_SUPPORTED_MODELS).toContain("LongCat-2.0");
     expect(FLOWLET_SUPPORTED_MODELS).toContain("deepseek-v4-flash-vision-exp");
+    expect(FLOWLET_SUPPORTED_MODELS).toContain("qwen3.8-flash");
     expect(FLOWLET_SUPPORTED_MODELS).toContain("glm-5.3");
     expect(FLOWLET_SUPPORTED_MODELS).toContain("glm-5.3-flash");
     expect(FLOWLET_SUPPORTED_MODELS).toContain("glm-4.5-air");
@@ -28,6 +29,15 @@ describe("model identity catalog", () => {
       "deepseek-v4-flash",
       "deepseek-v4-flash-vision-exp",
       "deepseek-v4-pro",
+    ]);
+    expect(DEFAULT_EXPOSED_MODELS_BY_CHANNEL.qwen).toEqual([
+      "qwen3.8-max",
+      "qwen3.8-flash",
+      "qwen3.7-max",
+      "qwen3.7-plus",
+      "qwen3.7-flash",
+      "qwen3.6-plus",
+      "qwen3.6-flash",
     ]);
     expect(DEFAULT_EXPOSED_MODELS_BY_CHANNEL.zhipu).toEqual([
       "glm-5.3",

@@ -8,6 +8,7 @@
     { "id": "kimi-k3", "ownerChannelId": "kimi", "modelsCnProviderId": "moonshot-cn", "aliases": [] },
     { "id": "kimi-k2.7-code", "ownerChannelId": "kimi", "modelsCnProviderId": "moonshot-cn", "aliases": [] },
     { "id": "qwen3.8-max", "ownerChannelId": "qwen", "modelsCnProviderId": "qwen-cn", "aliases": [] },
+    { "id": "qwen3.8-flash", "ownerChannelId": "qwen", "modelsCnProviderId": "qwen-cn", "aliases": [] },
     { "id": "qwen3.7-max", "ownerChannelId": "qwen", "modelsCnProviderId": "qwen-cn", "aliases": [] },
     { "id": "qwen3.7-plus", "ownerChannelId": "qwen", "modelsCnProviderId": "qwen-cn", "aliases": [] },
     { "id": "qwen3.7-flash", "ownerChannelId": "qwen", "modelsCnProviderId": "qwen-cn", "aliases": [] },

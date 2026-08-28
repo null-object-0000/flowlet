@@ -107,7 +107,7 @@ Flowlet 当前有七种渠道模板：LongCat、DeepSeek、Kimi、Qwen、Z.AI、
 
 ## 4. 模型支持
 
-Flowlet 当前总共支持 21 个规范化模型。这个列表是全局白名单，不是按渠道切分的
+Flowlet 当前总共支持 22 个规范化模型。这个列表是全局白名单，不是按渠道切分的
 固定路由表。
 
 | 官方归属 | 规范化模型 ID | Responses 说明 |
@@ -119,6 +119,7 @@ Flowlet 当前总共支持 21 个规范化模型。这个列表是全局白名�
 | Kimi | `kimi-k3` | — 上游暂不支持 |
 | Kimi | `kimi-k2.7-code` | — 上游暂不支持 |
 | Qwen | `qwen3.8-max` | ✅ 上游确认 |
+| Qwen | `qwen3.8-flash` | ✅ 上游确认 |
 | Qwen | `qwen3.7-max` | ✅ 上游确认 |
 | Qwen | `qwen3.7-plus` | ✅ 上游确认 |
 | Qwen | `qwen3.7-flash` | ✅ 上游确认 |

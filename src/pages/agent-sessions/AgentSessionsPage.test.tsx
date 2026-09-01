@@ -290,10 +290,9 @@ describe("AgentSessionsPage", () => {
     expect(screen.getByLabelText("Token 明细：总计 13.50万，缓存命中率 16.0%")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("Native session title").closest("button")!);
-    fireEvent.click(screen.getByRole("tab", { name: "用量" }));
-    const usage = screen.getByRole("tabpanel", { name: "用量" });
-    expect(within(usage).getByText("源文件已删除，以下为 Flowlet 最后一次同步保存的数据")).toBeInTheDocument();
-    expect(within(usage).getByText("13.50万")).toBeInTheDocument();
+    const drawer = screen.getByRole("dialog");
+    expect(within(drawer).getByText("源文件已删除，以下为 Flowlet 最后一次同步保存的数据")).toBeInTheDocument();
+    expect(within(drawer).getAllByText("13.50万").length).toBeGreaterThan(0);
   });
 
   it("offers client and runtime status filters", () => {
@@ -314,27 +313,20 @@ describe("AgentSessionsPage", () => {
     expect(screen.queryByText("经过 Flowlet")).not.toBeInTheDocument();
   });
 
-  it("opens session details and refreshes the active tab", async () => {
+  it("opens session details and refreshes the whole drawer", async () => {
     permissionsReport = { ...defaultPermissionsReport, permissions: [] };
     render(<MemoryRouter><AgentSessionsPage /></MemoryRouter>);
 
     const rowTitle = screen.getByText("Native session title");
     fireEvent.click(rowTitle.closest("button")!);
 
-    expect(screen.getByRole("tab", { name: "概览" })).toHaveAttribute("aria-selected", "true");
-    const overview = screen.getByRole("tabpanel", { name: "概览" });
-
-    // 会话摘要直接作为抽屉标题，概览只保留 3 列统计行，避免重复展示。
-    expect(screen.getAllByText("空闲").some((element) => !overview.contains(element))).toBe(true);
-    expect(within(overview).queryByText("Native session title")).not.toBeInTheDocument();
-    expect(within(overview).queryByText("空闲")).not.toBeInTheDocument();
-    expect(within(overview).getByText("1.20万")).toBeInTheDocument();
-    expect(within(overview).getByText("4")).toBeInTheDocument();
-    expect(within(overview).getByText("1")).toBeInTheDocument();
-
-    // 刷新概览：子会话 + 原生用量 + 列表（内容读取 Tab 已移除）。
-    // 抽屉打开时会立即自动刷新一次（移动端同款行为），先清除该次调用再验证手动刷新。
     const drawer = screen.getByRole("dialog");
+
+    // 概览统计与用量、信息、子会话区块同页展示，不再分 Tab。
+    expect(within(drawer).getAllByText("1.20万").length).toBeGreaterThan(0);
+
+    // 刷新整份会话数据：子会话 + 原生用量 + 列表。
+    // 抽屉打开时会立即自动刷新一次，先清除该次调用再验证手动刷新。
     [sessionListRefetchMock, childrenRefetchMock, nativeSummaryRefetchMock].forEach((mock) => mock.mockClear());
     fireEvent.click(within(drawer).getByRole("button", { name: "刷新数据" }));
     await waitFor(() => {
@@ -344,33 +336,13 @@ describe("AgentSessionsPage", () => {
     });
     [sessionListRefetchMock, childrenRefetchMock, nativeSummaryRefetchMock].forEach((mock) => mock.mockClear());
 
-    // 用量 Tab：Flowlet 请求统计 + Agent 原生用量
-    fireEvent.click(screen.getByRole("tab", { name: "用量" }));
-    const usage = screen.getByRole("tabpanel", { name: "用量" });
-    expect(within(usage).getByText("Flowlet 请求统计")).toBeInTheDocument();
-    expect(within(usage).getByText("Agent 原生用量")).toBeInTheDocument();
-    expect(within(usage).getByText("$0.123456")).toBeInTheDocument();
-    expect(within(usage).getByText("模型：native-model")).toBeInTheDocument();
-
-    // 用量 Tab 刷新：只刷新原生用量与子会话
-    fireEvent.click(within(drawer).getByRole("button", { name: "刷新数据" }));
-    await waitFor(() => {
-      expect(nativeSummaryRefetchMock).toHaveBeenCalledOnce();
-      expect(childrenRefetchMock).toHaveBeenCalledOnce();
-    });
-    expect(sessionListRefetchMock).not.toHaveBeenCalled();
-    [childrenRefetchMock, nativeSummaryRefetchMock].forEach((mock) => mock.mockClear());
-
-    // 信息 Tab：会话信息与活动时间
-    fireEvent.click(screen.getByRole("tab", { name: "信息" }));
-    const sessionPane = screen.getByRole("tabpanel", { name: "信息" });
-    expect(within(sessionPane).getByText("ses_native_test")).toBeInTheDocument();
-    expect(within(sessionPane).getByText("D:\\GitHub\\flowlet")).toBeInTheDocument();
-
-    // 子会话 Tab
-    fireEvent.click(screen.getByRole("tab", { name: "子会话（1）" }));
-    const childrenPane = screen.getByRole("tabpanel", { name: "子会话（1）" });
-    expect(within(childrenPane).getByText("Child session title")).toBeInTheDocument();
+    expect(within(drawer).getByText("Flowlet 请求统计")).toBeInTheDocument();
+    expect(within(drawer).getByText("Agent 原生用量")).toBeInTheDocument();
+    expect(within(drawer).getByText("$0.123456")).toBeInTheDocument();
+    expect(within(drawer).getByText("模型：native-model")).toBeInTheDocument();
+    expect(within(drawer).getByText("ses_native_test")).toBeInTheDocument();
+    expect(within(drawer).getByText("D:\\GitHub\\flowlet")).toBeInTheDocument();
+    expect(within(drawer).getByText("Child session title")).toBeInTheDocument();
   });
 
   it("does not reopen a closed detail drawer when an in-flight overview refresh completes", async () => {
@@ -410,7 +382,6 @@ describe("AgentSessionsPage", () => {
     );
 
     fireEvent.click(screen.getByText("Native session title").closest("button")!);
-    fireEvent.click(screen.getByRole("tab", { name: "信息" }));
     fireEvent.click(screen.getByRole("button", { name: "查看会话 ses_native_test 的请求日志明细" }));
 
     expect(screen.getByTestId("location")).toHaveTextContent("/logs?search=ses_native_test");
@@ -425,7 +396,6 @@ describe("AgentSessionsPage", () => {
     );
 
     fireEvent.click(screen.getByText("Native session title").closest("button")!);
-    fireEvent.click(screen.getByRole("tab", { name: "子会话（1）" }));
     fireEvent.click(screen.getByRole("button", { name: "查看会话 ses_child 的请求日志明细" }));
 
     expect(screen.getByTestId("location")).toHaveTextContent("/logs?search=ses_child");
@@ -442,18 +412,15 @@ describe("AgentSessionsPage", () => {
       </MemoryRouter>,
     );
 
-    // 概览：native 来源的统计行显示为 Agent 原生，而非请求指标
-    const overview = screen.getByRole("tabpanel", { name: "概览" });
-    expect(screen.getAllByText("Codex Desktop").some((element) => !overview.contains(element))).toBe(true);
-    expect(within(overview).queryByText("Codex Desktop")).not.toBeInTheDocument();
-    expect(within(overview).getByText("Agent 原生")).toBeInTheDocument();
+    const drawer = screen.getByRole("dialog");
 
-    // 信息 Tab：显示 Agent 来源，无请求日志入口
-    fireEvent.click(screen.getByRole("tab", { name: "信息" }));
-    const sessionPane = screen.getByRole("tabpanel", { name: "信息" });
-    expect(within(sessionPane).getByText("Agent 来源")).toBeInTheDocument();
-    expect(within(sessionPane).queryByText("未知客户端")).not.toBeInTheDocument();
-    expect(within(sessionPane).queryByRole("button", { name: "查看会话 ses_native_test 的请求日志明细" })).not.toBeInTheDocument();
+    // 概览统计行：native 来源显示为 Agent 原生，而非请求指标。
+    expect(within(drawer).getByText("Agent 原生")).toBeInTheDocument();
+
+    // 信息区块：显示 Agent 来源，无请求日志入口。
+    expect(within(drawer).getByText("Agent 来源")).toBeInTheDocument();
+    expect(within(drawer).queryByText("未知客户端")).not.toBeInTheDocument();
+    expect(within(drawer).queryByRole("button", { name: "查看会话 ses_native_test 的请求日志明细" })).not.toBeInTheDocument();
     expect(screen.queryByText("未经过 Flowlet")).not.toBeInTheDocument();
   });
 
@@ -464,11 +431,9 @@ describe("AgentSessionsPage", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole("tab", { name: "概览" })).toHaveAttribute("aria-selected", "true");
-    const overview = screen.getByRole("tabpanel", { name: "概览" });
-    const approval = within(overview).getByText("OpenCode 等待确认").closest("article")!;
+    const drawer = screen.getByRole("dialog");
+    const approval = within(drawer).getByText("OpenCode 等待确认").closest("article")!;
     expect(within(approval).getByText("cargo test")).toBeInTheDocument();
-    expect(within(overview).queryByRole("status")).not.toBeInTheDocument();
     fireEvent.click(within(approval).getByRole("button", { name: "同意本次" }));
 
     await waitFor(() => expect(permissionReplyMock).toHaveBeenCalledWith({ permissionId: "per_test", decision: "allow_once" }));
@@ -479,7 +444,7 @@ describe("AgentSessionsPage", () => {
 
     // 默认当前设备：展示本地会话与「同步数据」按钮。
     expect(screen.getByText("Native session title")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "同步数据" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /同步数据/ })).toBeInTheDocument();
     expect(screen.queryByText("Remote session title")).not.toBeInTheDocument();
 
     // 主标题设备切换器没有「全部设备」选项，只能指定具体设备。
@@ -491,22 +456,22 @@ describe("AgentSessionsPage", () => {
     expect(await screen.findByText("Remote session title")).toBeInTheDocument();
     expect(screen.getByText("Claude Code · 办公室电脑")).toBeInTheDocument();
     expect(screen.queryByText("Native session title")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "刷新设备数据" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "同步数据" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /刷新设备数据/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /同步数据/ })).not.toBeInTheDocument();
   });
 
-  it("opens a remote session as a read-only snapshot but keeps all detail tabs", async () => {
+  it("opens a remote session as a read-only snapshot", async () => {
     render(<MemoryRouter><AgentSessionsPage /></MemoryRouter>);
 
     fireEvent.click(screen.getByRole("button", { name: /切换设备/ }));
     fireEvent.click(await screen.findByText("办公室电脑"));
     fireEvent.click((await screen.findByText("Remote session title")).closest("button")!);
 
-    expect(screen.getByText("远端设备会话快照")).toBeInTheDocument();
-    expect(screen.getByText(/来自 办公室电脑/)).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "概览" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "用量" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "信息" })).toBeInTheDocument();
+    const drawer = screen.getByRole("dialog");
+    await waitFor(() => expect(within(drawer).getByText("远端设备会话快照")).toBeInTheDocument());
+    expect(within(drawer).getByText(/来自 办公室电脑/)).toBeInTheDocument();
+    expect(within(drawer).getByText("概览")).toBeInTheDocument();
+    expect(within(drawer).getByText("会话信息")).toBeInTheDocument();
   });
 });
 

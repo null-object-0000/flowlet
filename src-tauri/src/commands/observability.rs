@@ -25,22 +25,30 @@ pub(crate) async fn list_agent_sessions(
     // 否则按运行状态筛选时，实时等待中的会话会被 SQLite 中旧的状态误筛掉。
     let opencode_pending_sessions = crate::core::opencode_control::pending_session_ids().await;
     let dsh_pending_sessions = crate::core::dsh_control::pending_session_ids().await;
-    state
-        .storage
-        .list_agent_sessions(filter, &opencode_pending_sessions, &dsh_pending_sessions)
-        .map_err(|err| err.to_string())
+    let storage = state.storage.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        storage
+            .list_agent_sessions(filter, &opencode_pending_sessions, &dsh_pending_sessions)
+            .map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|error| format!("读取会话列表任务失败：{error}"))?
 }
 
 #[tauri::command]
-pub(crate) fn list_agent_session_children(
+pub(crate) async fn list_agent_session_children(
     state: tauri::State<'_, AppState>,
     agent_type: String,
     parent_session_id: String,
 ) -> Result<Vec<crate::core::config::AgentSessionRow>, String> {
-    state
-        .storage
-        .list_agent_session_children(&agent_type, &parent_session_id)
-        .map_err(|err| err.to_string())
+    let storage = state.storage.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        storage
+            .list_agent_session_children(&agent_type, &parent_session_id)
+            .map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|error| format!("读取子会话任务失败：{error}"))?
 }
 
 #[tauri::command]

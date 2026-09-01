@@ -8,9 +8,25 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::io::{BufReader, Cursor, Read};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
 
 const RUNNING_FRESHNESS: Duration = Duration::from_secs(30 * 60);
+
+/// 会话列表按文件元数据缓存的解析结果。DSH 会话文件是整段 zstd 流，列出会话时
+/// 不需要反复解压/解析 100+ 个文件；只有文件长度或 mtime 变化时才重新读取，
+/// 避免 15 秒自动刷新反复触发全量原生会话解析造成界面无响应。
+#[derive(Clone)]
+struct CachedDshSession {
+    file_len: u64,
+    modified: Option<SystemTime>,
+    row: AgentSessionRow,
+    /// 解析时文件里是否存在未闭合的 turn（最后一条 turn/start 晚于最后一条 turn/end）。
+    /// 缓存命中时据此结合当前 mtime 重新计算运行态，避免“运行中”徽标过期后不回落。
+    has_open_turn: bool,
+}
+
+static DSH_SESSION_CACHE: OnceLock<Mutex<HashMap<PathBuf, CachedDshSession>>> = OnceLock::new();
 
 pub(super) struct DeepSeekHarnessSessionAdapter;
 
@@ -34,9 +50,21 @@ impl AgentSessionAdapter for DeepSeekHarnessSessionAdapter {
             .unwrap_or_default()
     }
     fn list_sessions(&self) -> Vec<AgentSessionRow> {
-        let mut rows = session_files()
+        let files = session_files();
+        let current_paths = files.iter().cloned().collect::<HashSet<_>>();
+        let cache = DSH_SESSION_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+        let Ok(mut cache) = cache.lock() else {
+            let mut rows = files
+                .into_iter()
+                .filter_map(|path| session_row(&path).ok().map(|(row, _)| row))
+                .collect::<Vec<_>>();
+            rows.sort_by(|a, b| b.activity_at.cmp(&a.activity_at));
+            return rows;
+        };
+        cache.retain(|path, _| current_paths.contains(path));
+        let mut rows = files
             .into_iter()
-            .filter_map(|path| session_row(&path).ok())
+            .filter_map(|path| cached_or_refresh_dsh_session(&mut cache, &path))
             .collect::<Vec<_>>();
         rows.sort_by(|a, b| b.activity_at.cmp(&a.activity_at));
         rows
@@ -272,7 +300,37 @@ fn millis_time(value: i64) -> String {
         .to_rfc3339()
 }
 
-fn session_row(path: &Path) -> Result<AgentSessionRow, String> {
+/// 命中缓存时直接复用上次解析的行，否则重新读取并写回缓存。缓存键是文件路径，
+/// 失效条件为文件长度或修改时间变化（与 Claude Code 会话缓存策略一致）。
+fn cached_or_refresh_dsh_session(
+    cache: &mut HashMap<PathBuf, CachedDshSession>,
+    path: &Path,
+) -> Option<AgentSessionRow> {
+    let metadata = std::fs::metadata(path).ok()?;
+    let modified = metadata.modified().ok();
+    if let Some(cached) = cache.get(path) {
+        if cached.file_len == metadata.len() && cached.modified == modified {
+            // mtime/大小未变，复用解析结果；但运行态要按当前时间重新收敛，
+            // 避免缓存把“运行中”永久钉住（DSH 关闭后文件 mtime 不再变化）。
+            let mut row = cached.row.clone();
+            row.runtime_status = dsh_runtime_status_from_open_turn(cached.has_open_turn, modified, SystemTime::now());
+            return Some(row);
+        }
+    }
+    let (row, open_turn) = session_row(path).ok()?;
+    cache.insert(
+        path.to_path_buf(),
+        CachedDshSession {
+            file_len: metadata.len(),
+            modified,
+            row: row.clone(),
+            has_open_turn: open_turn,
+        },
+    );
+    Some(row)
+}
+
+fn session_row(path: &Path) -> Result<(AgentSessionRow, bool), String> {
     let records = read_records(path)?;
     let header = records
         .first()
@@ -301,75 +359,90 @@ fn session_row(path: &Path) -> Result<AgentSessionRow, String> {
         .map(|time| time.to_rfc3339())
         .unwrap_or_else(|| created.clone());
     let timeline = read_timeline_records(&records)?;
+    let open_turn = has_open_turn(&records);
     let runtime_status = infer_runtime_status(&records, modified, SystemTime::now());
-    Ok(AgentSessionRow {
-        agent_type: "deepseek-harness".to_string(),
-        session_id,
-        runtime_status,
-        title: native_session_title(&records).or_else(|| first_user_text(&records)),
-        project_path: header
-            .get("cwd")
-            .and_then(Value::as_str)
-            .map(str::to_string),
-        parent_session_id: header
-            .get("parentSession")
-            .and_then(Value::as_str)
-            .map(str::to_string),
-        client_id: None,
-        client_name: Some("DeepSeek Harness".to_string()),
-        native_started_at: Some(created.clone()),
-        native_updated_at: Some(updated.clone()),
-        activity_at: updated.clone(),
-        flowlet_observed: false,
-        started_at: created,
-        updated_at: updated,
-        request_count: 0,
-        success_count: 0,
-        error_count: 0,
-        known_tokens: 0,
-        input_tokens: 0,
-        input_cached_tokens: 0,
-        input_uncached_tokens: 0,
-        cache_measured_input_tokens: 0,
-        output_tokens: 0,
-        unknown_usage_count: 0,
-        estimated_cost: 0.0,
-        estimated_input_uncached_cost: 0.0,
-        estimated_input_cached_cost: 0.0,
-        estimated_input_cache_write_cost: 0.0,
-        estimated_output_cost: 0.0,
-        native_summary: Some(AgentSessionNativeSummary {
-            source_available: true,
-            truncated: false,
-            turn_count: timeline.turn_count,
-            usage: timeline.usage.clone(),
-            models: timeline.models.clone(),
-        }),
-        native_synced_at: None,
-    })
+    Ok((
+        AgentSessionRow {
+            agent_type: "deepseek-harness".to_string(),
+            session_id,
+            runtime_status,
+            title: native_session_title(&records).or_else(|| first_user_text(&records)),
+            project_path: header
+                .get("cwd")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            parent_session_id: header
+                .get("parentSession")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            client_id: None,
+            client_name: Some("DeepSeek Harness".to_string()),
+            native_started_at: Some(created.clone()),
+            native_updated_at: Some(updated.clone()),
+            activity_at: updated.clone(),
+            flowlet_observed: false,
+            started_at: created,
+            updated_at: updated,
+            request_count: 0,
+            success_count: 0,
+            error_count: 0,
+            known_tokens: 0,
+            input_tokens: 0,
+            input_cached_tokens: 0,
+            input_uncached_tokens: 0,
+            cache_measured_input_tokens: 0,
+            output_tokens: 0,
+            unknown_usage_count: 0,
+            estimated_cost: 0.0,
+            estimated_input_uncached_cost: 0.0,
+            estimated_input_cached_cost: 0.0,
+            estimated_input_cache_write_cost: 0.0,
+            estimated_output_cost: 0.0,
+            native_summary: Some(AgentSessionNativeSummary {
+                source_available: true,
+                truncated: false,
+                turn_count: timeline.turn_count,
+                usage: timeline.usage.clone(),
+                models: timeline.models.clone(),
+            }),
+            native_synced_at: None,
+        },
+        open_turn,
+    ))
 }
 
 /// DSH 的 `turn/end` 只结束当前一轮，不能代表整个 Web 会话已经结束。
 /// 最新 `turn/start` 晚于最新 `turn/end` 且文件仍在活跃更新时，才视为运行中；
 /// 异常退出留下的未闭合 turn 在新鲜度窗口后降级为空闲。
-fn infer_runtime_status(
-    records: &[Value],
-    modified: Option<SystemTime>,
-    now: SystemTime,
-) -> String {
+/// 是否存在未闭合的 turn：最后一条 `turn/start` 晚于最后一条 `turn/end`。
+fn has_open_turn(records: &[Value]) -> bool {
     let last_turn_start = records
         .iter()
         .rposition(|value| value.get("type").and_then(Value::as_str) == Some("turn/start"));
     let last_turn_end = records
         .iter()
         .rposition(|value| value.get("type").and_then(Value::as_str) == Some("turn/end"));
-    let has_open_turn =
-        last_turn_start.is_some_and(|start| last_turn_end.is_none_or(|end| start > end));
+    last_turn_start.is_some_and(|start| last_turn_end.is_none_or(|end| start > end))
+}
+
+fn infer_runtime_status(
+    records: &[Value],
+    modified: Option<SystemTime>,
+    now: SystemTime,
+) -> String {
+    dsh_runtime_status_from_open_turn(has_open_turn(records), modified, now)
+}
+
+fn dsh_runtime_status_from_open_turn(
+    open_turn: bool,
+    modified: Option<SystemTime>,
+    now: SystemTime,
+) -> String {
     let recently_modified = modified.is_some_and(|modified| {
         now.duration_since(modified)
             .map_or(true, |age| age <= RUNNING_FRESHNESS)
     });
-    if has_open_turn && recently_modified {
+    if open_turn && recently_modified {
         "running"
     } else {
         "idle"

@@ -1,16 +1,12 @@
 import { Button, SideSheet, Tabs, Tag, Toast, Tooltip } from "@douyinfe/semi-ui-19";
 import { IconAlertTriangle, IconCopy, IconExternalOpen } from "@douyinfe/semi-icons";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
-import { agentSessionLabel, type AgentSessionLastInteraction, type AgentSessionNativeSummary, type AgentSessionNativeUsage, type AgentSessionRow, type DshApprovalRequest, type OpenCodePermissionRequest } from "../../domains/agent-session/types";
-import { groupInteractionEvents, InteractionOutputEvent, InteractionProcessGroup, SessionConversation } from "../../features/agent-sessions/SessionConversation";
-import { SessionTrajectory } from "../../features/agent-sessions/SessionTrajectory";
-import { useAgentSessionChildren, useAgentSessionLastInteraction, useAgentSessionNativeSummary, useAgentSessionTimeline, useDshSessionPermissions, useOpenCodeSessionPermissions, useReplyDshPermission, useReplyOpenCodePermission } from "../../features/agent-sessions/useAgentSessions";
-import { interactionEventsVersion, useSessionScrollFollow } from "../../features/agent-sessions/useSessionScrollFollow";
+import { agentSessionLabel, type AgentSessionNativeSummary, type AgentSessionNativeUsage, type AgentSessionRow, type DshApprovalRequest, type OpenCodePermissionRequest } from "../../domains/agent-session/types";
+import { useAgentSessionChildren, useAgentSessionNativeSummary, useDshSessionPermissions, useOpenCodeSessionPermissions, useReplyDshPermission, useReplyOpenCodePermission } from "../../features/agent-sessions/useAgentSessions";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import { SESSION_DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
 import { RefreshControl } from "../../shared/ui/RefreshControl";
-import { ScrollBottomControl } from "../../shared/ui/ScrollBottomControl";
 import { useRefreshControl } from "../../shared/ui/useRefreshControl";
 import { formatCompactNumber, formatInteger } from "../../shared/formatters/number";
 import { formatCostAmount, formatNativeCost } from "../../shared/formatters/cost";
@@ -35,54 +31,17 @@ export function AgentSessionDetailSideSheet({
   remote?: boolean;
 }) {
   const { language, t } = useAppPreferences();
-  const [activeTab, setActiveTab] = useState<"overview" | "conversation" | "trajectory" | "usage" | "info" | "child-sessions">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "usage" | "info" | "child-sessions">("overview");
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | undefined>(undefined);
   // 抽屉右上角使用页面公共的自动刷新控件：开关控制抽屉内 5 秒自动刷新。
   const refreshControl = useRefreshControl({ intervalMs: SESSION_AUTO_REFRESH_MS });
   const title = sessionDisplayTitle(session);
   const children = useAgentSessionChildren(session, !remote);
   const nativeSummary = useAgentSessionNativeSummary(session);
-  const lastInteraction = useAgentSessionLastInteraction(session, activeTab === "overview" && !remote);
-  const timeline = useAgentSessionTimeline(
-    session.agentType,
-    session.sessionId,
-    (activeTab === "conversation" || activeTab === "trajectory") && !remote,
-  );
   const openCodePermissions = useOpenCodeSessionPermissions(session, activeTab === "overview" && !remote);
   const dshPermissions = useDshSessionPermissions(session, activeTab === "overview" && !remote);
-  const pendingApprovalCount = session.agentType === "opencode" && openCodePermissions.data?.available
-    ? openCodePermissions.data.permissions.length
-    : session.agentType === "deepseek-harness" && dshPermissions.data?.available
-      ? dshPermissions.data.permissions.length
-      : 0;
   const nativeUsage = session.nativeSummary ?? nativeSummary.data;
   const overviewMetrics = overviewSessionMetrics(session, nativeUsage);
-  // 远端设备会话用快照携带的最近一次交互作为时间线；本地会话走本地时间线命令。
-  const timelineEvents = remote ? (session.remoteEvents ?? []) : (timeline.data?.events ?? []);
-  const timelineTruncated = remote ? (session.nativeSummary?.truncated ?? false) : (timeline.data?.truncated ?? false);
-  const timelineLoading = remote ? false : timeline.isLoading;
-  const timelineError = remote ? null : (timeline.isError ? timeline.error.message : null);
-  // 远端会话概览「最近一轮」直接使用快照携带的交互事件。
-  const remoteLastInteraction = remote && session.remoteEvents && session.remoteEvents.length > 0
-    ? {
-        sourceAvailable: true,
-        truncated: false,
-        turnCount: session.nativeSummary?.turnCount ?? 0,
-        usage: session.nativeSummary?.usage ?? null,
-        models: session.nativeSummary?.models ?? [],
-        events: session.remoteEvents,
-      } satisfies AgentSessionLastInteraction
-    : null;
-  // 概览 Tab「最近一轮」的滚动跟随：在底部时新内容自动滚到底，离开底部时右下角出现
-  // 滚动按钮并用红点提示新内容（与移动端会话弹窗一致）。
-  const overviewScroll = useSessionScrollFollow<HTMLDivElement>();
-  const lastInteractionVersion = useMemo(
-    () => interactionEventsVersion(lastInteraction.data?.events ?? []),
-    [lastInteraction.data],
-  );
-  useLayoutEffect(() => {
-    overviewScroll.observeContent(lastInteractionVersion);
-  }, [overviewScroll.observeContent, lastInteractionVersion]);
   /** 按当前 Tab 拉取对应数据（静默版，不带动按钮 loading）。手动刷新与自动刷新共用；
    *  拉取成功后记录本次刷新时间，供右上角「最后刷新」指示展示。 */
   const refetchActiveTab = () => {
@@ -91,7 +50,6 @@ export function AgentSessionDetailSideSheet({
       if (remote) return Promise.resolve(onRefreshOverview?.());
       if (activeTab === "overview") {
         return Promise.all([
-          lastInteraction.refetch(),
           children.refetch(),
           nativeSummary.refetch(),
           onRefreshOverview?.(),
@@ -99,9 +57,6 @@ export function AgentSessionDetailSideSheet({
       }
       if (activeTab === "usage") {
         return Promise.all([nativeSummary.refetch(), children.refetch()]);
-      }
-      if (activeTab === "conversation" || activeTab === "trajectory") {
-        return timeline.refetch();
       }
       if (activeTab === "child-sessions") {
         return children.refetch();
@@ -150,7 +105,7 @@ export function AgentSessionDetailSideSheet({
           <RefreshControl
             autoRefresh={refreshControl.autoRefresh}
             onToggleAutoRefresh={refreshControl.toggleAutoRefresh}
-            isFetching={remote ? false : lastInteraction.isFetching || timeline.isFetching || children.isFetching || nativeSummary.isFetching || openCodePermissions.isFetching || dshPermissions.isFetching}
+            isFetching={remote ? false : children.isFetching || nativeSummary.isFetching || openCodePermissions.isFetching || dshPermissions.isFetching}
             lastUpdatedAt={lastUpdatedAt}
             intervalMs={refreshControl.intervalMs}
             onRefresh={() => void refetchActiveTab()}
@@ -163,65 +118,22 @@ export function AgentSessionDetailSideSheet({
           type="line"
           activeKey={activeTab}
           tabPaneMotion={false}
-          onChange={(key) => setActiveTab(key as "overview" | "conversation" | "trajectory" | "usage" | "info" | "child-sessions")}
+          onChange={(key) => setActiveTab(key as "overview" | "usage" | "info" | "child-sessions")}
         >
           <Tabs.TabPane tab={t("概览")} itemKey="overview">
             <div className={styles.tabFrame}>
-              <div
-                ref={overviewScroll.containerRef}
-                className={styles.tabScroll}
-                onScroll={overviewScroll.handleScroll}
-              >
+              <div className={styles.tabScroll}>
                 <div className={styles.body}>
                   <OverviewStats metrics={overviewMetrics} language={language} />
                   {remote ? (
-                    <>
-                      <RemoteSnapshotNotice session={session} />
-                      {remoteLastInteraction ? (
-                        <>
-                          <div className={styles.sectionHeading}>
-                            <h3 className={styles.sectionLabel}>{t("最近一轮")}</h3>
-                          </div>
-                          <LastInteractionSection
-                            data={remoteLastInteraction}
-                            loading={false}
-                            error={null}
-                            language={language}
-                            onRetry={() => undefined}
-                            turnBlocked={false}
-                          />
-                        </>
-                      ) : null}
-                    </>
-                  ) : (
-                    <>
-                      <div className={styles.sectionHeading}>
-                        <h3 className={styles.sectionLabel}>{t("最近一轮")}</h3>
-                      </div>
-                      <LastInteractionSection
-                        data={lastInteraction.data}
-                        loading={lastInteraction.isLoading}
-                        error={lastInteraction.isError ? lastInteraction.error.message : null}
-                        language={language}
-                        onRetry={() => void lastInteraction.refetch()}
-                        turnBlocked={pendingApprovalCount > 0}
-                        approvalSection={session.agentType === "opencode" ? (
-                          <OpenCodeApprovalSection session={session} permissions={openCodePermissions} />
-                        ) : session.agentType === "deepseek-harness" ? (
-                          <DshApprovalSection session={session} permissions={dshPermissions} />
-                        ) : null}
-                      />
-                    </>
-                  )}
+                    <RemoteSnapshotNotice session={session} />
+                  ) : session.agentType === "opencode" ? (
+                    <OpenCodeApprovalSection session={session} permissions={openCodePermissions} />
+                  ) : session.agentType === "deepseek-harness" ? (
+                    <DshApprovalSection session={session} permissions={dshPermissions} />
+                  ) : null}
                 </div>
               </div>
-              {!overviewScroll.atBottom ? (
-                <ScrollBottomControl
-                  hasUnseenContent={overviewScroll.hasUnseenContent}
-                  ariaLabel={overviewScroll.hasUnseenContent ? t("有新内容，滚动到底部") : t("滚动到底部")}
-                  onClick={overviewScroll.scrollToBottom}
-                />
-              ) : null}
             </div>
           </Tabs.TabPane>
           <Tabs.TabPane tab={t("信息")} itemKey="info">
@@ -254,32 +166,6 @@ export function AgentSessionDetailSideSheet({
                   </DetailSection>
                 </div>
               </div>
-            </div>
-          </Tabs.TabPane>
-          <Tabs.TabPane tab={t("对话")} itemKey="conversation">
-            <div className={styles.tabFrame}>
-              <div className={styles.tabScroll}>
-                <div className={styles.conversationBody}>
-                  <SessionConversation
-                    events={timelineEvents}
-                    truncated={timelineTruncated}
-                    loading={timelineLoading}
-                    error={timelineError}
-                    language={language}
-                    onRetry={() => void timeline.refetch()}
-                  />
-                </div>
-              </div>
-            </div>
-          </Tabs.TabPane>
-          <Tabs.TabPane tab={t("轨迹")} itemKey="trajectory">
-            <div className={styles.trajectoryFrame}>
-              <SessionTrajectory
-                events={timelineEvents}
-                loading={timelineLoading}
-                error={timelineError}
-                onRetry={() => void timeline.refetch()}
-              />
             </div>
           </Tabs.TabPane>
           <Tabs.TabPane tab={t("用量")} itemKey="usage">
@@ -329,78 +215,6 @@ export function AgentSessionDetailSideSheet({
         </Tabs>
       </div>
     </SideSheet>
-  );
-}
-
-function LastInteractionSection({
-  data,
-  loading,
-  error,
-  language,
-  onRetry,
-  turnBlocked = false,
-  approvalSection = null,
-}: {
-  data: AgentSessionLastInteraction | null | undefined;
-  loading: boolean;
-  error: string | null;
-  language: "zh-CN" | "en-US";
-  onRetry: () => void;
-  turnBlocked?: boolean;
-  approvalSection?: ReactNode;
-}) {
-  const { t } = useAppPreferences();
-  const turnEvent = data?.events.find((event) => event.kind === "turn") ?? null;
-  const events = data?.events.filter((event) => event.kind !== "turn") ?? [];
-  const userEventIndex = events.findIndex((event) => event.kind === "user-message");
-  const userEvent = userEventIndex >= 0 ? events[userEventIndex] : null;
-  const outputEvents = userEventIndex >= 0 ? events.slice(userEventIndex + 1) : events;
-  const outputItems = groupInteractionEvents(outputEvents);
-  const hasAssistantMessage = outputEvents.some((event) => event.kind === "assistant-message");
-  return (
-    <div className={styles.lastInteractionContent}>
-      {loading ? <div className={styles.interactionLoading}><span /><span /><span /></div> : null}
-      {error ? (
-        <div className={styles.childError}>
-          <span>{t("最近一轮加载失败：{message}", { message: error })}</span>
-          <Button size="small" onClick={onRetry}>{t("重试")}</Button>
-        </div>
-      ) : null}
-      {!loading && !error && events.length === 0 ? (
-        <>
-          <div className={styles.emptyState}>{t("未找到可读取的最近一轮")}</div>
-          {approvalSection}
-        </>
-      ) : null}
-      {!loading && !error && events.length > 0 ? (
-        <div className={styles.interactionFlow} aria-label={t("最近一轮")}>
-          {userEvent ? (
-            <article className={styles.userMessageRow} aria-label={t("用户消息")}>
-              {userEvent.content ? <pre className={styles.userMessageBubble}>{userEvent.content}</pre> : null}
-            </article>
-          ) : null}
-          {outputItems.length > 0 ? (
-            <div className={styles.outputStream}>
-              {outputItems.map((item) => item.kind === "event" ? (
-                <InteractionOutputEvent key={item.event.id} event={item.event} language={language} />
-              ) : (
-                <InteractionProcessGroup key={item.id} events={item.events} language={language} />
-              ))}
-            </div>
-          ) : null}
-          {approvalSection}
-          {turnEvent?.status === "running" && !turnBlocked ? (
-            <div className={styles.interactionProgress} role="status"><i />{t("正在处理")}</div>
-          ) : null}
-          {turnEvent?.status === "cancelled" && !hasAssistantMessage ? (
-            <div className={styles.interactionNotice}>{t("本轮已中断，未生成回复")}</div>
-          ) : null}
-          {turnEvent?.status === "completed" && !hasAssistantMessage ? (
-            <div className={styles.interactionNotice}>{t("本轮未生成可展示的回复")}</div>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
   );
 }
 
@@ -777,7 +591,7 @@ function RemoteSnapshotNotice({ session }: { session: AgentSessionRow }) {
   return (
     <div className={styles.remoteNotice}>
       <strong>{t("远端设备会话快照")}</strong>
-      <span>{t("该会话来自设备「{device}」，展示的是最近一次同步的数据，仅包含最近一轮对话；完整记录与请求日志保存在对方设备上。", { device: session.remoteDeviceName ?? session.remoteDeviceId ?? "—" })}</span>
+      <span>{t("该会话来自设备「{device}」，展示的是最近一次同步的汇总数据；完整记录与请求日志保存在对方设备上。", { device: session.remoteDeviceName ?? session.remoteDeviceId ?? "—" })}</span>
     </div>
   );
 }

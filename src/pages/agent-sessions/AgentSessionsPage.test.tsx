@@ -120,7 +120,6 @@ const {
   sessionListRefetchMock,
   childrenRefetchMock,
   nativeSummaryRefetchMock,
-  lastInteractionRefetchMock,
 } = vi.hoisted(() => ({
   permissionReplyMock: vi.fn(() => Promise.resolve()),
   sessionListRefetchMock: vi.fn<() => Promise<{ data: { rows: AgentSessionRow[] } }>>(
@@ -128,7 +127,6 @@ const {
   ),
   childrenRefetchMock: vi.fn(() => Promise.resolve()),
   nativeSummaryRefetchMock: vi.fn(() => Promise.resolve()),
-  lastInteractionRefetchMock: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock("../../features/agent-sessions/useAgentSessions", () => ({
@@ -179,44 +177,6 @@ vi.mock("../../features/agent-sessions/useAgentSessions", () => ({
     error: null,
     refetch: nativeSummaryRefetchMock,
   }),
-  useAgentSessionLastInteraction: () => ({
-    data: {
-      sourceAvailable: true,
-      truncated: false,
-      turnCount: 1,
-      usage: null,
-      models: ["native-model"],
-      events: [
-        { id: "turn-latest", kind: "turn", source: "agent-native", timestamp: "2026-07-18T09:00:00Z", title: null, content: null, model: "native-model", status: "running", durationMs: null, timeToFirstTokenMs: null, usage: null },
-        { id: "user-latest", kind: "user-message", source: "agent-native", timestamp: "2026-07-18T09:00:00Z", title: null, content: "latest complete input", model: null, status: null, durationMs: null, timeToFirstTokenMs: null, usage: null },
-        { id: "assistant-first", kind: "assistant-message", source: "agent-native", timestamp: "2026-07-18T09:00:01Z", title: null, content: "first output", model: "native-model", status: "completed", durationMs: null, timeToFirstTokenMs: null, usage: null },
-        { id: "reasoning-latest", kind: "reasoning", source: "agent-native", timestamp: "2026-07-18T09:00:02Z", title: "思考摘要", content: "check the implementation", model: null, status: null, durationMs: null, timeToFirstTokenMs: null, usage: null },
-        { id: "tool-call-latest", kind: "tool-call", source: "agent-native", timestamp: "2026-07-18T09:00:03Z", title: "exec_command", content: JSON.stringify({ cmd: "cargo test", workdir: "E:\\flowlet" }), model: null, status: "completed", durationMs: null, timeToFirstTokenMs: null, usage: null },
-        { id: "tool-result-latest", kind: "tool-result", source: "agent-native", timestamp: "2026-07-18T09:00:04Z", title: "exec_command", content: JSON.stringify({ output: "2 tests passed", exit_code: 0 }), model: null, status: "completed", durationMs: null, timeToFirstTokenMs: null, usage: null },
-        { id: "assistant-second", kind: "assistant-message", source: "agent-native", timestamp: "2026-07-18T09:00:02Z", title: null, content: "second output", model: "native-model", status: "completed", durationMs: null, timeToFirstTokenMs: null, usage: null },
-      ],
-    },
-    isLoading: false,
-    isFetching: false,
-    isError: false,
-    error: null,
-    refetch: lastInteractionRefetchMock,
-  }),
-  useAgentSessionTimeline: () => ({
-    data: {
-      sourceAvailable: true,
-      truncated: false,
-      turnCount: 1,
-      usage: null,
-      models: ["native-model"],
-      events: [],
-    },
-    isLoading: false,
-    isFetching: false,
-    isError: false,
-    error: null,
-    refetch: vi.fn(() => Promise.resolve()),
-  }),
   useDshSessionPermissions: () => ({
     data: { available: false, permissions: [], error: null },
     isLoading: false,
@@ -240,7 +200,6 @@ describe("AgentSessionsPage", () => {
       sessionListRefetchMock,
       childrenRefetchMock,
       nativeSummaryRefetchMock,
-      lastInteractionRefetchMock,
     ].forEach((mock) => mock.mockClear());
   });
 
@@ -373,41 +332,17 @@ describe("AgentSessionsPage", () => {
     expect(within(overview).getByText("4")).toBeInTheDocument();
     expect(within(overview).getByText("1")).toBeInTheDocument();
 
-    // 刷新概览：最近一轮 + 子会话 + 原生用量 + 列表。
+    // 刷新概览：子会话 + 原生用量 + 列表（内容读取 Tab 已移除）。
     // 抽屉打开时会立即自动刷新一次（移动端同款行为），先清除该次调用再验证手动刷新。
-    const tabList = screen.getByRole("tablist");
     const drawer = screen.getByRole("dialog");
-    [sessionListRefetchMock, childrenRefetchMock, nativeSummaryRefetchMock, lastInteractionRefetchMock].forEach((mock) => mock.mockClear());
+    [sessionListRefetchMock, childrenRefetchMock, nativeSummaryRefetchMock].forEach((mock) => mock.mockClear());
     fireEvent.click(within(drawer).getByRole("button", { name: "刷新数据" }));
     await waitFor(() => {
-      expect(lastInteractionRefetchMock).toHaveBeenCalledOnce();
       expect(childrenRefetchMock).toHaveBeenCalledOnce();
       expect(nativeSummaryRefetchMock).toHaveBeenCalledOnce();
       expect(sessionListRefetchMock).toHaveBeenCalledOnce();
     });
-    [sessionListRefetchMock, childrenRefetchMock, nativeSummaryRefetchMock, lastInteractionRefetchMock].forEach((mock) => mock.mockClear());
-
-    // 最近一轮嵌入概览
-    expect(within(overview).queryByText("完整展示最后一个用户输入及其后的全部 Agent 输出与过程事件")).not.toBeInTheDocument();
-    const input = within(overview).getByLabelText("用户消息");
-    expect(within(input).getByText("latest complete input")).toBeInTheDocument();
-    expect(within(overview).getByText("first output")).toBeInTheDocument();
-    expect(within(overview).getByText("second output")).toBeInTheDocument();
-    expect(within(overview).getByRole("status")).toHaveTextContent("正在处理");
-    expect(within(overview).queryByText("用户输入")).not.toBeInTheDocument();
-    expect(within(overview).queryByText("Agent 输出")).not.toBeInTheDocument();
-    expect(within(overview).queryByText("OpenCode · native-model")).not.toBeInTheDocument();
-    const process = within(overview).getByText("已处理 3 项").closest("details")!;
-    expect(process).not.toHaveAttribute("open");
-    fireEvent.click(within(overview).getByText("已处理 3 项"));
-    expect(process).toHaveAttribute("open");
-    expect(within(process).getByText("cargo test")).toBeInTheDocument();
-    expect(within(process).getByText("E:\\flowlet")).toBeInTheDocument();
-    expect(within(process).getByText("2 tests passed")).toBeInTheDocument();
-    expect(within(process).getByText("命令")).toBeInTheDocument();
-    expect(within(process).getByText("工作目录")).toBeInTheDocument();
-    expect(within(process).getByText("退出码")).toBeInTheDocument();
-    expect(screen.queryByText("会话时间线")).not.toBeInTheDocument();
+    [sessionListRefetchMock, childrenRefetchMock, nativeSummaryRefetchMock].forEach((mock) => mock.mockClear());
 
     // 用量 Tab：Flowlet 请求统计 + Agent 原生用量
     fireEvent.click(screen.getByRole("tab", { name: "用量" }));
@@ -423,7 +358,6 @@ describe("AgentSessionsPage", () => {
       expect(nativeSummaryRefetchMock).toHaveBeenCalledOnce();
       expect(childrenRefetchMock).toHaveBeenCalledOnce();
     });
-    expect(lastInteractionRefetchMock).not.toHaveBeenCalled();
     expect(sessionListRefetchMock).not.toHaveBeenCalled();
     [childrenRefetchMock, nativeSummaryRefetchMock].forEach((mock) => mock.mockClear());
 
@@ -571,8 +505,6 @@ describe("AgentSessionsPage", () => {
     expect(screen.getByText("远端设备会话快照")).toBeInTheDocument();
     expect(screen.getByText(/来自 办公室电脑/)).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "概览" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "对话" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "轨迹" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "用量" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "信息" })).toBeInTheDocument();
   });

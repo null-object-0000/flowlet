@@ -317,6 +317,7 @@ export function AgentAccessSideSheet({
                       size="small"
                       value={modelSelector.value}
                       optionList={modelSelector.options}
+                      zIndex={APP_OVERLAY_Z_INDEX.sideSheet + 1}
                       disabled={globalConfigBusy || globalConfig.state === "invalid" || !clientToken}
                       onChange={(value) => void onApplyGlobalConfig(modelSelector.applyOptions(String(value)))}
                     />

@@ -179,6 +179,37 @@
         "manualDescription": "Flowlet 会安全合并 DSH 官方 YAML 配置；下方片段与一键写入内容一致。",
         "restartTip": "DSH 会热加载 settings.yaml 与 .credentials.yaml；配置生效无需重启 DSH Web。"
       }
+    },
+    {
+      "id": "flowlet.agent.hermes",
+      "kind": "agent",
+      "agent": {
+        "id": "hermes",
+        "name": "Hermes Agent",
+        "environmentAdapterId": "hermes",
+        "globalConfigAdapterId": "hermes",
+        "sessionAdapterId": "hermes",
+        "identityAdapterId": "hermes",
+        "runnerAdapterId": "hermes",
+        "sessionTypes": [{ "id": "hermes", "name": "Hermes Agent", "clientId": "hermes" }],
+        "taskProfile": { "name": "Hermes Agent", "sessionType": "hermes" },
+        "configCapabilities": [],
+        "endpointSuffix": "/v1",
+        "npmPackage": "hermes-agent",
+        "surfaces": ["cli"],
+        "iconSrc": "/icons/lobe/hermesagent.svg",
+        "officialUrl": "https://hermes-agent.nousresearch.com/",
+        "updateUrl": "https://github.com/NousResearch/hermes-agent/releases",
+        "showsCredentialsFile": true,
+        "showsFastModel": false,
+        "showsSubagentModel": false,
+        "supportsManagedConfig": true,
+        "environmentDescription": "识别 Hermes Agent CLI 的安装位置和版本",
+        "notInstalledText": "未检测到 Hermes Agent。Flowlet 会检查 PATH 和官方常见安装位置。",
+        "globalConfigDescription": "Hermes Agent 使用 ~/.hermes/config.yaml 描述模型与 Provider，API Key 以 ${HERMES_CUSTOM_…_API_KEY} 引用写入 ~/.hermes/.env",
+        "manualDescription": "以下内容与一键写入的 Hermes Agent config.yaml 与 .env 配置一致",
+        "restartTip": "config.yaml 在下次 hermes chat 启动时读取；修改后请重新启动 Hermes Agent。"
+      }
     }
   ]
 }

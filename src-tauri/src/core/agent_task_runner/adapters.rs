@@ -5,6 +5,7 @@ use std::pin::Pin;
 pub(super) mod claude_code;
 pub(super) mod codex;
 pub(super) mod deepseek_harness;
+pub(super) mod hermes;
 pub(super) mod opencode;
 pub(super) mod pi;
 
@@ -91,6 +92,18 @@ pub(crate) static DEEPSEEK_HARNESS: AgentTaskRunnerAdapter = AgentTaskRunnerAdap
         resume_unsupported_message: "DeepSeek Harness headless 当前不提供稳定的 resume 参数；Flowlet 不会把续跑伪装成新会话。请将任务会话策略改为 fresh。",
         execute: execute_deepseek_harness_boxed,
     };
+pub(crate) static HERMES: AgentTaskRunnerAdapter = AgentTaskRunnerAdapter {
+    id: "hermes",
+    profile: "Hermes Agent",
+    environment_adapter_id: "hermes",
+    display_name: "Hermes Agent",
+    required_surface: AgentSurface::Cli,
+    supports_resume: false,
+    missing_executable_message:
+        "未检测到 Hermes Agent CLI 可执行文件，请先安装 Hermes Agent（curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash）后重试。",
+    resume_unsupported_message: "Hermes Agent 一次性任务模式（--oneshot）当前不提供稳定的 resume 参数；Flowlet 不会把续跑伪装成新会话。请将任务会话策略改为 fresh。",
+    execute: execute_hermes_boxed,
+};
 
 pub(super) fn for_profile(profile: &str) -> Option<&'static AgentTaskRunnerAdapter> {
     let normalized = profile.trim();
@@ -154,6 +167,7 @@ boxed_runner!(
     execute_deepseek_harness_boxed,
     deepseek_harness::execute_deepseek_harness
 );
+boxed_runner!(execute_hermes_boxed, hermes::execute_hermes);
 
 #[cfg(test)]
 mod tests {
@@ -166,7 +180,7 @@ mod tests {
                 .iter()
                 .map(|bundle| bundle.runner.id)
                 .collect::<Vec<_>>(),
-            vec!["claude-code", "opencode", "pi", "codex", "deepseek-harness"]
+            vec!["claude-code", "opencode", "pi", "codex", "deepseek-harness", "hermes"]
         );
         assert_eq!(
             for_profile("").map(|adapter| adapter.id),
@@ -174,5 +188,6 @@ mod tests {
         );
         assert!(for_profile("missing").is_none());
         assert!(!has("missing"));
+        assert_eq!(for_profile("Hermes Agent").map(|adapter| adapter.id), Some("hermes"));
     }
 }

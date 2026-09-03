@@ -9,7 +9,7 @@ describe("plugin registry", () => {
   });
 
   it("registers each agent identity and integration metadata once", () => {
-    expect(AGENT_PLUGINS.map((agent) => agent.id)).toEqual(["claude-code", "opencode", "pi", "codex", "deepseek-harness"]);
+    expect(AGENT_PLUGINS.map((agent) => agent.id)).toEqual(["claude-code", "opencode", "pi", "codex", "deepseek-harness", "hermes"]);
     expect(agentPlugin("claude-code").endpointSuffix).toBe("/anthropic");
     expect(agentPlugin("codex").environmentAdapterId).toBe("chatgpt-desktop");
     expect(agentPlugin("codex").globalConfigAdapterId).toBe("codex");
@@ -31,13 +31,18 @@ describe("plugin registry", () => {
     expect(agentPlugin("opencode").configCapabilities).toEqual([
       expect.objectContaining({ id: "model-specs", defaultEnabled: false, requiresRestart: true }),
     ]);
+    expect(agentPlugin("hermes").endpointSuffix).toBe("/v1");
+    expect(agentPlugin("hermes").surfaces).toEqual(["cli"]);
+    expect(agentPlugin("hermes").configCapabilities).toEqual([]);
+    expect(agentPlugin("hermes").supportsManagedConfig).toBe(true);
     expect(AGENT_SESSION_OPTIONS.map((session) => session.id)).toEqual([
-      "claude-code", "opencode", "pi", "codex-desktop", "codex-cli", "deepseek-harness",
+      "claude-code", "opencode", "pi", "codex-desktop", "codex-cli", "deepseek-harness", "hermes",
     ]);
     expect(AGENT_SESSION_OPTIONS.find((session) => session.id === "codex-cli")?.clientId).toBe("codex");
     expect(AGENT_TASK_PROFILE_OPTIONS.map((profile) => profile.value)).toEqual([
-      "Claude Code", "OpenCode", "Pi", "Codex", "DeepSeek Harness",
+      "Claude Code", "OpenCode", "Pi", "Codex", "DeepSeek Harness", "Hermes Agent",
     ]);
     expect(agentTaskSessionType("DeepSeek Harness")).toBe("deepseek-harness");
+    expect(agentTaskSessionType("Hermes Agent")).toBe("hermes");
   });
 });

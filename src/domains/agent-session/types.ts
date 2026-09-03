@@ -1,6 +1,6 @@
 import { registeredAgentSessionLabel } from "../pluginRegistry";
 
-export type AgentSessionType = "opencode" | "claude-code" | "codex-desktop" | "codex-cli" | "pi" | "deepseek-harness";
+export type AgentSessionType = "opencode" | "claude-code" | "codex-desktop" | "codex-cli" | "pi" | "deepseek-harness" | "hermes";
 export type AgentSessionRuntimeStatus = "idle" | "running" | "waiting_user" | "unknown";
 
 /** 未登记的新类型显示原始 id，禁止静默回退成另一个 Agent。 */

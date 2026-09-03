@@ -3,6 +3,7 @@ use super::{AgentGlobalConfigOptions, AgentGlobalConfigReport};
 pub(super) mod claude_code;
 pub(super) mod codex;
 pub(super) mod deepseek_harness;
+pub(super) mod hermes;
 pub(super) mod opencode;
 pub(super) mod pi;
 
@@ -24,12 +25,14 @@ static PI_VALUE: pi::PiAdapter = pi::PiAdapter;
 static CODEX_VALUE: codex::CodexAdapter = codex::CodexAdapter;
 static DEEPSEEK_HARNESS_VALUE: deepseek_harness::DeepSeekHarnessAdapter =
     deepseek_harness::DeepSeekHarnessAdapter;
+static HERMES_VALUE: hermes::HermesAdapter = hermes::HermesAdapter;
 
 pub(crate) static CLAUDE_CODE: &dyn AgentGlobalConfigAdapter = &CLAUDE_CODE_VALUE;
 pub(crate) static OPENCODE: &dyn AgentGlobalConfigAdapter = &OPENCODE_VALUE;
 pub(crate) static PI: &dyn AgentGlobalConfigAdapter = &PI_VALUE;
 pub(crate) static CODEX: &dyn AgentGlobalConfigAdapter = &CODEX_VALUE;
 pub(crate) static DEEPSEEK_HARNESS: &dyn AgentGlobalConfigAdapter = &DEEPSEEK_HARNESS_VALUE;
+pub(crate) static HERMES: &dyn AgentGlobalConfigAdapter = &HERMES_VALUE;
 
 fn find(adapter_id: &str) -> Option<&'static dyn AgentGlobalConfigAdapter> {
     crate::core::agent_plugin_bundle::bundles()
@@ -57,9 +60,9 @@ mod tests {
                 .iter()
                 .map(|bundle| bundle.global_config.id())
                 .collect::<Vec<_>>(),
-            vec!["claude-code", "opencode", "pi", "codex", "deepseek-harness"]
+            vec!["claude-code", "opencode", "pi", "codex", "deepseek-harness", "hermes"]
         );
-        for adapter_id in ["claude-code", "opencode", "pi", "codex", "deepseek-harness"] {
+        for adapter_id in ["claude-code", "opencode", "pi", "codex", "deepseek-harness", "hermes"] {
             assert!(has_adapter(adapter_id), "missing adapter: {adapter_id}");
             assert!(adapter(adapter_id).is_ok());
         }

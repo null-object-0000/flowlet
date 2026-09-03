@@ -50,8 +50,33 @@ pub(crate) fn opencode_database_candidates() -> Vec<PathBuf> {
     candidates
 }
 
+/// Hermes Agent 的会话数据库候选路径（默认 Profile + `HERMES_HOME` 覆盖）。
+/// 会话与消息都存在 `state.db`（SQLite，WAL），时间戳为 Unix epoch 浮点秒。
+pub(crate) fn hermes_database_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(home) = std::env::var_os("HERMES_HOME").map(PathBuf::from) {
+        candidates.push(home.join("state.db"));
+    }
+    if let Some(home) = dirs::home_dir() {
+        candidates.push(home.join(".hermes").join("state.db"));
+    }
+    let mut seen = HashSet::new();
+    candidates.retain(|path| seen.insert(path.clone()));
+    candidates
+}
+
 pub(crate) fn format_unix_millis(value: i64) -> Option<String> {
     DateTime::<Utc>::from_timestamp_millis(value).map(|value| value.to_rfc3339())
+}
+
+/// Hermes Agent 的 `sessions.started_at` / `messages.timestamp` 是 Unix epoch 浮点秒，
+/// 与 OpenCode/Codex 的毫秒整型不同，需要单独换算为 RFC3339。
+pub(crate) fn format_unix_seconds(value: f64) -> Option<String> {
+    let millis = (value * 1000.0).round();
+    if !millis.is_finite() || millis < 0.0 || millis > i64::MAX as f64 {
+        return None;
+    }
+    DateTime::<Utc>::from_timestamp_millis(millis as i64).map(|value| value.to_rfc3339())
 }
 
 pub(crate) fn string_field(value: &Value, field: &str) -> Option<String> {

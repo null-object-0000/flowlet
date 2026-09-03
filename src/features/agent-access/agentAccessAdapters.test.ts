@@ -19,7 +19,33 @@ function context(globalConfig?: Partial<AgentGlobalConfigReport>): AgentAccessCo
 describe("agent access adapters", () => {
   it("resolves every registered global config adapter", () => {
     expect(AGENT_PLUGINS.map((plugin) => agentAccessAdapter(plugin.globalConfigAdapterId).id))
-      .toEqual(["claude-code", "opencode", "pi", "codex", "deepseek-harness"]);
+      .toEqual(["claude-code", "opencode", "pi", "codex", "deepseek-harness", "hermes"]);
+  });
+
+  it("lets Hermes pick the default aggregate model", () => {
+    const adapter = agentAccessAdapter("hermes");
+
+    // 默认主模型 flowlet-pro，applyOptions 回填当前选择。
+    expect(adapter.applyOptions(context())).toEqual({ primaryModel: "flowlet-pro" });
+    const selector = adapter.modelSelector?.(context())!;
+    expect(selector.value).toBe("flowlet-pro");
+    expect(selector.options.map((option) => option.value)).toEqual(["flowlet-pro", "flowlet-flash"]);
+    expect(selector.applyOptions("flowlet-flash")).toEqual({ primaryModel: "flowlet-flash" });
+
+    // 已配置 flowlet-flash 时，选择器与片段都反映该选择。
+    const flash = context({ primary_model: "flowlet-flash" });
+    expect(adapter.applyOptions(flash)).toEqual({ primaryModel: "flowlet-flash" });
+    expect(adapter.modelSelector?.(flash)!.value).toBe("flowlet-flash");
+    expect(adapter.manualSnippets(flash)[0].copyValue).toContain('default: "flowlet-flash"');
+
+    // 非法/缺失值回退 flowlet-pro。
+    expect(adapter.applyOptions(context({ primary_model: "gpt-4o" }))).toEqual({ primaryModel: "flowlet-pro" });
+
+    // 手动片段注入 x-flowlet-client 与 ${HERMES_CUSTOM_...} 引用。
+    const snippets = adapter.manualSnippets(context());
+    expect(snippets[0].copyValue).toContain('x-flowlet-client: "hermes"');
+    expect(snippets[0].copyValue).toContain('api_key: "${HERMES_CUSTOM_127_0_0_1_8787_API_KEY}"');
+    expect(snippets[1].copyValue).toBe("HERMES_CUSTOM_127_0_0_1_8787_API_KEY=real-token");
   });
 
   it("keeps Claude long-context controls and snippets in sync", () => {

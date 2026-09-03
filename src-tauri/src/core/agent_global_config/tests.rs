@@ -15,6 +15,7 @@ use super::adapters::pi::{
     apply_pi, apply_pi_with_model_specs, inspect_pi, restore_pi, PI_FAST_MODEL, PI_PRIMARY_MODEL,
     PI_PROVIDER_ID, PI_SESSION_EXTENSION_SOURCE,
 };
+use super::adapters::hermes::{apply_hermes, inspect_hermes, restore_hermes};
 use super::*;
 
 fn test_settings_path() -> PathBuf {
@@ -1555,4 +1556,153 @@ fn legacy_codex_backup_without_models_fields_is_upgraded_on_reapply() {
     assert!(!models_path.exists());
     assert!(!config_path.exists());
     assert!(!backup_path.exists());
+}
+
+#[test]
+fn hermes_config_lifecycle_uses_real_upstream_fixture() {
+    // 真实 Hermes Agent 全新安装时的 config.yaml：`model` 是空串哨兵，另含用户自定义段；
+    // `.env` 里有其它 Provider 密钥与注释，用于验证 apply/restore 只触碰受管变量。
+    let directory = std::env::temp_dir().join(format!(
+        "flowlet-hermes-global-config-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&directory).unwrap();
+    let config_path = directory.join("config.yaml");
+    let env_path = directory.join(".env");
+    let expected_base_url = "http://127.0.0.1:18640/v1";
+    std::fs::write(
+        &config_path,
+        concat!(
+            "model: \"\"\n",
+            "terminal:\n",
+            "  backend: local\n",
+            "  timeout: 180\n",
+            "display:\n",
+            "  theme: dark\n",
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        &env_path,
+        concat!("# Hermes Agent Environment Configuration\n", "OPENROUTER_API_KEY=sk-or-keep\n", "NOVITA_API_KEY=sk-novita-keep\n"),
+    )
+    .unwrap();
+
+    // inspect：未配置。
+    let before = inspect_hermes(&config_path, &env_path, expected_base_url).unwrap();
+    assert_eq!(before.state, AgentGlobalConfigState::NotConfigured);
+    assert_eq!(before.primary_model, None);
+    assert_eq!(before.credentials_path.as_deref(), Some(display_path(&env_path).as_str()));
+
+    // apply：Flowlet 配置写入 config.yaml（api_key 是 ${HERMES_CUSTOM_...} 引用）与 .env
+    // （真实密钥），重新解析输出格式并保留用户无关段与其它 .env 变量。
+    let applied = apply_hermes(&config_path, &env_path, expected_base_url, "flowlet-token", "flowlet-pro".to_string()).unwrap();
+    assert_eq!(applied.state, AgentGlobalConfigState::Flowlet);
+    assert_eq!(applied.primary_model.as_deref(), Some("flowlet-pro"));
+    assert_eq!(
+        applied.base_url.as_deref(),
+        Some("http://127.0.0.1:18640/v1")
+    );
+    assert!(applied.api_key_configured);
+    let yaml: serde_yaml::Value =
+        serde_yaml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    assert_eq!(yaml["model"]["provider"].as_str(), Some("custom"));
+    assert_eq!(yaml["model"]["default"].as_str(), Some("flowlet-pro"));
+    assert_eq!(
+        yaml["model"]["api_key"].as_str(),
+        Some("${HERMES_CUSTOM_127_0_0_1_18640_API_KEY}")
+    );
+    assert_eq!(
+        yaml["model"]["default_headers"]["x-flowlet-client"].as_str(),
+        Some("hermes")
+    );
+    assert_eq!(yaml["terminal"]["backend"].as_str(), Some("local"));
+    assert_eq!(yaml["display"]["theme"].as_str(), Some("dark"));
+    let env_text = std::fs::read_to_string(&env_path).unwrap();
+    assert!(env_text.contains("HERMES_CUSTOM_127_0_0_1_18640_API_KEY=flowlet-token"));
+    assert!(env_text.contains("OPENROUTER_API_KEY=sk-or-keep"));
+    assert!(env_text.contains("NOVITA_API_KEY=sk-novita-keep"));
+
+    // reapply：幂等，仍是 Flowlet 且不产生重复键/重复 .env 变量。
+    let reapplied = apply_hermes(&config_path, &env_path, expected_base_url, "flowlet-token", "flowlet-pro".to_string()).unwrap();
+    assert_eq!(reapplied.state, AgentGlobalConfigState::Flowlet);
+    let text = std::fs::read_to_string(&config_path).unwrap();
+    assert_eq!(text.matches("provider:").count(), 1);
+    assert_eq!(text.matches("default:").count(), 1);
+    let reparse: serde_yaml::Value = serde_yaml::from_str(&text).unwrap();
+    assert_eq!(reparse["model"]["provider"].as_str(), Some("custom"));
+    let env_text = std::fs::read_to_string(&env_path).unwrap();
+    assert_eq!(env_text.matches("HERMES_CUSTOM_127_0_0_1_18640_API_KEY=").count(), 1);
+
+    // restore：完整还原到接入前的哨兵状态，并删除 Flowlet 写入的 .env 变量、保留其它变量。
+    let restored = restore_hermes(&config_path, &env_path, expected_base_url).unwrap();
+    assert_eq!(restored.state, AgentGlobalConfigState::NotConfigured);
+    let restored_text = std::fs::read_to_string(&config_path).unwrap();
+    assert!(restored_text.contains("model: \"\"") || restored_text.contains("model: ''"));
+    let reparse: serde_yaml::Value = serde_yaml::from_str(&restored_text).unwrap();
+    assert_eq!(reparse["terminal"]["backend"].as_str(), Some("local"));
+    assert_eq!(reparse["display"]["theme"].as_str(), Some("dark"));
+    assert!(reparse.get("model").is_none_or(|value| !value.is_mapping()));
+    let env_text = std::fs::read_to_string(&env_path).unwrap();
+    assert!(!env_text.contains("HERMES_CUSTOM_127_0_0_1_18640_API_KEY"));
+    assert!(env_text.contains("OPENROUTER_API_KEY=sk-or-keep"));
+    assert!(env_text.contains("NOVITA_API_KEY=sk-novita-keep"));
+
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn hermes_custom_key_env_derives_from_host_port() {
+    assert_eq!(
+        super::adapters::hermes::hermes_custom_key_env("127.0.0.1:18640"),
+        "HERMES_CUSTOM_127_0_0_1_18640_API_KEY"
+    );
+    assert_eq!(
+        super::adapters::hermes::hermes_custom_key_env("localhost:8080"),
+        "HERMES_CUSTOM_LOCALHOST_8080_API_KEY"
+    );
+    assert_eq!(
+        super::adapters::hermes::hermes_custom_key_env(""),
+        "HERMES_CUSTOM_API_KEY"
+    );
+}
+
+#[test]
+fn hermes_primary_model_resolves_user_choice_with_fallback() {
+    let resolve = |primary_model: Option<&str>| {
+        super::adapters::hermes::resolve_primary_model(Some(&AgentGlobalConfigOptions {
+            primary_model: primary_model.map(str::to_string),
+            ..Default::default()
+        }))
+    };
+    assert_eq!(resolve(Some("flowlet-pro")), "flowlet-pro");
+    assert_eq!(resolve(Some("flowlet-flash")), "flowlet-flash");
+    // 非法值/缺省回退到默认主模型。
+    assert_eq!(resolve(Some("gpt-4o")), "flowlet-pro");
+    assert_eq!(resolve(None), "flowlet-pro");
+    assert_eq!(super::adapters::hermes::resolve_primary_model(None), "flowlet-pro");
+}
+
+#[test]
+fn hermes_apply_writes_selected_fast_model_and_still_detects_flowlet() {
+    let directory = std::env::temp_dir().join(format!(
+        "flowlet-hermes-model-choice-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&directory).unwrap();
+    let config_path = directory.join("config.yaml");
+    let env_path = directory.join(".env");
+    let expected_base_url = "http://127.0.0.1:18640/v1";
+    std::fs::write(&config_path, "model: \"\"\n").unwrap();
+
+    let applied =
+        apply_hermes(&config_path, &env_path, expected_base_url, "flowlet-token", "flowlet-flash".to_string())
+            .unwrap();
+    assert_eq!(applied.state, AgentGlobalConfigState::Flowlet);
+    assert_eq!(applied.primary_model.as_deref(), Some("flowlet-flash"));
+    let yaml: serde_yaml::Value =
+        serde_yaml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    assert_eq!(yaml["model"]["default"].as_str(), Some("flowlet-flash"));
+
+    std::fs::remove_dir_all(directory).unwrap();
 }

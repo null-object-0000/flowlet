@@ -3,6 +3,7 @@ use super::AgentIdentityAdapter;
 mod claude_code;
 mod codex;
 mod deepseek_harness;
+mod hermes;
 mod opencode;
 mod pi;
 
@@ -13,12 +14,14 @@ static PI_VALUE: pi::PiIdentityAdapter = pi::PiIdentityAdapter;
 static CODEX_VALUE: codex::CodexIdentityAdapter = codex::CodexIdentityAdapter;
 static DEEPSEEK_HARNESS_VALUE: deepseek_harness::DeepSeekHarnessIdentityAdapter =
     deepseek_harness::DeepSeekHarnessIdentityAdapter;
+static HERMES_VALUE: hermes::HermesIdentityAdapter = hermes::HermesIdentityAdapter;
 
 pub(crate) static CLAUDE_CODE: &dyn AgentIdentityAdapter = &CLAUDE_CODE_VALUE;
 pub(crate) static OPENCODE: &dyn AgentIdentityAdapter = &OPENCODE_VALUE;
 pub(crate) static PI: &dyn AgentIdentityAdapter = &PI_VALUE;
 pub(crate) static CODEX: &dyn AgentIdentityAdapter = &CODEX_VALUE;
 pub(crate) static DEEPSEEK_HARNESS: &dyn AgentIdentityAdapter = &DEEPSEEK_HARNESS_VALUE;
+pub(crate) static HERMES: &dyn AgentIdentityAdapter = &HERMES_VALUE;
 
 #[cfg(test)]
 mod tests {
@@ -28,7 +31,7 @@ mod tests {
             crate::core::agent_plugin_bundle::identity_adapters()
                 .map(|adapter| adapter.id())
                 .collect::<Vec<_>>(),
-            vec!["claude-code", "pi", "deepseek-harness", "codex", "opencode"]
+            vec!["claude-code", "pi", "deepseek-harness", "codex", "opencode", "hermes"]
         );
     }
 }

@@ -5,6 +5,7 @@ use std::pin::Pin;
 mod claude_code;
 pub(in crate::core::agent_environment) mod codex;
 mod deepseek_harness;
+mod hermes;
 mod opencode;
 mod pi;
 
@@ -42,6 +43,11 @@ pub(crate) static DEEPSEEK_HARNESS: AgentEnvironmentAdapter = AgentEnvironmentAd
     detect: deepseek_harness::detect_boxed,
     runtime: Some(&deepseek_harness::RUNTIME),
 };
+pub(crate) static HERMES: AgentEnvironmentAdapter = AgentEnvironmentAdapter {
+    id: "hermes",
+    detect: hermes::detect_boxed,
+    runtime: None,
+};
 
 pub(super) fn get(adapter_id: &str) -> Option<&'static AgentEnvironmentAdapter> {
     crate::core::agent_plugin_bundle::bundles()
@@ -70,11 +76,13 @@ mod tests {
                 "opencode",
                 "pi",
                 "chatgpt-desktop",
-                "deepseek-harness"
+                "deepseek-harness",
+                "hermes"
             ]
         );
         assert!(has("claude-code"));
         assert!(has("chatgpt-desktop"));
+        assert!(has("hermes"));
         assert!(!has("codex"));
         assert!(!has("unknown"));
     }

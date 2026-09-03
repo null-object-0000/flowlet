@@ -134,6 +134,10 @@ pub struct AgentGlobalConfigOptions {
     /// 的图片候选过滤使用同一份能力事实源。
     #[serde(skip)]
     pub(crate) model_input_modalities: Option<BTreeMap<String, Vec<String>>>,
+    /// 仅 Hermes Agent：用户选择的默认模型（`flowlet-pro` / `flowlet-flash`）。
+    /// 未传或非法时使用 Adapter 默认值（flowlet-pro）；其余 Agent 忽略该字段。
+    #[serde(default)]
+    pub primary_model: Option<String>,
     /// 仅 DeepSeek Harness：是否部署受管交互确认桥（approval bridge）。
     /// 部署后 DSH headless 会话的 approval/request 会经文件桥转交 Flowlet
     /// 桌面端确认或否决。未传选项时保持已有状态不变。

@@ -873,14 +873,16 @@ fn inspect_dsh_at(home: &Path, expected_base_url: &str) -> Result<AgentGlobalCon
     Ok(report(state, base_url, token, model, None))
 }
 
-fn read_yaml_text(path: &Path) -> Result<String, String> {
+pub(in crate::core::agent_global_config) fn read_yaml_text(path: &Path) -> Result<String, String> {
     if !path.is_file() {
         return Ok(String::new());
     }
     std::fs::read_to_string(path).map_err(|error| format!("读取 {} 失败：{error}", path.display()))
 }
 
-fn read_yaml_value(path: &Path) -> Result<serde_yaml::Value, String> {
+pub(in crate::core::agent_global_config) fn read_yaml_value(
+    path: &Path,
+) -> Result<serde_yaml::Value, String> {
     let text = read_yaml_text(path)?;
     if text.trim().is_empty() {
         return Ok(serde_yaml::Value::Mapping(Default::default()));
@@ -902,7 +904,10 @@ fn read_credential_value(path: &Path) -> Result<Option<String>, String> {
         .map(str::to_string))
 }
 
-fn yaml_at<'a>(root: &'a serde_yaml::Value, path: &[&str]) -> Option<&'a serde_yaml::Value> {
+pub(in crate::core::agent_global_config) fn yaml_at<'a>(
+    root: &'a serde_yaml::Value,
+    path: &[&str],
+) -> Option<&'a serde_yaml::Value> {
     let mut current = Some(root);
     for segment in path {
         current = current.and_then(|value| {
@@ -1098,7 +1103,7 @@ fn render_nested_entry(
     }
 }
 
-fn patch_yaml_entry(
+pub(in crate::core::agent_global_config) fn patch_yaml_entry(
     text: &str,
     label: &str,
     parents: &[&str],

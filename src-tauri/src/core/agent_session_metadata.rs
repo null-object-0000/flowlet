@@ -1,5 +1,6 @@
 use super::agent_session_sources::{
-    collect_jsonl_files, format_unix_millis, opencode_database_candidates, string_field,
+    collect_jsonl_files, format_unix_millis, format_unix_seconds, hermes_database_candidates,
+    opencode_database_candidates, string_field,
 };
 use super::config::AgentSessionRow;
 use chrono::{DateTime, NaiveDateTime, Utc};
@@ -101,6 +102,20 @@ fn raw_native_agent_source_watches() -> Vec<NativeAgentSourceWatch> {
             });
         }
     }
+    // Hermes Agent 的会话与消息都持久化在 `state.db`（SQLite），监听其父目录以捕获
+    // `state.db` / `state.db-wal` 的变更。
+    for database in hermes_database_candidates()
+        .into_iter()
+        .filter(|path| path.is_file())
+    {
+        if let Some(parent) = database.parent() {
+            watches.push(NativeAgentSourceWatch {
+                agent_type: "hermes".into(),
+                path: parent.to_path_buf(),
+                recursive: false,
+            });
+        }
+    }
     for database in opencode_database_candidates()
         .into_iter()
         .filter(|path| path.is_file())
@@ -145,6 +160,9 @@ pub(crate) fn pi_source_watches() -> Vec<NativeAgentSourceWatch> {
 }
 pub(crate) fn codex_source_watches() -> Vec<NativeAgentSourceWatch> {
     source_watches_for("codex")
+}
+pub(crate) fn hermes_source_watches() -> Vec<NativeAgentSourceWatch> {
+    source_watches_for("hermes")
 }
 
 pub fn available_native_agent_types() -> HashSet<String> {
@@ -874,6 +892,75 @@ pub(crate) fn list_pi_native_sessions() -> Vec<AgentSessionRow> {
         return Vec::new();
     };
     list_pi_native_sessions_from(&home.join(".pi").join("agent").join("sessions"))
+}
+
+pub(crate) fn list_hermes_native_sessions() -> Vec<AgentSessionRow> {
+    let mut rows = HashMap::new();
+    for path in hermes_database_candidates() {
+        for row in list_hermes_native_sessions_from(&path) {
+            rows.entry(session_key(&row)).or_insert(row);
+        }
+    }
+    rows.into_values().collect()
+}
+
+fn list_hermes_native_sessions_from(database_path: &Path) -> Vec<AgentSessionRow> {
+    if !database_path.is_file() {
+        return Vec::new();
+    }
+    let Ok(connection) = Connection::open_with_flags(
+        database_path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) else {
+        return Vec::new();
+    };
+    let _ = connection.busy_timeout(std::time::Duration::from_millis(750));
+    let Ok(mut statement) = connection.prepare(
+        r#"
+        SELECT s.id, s.title, s.cwd, s.parent_session_id, s.started_at, s.ended_at,
+               (SELECT m.role FROM messages m
+                 WHERE m.session_id = s.id ORDER BY m.id DESC LIMIT 1)
+        FROM sessions s
+        "#,
+    ) else {
+        return Vec::new();
+    };
+    let Ok(mapped) = statement.query_map([], |row| {
+        let session_id: String = row.get(0)?;
+        let title: Option<String> = row.get(1)?;
+        let project_path: Option<String> = row.get(2)?;
+        let parent_session_id: Option<String> = row.get(3)?;
+        let started_at: Option<f64> = row.get(4)?;
+        let ended_at: Option<f64> = row.get(5)?;
+        let last_role: Option<String> = row.get(6)?;
+        Ok(native_row(
+            "hermes",
+            session_id,
+            parent_session_id,
+            infer_hermes_runtime_status(ended_at, last_role.as_deref()),
+            title,
+            project_path,
+            started_at.and_then(format_unix_seconds),
+            ended_at.or(started_at).and_then(format_unix_seconds),
+        ))
+    }) else {
+        return Vec::new();
+    };
+    mapped.flatten().collect()
+}
+
+/// Hermes 会话运行态：已结束恒为 idle；未结束时按最后一条消息角色推断——最后是
+/// 用户消息表示 agent 正在处理（running），最后是 assistant 表示等待用户（idle）。
+fn infer_hermes_runtime_status(ended_at: Option<f64>, last_role: Option<&str>) -> String {
+    if ended_at.is_some() {
+        return "idle".to_string();
+    }
+    match last_role {
+        Some("user") => "running",
+        Some("assistant") => "idle",
+        _ => "unknown",
+    }
+    .to_string()
 }
 
 fn list_pi_native_sessions_from(sessions_root: &Path) -> Vec<AgentSessionRow> {

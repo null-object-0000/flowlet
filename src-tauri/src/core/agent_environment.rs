@@ -401,6 +401,62 @@ fn claude_candidates() -> Vec<Candidate> {
     candidates
 }
 
+fn hermes_cli_candidates() -> Vec<Candidate> {
+    let mut candidates = Vec::new();
+    let mut seen = HashSet::new();
+    if let Some(path) = std::env::var_os("PATH") {
+        for directory in std::env::split_paths(&path) {
+            for file_name in executable_names("hermes") {
+                push_candidate(&mut candidates, &mut seen, directory.join(file_name), true);
+            }
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        for relative in known_hermes_cli_locations() {
+            push_candidate(&mut candidates, &mut seen, home.join(relative), false);
+        }
+    }
+    candidates
+}
+
+// Hermes Agent 官方安装脚本把 `hermes` 入口软链到 `~/.local/bin`，Python venv
+// 位于 `~/.hermes/venv`；pip 安装则直接进入当前 Python 环境的 bin 目录。
+#[cfg(not(windows))]
+fn known_hermes_cli_locations() -> &'static [&'static str] {
+    &[".local/bin/hermes", ".hermes/venv/bin/hermes"]
+}
+
+#[cfg(windows)]
+fn known_hermes_cli_locations() -> &'static [&'static str] {
+    &[
+        ".local/bin/hermes.exe",
+        ".local/bin/hermes.cmd",
+        ".hermes/venv/Scripts/hermes.exe",
+        ".hermes/venv/Scripts/hermes.cmd",
+    ]
+}
+
+fn classify_hermes_method(path: &Path) -> AgentInstallMethod {
+    let normalized = normalized_path_key(path);
+    if normalized.contains("/.hermes/venv/")
+        || normalized.ends_with("/.local/bin/hermes")
+        || normalized.ends_with("/.local/bin/hermes.exe")
+    {
+        AgentInstallMethod::Native
+    } else if normalized.contains("/homebrew/") || normalized.contains("/cellar/hermes/") {
+        AgentInstallMethod::Homebrew
+    } else if normalized.starts_with("/usr/bin/") || normalized.starts_with("/usr/local/bin/") {
+        AgentInstallMethod::SystemPackage
+    } else {
+        AgentInstallMethod::Unknown
+    }
+}
+
+fn resolve_hermes_install_dir(path: &Path, _method: &AgentInstallMethod) -> PathBuf {
+    // `hermes` 通常是进入 venv bin 目录的软链，安装目录即其所在 bin 目录。
+    path.parent().unwrap_or(path).to_path_buf()
+}
+
 fn push_candidate(
     candidates: &mut Vec<Candidate>,
     seen: &mut HashSet<String>,

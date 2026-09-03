@@ -1,11 +1,11 @@
 import registryJson from "../../../plugin-registry.json";
 
 export type PluginKind = "channel" | "model-catalog" | "agent";
-export type AgentPluginId = "claude-code" | "opencode" | "pi" | "codex" | "deepseek-harness";
-export type AgentGlobalConfigAdapterId = "claude-code" | "opencode" | "pi" | "codex" | "deepseek-harness";
-export type AgentSessionAdapterId = "claude-code" | "opencode" | "pi" | "codex" | "deepseek-harness";
-export type AgentIdentityAdapterId = "claude-code" | "opencode" | "pi" | "codex" | "deepseek-harness";
-export type AgentRunnerAdapterId = "claude-code" | "opencode" | "pi" | "codex" | "deepseek-harness";
+export type AgentPluginId = "claude-code" | "opencode" | "pi" | "codex" | "deepseek-harness" | "hermes";
+export type AgentGlobalConfigAdapterId = "claude-code" | "opencode" | "pi" | "codex" | "deepseek-harness" | "hermes";
+export type AgentSessionAdapterId = "claude-code" | "opencode" | "pi" | "codex" | "deepseek-harness" | "hermes";
+export type AgentIdentityAdapterId = "claude-code" | "opencode" | "pi" | "codex" | "deepseek-harness" | "hermes";
+export type AgentRunnerAdapterId = "claude-code" | "opencode" | "pi" | "codex" | "deepseek-harness" | "hermes";
 export type AgentPluginSurface = "cli" | "desktop" | "web";
 
 export type AgentSessionTypeDescriptor = { id: string; name: string; clientId: string };

@@ -205,6 +205,8 @@ export type AgentGlobalConfigOptions = {
   approvalBridge?: boolean;
   /** 仅 DeepSeek Harness：受管 MCP 服务器列表；空数组移除全部受管 MCP 块。 */
   mcpServers?: McpServerSpec[];
+  /** 仅 Hermes Agent：默认模型（`flowlet-pro` / `flowlet-flash`）。 */
+  primaryModel?: string;
 };
 
 /** Agent 最新版本查询结果（来自 npm registry，仅提示用，不执行升级）。 */

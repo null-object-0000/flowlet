@@ -188,6 +188,7 @@ mod tests {
             npm_package_for("deepseek-harness"),
             Some("@deepseek-ai/dsh")
         );
+        assert_eq!(npm_package_for("hermes"), Some("hermes-agent"));
         assert_eq!(npm_package_for("unknown"), None);
     }
 }

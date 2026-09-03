@@ -1,5 +1,6 @@
 use super::agent_session_sources::{
-    collect_jsonl_files, format_unix_millis, opencode_database_candidates, string_field,
+    collect_jsonl_files, format_unix_millis, format_unix_seconds, hermes_database_candidates,
+    opencode_database_candidates, string_field,
 };
 use super::config::{
     AgentSessionCostEstimate, AgentSessionNativeUsage, AgentSessionTimeline,
@@ -615,6 +616,20 @@ pub(crate) fn read_pi_last_interaction(
     session_id: &str,
 ) -> Result<Option<AgentSessionTimeline>, String> {
     adapters::pi::read_last_interaction(session_id)
+}
+
+pub(crate) fn read_hermes_timeline(
+    agent_type: &str,
+    session_id: &str,
+) -> Result<AgentSessionTimeline, String> {
+    adapters::hermes::read_timeline(agent_type, session_id)
+}
+
+pub(crate) fn read_hermes_last_interaction(
+    agent_type: &str,
+    session_id: &str,
+) -> Result<Option<AgentSessionTimeline>, String> {
+    adapters::hermes::read_last_interaction(agent_type, session_id)
 }
 
 #[cfg(test)]

@@ -21,3 +21,4 @@ Vendored files:
 - `codex.svg`
 - `codex-color.svg`
 - `pi.svg`
+- `hermesagent.svg`

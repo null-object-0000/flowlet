@@ -5,6 +5,7 @@ import { codexAdapter } from "./agent-access-adapters/codex";
 import { openCodeAdapter } from "./agent-access-adapters/openCode";
 import { piAdapter } from "./agent-access-adapters/pi";
 import { deepSeekHarnessAdapter } from "./agent-access-adapters/deepSeekHarness";
+import { hermesAdapter } from "./agent-access-adapters/hermes";
 
 export type Translate = (source: string, values?: Record<string, string | number>) => string;
 
@@ -33,6 +34,15 @@ export type AgentConfigControl = {
   applyOptions: (checked: boolean) => AgentGlobalConfigOptions;
 };
 
+export type AgentModelOption = { label: string; value: string };
+
+/** 可选的默认模型选择器（如 Hermes 的 flowlet-pro / flowlet-flash）。 */
+export type AgentModelSelector = {
+  value: string;
+  options: AgentModelOption[];
+  applyOptions: (value: string) => AgentGlobalConfigOptions;
+};
+
 export type AgentAccessAdapter = {
   id: AgentGlobalConfigAdapterId;
   installationName: (surface: AgentSurface | undefined) => string;
@@ -40,6 +50,7 @@ export type AgentAccessAdapter = {
   configControls: (context: AgentAccessContext) => AgentConfigControl[];
   applyOptions: (context: AgentAccessContext) => AgentGlobalConfigOptions | undefined;
   manualSnippets: (context: AgentAccessContext) => ManualSnippet[];
+  modelSelector?: (context: AgentAccessContext) => AgentModelSelector | undefined;
 };
 
 const ADAPTERS: Record<AgentGlobalConfigAdapterId, AgentAccessAdapter> = {
@@ -48,6 +59,7 @@ const ADAPTERS: Record<AgentGlobalConfigAdapterId, AgentAccessAdapter> = {
   pi: piAdapter,
   codex: codexAdapter,
   "deepseek-harness": deepSeekHarnessAdapter,
+  hermes: hermesAdapter,
 };
 
 export function agentAccessAdapter(adapterId: AgentGlobalConfigAdapterId): AgentAccessAdapter {

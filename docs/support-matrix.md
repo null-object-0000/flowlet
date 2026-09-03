@@ -170,7 +170,7 @@ Responses 暂时只接受 `deepseek-v4-flash`）由上游自行报错，Flowlet 
 
 ### 5.1 一等接入矩阵
 
-概览页当前提供五类一等 Agent 入口。
+概览页当前提供六类一等 Agent 入口。
 
 | Agent | 安装探测 | 一键写入/恢复 | 接入协议 | 请求归属 | 原生会话与时间线 | 其他能力 |
 |-------|----------|---------------|----------|----------|------------------|----------|
@@ -179,6 +179,7 @@ Responses 暂时只接受 `deepseek-v4-flash`）由上游自行报错，Flowlet 
 | Pi | ✅ CLI | ✅ | OpenAI Chat Completions | ✅ `x-flowlet-client: pi` | ✅ | 可选声明模型 `input`；可部署原生扩展注入 `x-flowlet-session` |
 | Codex | ✅ Desktop + CLI | ✅ | Responses（一键写入 `~/.codex/config.toml` + `auth.json`，覆盖 CLI / Desktop / VS Code 插件） | ✅ User-Agent（`codex_cli_rs/`） | ✅，Desktop 与 CLI 分开识别 | 账号发现/授权/套餐用量/credits 查询与单账号删除（承载于渠道账号卡片伪账号行的详情抽屉；删除只移除 Flowlet 本地凭据与观测快照，不影响 Codex 端登录态） |
 | DeepSeek Harness | ✅ Web + Harness 目录 + 启动入口 | ✅，安全合并官方 YAML；Cordis 精确会话桥为显式可选高级能力 | OpenAI Chat Completions | ✅ 官方 User-Agent | ✅，DSH v0 原生会话；可选插件注入原生 session id 精确合并代理请求 | `dsh --profile headless` fresh task；暂不支持 resume |
+| Hermes Agent | ✅ CLI、版本 | ✅，写入 `~/.hermes/config.yaml` 的 `model:` 段与 `${HERMES_CUSTOM_…_API_KEY}` 引用，密钥写入 `~/.hermes/.env`，注入 `x-flowlet-client: hermes` | OpenAI Chat Completions（`provider: "custom"`） | ✅ `x-flowlet-client: hermes`（复用 OpenAI Python SDK 通用 UA，无法靠 UA 区分） | ✅，`~/.hermes/state.db` SQLite 会话与消息 | `hermes chat --oneshot --yolo` fresh task；暂不支持 resume |
 
 Codex 账号的新增/重新授权通过独立 Codex CLI 的 `codex app-server` 完成。Desktop 仍参与
 安装探测、全局配置和原生会话读取，但 Microsoft Store 应用包内部的 `codex.exe` 不视为
@@ -214,6 +215,17 @@ Codex 全系（Codex CLI、ChatGPT 桌面端、VS Code Codex 插件）共享同�
 受管字段，恢复时还原此前的登录方式与配置（保留用户其它 provider 与注释）。
 请求经 User-Agent `codex_cli_rs/` 归属为 Codex（内置兜底规则，无需改 config.json）。
 
+Hermes Agent 的一键写入修改 `~/.hermes/config.yaml` 的 `model:` 段：写入
+`provider: "custom"`、`base_url` 指向本地代理，`default` 为用户在接入抽屉中选择的默认
+模型（`flowlet-pro` / `flowlet-flash`，默认 `flowlet-pro`），并写入
+`api_key: ${HERMES_CUSTOM_<host:port>_API_KEY}` 引用（官方“Custom endpoint”约定，
+`custom_endpoint_key_env`），真实密钥落到 `~/.hermes/.env` 的同名变量；同时在
+`default_headers` 注入 `x-flowlet-client: hermes` 用于客户端归属。逐键 patch 保留
+用户在 `model:` 段内的其它设置（`streaming` / `context_length` 等）；写入前把整个
+`model` 值与受管 `.env` 变量备份到 `~/.hermes/.flowlet/`，恢复时整键还原（含全新安装
+的空串哨兵 `model: ""`）。Hermes 复用 OpenAI Python SDK 的通用 User-Agent，无法靠 UA
+子串区分，因此归属完全依赖注入的标记头，不依赖 `config.json` 的 `ua_rules`。
+
 ### 5.2 原生会话数据源
 
 Flowlet 会只读以下 Agent 原生数据，不修改会话正文：
@@ -224,6 +236,7 @@ Flowlet 会只读以下 Agent 原生数据，不修改会话正文：
 | OpenCode | 本地 `opencode.db` | 会话层级、消息与 part、模型、Token 和原生 cost |
 | Pi | `~/.pi/agent/sessions/**/*.jsonl` | 树状会话、当前分支、消息、工具事件和 Token 用量 |
 | Codex Desktop / CLI | `$CODEX_HOME/sessions/**/*.jsonl`、`session_index.jsonl` | 按 originator 区分 Desktop/CLI，读取时间线、工具事件、用量与模型 |
+| Hermes Agent | `~/.hermes/state.db`（SQLite，`HERMES_HOME` 可覆盖） | 会话、标题、工作目录、消息、工具结果与 Token 用量 |
 
 原生会话与经过 Flowlet 的请求按 `(agent_type, session_id)` 合并。未经过 Flowlet 的本地
 会话也可以显示，但不会伪造 Flowlet 请求数、失败数或代理费用。
@@ -238,8 +251,8 @@ Flowlet 会只读以下 Agent 原生数据，不修改会话正文：
   `POST /v1/responses`，无状态透传，不要开启 `store`）；
 - 鉴权使用 Flowlet Client Token。
 
-Cline、Continue、Open WebUI、Gemini CLI、Hermes Agent 等目前没有完整的一等安装探测、
-全局配置备份/写入和原生会话解析，因此不应在产品文案中与上表四类 Agent 标成同等级支持。
+Cline、Continue、Open WebUI、Gemini CLI 等目前没有完整的一等安装探测、
+全局配置备份/写入和原生会话解析，因此不应在产品文案中与上表 Agent 标成同等级支持。
 其中使用 Gemini 原生协议的客户端还需要等待 Flowlet 提供 Gemini-compatible 入口。
 
 ## 6. 当前主要缺口

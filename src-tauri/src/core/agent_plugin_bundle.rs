@@ -20,7 +20,7 @@ pub(crate) struct AgentPluginBundle {
     pub(crate) runner: &'static AgentTaskRunnerAdapter,
 }
 
-static BUNDLES: [AgentPluginBundle; 5] = [
+static BUNDLES: [AgentPluginBundle; 6] = [
     AgentPluginBundle {
         id: "claude-code",
         environment: &super::agent_environment::adapters::CLAUDE_CODE,
@@ -60,6 +60,14 @@ static BUNDLES: [AgentPluginBundle; 5] = [
         session: super::agent_session_adapter::adapters::DEEPSEEK_HARNESS,
         identity: super::agent_identity_adapter::adapters::DEEPSEEK_HARNESS,
         runner: &super::agent_task_runner::adapters::DEEPSEEK_HARNESS,
+    },
+    AgentPluginBundle {
+        id: "hermes",
+        environment: &super::agent_environment::adapters::HERMES,
+        global_config: super::agent_global_config::adapters::HERMES,
+        session: super::agent_session_adapter::adapters::HERMES,
+        identity: super::agent_identity_adapter::adapters::HERMES,
+        runner: &super::agent_task_runner::adapters::HERMES,
     },
 ];
 
@@ -164,8 +172,8 @@ pub(crate) fn capabilities() -> AgentCapabilitiesReport {
 }
 
 /// 保留既有 Session Header 冲突时的识别优先级；产品展示顺序仍使用 Bundle/注册表顺序。
-const IDENTITY_PRECEDENCE: [&str; 5] =
-    ["claude-code", "pi", "deepseek-harness", "codex", "opencode"];
+const IDENTITY_PRECEDENCE: [&str; 6] =
+    ["claude-code", "pi", "deepseek-harness", "codex", "opencode", "hermes"];
 
 pub(crate) fn identity_adapters() -> impl Iterator<Item = &'static dyn AgentIdentityAdapter> {
     IDENTITY_PRECEDENCE.iter().filter_map(|id| {
@@ -184,7 +192,7 @@ mod tests {
     fn registers_each_agent_once_with_all_compiled_capabilities() {
         assert_eq!(
             bundles().iter().map(|bundle| bundle.id).collect::<Vec<_>>(),
-            vec!["claude-code", "opencode", "pi", "codex", "deepseek-harness"]
+            vec!["claude-code", "opencode", "pi", "codex", "deepseek-harness", "hermes"]
         );
         for bundle in bundles() {
             assert_eq!(bundle.id, bundle.global_config.id());
@@ -196,7 +204,7 @@ mod tests {
             identity_adapters()
                 .map(|adapter| adapter.id())
                 .collect::<Vec<_>>(),
-            vec!["claude-code", "pi", "deepseek-harness", "codex", "opencode"]
+            vec!["claude-code", "pi", "deepseek-harness", "codex", "opencode", "hermes"]
         );
     }
 

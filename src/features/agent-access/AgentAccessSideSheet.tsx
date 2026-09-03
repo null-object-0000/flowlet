@@ -97,6 +97,7 @@ export function AgentAccessSideSheet({
   );
   const configStatuses = adapter.configStatuses(adapterContext);
   const configControls = adapter.configControls(adapterContext);
+  const modelSelector = adapter.modelSelector?.(adapterContext);
   // 稳定引用：避免每次渲染生成新数组导致 MCP 面板草稿被意外重置。
   const mcpServers = useMemo(() => globalConfig?.mcp_servers ?? [], [globalConfig]);
 
@@ -309,7 +310,20 @@ export function AgentAccessSideSheet({
                 ) : null}
                 {globalConfig.base_url ? <StatusRow label="Base URL" value={globalConfig.base_url} /> : null}
                 <StatusRow label="Client Token" value={t(globalConfig.auth_token_configured ? "已配置（内容已隐藏）" : "未配置")} />
-                <StatusRow label={t("主模型")} value={globalConfig.primary_model || "-"} />
+                {modelSelector ? (
+                  <div className={styles.statusRow}>
+                    <Text type="tertiary" size="small">{t("主模型")}</Text>
+                    <Select
+                      size="small"
+                      value={modelSelector.value}
+                      optionList={modelSelector.options}
+                      disabled={globalConfigBusy || globalConfig.state === "invalid" || !clientToken}
+                      onChange={(value) => void onApplyGlobalConfig(modelSelector.applyOptions(String(value)))}
+                    />
+                  </div>
+                ) : (
+                  <StatusRow label={t("主模型")} value={globalConfig.primary_model || "-"} />
+                )}
                 {configStatuses.map((status) => <StatusRow key={status.label} label={status.label} value={status.value} />)}
                 {meta.showsFastModel ? <StatusRow label={t("快速模型")} value={globalConfig.fast_model || "-"} /> : null}
                 {meta.showsSubagentModel ? <StatusRow label={t("子 Agent 模型")} value={globalConfig.subagent_model || "-"} /> : null}

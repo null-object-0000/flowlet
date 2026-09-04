@@ -406,6 +406,9 @@ fn session_row(path: &Path) -> Result<(AgentSessionRow, bool), String> {
                 models: timeline.models.clone(),
             }),
             native_synced_at: None,
+            native_source: None,
+            native_profile: None,
+            has_flowlet_requests: false,
         },
         open_turn,
     ))

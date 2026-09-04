@@ -1920,6 +1920,9 @@ mod tests {
                 models: vec!["gpt-5".to_string()],
             }),
             native_synced_at: Some("2026-08-01T10:01:00Z".to_string()),
+            native_source: None,
+            native_profile: None,
+            has_flowlet_requests: false,
         };
 
         let synced = synced_agent_session_from_row(row);

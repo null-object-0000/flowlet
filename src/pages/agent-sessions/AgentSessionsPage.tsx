@@ -3,7 +3,7 @@ import { Button, Pagination, Toast, Typography } from "@douyinfe/semi-ui-19";
 import { IconRefresh } from "@douyinfe/semi-icons";
 import { useNavigate } from "react-router-dom";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
-import { agentSessionLabel, DEFAULT_AGENT_SESSION_FILTER, type AgentSessionFilter, type AgentSessionInteractionEvent, type AgentSessionNativeSummary, type AgentSessionNativeUsage, type AgentSessionRow, type AgentSessionsPage, type AgentSessionType } from "../../domains/agent-session/types";
+import { agentSessionLabel, DEFAULT_AGENT_SESSION_FILTER, hermesSessionOrigin, type AgentSessionFilter, type AgentSessionInteractionEvent, type AgentSessionNativeSummary, type AgentSessionNativeUsage, type AgentSessionRow, type AgentSessionsPage, type AgentSessionType } from "../../domains/agent-session/types";
 import { AGENT_SESSION_OPTIONS } from "../../domains/pluginRegistry";
 import type { SharedAgentSession } from "../../domains/device-sync/types";
 import { useAgentSessionNativeSummary, useAgentSessions } from "../../features/agent-sessions/useAgentSessions";
@@ -465,8 +465,12 @@ function toAgentSessionRowModels(rows: AgentSessionRow[], language: "zh-CN" | "e
       title: sessionDisplayTitle(row),
       subtitle: row.remoteDeviceId
         ? `${agentSessionLabel(row.agentType)} · ${row.remoteDeviceName ?? t("远端设备")}`
-        : row.projectPath ? `${agentSessionLabel(row.agentType)} · ${projectName(row.projectPath)}` : agentSessionLabel(row.agentType),
-      client: row.flowletObserved ? row.clientName ?? row.clientId ?? t("未知客户端") : t("未经过 Flowlet"),
+        : [agentSessionLabel(row.agentType), row.projectPath ? projectName(row.projectPath) : undefined, hermesSessionOrigin(row, t)].filter(Boolean).join(" · "),
+      client: row.flowletObserved
+        ? row.clientName ?? row.clientId ?? t("未知客户端")
+        : row.hasFlowletRequests
+          ? t("经过 Flowlet（未关联会话）")
+          : t("未经过 Flowlet"),
       clientSub: row.clientId && row.flowletObserved ? row.clientId : undefined,
       requests: requestCount == null ? undefined : formatInteger(requestCount, language),
       requestsPrefix: !row.flowletObserved && nativeTruncated ? "≥" : undefined,

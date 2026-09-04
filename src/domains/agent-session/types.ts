@@ -8,6 +8,30 @@ export function agentSessionLabel(agentType: AgentSessionType | string) {
   return registeredAgentSessionLabel(agentType) ?? agentType;
 }
 
+/** 把 Hermes `sessions.source`（cli/feishu/cron 等）映射为可读标签；未知来源原样展示。 */
+export function hermesSourceLabel(source: string | null | undefined, t: TranslateFn): string | undefined {
+  if (!source) return undefined;
+  switch (source) {
+    case "cli": return t("CLI");
+    case "feishu": return t("飞书");
+    case "cron": return t("定时任务");
+    default: return source;
+  }
+}
+
+/** Hermes 会话的入口来源描述：`入口来源 · Profile`（如 `飞书 · myvault`）。
+ *  仅 Hermes Agent 的会话返回；其余 Agent / 无来源时返回 undefined。 */
+export function hermesSessionOrigin(row: Pick<AgentSessionRow, "agentType" | "nativeSource" | "nativeProfile">, t: TranslateFn): string | undefined {
+  if (row.agentType !== "hermes") return undefined;
+  const parts: string[] = [];
+  const source = hermesSourceLabel(row.nativeSource, t);
+  if (source) parts.push(source);
+  if (row.nativeProfile) parts.push(row.nativeProfile === "default" ? t("默认 Profile") : row.nativeProfile);
+  return parts.length ? parts.join(" · ") : undefined;
+}
+
+type TranslateFn = (source: string, values?: Record<string, string | number>) => string;
+
 export type AgentSessionFilter = {
   page: number;
   pageSize: number;
@@ -49,6 +73,13 @@ export type AgentSessionRow = {
   estimatedOutputCost: number;
   nativeSummary?: AgentSessionNativeSummary | null;
   nativeSyncedAt?: string | null;
+  /** 仅 Hermes Agent：原生会话的入口来源（cli / feishu / cron 等）。 */
+  nativeSource?: string | null;
+  /** 仅 Hermes Agent：原生会话所属命名 Profile（default / myvault / workvault 等）。 */
+  nativeProfile?: string | null;
+  /** 有经过 Flowlet 的请求记录，但请求未携带会话标识、无法按会话关联（如 Hermes
+   *  未启用会话桥时）。为 true 时 UI 展示「经过 Flowlet（未关联会话）」。 */
+  hasFlowletRequests?: boolean;
   /** 远端设备会话：来自设备同步快照（`list_shared_device_sessions`），
    *  本地没有原生会话文件与 Flowlet 请求日志，只能展示快照内的轻量数据。 */
   remoteDeviceId?: string;

@@ -1,0 +1,5 @@
+name: flowlet-session-bridge
+version: "1.0.0"
+description: "Flowlet 精确会话关联桥 — 为发往 Flowlet 本地代理的 LLM 请求注入 x-flowlet-session 头，使 Flowlet 能按会话关联请求与用量。由 Flowlet 桌面端受管写入。"
+author: Flowlet
+kind: standalone

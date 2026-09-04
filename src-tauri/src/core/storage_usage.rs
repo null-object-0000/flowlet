@@ -1122,6 +1122,7 @@ impl Storage {
             opencode_pending_sessions,
             dsh_pending_sessions,
         );
+        self.mark_unassociated_flowlet_requests(&mut catalog);
         let matching_roots = matching_root_session_keys(&catalog, &search);
         let project_matching_roots = matching_root_session_keys_by(&catalog, |row| {
             session_matches_project_path(row, project_path)
@@ -1170,6 +1171,7 @@ impl Storage {
             self.list_native_agent_sessions(),
         );
         apply_opencode_pending_sessions(&mut catalog, opencode_pending_sessions, dsh_pending_sessions);
+        self.mark_unassociated_flowlet_requests(&mut catalog);
         catalog.retain(|row| row.parent_session_id.is_none());
         catalog.sort_by(|left, right| {
             crate::core::agent_session_metadata::session_time_millis(&right.activity_at)
@@ -1186,8 +1188,7 @@ impl Storage {
     /// 复用后台 Agent 数据同步写入的 `agent_session_snapshots`，不在用量页面查询时
     /// 重新解析完整会话正文。已被 Flowlet 观测的会话不返回，避免与
     /// `usage_records` 重复统计。
-    pub fn agent_native_usage_summary(
-        &self,
+    pub fn agent_native_usage_summary(        &self,
     ) -> Result<Vec<AgentNativeUsageSummaryRow>, StorageError> {
         // 用量汇总不区分运行状态，无需实时待确认权限集合。
         Ok(build_agent_native_usage_summary(
@@ -1298,9 +1299,47 @@ impl Storage {
                 estimated_output_cost: row.get(21)?,
                 native_summary: None,
                 native_synced_at: None,
+                native_source: None,
+                native_profile: None,
+                has_flowlet_requests: false,
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// 为「有请求经过 Flowlet、但请求未携带会话标识而无法按会话关联」的原生会话打标记。
+    ///
+    /// 判定依据：`request_logs` 中存在该客户端（`client_id`，如 Hermes 的 `hermes`）的
+    /// 请求，但这些请求的 `agent_session_id` 为 NULL（即请求确实经过 Flowlet，只是没
+    /// 能归到具体会话）。此时 UI 展示「经过 Flowlet（未关联会话）」而不是「未经过 Flowlet」。
+    /// 已在合并中关联到会话的行（`flowlet_observed`）不重复打标。
+    fn mark_unassociated_flowlet_requests(&self, catalog: &mut [AgentSessionRow]) {
+        let Ok(connection) = self.connection.lock() else {
+            return;
+        };
+        let Ok(mut stmt) = connection.prepare(
+            r#"
+            SELECT DISTINCT client_id
+            FROM request_logs
+            WHERE is_last_attempt = 1
+              AND agent_session_id IS NULL
+              AND client_id IS NOT NULL
+              AND client_id <> ''
+            "#,
+        ) else {
+            return;
+        };
+        let Ok(clients) = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map(|rows| rows.flatten().collect::<HashSet<_>>())
+        else {
+            return;
+        };
+        for row in catalog.iter_mut() {
+            if !row.flowlet_observed && clients.contains(&row.agent_type) {
+                row.has_flowlet_requests = true;
+            }
+        }
     }
 
     /// 单个 Agent 会话的 Flowlet 观测用量与预估费用（人民币，来自 `usage_records`）。
@@ -4069,6 +4108,9 @@ mod agent_session_filter_tests {
             estimated_output_cost: 0.0,
             native_summary: None,
             native_synced_at: None,
+            native_source: None,
+            native_profile: None,
+            has_flowlet_requests: false,
         }
     }
 

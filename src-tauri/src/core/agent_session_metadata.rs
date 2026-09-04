@@ -918,6 +918,7 @@ fn list_hermes_native_sessions_from(database_path: &Path) -> Vec<AgentSessionRow
     let Ok(mut statement) = connection.prepare(
         r#"
         SELECT s.id, s.title, s.cwd, s.parent_session_id, s.started_at, s.ended_at,
+               s.source, s.profile_name,
                (SELECT m.role FROM messages m
                  WHERE m.session_id = s.id ORDER BY m.id DESC LIMIT 1)
         FROM sessions s
@@ -932,8 +933,10 @@ fn list_hermes_native_sessions_from(database_path: &Path) -> Vec<AgentSessionRow
         let parent_session_id: Option<String> = row.get(3)?;
         let started_at: Option<f64> = row.get(4)?;
         let ended_at: Option<f64> = row.get(5)?;
-        let last_role: Option<String> = row.get(6)?;
-        Ok(native_row(
+        let native_source: Option<String> = row.get(6)?;
+        let native_profile: Option<String> = row.get(7)?;
+        let last_role: Option<String> = row.get(8)?;
+        let mut row = native_row(
             "hermes",
             session_id,
             parent_session_id,
@@ -942,7 +945,10 @@ fn list_hermes_native_sessions_from(database_path: &Path) -> Vec<AgentSessionRow
             project_path,
             started_at.and_then(format_unix_seconds),
             ended_at.or(started_at).and_then(format_unix_seconds),
-        ))
+        );
+        row.native_source = native_source.filter(|value| !value.trim().is_empty());
+        row.native_profile = native_profile.filter(|value| !value.trim().is_empty());
+        Ok(row)
     }) else {
         return Vec::new();
     };
@@ -1178,6 +1184,9 @@ fn native_row(
         estimated_output_cost: 0.0,
         native_summary: None,
         native_synced_at: None,
+        native_source: None,
+        native_profile: None,
+        has_flowlet_requests: false,
     }
 }
 
@@ -1884,5 +1893,98 @@ mod tests {
         assert_eq!(rows[0].known_tokens, 120);
         assert!(rows[0].flowlet_observed);
         assert_eq!(rows[0].activity_at, "2026-07-18T09:00:00Z");
+    }
+
+    #[test]
+    fn hermes_listing_exposes_source_and_profile_columns() {
+        use rusqlite::{params, Connection};
+
+        let directory = std::env::temp_dir().join(format!(
+            "flowlet-hermes-list-{}",
+            Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let db_path = directory.join("state.db");
+        let connection = Connection::open(&db_path).unwrap();
+        connection
+            .execute_batch(
+                r#"
+                CREATE TABLE sessions (
+                    id TEXT PRIMARY KEY, source TEXT NOT NULL, title TEXT, cwd TEXT,
+                    parent_session_id TEXT, started_at REAL NOT NULL, ended_at REAL,
+                    model_config TEXT, profile_name TEXT
+                );
+                CREATE TABLE messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL,
+                    role TEXT NOT NULL, content TEXT, timestamp REAL NOT NULL
+                );
+                "#,
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO sessions (id, source, title, cwd, parent_session_id, started_at, ended_at, profile_name)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    "sess-cli",
+                    "cli",
+                    "本地任务",
+                    "/home/nichangen/proj",
+                    None::<String>,
+                    1_700_000_000.0,
+                    None::<f64>,
+                    "myvault"
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO sessions (id, source, title, cwd, parent_session_id, started_at, ended_at, profile_name)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    "sess-feishu",
+                    "feishu",
+                    "飞书消息",
+                    None::<String>,
+                    None::<String>,
+                    1_700_000_100.0,
+                    None::<f64>,
+                    "workvault"
+                ],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO messages (session_id, role, content, timestamp) VALUES (?1, ?2, ?3, ?4)",
+                params!["sess-feishu", "user", "你好", 1_700_000_100.5],
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO messages (session_id, role, content, timestamp) VALUES (?1, ?2, ?3, ?4)",
+                params!["sess-feishu", "assistant", "收到", 1_700_000_101.0],
+            )
+            .unwrap();
+        drop(connection);
+
+        let rows = list_hermes_native_sessions_from(&db_path);
+        assert_eq!(rows.len(), 2);
+        let cli = rows
+            .iter()
+            .find(|row| row.session_id == "sess-cli")
+            .expect("cli session listed");
+        assert_eq!(cli.agent_type, "hermes");
+        assert_eq!(cli.native_source.as_deref(), Some("cli"));
+        assert_eq!(cli.native_profile.as_deref(), Some("myvault"));
+        let feishu = rows
+            .iter()
+            .find(|row| row.session_id == "sess-feishu")
+            .expect("feishu session listed");
+        assert_eq!(feishu.native_source.as_deref(), Some("feishu"));
+        assert_eq!(feishu.native_profile.as_deref(), Some("workvault"));
+        // 未结束且最后消息是 assistant：等待用户（idle）。
+        assert_eq!(feishu.runtime_status, "idle");
+
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }

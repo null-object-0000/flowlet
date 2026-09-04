@@ -1596,7 +1596,7 @@ fn hermes_config_lifecycle_uses_real_upstream_fixture() {
 
     // apply：Flowlet 配置写入 config.yaml（api_key 是 ${HERMES_CUSTOM_...} 引用）与 .env
     // （真实密钥），重新解析输出格式并保留用户无关段与其它 .env 变量。
-    let applied = apply_hermes(&config_path, &env_path, expected_base_url, "flowlet-token", "flowlet-pro".to_string()).unwrap();
+    let applied = apply_hermes(&config_path, &env_path, expected_base_url, "flowlet-token", "flowlet-pro".to_string(), None).unwrap();
     assert_eq!(applied.state, AgentGlobalConfigState::Flowlet);
     assert_eq!(applied.primary_model.as_deref(), Some("flowlet-pro"));
     assert_eq!(
@@ -1624,7 +1624,7 @@ fn hermes_config_lifecycle_uses_real_upstream_fixture() {
     assert!(env_text.contains("NOVITA_API_KEY=sk-novita-keep"));
 
     // reapply：幂等，仍是 Flowlet 且不产生重复键/重复 .env 变量。
-    let reapplied = apply_hermes(&config_path, &env_path, expected_base_url, "flowlet-token", "flowlet-pro".to_string()).unwrap();
+    let reapplied = apply_hermes(&config_path, &env_path, expected_base_url, "flowlet-token", "flowlet-pro".to_string(), None).unwrap();
     assert_eq!(reapplied.state, AgentGlobalConfigState::Flowlet);
     let text = std::fs::read_to_string(&config_path).unwrap();
     assert_eq!(text.matches("provider:").count(), 1);
@@ -1696,13 +1696,116 @@ fn hermes_apply_writes_selected_fast_model_and_still_detects_flowlet() {
     std::fs::write(&config_path, "model: \"\"\n").unwrap();
 
     let applied =
-        apply_hermes(&config_path, &env_path, expected_base_url, "flowlet-token", "flowlet-flash".to_string())
+        apply_hermes(&config_path, &env_path, expected_base_url, "flowlet-token", "flowlet-flash".to_string(), None)
             .unwrap();
     assert_eq!(applied.state, AgentGlobalConfigState::Flowlet);
     assert_eq!(applied.primary_model.as_deref(), Some("flowlet-flash"));
     let yaml: serde_yaml::Value =
         serde_yaml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
     assert_eq!(yaml["model"]["default"].as_str(), Some("flowlet-flash"));
+
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn hermes_session_bridge_lifecycle_installs_enables_disables_and_restores() {
+    // 真实 Hermes 配置 fixture：`model` 是空串哨兵、含用户自定义段；`.env` 有其它密钥。
+    // 验证受管会话桥插件：启用写插件文件 + 加入 plugins.enabled；关闭移除；恢复完整还原。
+    let directory = std::env::temp_dir().join(format!(
+        "flowlet-hermes-session-bridge-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&directory).unwrap();
+    let config_path = directory.join("config.yaml");
+    let env_path = directory.join(".env");
+    let expected_base_url = "http://127.0.0.1:18640/v1";
+    let bridge_dir = directory.join("plugins").join("flowlet-session-bridge");
+    std::fs::write(
+        &config_path,
+        concat!(
+            "model: \"\"\n",
+            "terminal:\n",
+            "  backend: local\n",
+            "display:\n",
+            "  theme: dark\n",
+        ),
+    )
+    .unwrap();
+    std::fs::write(&env_path, "# Hermes Agent Environment Configuration\nOPENROUTER_API_KEY=sk-or-keep\n").unwrap();
+
+    // 初始 inspect：未配置，会话桥未安装。
+    let before = inspect_hermes(&config_path, &env_path, expected_base_url).unwrap();
+    assert_eq!(before.state, AgentGlobalConfigState::NotConfigured);
+    assert!(!before.session_extension);
+    assert!(!bridge_dir.is_dir());
+
+    // apply（启用会话桥）：写入插件文件 + plugins.enabled。
+    let applied = apply_hermes(
+        &config_path,
+        &env_path,
+        expected_base_url,
+        "flowlet-token",
+        "flowlet-pro".to_string(),
+        Some(true),
+    )
+    .unwrap();
+    assert_eq!(applied.state, AgentGlobalConfigState::Flowlet);
+    assert!(applied.session_extension);
+    assert!(bridge_dir.join("plugin.yaml").is_file());
+    assert!(bridge_dir.join("__init__.py").is_file());
+    let yaml: serde_yaml::Value =
+        serde_yaml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    assert_eq!(yaml["plugins"]["enabled"][0].as_str(), Some("flowlet-session-bridge"));
+    assert_eq!(yaml["terminal"]["backend"].as_str(), Some("local"));
+
+    // reapply（保持启用）：幂等，仍是 Flowlet、插件在位、enabled 不重复。
+    let reapplied = apply_hermes(
+        &config_path,
+        &env_path,
+        expected_base_url,
+        "flowlet-token",
+        "flowlet-pro".to_string(),
+        Some(true),
+    )
+    .unwrap();
+    assert_eq!(reapplied.state, AgentGlobalConfigState::Flowlet);
+    assert!(reapplied.session_extension);
+    assert!(bridge_dir.join("plugin.yaml").is_file());
+    let yaml: serde_yaml::Value =
+        serde_yaml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    assert_eq!(
+        yaml["plugins"]["enabled"].as_sequence().map(Vec::len),
+        Some(1)
+    );
+
+    // 关闭会话桥：移除插件文件 + 从 enabled 移除。
+    let disabled = apply_hermes(
+        &config_path,
+        &env_path,
+        expected_base_url,
+        "flowlet-token",
+        "flowlet-pro".to_string(),
+        Some(false),
+    )
+    .unwrap();
+    assert_eq!(disabled.state, AgentGlobalConfigState::Flowlet);
+    assert!(!disabled.session_extension);
+    assert!(!bridge_dir.join("plugin.yaml").exists());
+    let yaml: serde_yaml::Value =
+        serde_yaml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    let enabled = yaml["plugins"]["enabled"].as_sequence().map(Vec::len).unwrap_or(0);
+    assert_eq!(enabled, 0);
+
+    // restore：完整还原到接入前状态（model 哨兵、无 plugins 块、插件目录消失）。
+    let restored = restore_hermes(&config_path, &env_path, expected_base_url).unwrap();
+    assert_eq!(restored.state, AgentGlobalConfigState::NotConfigured);
+    assert!(!restored.session_extension);
+    let restored_text = std::fs::read_to_string(&config_path).unwrap();
+    assert!(restored_text.contains("model: \"\"") || restored_text.contains("model: ''"));
+    let yaml: serde_yaml::Value = serde_yaml::from_str(&restored_text).unwrap();
+    assert_eq!(yaml["terminal"]["backend"].as_str(), Some("local"));
+    assert!(yaml.get("plugins").is_none());
+    assert!(!bridge_dir.exists());
 
     std::fs::remove_dir_all(directory).unwrap();
 }

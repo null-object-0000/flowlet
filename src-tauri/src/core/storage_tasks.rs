@@ -51,6 +51,9 @@ fn archived_agent_session_row(
         estimated_output_cost: 0.0,
         native_summary: None,
         native_synced_at: Some(synced_at.to_string()),
+        native_source: None,
+        native_profile: None,
+        has_flowlet_requests: false,
     }
 }
 
@@ -2264,6 +2267,9 @@ mod tests {
             estimated_output_cost: 0.0,
             native_summary: None,
             native_synced_at: None,
+            native_source: None,
+            native_profile: None,
+            has_flowlet_requests: false,
         }
     }
 

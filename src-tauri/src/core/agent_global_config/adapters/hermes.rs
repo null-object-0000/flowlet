@@ -7,6 +7,12 @@ const HERMES_PROVIDER: &str = "custom";
 const HERMES_PRIMARY_MODEL: &str = "flowlet-pro";
 const HERMES_CLIENT_MARKER: &str = "hermes";
 const HERMES_CLIENT_HEADER: &str = "x-flowlet-client";
+/// 受管会话桥插件名（`~/.hermes/plugins/<name>/`，同时是 `plugins.enabled` 的条目）。
+const HERMES_SESSION_BRIDGE_NAME: &str = "flowlet-session-bridge";
+const HERMES_SESSION_BRIDGE_MANIFEST: &str =
+    include_str!("../../../../resources/agent-plugins/hermes/plugin.yaml");
+const HERMES_SESSION_BRIDGE_SOURCE: &str =
+    include_str!("../../../../resources/agent-plugins/hermes/__init__.py");
 
 pub(super) struct HermesAdapter;
 
@@ -35,6 +41,7 @@ impl AgentGlobalConfigAdapter for HermesAdapter {
             expected_base_url,
             client_token,
             resolve_primary_model(options),
+            options.and_then(|options| options.session_extension),
         )
     }
 
@@ -85,6 +92,17 @@ struct HermesConfigBackup {
     env_key: String,
     /// 接入前该变量的值；present=false 表示原本不存在该变量。
     env_value: BackedUpValue,
+    /// 接入前整个顶层 `plugins` 值（可能是完整映射、缺失），恢复时整键还原，
+    /// 与 `model` 的处理方式一致，确保 Flowlet 写入的 `plugins.enabled` 能被完整移除。
+    #[serde(default)]
+    plugins: BackedUpValue,
+    /// 接入前受管会话桥插件文件内容（文件名 → 原文或 None=原本不存在）。
+    /// 恢复时据此还原用户接入前的插件状态。
+    #[serde(default)]
+    bridge_files: BTreeMap<String, Option<String>>,
+    /// 接入前插件目录是否为空目录（接入前无文件时，恢复后尝试清理空目录）。
+    #[serde(default)]
+    bridge_dir_existed: bool,
 }
 
 fn hermes_home() -> Result<PathBuf, String> {
@@ -109,6 +127,51 @@ fn hermes_backup_path(config_path: &Path) -> PathBuf {
         .join(FLOWLET_DIR)
         .join(HERMES_BACKUP_FILE)
 }
+
+/// 受管会话桥插件的安装目录 `~/.hermes/plugins/flowlet-session-bridge/`。
+/// 由 config.yaml 所在目录（HERMES_HOME）推导，保证与显式传入的配置路径一致。
+fn hermes_session_bridge_dir(config_path: &Path) -> PathBuf {
+    config_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("plugins")
+        .join(HERMES_SESSION_BRIDGE_NAME)
+}
+
+/// 读取 config.yaml 中 `plugins.enabled` 列表（缺失视为空）。
+fn read_plugins_enabled(root: &serde_yaml::Value) -> Vec<String> {
+    yaml_at(root, &["plugins", "enabled"])
+        .and_then(serde_yaml::Value::as_sequence)
+        .map(|sequence| {
+            sequence
+                .iter()
+                .filter_map(serde_yaml::Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 把 `plugins.enabled` 列表写回 config.yaml 文本。
+fn patch_plugins_enabled(text: &str, enabled: &[String]) -> Result<Vec<u8>, String> {
+    let value = serde_json::to_value(enabled).map_err(|error| error.to_string())?;
+    patch_yaml_entry(text, "config.yaml", &["plugins"], "enabled", Some(&value))
+}
+
+/// 会话桥是否在位：插件目录两个受管文件都存在，且 `plugins.enabled` 包含该插件。
+fn session_bridge_installed(config_path: &Path) -> bool {
+    let dir = hermes_session_bridge_dir(config_path);
+    if !dir.join("plugin.yaml").is_file() || !dir.join("__init__.py").is_file() {
+        return false;
+    }
+    let Ok(root) = read_yaml_value(config_path) else {
+        return false;
+    };
+    read_plugins_enabled(&root)
+        .iter()
+        .any(|name| name == HERMES_SESSION_BRIDGE_NAME)
+}
+
 
 /// 从本地代理 base_url（如 `http://127.0.0.1:18640/v1`）提取 Hermes 自定义端点
 /// 身份 `host:port`（`127.0.0.1:18640`），与官方 CLI setup 流程一致。
@@ -150,28 +213,28 @@ pub(in crate::core::agent_global_config) fn hermes_custom_key_env(identity: &str
     }
 }
 
-/// 判定某行是否为顶层（无缩进）`model:` 键。
-fn is_top_level_model_key(line: &str) -> bool {
+/// 判定某行是否为顶层（无缩进）`key:` 键。
+fn is_top_level_key(line: &str, key: &str) -> bool {
     if line.starts_with([' ', '\t']) {
         return false;
     }
-    let Some(rest) = line.strip_prefix("model") else {
+    let Some(rest) = line.strip_prefix(key) else {
         return false;
     };
     let rest = rest.trim_start();
     rest == ":" || rest.starts_with(": ")
 }
 
-/// 移除顶层 `model:` 块（含其后所有更深缩进/空行/注释的子行），保留文件中其余内容。
+/// 移除顶层 `key:` 块（含其后所有更深缩进/空行/注释的子行），保留文件中其余内容。
 /// 用于：apply 前替换接入前的 model（空串哨兵或映射）、restore 前移除 Flowlet 写的
-/// 受管 model 块，随后再整块写回备份值。
-fn strip_top_level_model_block(text: &str) -> String {
+/// 受管块，随后再整块写回备份值。
+fn strip_top_level_block(text: &str, key: &str) -> String {
     let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
     let lines: Vec<&str> = text.lines().collect();
     let mut output = Vec::new();
     let mut index = 0;
     while index < lines.len() {
-        if is_top_level_model_key(lines[index]) {
+        if is_top_level_key(lines[index], key) {
             index += 1;
             while index < lines.len() {
                 let line = lines[index];
@@ -190,6 +253,14 @@ fn strip_top_level_model_block(text: &str) -> String {
     output.join(newline)
 }
 
+fn strip_top_level_model_block(text: &str) -> String {
+    strip_top_level_block(text, "model")
+}
+
+fn strip_top_level_plugins_block(text: &str) -> String {
+    strip_top_level_block(text, "plugins")
+}
+
 /// Hermes 全新安装时 `config.yaml` 的 `model:` 可能是空串哨兵（`model: ""`，表示
 /// “尚未配置”）。行级 patch 要求父键是映射，因此先把标量/空映射的顶层 `model:` 行剥离，
 /// 后续 `patch_yaml_entry` 再以映射形式整体插入。已是非空映射时保持不变。
@@ -206,7 +277,7 @@ fn strip_model_sentinel(text: &str) -> String {
     }
     let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
     text.lines()
-        .filter(|line| !is_top_level_model_key(line))
+        .filter(|line| !is_top_level_key(line, "model"))
         .collect::<Vec<_>>()
         .join(newline)
 }
@@ -265,6 +336,7 @@ pub(in crate::core::agent_global_config) fn inspect_hermes(
     let backup_available = hermes_backup_path(config_path).is_file();
     let settings_exists = config_path.is_file();
     let env_key = hermes_custom_key_env(&hermes_host_port(expected_base_url));
+    let bridge_installed = session_bridge_installed(config_path);
     let report = |state: AgentGlobalConfigState,
                   base_url: Option<String>,
                   api_key_configured: bool,
@@ -289,7 +361,7 @@ pub(in crate::core::agent_global_config) fn inspect_hermes(
         backup_available,
         external_environment_overrides: Vec::new(),
         error,
-        session_extension: false,
+        session_extension: bridge_installed,
         model_specs: false,
         model_input_modalities: BTreeMap::new(),
         approval_bridge: false,
@@ -381,6 +453,7 @@ pub(in crate::core::agent_global_config) fn apply_hermes(
     expected_base_url: &str,
     client_token: &str,
     primary_model: String,
+    session_extension: Option<bool>,
 ) -> Result<AgentGlobalConfigReport, String> {
     if client_token.trim().is_empty() {
         return Err("Flowlet 默认 Client Token 未配置，无法写入 Hermes Agent".to_string());
@@ -396,6 +469,7 @@ pub(in crate::core::agent_global_config) fn apply_hermes(
     } else {
         String::new()
     };
+    let bridge_dir = hermes_session_bridge_dir(config_path);
 
     let backup = hermes_backup_path(config_path);
     let backup_created = !backup.is_file();
@@ -420,6 +494,9 @@ pub(in crate::core::agent_global_config) fn apply_hermes(
                     value: Value::Null,
                 },
             },
+            plugins: backed_up_yaml(&original_root, &["plugins"]),
+            bridge_files: snapshot_bridge_files(&bridge_dir),
+            bridge_dir_existed: bridge_dir.is_dir(),
         };
         write_json_file(
             &backup,
@@ -465,24 +542,67 @@ pub(in crate::core::agent_global_config) fn apply_hermes(
         )?)
         .map_err(|error| format!("生成 Hermes config.yaml 失败：{error}"))?;
     }
+    // 会话桥：启用时把受管插件加入 `plugins.enabled`；关闭时移除；选项缺失不动。
+    if session_extension.is_some() {
+        let enabled = read_plugins_enabled(&original_root);
+        let enabled = match session_extension {
+            Some(true) if !enabled.iter().any(|name| name == HERMES_SESSION_BRIDGE_NAME) => {
+                let mut next = enabled;
+                next.push(HERMES_SESSION_BRIDGE_NAME.to_string());
+                next
+            }
+            Some(false) => enabled
+                .into_iter()
+                .filter(|name| name != HERMES_SESSION_BRIDGE_NAME)
+                .collect::<Vec<_>>(),
+            _ => enabled,
+        };
+        text = String::from_utf8(patch_plugins_enabled(&text, &enabled)?)
+            .map_err(|error| format!("生成 Hermes config.yaml 失败：{error}"))?;
+    }
     let env_text = patch_env_value(&original_env_text, &env_key, Some(client_token.trim()));
 
     let content = text_file_bytes(&text);
     let env_content = (!env_text.trim().is_empty()).then(|| text_file_bytes(&env_text));
-    write_files_transactionally(
-        "Hermes config.yaml 与 .env",
-        &[
-            (config_path.to_path_buf(), Some(content)),
-            (env_path.to_path_buf(), env_content),
-        ],
-    )
-    .map_err(|failure| {
-        if backup_created && failure.rolled_back {
-            let _ = std::fs::remove_file(&backup);
+    let mut writes = vec![
+        (config_path.to_path_buf(), Some(content)),
+        (env_path.to_path_buf(), env_content),
+    ];
+    // 会话桥插件文件：启用写受管版本；关闭时删除与受管版本一致的文件；选项缺失不动。
+    match session_extension {
+        Some(true) => {
+            writes.push((bridge_dir.join("plugin.yaml"), Some(text_file_bytes(HERMES_SESSION_BRIDGE_MANIFEST))));
+            writes.push((bridge_dir.join("__init__.py"), Some(text_file_bytes(HERMES_SESSION_BRIDGE_SOURCE))));
         }
-        failure.message
-    })?;
+        Some(false) => {
+            if managed_text_file_matches(&bridge_dir.join("plugin.yaml"), HERMES_SESSION_BRIDGE_MANIFEST) {
+                writes.push((bridge_dir.join("plugin.yaml"), None));
+            }
+            if managed_text_file_matches(&bridge_dir.join("__init__.py"), HERMES_SESSION_BRIDGE_SOURCE) {
+                writes.push((bridge_dir.join("__init__.py"), None));
+            }
+        }
+        None => {}
+    }
+    write_files_transactionally("Hermes config.yaml、.env 与会话桥插件", &writes)
+        .map_err(|failure| {
+            if backup_created && failure.rolled_back {
+                let _ = std::fs::remove_file(&backup);
+            }
+            failure.message
+        })?;
     inspect_hermes(config_path, env_path, expected_base_url)
+}
+
+/// 记录接入前受管会话桥插件目录中两个文件的原文（文件名 → 内容或 None=原本不存在）。
+fn snapshot_bridge_files(dir: &Path) -> BTreeMap<String, Option<String>> {
+    ["plugin.yaml", "__init__.py"]
+        .into_iter()
+        .map(|name| {
+            let content = std::fs::read_to_string(dir.join(name)).ok();
+            (name.to_string(), content)
+        })
+        .collect()
 }
 
 pub(in crate::core::agent_global_config) fn restore_hermes(
@@ -517,6 +637,19 @@ pub(in crate::core::agent_global_config) fn restore_hermes(
     )?)
     .map_err(|error| format!("恢复 Hermes config.yaml 失败：{error}"))?;
 
+    // 还原 `plugins` 块：整块移除 Flowlet 写入的受管 plugins，再写回接入前的值
+    // （或原本缺失时保持移除），避免残留空的 `plugins:`。
+    text = strip_top_level_plugins_block(&text);
+    let plugins_value = backup.plugins.present.then_some(&backup.plugins.value);
+    text = String::from_utf8(patch_yaml_entry(
+        &text,
+        "config.yaml",
+        &[],
+        "plugins",
+        plugins_value,
+    )?)
+    .map_err(|error| format!("恢复 Hermes config.yaml 失败：{error}"))?;
+
     // 还原 .env 中的受管变量：接入前存在则写回原值，否则删除 Flowlet 写入的变量。
     let env_text = std::fs::read_to_string(env_path).unwrap_or_default();
     let env_value = backup
@@ -525,6 +658,14 @@ pub(in crate::core::agent_global_config) fn restore_hermes(
         .then(|| backup.env_value.value.as_str().map(str::to_string))
         .flatten();
     let env_text = patch_env_value(&env_text, &backup.env_key, env_value.as_deref());
+
+    // 还原受管会话桥插件文件：接入前存在则写回原文，否则删除 Flowlet 写入的文件。
+    let bridge_dir = hermes_session_bridge_dir(config_path);
+    let mut writes = Vec::new();
+    for name in ["plugin.yaml", "__init__.py"] {
+        let content = backup.bridge_files.get(name).and_then(Option::as_deref);
+        writes.push((bridge_dir.join(name), content.map(text_file_bytes)));
+    }
 
     let restored_empty = text.trim().is_empty()
         || serde_yaml::from_str::<serde_yaml::Value>(&text)
@@ -544,14 +685,14 @@ pub(in crate::core::agent_global_config) fn restore_hermes(
     } else {
         Some(text_file_bytes(&env_text))
     };
-    write_files_transactionally(
-        "Hermes config.yaml 与 .env",
-        &[
-            (config_path.to_path_buf(), content),
-            (env_path.to_path_buf(), env_content),
-        ],
-    )
-    .map_err(|failure| failure.message)?;
+    writes.insert(0, (config_path.to_path_buf(), content));
+    writes.insert(1, (env_path.to_path_buf(), env_content));
+    write_files_transactionally("Hermes config.yaml、.env 与会话桥插件", &writes)
+        .map_err(|failure| failure.message)?;
+    // 接入前插件目录不存在且已清空时，顺手删除空目录。
+    if !backup.bridge_dir_existed && bridge_dir.is_dir() && bridge_dir.read_dir().map(|mut entries| entries.next().is_none()).unwrap_or(false) {
+        let _ = std::fs::remove_dir(&bridge_dir);
+    }
     std::fs::remove_file(&backup_path)
         .map_err(|error| format!("配置已恢复，但清理 Flowlet 备份标记失败：{error}"))?;
     inspect_hermes(config_path, env_path, expected_base_url)

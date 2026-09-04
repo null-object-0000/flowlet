@@ -2,7 +2,7 @@ import { Button, SideSheet, Tag, Toast, Tooltip } from "@douyinfe/semi-ui-19";
 import { IconAlertTriangle, IconCopy, IconExternalOpen } from "@douyinfe/semi-icons";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
-import { agentSessionLabel, type AgentSessionNativeSummary, type AgentSessionNativeUsage, type AgentSessionRow, type DshApprovalRequest, type OpenCodePermissionRequest } from "../../domains/agent-session/types";
+import { agentSessionLabel, hermesSessionOrigin, type AgentSessionNativeSummary, type AgentSessionNativeUsage, type AgentSessionRow, type DshApprovalRequest, type OpenCodePermissionRequest } from "../../domains/agent-session/types";
 import { useAgentSessionChildren, useAgentSessionNativeSummary, useDshSessionPermissions, useOpenCodeSessionPermissions, useReplyDshPermission, useReplyOpenCodePermission } from "../../features/agent-sessions/useAgentSessions";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import { DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
@@ -125,9 +125,15 @@ export function AgentSessionDetailSideSheet({
                     ? session.clientName ?? session.clientId ?? t("未知客户端")
                     : agentSessionLabel(session.agentType)}
                 />
+                {session.agentType === "hermes" && (session.nativeSource || session.nativeProfile) ? (
+                  <DetailItem label={t("入口来源")} value={hermesSessionOrigin(session, t) ?? "—"} wide />
+                ) : null}
                 {remote ? <DetailItem label={t("来源设备")} value={session.remoteDeviceName ?? session.remoteDeviceId ?? "—"} wide /> : null}
                 <DetailItem label={t("项目目录")} value={session.projectPath ?? "—"} />
               </div>
+              {!session.flowletObserved && session.hasFlowletRequests ? (
+                <p className={styles.usageHint}>{t("该会话的请求经过 Flowlet，但未携带会话标识、无法按会话关联。可在接入抽屉开启「精确会话关联」后按会话查看请求与用量。")}</p>
+              ) : null}
             </DetailSection>
 
             <DetailSection title={t("活动时间")}>

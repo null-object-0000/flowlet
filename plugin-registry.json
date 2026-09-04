@@ -193,7 +193,9 @@
         "runnerAdapterId": "hermes",
         "sessionTypes": [{ "id": "hermes", "name": "Hermes Agent", "clientId": "hermes" }],
         "taskProfile": { "name": "Hermes Agent", "sessionType": "hermes" },
-        "configCapabilities": [],
+        "configCapabilities": [
+          { "id": "session-extension", "name": "精确会话关联", "kind": "boolean", "defaultEnabled": false, "requiresRestart": true }
+        ],
         "endpointSuffix": "/v1",
         "npmPackage": "hermes-agent",
         "surfaces": ["cli"],

@@ -41,12 +41,25 @@ export const hermesAdapter: AgentAccessAdapter = {
   id: "hermes",
   installationName: () => "Hermes Agent CLI",
   configStatuses: () => [],
-  configControls: () => [],
-  applyOptions: ({ globalConfig }) => ({ primaryModel: currentModel(globalConfig?.primary_model) }),
+  configControls: ({ globalConfig, t }) => [{
+    id: "session-extension",
+    label: t("精确会话关联"),
+    descriptions: [
+      t("Hermes 复用 OpenAI Python SDK，原生请求不携带会话标识；开启后 Flowlet 部署受管插件，为发往本地代理的请求注入会话头，使请求能按会话归并。"),
+      t("插件写入 ~/.hermes/plugins/flowlet-session-bridge/ 并在 plugins.enabled 注册；启用或关闭后需重启 Hermes（gateway 需 hermes gateway restart）。"),
+    ],
+    checked: globalConfig?.session_extension ?? false,
+    requiresRestart: true,
+    applyOptions: (checked) => ({ primaryModel: currentModel(globalConfig?.primary_model), sessionExtension: checked }),
+  }],
+  applyOptions: ({ globalConfig }) => ({
+    primaryModel: currentModel(globalConfig?.primary_model),
+    sessionExtension: globalConfig?.session_extension ?? false,
+  }),
   modelSelector: ({ globalConfig }) => ({
     value: currentModel(globalConfig?.primary_model),
     options: HERMES_MODELS.map((model) => ({ label: model.label, value: model.value })),
-    applyOptions: (value) => ({ primaryModel: value }),
+    applyOptions: (value) => ({ primaryModel: value, sessionExtension: globalConfig?.session_extension ?? false }),
   }),
   manualSnippets: ({ endpoint, token, displayedToken, globalConfig, t }) => {
     const envKey = hermesCustomKeyEnv(endpoint);
@@ -61,6 +74,12 @@ export const hermesAdapter: AgentAccessAdapter = {
       '    x-flowlet-client: "hermes"',
     ].join("\n");
     const env = (apiKey: string) => `${envKey}=${apiKey}`;
+    const bridgeNote = [
+      "# 精确会话关联（可选）：由 Flowlet 受管写入 ~/.hermes/plugins/flowlet-session-bridge/",
+      "# （plugin.yaml + __init__.py），并在 config.yaml 的 plugins.enabled 注册该插件。",
+      "# 插件注册 llm_request 中间件，为发往 Flowlet 的请求注入 x-flowlet-session。",
+      "# 启用或关闭后需重启 Hermes（gateway 需 hermes gateway restart）。",
+    ].join("\n");
     return [
       {
         label: t("config.yaml 配置片段"),
@@ -71,6 +90,11 @@ export const hermesAdapter: AgentAccessAdapter = {
         label: t("~/.hermes/.env 凭据片段"),
         displayValue: env(displayedToken),
         copyValue: env(token),
+      },
+      {
+        label: t("精确会话关联说明"),
+        displayValue: bridgeNote,
+        copyValue: bridgeNote,
       },
     ];
   },

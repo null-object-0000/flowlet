@@ -50,15 +50,35 @@ pub(crate) fn opencode_database_candidates() -> Vec<PathBuf> {
     candidates
 }
 
-/// Hermes Agent 的会话数据库候选路径（默认 Profile + `HERMES_HOME` 覆盖）。
-/// 会话与消息都存在 `state.db`（SQLite，WAL），时间戳为 Unix epoch 浮点秒。
+/// Hermes Agent 的会话数据库候选路径：默认 Profile + `HERMES_HOME` 覆盖，
+/// 以及 `~/.hermes/profiles/<name>/state.db` 下每个命名 Profile 的独立库。
+///
+/// 飞书/gateway、cron、delegation（子 Agent）会话都持久化在各自的 `state.db`
+/// （SQLite，WAL），命名 Profile 会另起一份独立库，必须一并扫描，否则这些入口的
+/// 会话在 Flowlet 会话管理里不可见。时间戳为 Unix epoch 浮点秒。
 pub(crate) fn hermes_database_candidates() -> Vec<PathBuf> {
-    let mut candidates = Vec::new();
+    let mut homes = Vec::new();
     if let Some(home) = std::env::var_os("HERMES_HOME").map(PathBuf::from) {
-        candidates.push(home.join("state.db"));
+        homes.push(home);
     }
     if let Some(home) = dirs::home_dir() {
-        candidates.push(home.join(".hermes").join("state.db"));
+        homes.push(home.join(".hermes"));
+    }
+    hermes_database_candidates_from(&homes)
+}
+
+fn hermes_database_candidates_from(homes: &[PathBuf]) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    for home in homes {
+        candidates.push(home.join("state.db"));
+        // 命名 Profile：每个子目录是一份独立 HERMES_HOME，拥有自己的 state.db。
+        if let Ok(entries) = fs::read_dir(home.join("profiles")) {
+            for entry in entries.flatten() {
+                if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                    candidates.push(entry.path().join("state.db"));
+                }
+            }
+        }
     }
     let mut seen = HashSet::new();
     candidates.retain(|path| seen.insert(path.clone()));
@@ -86,4 +106,46 @@ pub(crate) fn string_field(value: &Value, field: &str) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hermes_candidates_include_named_profile_databases() {
+        let root = std::env::temp_dir().join(format!("flowlet-hermes-db-{}", uuid::Uuid::new_v4()));
+        let profiles = root.join("profiles");
+        std::fs::create_dir_all(profiles.join("myvault")).unwrap();
+        std::fs::create_dir_all(profiles.join("workvault")).unwrap();
+        std::fs::write(root.join("state.db"), b"").unwrap();
+        std::fs::write(profiles.join("myvault").join("state.db"), b"").unwrap();
+        std::fs::write(profiles.join("workvault").join("state.db"), b"").unwrap();
+        // 非目录条目（如文件）不应被当作 profile。
+        std::fs::write(profiles.join("README.txt"), b"").unwrap();
+
+        let candidates = hermes_database_candidates_from(&[root.clone()]);
+        assert!(candidates.contains(&root.join("state.db")));
+        assert!(candidates.contains(&profiles.join("myvault").join("state.db")));
+        assert!(candidates.contains(&profiles.join("workvault").join("state.db")));
+        // 文件不被当成 profile 目录；不产生对 README.txt 的错误候选。
+        assert!(!candidates.contains(&profiles.join("README.txt").join("state.db")));
+        // 去重：同一 home 不重复。
+        let unique: std::collections::HashSet<_> = candidates.iter().collect();
+        assert_eq!(unique.len(), candidates.len());
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn hermes_candidates_dedup_across_homes() {
+        let root = std::env::temp_dir().join(format!("flowlet-hermes-dedup-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("profiles").join("p")).unwrap();
+        std::fs::write(root.join("state.db"), b"").unwrap();
+
+        let candidates = hermes_database_candidates_from(&[root.clone(), root.clone()]);
+        assert_eq!(candidates.len(), 2); // state.db + profiles/p/state.db，各一次
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

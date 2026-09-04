@@ -1663,6 +1663,18 @@ pub struct AgentSessionRow {
     pub estimated_output_cost: f64,
     pub native_summary: Option<AgentSessionNativeSummary>,
     pub native_synced_at: Option<String>,
+    /// 仅 Hermes Agent：原生会话的入口来源（`cli` / `feishu` / `cron` 等，
+    /// 来自 `state.db` 的 `sessions.source`）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_source: Option<String>,
+    /// 仅 Hermes Agent：原生会话所属命名 Profile（`default` / `myvault` / `workvault` 等，
+    /// 来自 `sessions.profile_name`）。用于区分多个 Hermes Profile 的独立会话库。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_profile: Option<String>,
+    /// 有经过 Flowlet 的请求记录，但请求未携带会话标识、无法按会话关联（如 Hermes
+    /// 未启用会话桥时）。为 true 时 UI 展示「经过 Flowlet（未关联会话）」。
+    #[serde(default)]
+    pub has_flowlet_requests: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -33,7 +33,9 @@ describe("plugin registry", () => {
     ]);
     expect(agentPlugin("hermes").endpointSuffix).toBe("/v1");
     expect(agentPlugin("hermes").surfaces).toEqual(["cli"]);
-    expect(agentPlugin("hermes").configCapabilities).toEqual([]);
+    expect(agentPlugin("hermes").configCapabilities).toEqual([
+      expect.objectContaining({ id: "session-extension", defaultEnabled: false, requiresRestart: true }),
+    ]);
     expect(agentPlugin("hermes").supportsManagedConfig).toBe(true);
     expect(AGENT_SESSION_OPTIONS.map((session) => session.id)).toEqual([
       "claude-code", "opencode", "pi", "codex-desktop", "codex-cli", "deepseek-harness", "hermes",

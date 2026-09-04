@@ -25,27 +25,34 @@ describe("agent access adapters", () => {
   it("lets Hermes pick the default aggregate model", () => {
     const adapter = agentAccessAdapter("hermes");
 
-    // 默认主模型 flowlet-pro，applyOptions 回填当前选择。
-    expect(adapter.applyOptions(context())).toEqual({ primaryModel: "flowlet-pro" });
+    // 默认主模型 flowlet-pro，applyOptions 回填当前选择与会话桥开关。
+    expect(adapter.applyOptions(context())).toEqual({ primaryModel: "flowlet-pro", sessionExtension: false });
     const selector = adapter.modelSelector?.(context())!;
     expect(selector.value).toBe("flowlet-pro");
     expect(selector.options.map((option) => option.value)).toEqual(["flowlet-pro", "flowlet-flash"]);
-    expect(selector.applyOptions("flowlet-flash")).toEqual({ primaryModel: "flowlet-flash" });
+    expect(selector.applyOptions("flowlet-flash")).toEqual({ primaryModel: "flowlet-flash", sessionExtension: false });
 
     // 已配置 flowlet-flash 时，选择器与片段都反映该选择。
     const flash = context({ primary_model: "flowlet-flash" });
-    expect(adapter.applyOptions(flash)).toEqual({ primaryModel: "flowlet-flash" });
+    expect(adapter.applyOptions(flash)).toEqual({ primaryModel: "flowlet-flash", sessionExtension: false });
     expect(adapter.modelSelector?.(flash)!.value).toBe("flowlet-flash");
     expect(adapter.manualSnippets(flash)[0].copyValue).toContain('default: "flowlet-flash"');
 
     // 非法/缺失值回退 flowlet-pro。
-    expect(adapter.applyOptions(context({ primary_model: "gpt-4o" }))).toEqual({ primaryModel: "flowlet-pro" });
+    expect(adapter.applyOptions(context({ primary_model: "gpt-4o" }))).toEqual({ primaryModel: "flowlet-pro", sessionExtension: false });
+
+    // 会话桥开关：勾选时 applyOptions 携带 sessionExtension。
+    const withBridge = context({ session_extension: true });
+    expect(adapter.applyOptions(withBridge)).toEqual({ primaryModel: "flowlet-pro", sessionExtension: true });
+    expect(adapter.configControls(withBridge)[0].checked).toBe(true);
+    expect(adapter.configControls(withBridge)[0].applyOptions(false)).toEqual({ primaryModel: "flowlet-pro", sessionExtension: false });
 
     // 手动片段注入 x-flowlet-client 与 ${HERMES_CUSTOM_...} 引用。
     const snippets = adapter.manualSnippets(context());
     expect(snippets[0].copyValue).toContain('x-flowlet-client: "hermes"');
     expect(snippets[0].copyValue).toContain('api_key: "${HERMES_CUSTOM_127_0_0_1_8787_API_KEY}"');
     expect(snippets[1].copyValue).toBe("HERMES_CUSTOM_127_0_0_1_8787_API_KEY=real-token");
+    expect(snippets[2].copyValue).toContain("flowlet-session-bridge");
   });
 
   it("keeps Claude long-context controls and snippets in sync", () => {

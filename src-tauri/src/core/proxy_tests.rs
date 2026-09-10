@@ -469,6 +469,8 @@ fn ensure_reasoning_content_passback_skips_non_deepseek_and_other_protocols() {
         "deepseek-v4-flash-0731",
         "deepseek/deepseek-v4-flash",
         "deepseek-v4-flash-vision-exp",
+        "deepseek-v4.1-flash",
+        "deepseek-flash",
         "deepseek-v4-pro",
     ] {
         let rewritten =

@@ -154,6 +154,7 @@ LongCat + DeepSeek first 阶段使用 Channel / Account / Model 三层概念，�
 - [x] 支持 DeepSeek OpenAI base_url `https://api.deepseek.com`
 - [x] 支持 DeepSeek Anthropic base_url `https://api.deepseek.com/anthropic`
 - [x] 支持 `deepseek-v4-flash`
+- [x] 支持 `deepseek-v4.1-flash`（官方 API 名 `deepseek-flash` 归一命中）
 - [x] 支持 `deepseek-v4-pro`
 - [x] 默认模型调整为 `deepseek-v4-pro`
 - [x] 支持 DeepSeek 模型列表同步（`/models`）并写入 `channel_models`

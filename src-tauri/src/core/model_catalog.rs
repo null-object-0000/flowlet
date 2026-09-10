@@ -154,7 +154,7 @@ mod tests {
     #[test]
     fn embedded_catalog_is_valid_and_has_expected_models() {
         let catalog = model_catalog();
-        assert_eq!(catalog.supported_models().len(), 22);
+        assert_eq!(catalog.supported_models().len(), 23);
         assert_eq!(
             catalog.find("LongCat-2.0").unwrap().owner_channel_id,
             "longcat"
@@ -162,6 +162,14 @@ mod tests {
         assert_eq!(
             catalog.find("deepseek-v4-flash-vision-exp").unwrap().owner_channel_id,
             "deepseek"
+        );
+        assert_eq!(
+            catalog.find("deepseek-v4.1-flash").unwrap().owner_channel_id,
+            "deepseek"
+        );
+        assert_eq!(
+            catalog.find("deepseek-flash").unwrap().id,
+            "deepseek-v4.1-flash"
         );
         assert_eq!(catalog.find("qwen3.8-flash").unwrap().owner_channel_id, "qwen");
         assert_eq!(catalog.find("GLM-5.3").unwrap().owner_channel_id, "zhipu");
@@ -252,6 +260,16 @@ mod tests {
         assert_eq!(
             canonical_model_key("qwen/deepseek-v4-pro-0813"),
             "deepseek-v4-pro"
+        );
+        // DeepSeek V4.1 Flash 的官方 API 模型名是 deepseek-flash（2026-09-10 起），
+        // 归一后命中白名单规范 ID deepseek-v4.1-flash。
+        let flash_41 = catalog.find("deepseek-v4.1-flash").unwrap();
+        let official = catalog.find("deepseek-flash").unwrap();
+        assert_eq!(flash_41.id, official.id);
+        assert_eq!(official.models_cn_provider_id, "deepseek");
+        assert_eq!(
+            canonical_model_key("deepseek-flash"),
+            "deepseek-v4.1-flash"
         );
     }
 

@@ -423,21 +423,24 @@ fn estimate_cost_at(
 ) -> Option<CostBreakdown> {
     let channel_id = channel_id?;
     let upstream_model = upstream_model?;
-    // 别名变体（如 deepseek-v4-flash-0731）按规范模型 ID 匹配价格条目。
+    // 别名变体（如 deepseek-v4-flash-0731）按规范模型 ID 匹配价格条目；价格条目本身
+    // 也可能使用官方 API 名（如 models-cn 对 DeepSeek V4.1 Flash 用 deepseek-flash），
+    // 因此两侧都先归一，再按规范 ID 相等匹配。
     let canonical_model = canonical_model_key(upstream_model);
+    let price_entry_matches = |channel: &str, price_upstream: &str, canonical: &str| {
+        channel.eq_ignore_ascii_case(channel_id)
+            && canonical_model_key(price_upstream).eq_ignore_ascii_case(canonical)
+    };
     // 实际渠道的显式价格优先；自定义渠道没有独立价格时，按模型 ID 回退到
     // 官方归属渠道的基准价格。路由渠道仍原样保留用于渠道/账号维度统计。
     let price = prices
         .iter()
-        .find(|p| {
-            p.channel_id.eq_ignore_ascii_case(channel_id)
-                && p.upstream_model.eq_ignore_ascii_case(&canonical_model)
-        })
+        .find(|p| price_entry_matches(&p.channel_id, &p.upstream_model, &canonical_model))
         .or_else(|| {
             let owner_channel_id = official_channel_id_for_model(&canonical_model)?;
             prices.iter().find(|p| {
-                p.channel_id.eq_ignore_ascii_case(owner_channel_id)
-                    && p.upstream_model.eq_ignore_ascii_case(&canonical_model)
+                owner_channel_id.eq_ignore_ascii_case(&p.channel_id)
+                    && canonical_model_key(&p.upstream_model).eq_ignore_ascii_case(&canonical_model)
             })
         })?;
 
@@ -4377,6 +4380,47 @@ mod estimate_cost_tests {
             at("2026-08-17T04:00:00Z"),
         )
         .is_none());
+    }
+
+    #[test]
+    fn prices_match_by_canonical_key_when_catalog_uses_official_api_name() {
+        // models-cn 同步后，DeepSeek V4.1 Flash 的价格条目以官方 API 名
+        // deepseek-flash 为 key；白名单规范 ID 是 deepseek-v4.1-flash。
+        // 两侧都按规范 ID 归一后必须仍能匹配，包括由千问等渠道承载、
+        // upstream_model 为 deepseek-v4.1-flash 的行。
+        let price = ModelPrice {
+            channel_id: "deepseek".to_string(),
+            upstream_model: "deepseek-flash".to_string(),
+            schedules: vec![ModelPriceSchedule {
+                rate_type: "standard".to_string(),
+                input_uncached_price: 1.0,
+                input_cached_price: 0.02,
+                output_price: 4.0,
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let row = |channel: &str, upstream: &str| {
+            estimate_cost_at(
+                std::slice::from_ref(&price),
+                Some(channel),
+                Some(upstream),
+                Some(1_000_000),
+                Some(0),
+                Some(1_000_000),
+                None,
+                Some(1_000_000),
+                chrono::Utc::now(),
+            )
+        };
+        let canonical_row = row("deepseek", "deepseek-v4.1-flash").unwrap();
+        approx(canonical_row.total, 5.0); // 1M 未缓存输入 × 1 + 1M 输出 × 4
+        let official_row = row("deepseek", "deepseek-flash").unwrap();
+        approx(official_row.total, 5.0);
+        // 千问 Token Plan 等渠道承载时回退到官方归属渠道的基准价。
+        let qwen_row = row("qwen", "deepseek-v4.1-flash").unwrap();
+        approx(qwen_row.total, 5.0);
+        assert!(row("qwen", "qwen3.7-max").is_none());
     }
 
     #[test]

@@ -107,7 +107,7 @@ Flowlet 当前有七种渠道模板：LongCat、DeepSeek、Kimi、Qwen、Z.AI、
 
 ## 4. 模型支持
 
-Flowlet 当前总共支持 22 个规范化模型。这个列表是全局白名单，不是按渠道切分的
+Flowlet 当前总共支持 23 个规范化模型。这个列表是全局白名单，不是按渠道切分的
 固定路由表。
 
 | 官方归属 | 规范化模型 ID | Responses 说明 |
@@ -115,6 +115,7 @@ Flowlet 当前总共支持 22 个规范化模型。这个列表是全局白名�
 | LongCat | `LongCat-2.0` | ✅ 上游确认 |
 | DeepSeek | `deepseek-v4-pro` | ◐ Flowlet 会生成候选；上游模型级可用性需实测 |
 | DeepSeek | `deepseek-v4-flash` | ✅ 上游确认 |
+| DeepSeek | `deepseek-v4.1-flash` | ✅ 上游确认（官方 API 名 `deepseek-flash` 归一命中） |
 | DeepSeek | `deepseek-v4-flash-vision-exp` | ◐ 视觉实验模型；上游模型级可用性需实测 |
 | Kimi | `kimi-k3` | — 上游暂不支持 |
 | Kimi | `kimi-k2.7-code` | — 上游暂不支持 |
@@ -156,7 +157,8 @@ Channel + Account + Protocol
 Responses 能力同样必须按“渠道端点 + 模型”共同判断，不能因为账号属于 Qwen 渠道，就把
 它返回的所有第三方模型都视为支持 Responses。Flowlet 的 responses 路由按渠道声明
 （`supported_protocols` 含 `"responses"`）生成，模型级上游可用性差异（如 DeepSeek
-Responses 暂时只接受 `deepseek-v4-flash`）由上游自行报错，Flowlet 不做模型级拦截。
+各模型对 Responses 的支持范围，V4.1 Flash 官方已原生支持）由上游自行报错，
+Flowlet 不做模型级拦截。
 
 ### 4.2 对外模型名
 

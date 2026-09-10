@@ -190,7 +190,18 @@ fn find_models_cn_model<'a>(
                 .get("models")?
                 .as_array()?
                 .iter()
-                .find(|model| model.get("id").and_then(|value| value.as_str()) == Some(canonical))
+                .find(|model| {
+                    // models-cn 可能使用官方 API 名（如 deepseek-flash）作为模型 ID，
+                    // 与白名单规范 ID（deepseek-v4.1-flash）不同；两侧都归一后匹配。
+                    model
+                        .get("id")
+                        .and_then(|value| value.as_str())
+                        .map(|id| {
+                            crate::core::model_catalog::canonical_model_key(id)
+                                == crate::core::model_catalog::canonical_model_key(canonical)
+                        })
+                        .unwrap_or(false)
+                })
                 .map(|model| {
                     let retrieved_at = provider
                         .get("sources")
@@ -1477,6 +1488,7 @@ pub(super) fn ensure_reasoning_content_passback(
 fn is_deepseek_reasoning_model(model: &str) -> bool {
     const DEEPSEEK_REASONING_MODELS: &[&str] = &[
         "deepseek-v4-flash",
+        "deepseek-v4.1-flash",
         "deepseek-v4-flash-vision-exp",
         "deepseek-v4-pro",
     ];

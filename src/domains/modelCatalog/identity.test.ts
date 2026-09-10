@@ -10,9 +10,11 @@ import {
 
 describe("model identity catalog", () => {
   it("provides the complete supported-model whitelist without duplicates", () => {
-    expect(FLOWLET_SUPPORTED_MODELS).toHaveLength(22);
-    expect(new Set(FLOWLET_SUPPORTED_MODELS.map((model) => model.toLowerCase())).size).toBe(22);
+    expect(FLOWLET_SUPPORTED_MODELS).toHaveLength(23);
+    expect(new Set(FLOWLET_SUPPORTED_MODELS.map((model) => model.toLowerCase())).size).toBe(23);
     expect(FLOWLET_SUPPORTED_MODELS).toContain("LongCat-2.0");
+    expect(FLOWLET_SUPPORTED_MODELS).toContain("deepseek-v4-flash");
+    expect(FLOWLET_SUPPORTED_MODELS).toContain("deepseek-v4.1-flash");
     expect(FLOWLET_SUPPORTED_MODELS).toContain("deepseek-v4-flash-vision-exp");
     expect(FLOWLET_SUPPORTED_MODELS).toContain("qwen3.8-flash");
     expect(FLOWLET_SUPPORTED_MODELS).toContain("glm-5.3");
@@ -27,6 +29,7 @@ describe("model identity catalog", () => {
   it("derives owner defaults and models-cn providers from the same identity", () => {
     expect(DEFAULT_EXPOSED_MODELS_BY_CHANNEL.deepseek).toEqual([
       "deepseek-v4-flash",
+      "deepseek-v4.1-flash",
       "deepseek-v4-flash-vision-exp",
       "deepseek-v4-pro",
     ]);
@@ -64,6 +67,9 @@ describe("model identity catalog", () => {
     expect(canonicalModelId("deepseek/deepseek-v4-flash-0731")).toBe("deepseek-v4-flash");
     expect(canonicalModelId("qwen/deepseek-v4-pro-0813")).toBe("deepseek-v4-pro");
     expect(canonicalModelId("deepseek-v4-pro-0813")).toBe("deepseek-v4-pro");
+    // DeepSeek V4.1 Flash 的官方 API 模型名 deepseek-flash 归一后命中白名单规范 ID。
+    expect(canonicalModelId("deepseek-flash")).toBe("deepseek-v4.1-flash");
+    expect(canonicalModelId("deepseek/deepseek-flash")).toBe("deepseek-v4.1-flash");
     expect(canonicalModelId("stealth/ox-alpha")).toBe("ox-alpha");
     expect(canonicalModelId("nvidia/nemotron-3.5-lightning:free")).toBe("nemotron-3.5-lightning");
     expect(canonicalModelId("nvidia/nemotron-3-super-120b-a12b:free")).toBe("nemotron-3-super-120b-a12b");

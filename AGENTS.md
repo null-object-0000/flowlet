@@ -328,6 +328,14 @@ Flowlet 在 `model-catalog.json` 维护「上游变体 → 规范模型 ID」映
 同一规范模型的多个上游 ID 不新增对外模型身份，但会生成多个可独立启停、排序和失败
 降级的 Route Candidate；`/models` 对外仍只返回一次规范模型 ID。
 
+`models-cn.json` 目录按**厂商自己的模型名**收录，可能与白名单规范 ID 不同：例如 DeepSeek
+V4.1 Flash 的官方 API 名是 `deepseek-flash`，目录以该名收录，而白名单规范 ID 是
+`deepseek-v4.1-flash`（`deepseek-flash` 登记为其别名）。因此规格、能力与基准价格的目录
+查找必须按规范 ID **双侧归一**后匹配，不得只做字符串相等：前端 `findModelInCatalog`、
+Rust `find_models_cn_model` 与费用匹配 `estimate_cost_at` 均已按此实现；新增目录查找入口
+时必须保持一致，否则会出现「模型明明在模型目录里，界面却显示暂无可用模型规格」或费用
+估算缺失。
+
 ---
 
 ## 7. 概览页规则

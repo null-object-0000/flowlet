@@ -154,6 +154,12 @@ Channel + Account + Protocol
 例如千问 Token Plan 端点可能返回 DeepSeek 模型；该模型仍然是 DeepSeek 模型，只是由
 千问账号承载请求。
 
+目录查找同样按规范模型 ID 双侧归一：`models-cn.json` 按厂商自己的模型名收录（DeepSeek
+V4.1 Flash 收录为官方 API 名 `deepseek-flash`，而白名单规范 ID 是 `deepseek-v4.1-flash`），
+因此规格、能力与基准价格解析（前端 `findModelInCatalog`、Rust `find_models_cn_model`、
+费用匹配 `estimate_cost_at`）都必须先归一再匹配，否则会出现「模型在目录中但界面显示暂无
+可用模型规格」或价格估算缺失。
+
 Responses 能力同样必须按“渠道端点 + 模型”共同判断，不能因为账号属于 Qwen 渠道，就把
 它返回的所有第三方模型都视为支持 Responses。Flowlet 的 responses 路由按渠道声明
 （`supported_protocols` 含 `"responses"`）生成，模型级上游可用性差异（如 DeepSeek

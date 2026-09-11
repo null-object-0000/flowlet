@@ -119,6 +119,22 @@ describe("resolveChannelModel", () => {
     expect(resolved?.officialPrice?.currency).toBe("CNY");
   });
 
+  it("resolves the canonical model when models-cn keys it by the official API name", () => {
+    // models-cn 用官方 API 名 deepseek-flash 收录 DeepSeek-V4.1-Flash；白名单规范 ID 是
+    // deepseek-v4.1-flash（别名 deepseek-flash）。规格、能力与基准价格必须仍能解析。
+    const catalog = makeCatalog();
+    catalog.providers[0].models[0].id = "deepseek-flash";
+    catalog.providers[0].models[0].name = "DeepSeek-V4.1-Flash";
+    const resolved = resolveChannelModel(catalog, "custom", "deepseek-v4.1-flash");
+    expect(resolved).not.toBeNull();
+    expect(resolved?.providerId).toBe("deepseek");
+    expect(resolved?.modelId).toBe("deepseek-flash");
+    expect(resolved?.specificationSource).toBe("models-cn");
+    expect(resolved?.limits.contextTokens).toBe(1_000_000);
+    expect(resolved?.capabilities.inputModalities).toEqual(["text", "image"]);
+    expect(resolved?.officialPrice?.currency).toBe("CNY");
+  });
+
   it("returns null for unknown channel", () => {
     expect(resolveChannelModel(makeCatalog(), "unknown", "x")).toBeNull();
   });

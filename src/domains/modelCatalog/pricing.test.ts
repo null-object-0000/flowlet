@@ -477,6 +477,23 @@ describe("findModelInCatalog", () => {
     expect(findModelInCatalog(catalog, "deepseek", "nope")).toBeNull();
     expect(findModelInCatalog(catalog, "missing", "deepseek-v4-flash")).toBeNull();
   });
+
+  it("falls back to the canonical model when the catalog uses the official API name", () => {
+    // models-cn 用官方 API 名 deepseek-flash 收录 DeepSeek-V4.1-Flash，而白名单规范 ID
+    // 是 deepseek-v4.1-flash；规格/价格解析必须仍能命中。
+    const catalog = {
+      providers: [makeProvider({ models: [makeModel({ id: "deepseek-flash", name: "DeepSeek-V4.1-Flash" })] })],
+    };
+    const found = findModelInCatalog(catalog, "deepseek", "deepseek-v4.1-flash");
+    expect(found?.model.id).toBe("deepseek-flash");
+  });
+
+  it("does not fall back across providers", () => {
+    const catalog = {
+      providers: [makeProvider({ id: "qwen-cn", models: [makeModel({ id: "deepseek-flash" })] })],
+    };
+    expect(findModelInCatalog(catalog, "deepseek", "deepseek-v4.1-flash")).toBeNull();
+  });
 });
 
 /** 构造一个最简 ResolvedModel，便于聚合测试只关注目标字段。 */

@@ -18,6 +18,11 @@ const DEFAULT_CURRENCY = "CNY";
  * `upstream_model` 是上游原名（可能是别名变体，如 deepseek-v4-flash-0731），
  * 查询时依次尝试原样名与 `canonicalModelId` 规范化后的规范名。
  *
+ * 目录条目本身可能用**厂商官方 API 名**收录（如 DeepSeek V4.1 Flash 收录为
+ * `deepseek-flash`），而用量行是白名单规范 ID（`deepseek-v4.1-flash`）。因此建表时
+ * 同时写入原样名与其规范名两个键，原始名优先（命中原始名的行永远用目录给的币种，
+ * 规范名键只补别名缺口）。
+ *
  * 代理行的 `estimated_cost_currency` 在 Rust 聚合层为 NULL，币种完全依赖本地
  * 价格目录解析；目录缺失（如便携版首次启动未同步 models-cn）或模型不在目录时
  * 回退到默认人民币，保证「预估费用」列始终带货币符号，而不是显示无币种裸数值。
@@ -34,7 +39,11 @@ export function buildModelPriceCurrencyLookup(data: Array<[string, string]>) {
     if (separator <= 0) continue;
     const channelId = key.slice(0, separator);
     const upstreamModel = key.slice(separator + 1);
-    if (upstreamModel) byModel.set(upstreamModel, currency);
+    if (upstreamModel) {
+      byModel.set(upstreamModel, currency);
+      const canonical = canonicalModelId(upstreamModel);
+      if (canonical && !byModel.has(canonical)) byModel.set(canonical, currency);
+    }
     if (channelId && !byChannel.has(channelId)) byChannel.set(channelId, currency);
   }
   return {

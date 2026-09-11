@@ -13,6 +13,7 @@ import type {
   ResolvedModelLimits,
   ResolvedPrice,
 } from "./types";
+import { canonicalModelKey } from "./identity";
 
 /** 星期规范顺序（mon 周一 … sun 周日），用于排序与连续区间压缩。 */
 export const MODEL_CN_DAY_ORDER: readonly ModelsCnDayOfWeek[] = [
@@ -410,18 +411,22 @@ export function estimateCost(price: ResolvedPrice, input: CostEstimateInput): Co
 }
 
 /** 在 catalog 中按 (providerId, modelId) 查找模型。
- *  纯函数：接受已解析的 ModelsCnCatalog。 */
+ *  纯函数：接受已解析的 ModelsCnCatalog。
+ *  models-cn 目录可能用**官方 API 名**作为模型 ID（如 deepseek 目录收录 `deepseek-flash`），
+ *  与 Flowlet 白名单规范 ID（`deepseek-v4.1-flash`）不同。精确匹配失败后按规范 ID 双侧
+ *  归一再匹配一次，与 Rust `find_models_cn_model` / 费用匹配保持同一语义。 */
 export function findModelInCatalog(
   catalog: { providers: ModelsCnProvider[] },
   providerId: string,
   modelId: string,
 ): { provider: ModelsCnProvider; model: ModelsCnModel } | null {
-  for (const provider of catalog.providers) {
-    if (provider.id !== providerId) continue;
-    const model = provider.models.find((m) => m.id === modelId);
-    if (model) return { provider, model };
-  }
-  return null;
+  const provider = catalog.providers.find((item) => item.id === providerId);
+  if (!provider) return null;
+  const exact = provider.models.find((model) => model.id === modelId);
+  if (exact) return { provider, model: exact };
+  const canonical = canonicalModelKey(modelId);
+  const aliased = provider.models.find((model) => canonicalModelKey(model.id) === canonical);
+  return aliased ? { provider, model: aliased } : null;
 }
 
 /** 在 catalog 中按 modelId 模糊匹配（含别名）。 */

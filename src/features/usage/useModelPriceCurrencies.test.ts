@@ -50,6 +50,27 @@ describe("buildModelPriceCurrencyLookup", () => {
     expect(lookup.modelCurrencyOf(aliasRow)).toBe("USD");
   });
 
+  it("resolves a canonical-id row when the catalog uses the official API name", () => {
+    // 目录用官方 API 名 deepseek-flash 收录，用量行的 upstream_model 是白名单规范 ID
+    // deepseek-v4.1-flash。用非默认币种断言，避免与 CNY 兜底混淆。
+    const lookup = buildModelPriceCurrencyLookup([["deepseek:deepseek-flash", "USD"]]);
+    const canonicalRow = row({ channel_id: "custom", upstream_model: "deepseek-v4.1-flash" });
+    expect(lookup.modelCurrencyOf(canonicalRow)).toBe("USD");
+    // 原始名本身仍然命中。
+    expect(lookup.modelCurrencyOf(row({ channel_id: "deepseek", upstream_model: "deepseek-flash" })))
+      .toBe("USD");
+  });
+
+  it("keeps the raw catalog name over the alias-derived key when both are present", () => {
+    const lookup = buildModelPriceCurrencyLookup([
+      ["deepseek:deepseek-flash", "USD"],
+      ["deepseek:deepseek-v4.1-flash", "CNY"],
+    ]);
+    // 规范 ID 有独立条目时以它为准，别名条目只服务别名行。
+    expect(lookup.modelCurrencyOf(row({ upstream_model: "deepseek-v4.1-flash" }))).toBe("CNY");
+    expect(lookup.modelCurrencyOf(row({ upstream_model: "deepseek-flash" }))).toBe("USD");
+  });
+
   it("prefers the backend-declared currency over the catalog", () => {
     const lookup = buildModelPriceCurrencyLookup([["longcat:LongCat-2.0", "CNY"]]);
     const nativeRow = row({

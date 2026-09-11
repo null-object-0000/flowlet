@@ -6,7 +6,7 @@ on:
       release_tag:
         description: GitHub Release tag whose APK should be uploaded
         required: true
-        default: v0.1.0
+        default: v0.1.1
         type: string
       notes_only:
         description: Update the existing Pgyer release notes without uploading the APK again

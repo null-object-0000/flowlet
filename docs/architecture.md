@@ -948,6 +948,8 @@ PC 用量分析页的 `usage_summary` 进一步把能够确认具体模型的纯
 时间范围比较先通过 SQLite `datetime()` 统一 RFC3339 表示，避免周期起点当天的边界误收。
 `channel_id = agent-native` 仅表示来源，`account_id` 保存 Agent 类型，
 `client_id` 保存统一客户端归属，`request_count = 0`，并用 `native_event_count` 单独表达消息级事件数。
+前端用量洞察页因此不把 `agent-native` 当作渠道品牌：渠道账号维度的原生行按 `account_id`、
+客户端维度按 `client_id` 解析 Agent 品牌图标（`agentBrandKey`），只有未登记品牌的归属才回退首字母徽标。
 该映射不新增数据库列；`estimated_cost_currency` 只存在于 command 返回结构中，用于让前端优先按
 后端实际命中的价格币种聚合。公开价匹配顺序为模型官方渠道、`openai-api` 保留命名空间、唯一非套餐
 价格；不会从 API 金额或套餐类型换算 credits。模型无法精确计价时金额为 0、币种为空，Token 仍参与

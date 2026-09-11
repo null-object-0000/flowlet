@@ -30,6 +30,9 @@ export type ConsumptionDimension = "model" | "account" | "client" | "device";
 export type ConsumptionMetric = "tokens" | "cost";
 export type CostCurrencyLookup = (row: UsageSummaryRow) => string | null;
 
+/** 品牌标识所属体系：渠道品牌（ChannelBrandLogo / 首字母圆形徽标）或 Agent 品牌（AgentBrandMark）。 */
+export type ConsumptionBrandKind = "channel" | "agent";
+
 function modelBrandId(row: UsageSummaryRow): string | null {
   const model = (canonicalModelId(row.upstream_model) ?? row.upstream_model ?? "")
     .trim()
@@ -71,8 +74,11 @@ export type ConsumptionEntry = ConsumptionAggregate & {
   key: string;
   label: string;
   sublabel: string | null;
-  /** 品牌标识：model → 官方渠道 ID；account → channel_id；client → client_id。 */
+  /** 品牌标识：model → 官方渠道 ID；account → channel_id（Agent 原生账号为 Agent 类型）；
+   *  client → client_id。 */
   brandId: string | null;
+  /** brandId 的解释方式：Agent 原生渠道账号与客户端维度按 Agent 品牌解析。 */
+  brandKind: ConsumptionBrandKind;
   tokenShare: number;
   costShare: number;
 };
@@ -114,6 +120,7 @@ export function groupConsumption(
       label: dimensionOf.labelOf(row),
       sublabel: dimensionOf.sublabelOf(row),
       brandId: dimensionOf.brandIdOf(row),
+      brandKind: dimensionOf.brandKindOf(row),
       ...emptyAggregate(),
     };
     accumulate(current, row, currencyOf);
@@ -235,6 +242,7 @@ type DimensionSelectors = {
   shortLabelOf: (row: UsageSummaryRow) => string;
   sublabelOf: (row: UsageSummaryRow) => string | null;
   brandIdOf: (row: UsageSummaryRow) => string | null;
+  brandKindOf: (row: UsageSummaryRow) => ConsumptionBrandKind;
 };
 
 function dimensionSelectors(
@@ -248,6 +256,7 @@ function dimensionSelectors(
       shortLabelOf: (row) => canonicalModelId(row.upstream_model) ?? row.upstream_model ?? "未知模型",
       sublabelOf: (row) => row.channel_name ?? row.channel_id ?? null,
       brandIdOf: modelBrandId,
+      brandKindOf: () => "channel",
     };
   }
   if (dimension === "account") {
@@ -273,7 +282,13 @@ function dimensionSelectors(
         if (row.channel_id === AGENT_NATIVE_CHANNEL_ID) return AGENT_NATIVE_CHANNEL_NOTE;
         return (row.account_name?.trim() || row.account_id?.trim() ? row.channel_name ?? row.channel_id ?? null : null);
       },
-      brandIdOf: (row) => row.channel_id ?? null,
+      // Agent 原生渠道的 channel_id 只是来源标记（`agent-native`），
+      // 真正的品牌是账号保存的 Agent 类型（如 codex-desktop / codex-cli / claude-code），
+      // 因此这里返回 account_id 并按 Agent 品牌解析，避免所有原生账号都退化成首字母徽标。
+      brandIdOf: (row) => (row.channel_id === AGENT_NATIVE_CHANNEL_ID
+        ? row.account_id?.trim() || row.account_name?.trim() || null
+        : row.channel_id ?? null),
+      brandKindOf: (row) => (row.channel_id === AGENT_NATIVE_CHANNEL_ID ? "agent" : "channel"),
     };
   }
   if (dimension === "client") {
@@ -285,6 +300,7 @@ function dimensionSelectors(
         ? row.client_id.trim()
         : null),
       brandIdOf: (row) => row.client_id?.trim() || null,
+      brandKindOf: () => "agent",
     };
   }
   // device：label 由调用方通过 deviceNameOf 解析设备展示名（来自同步的 known_devices），
@@ -308,6 +324,7 @@ function dimensionSelectors(
       return name && name !== id ? id : null;
     },
     brandIdOf: (row) => row.device_id?.trim() || null,
+    brandKindOf: () => "channel",
   };
 }
 

@@ -9,7 +9,7 @@ import { useKnownDevices } from "../../features/device-sync/useDeviceSync";
 import { DeviceUsageTitlePicker } from "../../features/device-sync/DeviceUsageTitlePicker";
 import { useModelPriceCurrencyLookup } from "../../features/usage/useModelPriceCurrencies";
 import { useUsageSummary } from "../../features/usage/useUsageSummary";
-import { AgentBrandMark } from "../../shared/ui/AgentBrandMark";
+import { AgentBrandMark, agentBrandKey } from "../../shared/ui/AgentBrandMark";
 import { CompactNumber } from "../../shared/ui/CompactNumber";
 import { PageHeader } from "../../shared/ui/PageHeader";
 import { dominantCostCurrency, formatAggregateCost, formatCostAmount } from "../../shared/formatters/cost";
@@ -44,9 +44,6 @@ const DIMENSION_OPTIONS: Array<{ value: ConsumptionDimension; label: string }> =
   { value: "client", label: "按客户端" },
   { value: "device", label: "按设备" },
 ];
-
-/** AgentBrandMark 已内置品牌图标的客户端 ID（其余客户端展示首字母徽标）。 */
-const BRANDED_AGENT_IDS = new Set(["claude-code", "opencode", "pi", "chatgpt-desktop", "codex", "codex-desktop"]);
 
 export function UsageAnalysisPage() {
   const { language, t } = useAppPreferences();
@@ -174,7 +171,7 @@ export function UsageAnalysisPage() {
               key: entry.key,
               label: entry.label,
               sublabel: entry.sublabel ?? undefined,
-              badge: { node: <DimensionBadge dimension={dimension} entry={entry} /> },
+              badge: { node: <DimensionBadge entry={entry} /> },
               tokenValue: formatCompactNumber(entry.tokens, language),
               tokenShare: formatPercent(entry.tokenShare),
               costValue: formatAggregateCost(entry.costByCurrency, entry.cost),
@@ -366,12 +363,12 @@ function CrossMatrixGrid({ entries, columns, matrix, metric, selectedKey, onSele
   );
 }
 
-function DimensionBadge({ dimension, entry }: { dimension: ConsumptionDimension; entry: ConsumptionEntry }) {
-  if (dimension === "client") {
-    const agentId = entry.brandId ?? "";
-    if (BRANDED_AGENT_IDS.has(agentId)) {
-      return <AgentBrandMark agentId={agentId} className={styles.badge} />;
-    }
+/** 主维度徽标：Agent 维度（客户端、Agent 原生账号）用 Agent 品牌标记，
+ *  已登记品牌的展示品牌图标、未登记的回退首字母；其余维度用渠道品牌图标。 */
+export function DimensionBadge({ entry }: { entry: ConsumptionEntry }) {
+  if (entry.brandKind === "agent") {
+    const brand = entry.brandId ? agentBrandKey(entry.brandId) : null;
+    if (brand) return <AgentBrandMark agentId={brand} className={styles.badge} />;
     return <span className={`${styles.badge} ${styles.badgeLetter}`} aria-hidden="true">{entry.label.trim().charAt(0).toUpperCase() || "?"}</span>;
   }
   return <ChannelBrandLogo channelId={entry.brandId ?? "unknown"} name={entry.label} />;

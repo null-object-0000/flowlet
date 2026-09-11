@@ -94,8 +94,10 @@ describe("groupConsumption", () => {
     expect(deepseek?.label).toBe("DeepSeek · 主账号");
     expect(deepseek?.tokens).toBe(2300);
     expect(deepseek?.brandId).toBe("deepseek");
+    expect(deepseek?.brandKind).toBe("channel");
     const custom = entries.find((entry) => entry.key === "custom::acc-or-1");
     expect(custom?.label).toBe("中转站 · OpenRouter 备用");
+    expect(custom?.brandKind).toBe("channel");
   });
 
   it("groups by client and buckets missing client ids as unknown", () => {
@@ -104,6 +106,8 @@ describe("groupConsumption", () => {
     const claudeCode = entries[0];
     expect(claudeCode.label).toBe("Claude Code");
     expect(claudeCode.tokens).toBe(3500);
+    expect(claudeCode.brandId).toBe("claude-code");
+    expect(claudeCode.brandKind).toBe("agent");
     const unknown = entries[1];
     expect(unknown.label).toBe("未识别客户端");
     expect(unknown.tokens).toBe(500);
@@ -150,6 +154,11 @@ describe("groupConsumption", () => {
     const byAccount = groupConsumption([native], "account", currencyOf);
     expect(byAccount[0].label).toBe("Codex Desktop · Agent 原生");
     expect(byAccount[0].sublabel).toBe("未经过 Flowlet");
+    // 伪渠道 `agent-native` 只是来源标记，品牌必须取账号保存的 Agent 类型。
+    expect(byAccount[0].brandId).toBe("codex-desktop");
+    expect(byAccount[0].brandKind).toBe("agent");
+    // 模型维度仍按渠道品牌展示。
+    expect(byModel[0].brandKind).toBe("channel");
     const matrix = buildCrossMatrix([native], "client", "cost", currencyOf);
     expect(matrix.cells.get(cellId("codex", "gpt-5.6-sol"))?.costByCurrency)
       .toEqual({ USD: 0.12 });

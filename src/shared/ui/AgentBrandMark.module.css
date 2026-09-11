@@ -13,5 +13,6 @@
 .pi { --agent-icon: url("/icons/lobe/pi.svg"); color: var(--flowlet-color-text); }
 .hermes { --agent-icon: url("/icons/lobe/hermesagent.svg"); color: var(--flowlet-color-text); }
 .openai { --agent-icon: url("/icons/lobe/openai.svg"); color: var(--flowlet-color-text); }
-.codex-desktop { --agent-icon: url("/icons/lobe/openai.svg"); color: var(--flowlet-color-text); }
+/* DeepSeek 品牌色与 ChannelBrandLogoView 的 .deepseek 保持一致。 */
+.deepseek { --agent-icon: url("/icons/lobe/deepseek.svg"); color: #4d6bfe; }
 .generic { --agent-icon: url("/icons/lobe/openai.svg"); color: var(--flowlet-color-text-tertiary); }

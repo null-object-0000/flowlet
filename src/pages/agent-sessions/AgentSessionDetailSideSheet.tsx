@@ -129,7 +129,10 @@ export function AgentSessionDetailSideSheet({
                   <DetailItem label={t("入口来源")} value={hermesSessionOrigin(session, t) ?? "—"} wide />
                 ) : null}
                 {remote ? <DetailItem label={t("来源设备")} value={session.remoteDeviceName ?? session.remoteDeviceId ?? "—"} wide /> : null}
-                <DetailItem label={t("项目目录")} value={session.projectPath ?? "—"} />
+                <DetailItem label={t("工作目录")} value={session.projectPath ?? "—"} wide hint={t("会话运行时的项目工作目录")} />
+                {session.nativeSessionDir ? (
+                  <DetailItem label={t("会话目录")} value={session.nativeSessionDir} copyable wide hint={t("会话记录在本机的存放位置")} />
+                ) : null}
               </div>
               {!session.flowletObserved && session.hasFlowletRequests ? (
                 <p className={styles.usageHint}>{t("该会话的请求经过 Flowlet，但未携带会话标识、无法按会话关联。可在接入抽屉开启「精确会话关联」后按会话查看请求与用量。")}</p>
@@ -358,12 +361,15 @@ function DetailItem({
   value,
   wide = false,
   copyable = false,
+  hint,
   onOpen,
 }: {
   label: string;
   value: string;
   wide?: boolean;
   copyable?: boolean;
+  /** 字段含义的补充说明，作为 label 的原生提示展示。 */
+  hint?: string;
   onOpen?: () => void;
 }) {
   const { t } = useAppPreferences();
@@ -377,7 +383,7 @@ function DetailItem({
   };
   return (
     <div className={`${styles.detailItem} ${wide ? styles.wide : ""}`}>
-      <span>{label}</span>
+      <span title={hint}>{label}</span>
       <div>
         {onOpen ? (
           <Tooltip content={t("查看请求日志明细")}>
@@ -393,7 +399,7 @@ function DetailItem({
               <IconExternalOpen />
             </Button>
           </Tooltip>
-        ) : <strong title={value}>{value}</strong>}
+        ) : <strong className={styles.value} title={value}>{value}</strong>}
         {copyable ? <Button aria-label={t("复制{label}", { label })} icon={<IconCopy />} theme="borderless" size="small" onClick={() => void copy()} /> : null}
       </div>
     </div>

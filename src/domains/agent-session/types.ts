@@ -77,6 +77,9 @@ export type AgentSessionRow = {
   nativeSource?: string | null;
   /** 仅 Hermes Agent：原生会话所属命名 Profile（default / myvault / workvault 等）。 */
   nativeProfile?: string | null;
+  /** 原生会话在本机的落盘目录（文件型 Agent 是会话记录所在目录，数据库型 Agent 是
+   *  `state.db` / `opencode.db` 所在目录）。仅本地原生会话有值；远端设备快照不带。 */
+  nativeSessionDir?: string | null;
   /** 有经过 Flowlet 的请求记录，但请求未携带会话标识、无法按会话关联（如 Hermes
    *  未启用会话桥时）。为 true 时 UI 展示「经过 Flowlet（未关联会话）」。 */
   hasFlowletRequests?: boolean;

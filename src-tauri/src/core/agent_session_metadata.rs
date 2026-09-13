@@ -204,6 +204,10 @@ pub fn merge_agent_session_catalog(
         if let Some(native) = merged.get_mut(&key) {
             native.title = native.title.take().or(observed.title.clone());
             native.project_path = native.project_path.take().or(observed.project_path.clone());
+            native.native_session_dir = native
+                .native_session_dir
+                .take()
+                .or(observed.native_session_dir.clone());
             native.parent_session_id = native
                 .parent_session_id
                 .take()
@@ -353,6 +357,7 @@ fn list_claude_native_sessions_from_with_live_status(
                 runtime_status,
                 metadata.title,
                 metadata.project_path,
+                parent_directory(&path),
                 metadata.native_started_at,
                 metadata.native_updated_at,
             ))
@@ -688,6 +693,7 @@ fn read_codex_session(
         infer_codex_runtime_status(path),
         title,
         string_field(payload, "cwd"),
+        parent_directory(path),
         string_field(payload, "timestamp").or_else(|| string_field(&value, "timestamp")),
         native_updated_at,
     ))
@@ -848,6 +854,7 @@ fn list_opencode_native_sessions_from(database_path: &Path) -> Vec<AgentSessionR
                 .unwrap_or_else(|| "idle".to_string()),
             title,
             project_path,
+            parent_directory(database_path),
             created_at.and_then(format_unix_millis),
             updated_at.and_then(format_unix_millis),
         ))
@@ -943,6 +950,7 @@ fn list_hermes_native_sessions_from(database_path: &Path) -> Vec<AgentSessionRow
             infer_hermes_runtime_status(ended_at, last_role.as_deref()),
             title,
             project_path,
+            parent_directory(database_path),
             started_at.and_then(format_unix_seconds),
             ended_at.or(started_at).and_then(format_unix_seconds),
         );
@@ -1068,6 +1076,7 @@ fn read_pi_session_summary(path: &Path) -> Option<AgentSessionRow> {
         infer_pi_runtime_status(path),
         title,
         project_path,
+        parent_directory(path),
         native_started_at,
         native_updated_at,
     ))
@@ -1138,6 +1147,13 @@ fn truncate_session_title(text: &str, max_chars: usize) -> String {
     }
 }
 
+/// 取文件所在目录（本机绝对路径的展示形态）。
+fn parent_directory(path: &Path) -> Option<String> {
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .map(|parent| parent.to_string_lossy().into_owned())
+}
+
 fn native_row(
     agent_type: &str,
     session_id: String,
@@ -1145,6 +1161,7 @@ fn native_row(
     runtime_status: String,
     title: Option<String>,
     project_path: Option<String>,
+    native_session_dir: Option<String>,
     native_started_at: Option<String>,
     native_updated_at: Option<String>,
 ) -> AgentSessionRow {
@@ -1186,6 +1203,7 @@ fn native_row(
         native_synced_at: None,
         native_source: None,
         native_profile: None,
+        native_session_dir,
         has_flowlet_requests: false,
     }
 }
@@ -1256,6 +1274,7 @@ mod tests {
             session_id.to_string(),
             parent_session_id.map(str::to_string),
             runtime_status.to_string(),
+            None,
             None,
             None,
             Some("2026-08-01T00:00:00Z".to_string()),
@@ -1871,6 +1890,7 @@ mod tests {
             "running".to_string(),
             Some("Native title".to_string()),
             Some("D:\\work\\flowlet".to_string()),
+            Some("C:\\Users\\dev\\.local\\share\\opencode".to_string()),
             Some("2026-07-18T08:00:00Z".to_string()),
             Some("2026-07-18T09:00:00Z".to_string()),
         );

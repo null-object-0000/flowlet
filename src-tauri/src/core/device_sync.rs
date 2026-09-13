@@ -1922,6 +1922,7 @@ mod tests {
             native_synced_at: Some("2026-08-01T10:01:00Z".to_string()),
             native_source: None,
             native_profile: None,
+            native_session_dir: None,
             has_flowlet_requests: false,
         };
 

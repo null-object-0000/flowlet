@@ -1304,6 +1304,7 @@ impl Storage {
                 native_synced_at: None,
                 native_source: None,
                 native_profile: None,
+                native_session_dir: None,
                 has_flowlet_requests: false,
             })
         })?;
@@ -4113,6 +4114,7 @@ mod agent_session_filter_tests {
             native_synced_at: None,
             native_source: None,
             native_profile: None,
+            native_session_dir: None,
             has_flowlet_requests: false,
         }
     }

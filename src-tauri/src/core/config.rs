@@ -1671,6 +1671,13 @@ pub struct AgentSessionRow {
     /// 来自 `sessions.profile_name`）。用于区分多个 Hermes Profile 的独立会话库。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub native_profile: Option<String>,
+    /// 原生会话在**本机**的落盘位置：文件型 Agent 是会话记录所在目录
+    /// （如 DSH 的 `<DSH_HOME>/sessions/--D-repo--/session-xxx`、Claude Code 的
+    /// `~/.claude/projects/<slug>`），数据库型 Agent 是 `state.db` / `opencode.db`
+    /// 所在目录。仅在本地原生会话上有值；已观测会话从原生行合并得到。
+    /// 这是本机路径，不写入数据库、不参与设备同步。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_session_dir: Option<String>,
     /// 有经过 Flowlet 的请求记录，但请求未携带会话标识、无法按会话关联（如 Hermes
     /// 未启用会话桥时）。为 true 时 UI 展示「经过 Flowlet（未关联会话）」。
     #[serde(default)]

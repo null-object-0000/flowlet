@@ -53,6 +53,7 @@ fn archived_agent_session_row(
         native_synced_at: Some(synced_at.to_string()),
         native_source: None,
         native_profile: None,
+        native_session_dir: None,
         has_flowlet_requests: false,
     }
 }
@@ -2269,6 +2270,7 @@ mod tests {
             native_synced_at: None,
             native_source: None,
             native_profile: None,
+            native_session_dir: None,
             has_flowlet_requests: false,
         }
     }

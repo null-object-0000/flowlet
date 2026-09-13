@@ -220,7 +220,7 @@ streamable-http 服务器）→ reapply（幂等）→ disable（空列表只移
 
 ## 仍保留的能力边界
 
-Flowlet 的会话详情使用与上游同版式的“对话 / 轨迹”双视图。轨迹读取 Session Adapter
+轨迹读取 Session Adapter
 输出的类型化 trace facts（seq、turn、step、callId、Provider、System Prompt、Tools 与输入/输出），
 不在前端直接读取 DSH 文件，也不依赖 DSH Web 正在运行。视图与投影参考上游提交
 `47f943859bef60e4160492346772ded9b24f765a` 的 `ui-conversation` / `ui-trajectory`，许可证记录见
@@ -229,7 +229,27 @@ Flowlet 的会话详情使用与上游同版式的“对话 / 轨迹”双视图
 `compaction/summary` 折叠为 compacted 行），inbox/request transport 事件不生成可见行，工具
 call/result 按 `callId` 合并，Turn 数按原生 turn 坐标去重而不是按 assistant step 计数。
 
-v0 轨迹事件的解析覆盖（与官方 `ui-conversation` / `ui-trajectory` 消费的集合一致）：
+### 会话格式代际（v0 → v3）
+
+DSH 用「不可变代际」持久化会话：格式迁移不改写旧文件，而是在同一会话目录里新增
+`session.vN.jsonl[.zstd]`，旧代文件原样保留。因此磁盘上同一个会话目录可能同时存在 v0 与
+v3 两份记录（本机实测有 5 个会话处于这种状态）。
+
+- **文件名按官方 `sessionFormatLogFilename` / `parseSessionFormatLogFilename` 解析**：
+  `session.jsonl`（v0）与 `session.vN.jsonl`（N ≥ 1），可带 `.zstd`；临时名、大写、
+  前导零（`v03`）、显式 `.v0` 均非规范，直接忽略。
+- **列表按会话目录归并**，取可读取的最高代际；目录里只有高于 Flowlet 支持版本的文件时，
+  退回其中最新的一份而不是静默丢弃，保证会话仍可见。
+- **逻辑版本以文件内 header 的 `version` 为准**（`session_row` 只读第一个 zstd 分帧拿
+  header，不解压整份正文）。Flowlet 当前支持 v0–v3；更高代际只降级该会话，
+  不隐藏整份会话列表。
+- **seeded 会话必须裁掉继承前缀**：`isSeeded`（v2/v3）或 `seedLength`（v0/v1）为真时，
+  本地正文从最后一条 `session/end-seed` 之后开始（v0/v1 的该记录 `data` 为空，
+  v1→v2 迁移才补写 `inherited: true`；两者都是同一个切点）。不裁剪会把父会话的历史
+  在子会话里重复投影一遍。切点切在父会话未闭合的 turn 内部时，本地正文可能确实没有
+  完整轮次，此时投影为空是正确结果。
+
+v0–v3 轨迹事件的解析覆盖（与官方 `ui-conversation` / `ui-trajectory` 消费的集合一致）：
 
 - `turn/start` + `turn/end`：每个轮次投影为一条 turn 事件，状态按 `reason.kind` 映射
   （`completed` → completed、`error` → error、`aborted*` / `blocked` / `interrupted` → cancelled、
@@ -242,18 +262,53 @@ v0 轨迹事件的解析覆盖（与官方 `ui-conversation` / `ui-trajectory` �
   tool-result（异常退出会话同理在文件收尾处闭合）。
 - `compaction/start|summary|end`：投影为 `compacted` 事件，正文为 `summary` 的 text 块拼接，
   归入 compaction/start 声明的轮次；压缩用量（`usage`）记录在事件上但不计入会话总用量
-  （shadowed 事件已在各自时点计费）。
+  （shadowed 事件已在各自时点计费）。压缩检查点的 `surfaceOp` 替换区间按官方语义生效：
+  被覆盖的旧 surface 事件不再重复投影。
+- **`system/message`（v3 新增）**：v2→v3 迁移把系统提示词从
+  `request/header.data.header.system` 提升为独立 surface 消息，投影为 request 行并保留
+  system prompt 列；提示词未变化时不新增行（与官方「只替换受保护头节点」一致）。
+  v0–v2 仍从 `request/header` 读取提示词，两条路径共用同一套「变化才出行」判定。
+- **`assistant/attempt`（v2 新增）**：未产出 surface message 的失败/取消尝试，投影为
+  `error` 行（`interrupted: true` → cancelled），失败原因取内嵌 stream 的
+  `chunk.reason.failure`，其 `chunk.usage` 计入会话总用量。
+- **内容与模型归属的多形状兼容**：内容块统一读 `data.message.content`（`assistant/message`
+  的 `tool-call` 块仍由并行的 `tool/call` 事件承接），模型读
+  `data.message.source.model`（v2/v3）并兼容 `data.provenance.model`（v0）。
+- `assistant/chunk`（v0/v1 顶层）与 v2 起内嵌在 `assistant/message.data.stream` 的 stream
+  都可能出现；首 token 计时对两者都生效。
 - 撕裂尾部容忍：与 `dsh-session-persistence-jsonl` 的 scanLog/scanZstdFrames 语义一致——只读
   前缀的完整记录；zstd 分帧按官方结构遍历（`blockSize = header >>> 3` 不掩码），损坏或未落盘
   完整的尾帧保留此前已解码内容，不因一个坏帧隐藏整个会话。`agent/inbox/spliced` 仅用于
   next-step 采纳判定（steering 标记），其余 transport 语义不生成可见行。
-- `tool/code-dispatch-start` + `tool/code-dispatch`：子工具（code dispatch）投影为
+- `tool/code-dispatch-start` + `tool/code-dispatch`：子工具（PTC / code dispatch）投影为
   `parentCallId` 关联的 subtool call/result 行（arguments 为对象时 JSON 化），前端轨迹按
-  `parentCallId` 归入子工具行。
+  `parentCallId` 归入子工具行。v3 把词汇重命名为 `tool/ptc-dispatch-start` /
+  `tool/ptc-dispatch`，载荷不变，两个名字都接纳。
 - `approval/asked` + `approval/decided`：投影为 `approval` 事件（toolName + reason），
   decided 按 `id` 回写同一行的 outcome（allowed-once / rejected / cancelled / unavailable），
   对话渲染审批历史行。
-- `llm/retry`：投影为 `model-retry` 事件（次数/延迟/失败原因）。
+- `llm/retry`：投影为 `model-retry` 事件（次数/延迟/失败原因）；`llm/retry-started` 不单列。
+
+回归夹具见 `src-tauri/tests/fixtures/dsh/`（真实会话裁剪，含未 seeded v3、seeded v3 与 v0），
+另有 `#[ignore]` 的 `dsh_real_store_lists_and_projects_every_session` 可对真实
+`~/.dsh/sessions` 全量核对列表与投影。
+
+### 会话详情里的本机目录
+
+会话详情面板「会话信息」分两组展示目录，语义不同、不可互相替代：
+
+- **工作目录**（`AgentSessionRow.projectPath`）：会话运行时的项目 cwd。DSH 取 header 的
+  `cwd`（v0–v3 一致），Claude Code 取 transcript 的 `cwd`，Codex 取 `session_meta` 的
+  `payload.cwd`，OpenCode 取 `session.directory`，Hermes 取 `sessions.cwd`，Pi 取会话头行
+  的 `cwd`。
+- **会话目录**（`AgentSessionRow.nativeSessionDir`）：会话记录在本机的落盘目录。文件型
+  Agent 是会话记录文件所在目录（DSH 的 `<DSH_HOME>/sessions/--D-<项目>--/session-<id>`；
+  同一会话的 v0/v3 代际文件必然落在同一目录，Claude Code 的 `~/.claude/projects/<slug>`，
+  Codex/Pi 的会话文件目录），数据库型 Agent 是 `state.db` / `opencode.db` 所在目录。
+
+`nativeSessionDir` 只在本机原生会话上有值，由各 Session Adapter 在列表阶段顺带算出
+（`parent_directory` / `session_directory`），**不写入 SQLite、不参与设备同步**
+（`#[serde(skip_serializing_if = "Option::is_none")]`），远端设备快照因此不展示该字段。
 
 对话视图的节点投影与上游 `ui-conversation` 对齐：轮次由 `turn` 事件开合（不再按 user/message
 切分），非 user 来源的 `user/message` 渲染为可展开的「上下文注入 / 跨会话召回」折叠行（首行

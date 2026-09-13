@@ -26,6 +26,8 @@
 .detailItem > span, .metrics span { color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); }
 .detailItem > div { min-width: 0; display: flex; align-items: center; gap: 5px; }
 .detailItem strong { min-width: 0; flex: 1; overflow: hidden; color: var(--flowlet-color-text); font-size: var(--flowlet-font-size-body); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+/* 字段值（含工作目录 / 会话目录这类长路径）优先换行完整展示，而不是截断成省略号。 */
+.detailItem .value { overflow: visible; line-height: 1.45; white-space: normal; overflow-wrap: anywhere; }
 .valueLink { min-width: 0; max-width: 100%; padding: 0 3px; justify-content: flex-start; }
 .linkText { min-width: 0; overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }

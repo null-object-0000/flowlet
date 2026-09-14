@@ -170,7 +170,6 @@ pub(in crate::core::agent_global_config) fn inspect_opencode(
             session_extension: false,
             model_specs: false,
             model_input_modalities: BTreeMap::new(),
-            approval_bridge: false,
             opencode_permission_bridge: permission_bridge,
             mcp_servers: Vec::new(),
         });
@@ -202,7 +201,6 @@ pub(in crate::core::agent_global_config) fn inspect_opencode(
                 session_extension: false,
                 model_specs: false,
                 model_input_modalities: BTreeMap::new(),
-                approval_bridge: false,
                 opencode_permission_bridge: permission_bridge,
                 mcp_servers: Vec::new(),
             });
@@ -234,7 +232,6 @@ pub(in crate::core::agent_global_config) fn inspect_opencode(
                 session_extension: false,
                 model_specs: false,
                 model_input_modalities: BTreeMap::new(),
-                approval_bridge: false,
                 opencode_permission_bridge: permission_bridge,
                 mcp_servers: Vec::new(),
             });
@@ -354,7 +351,6 @@ pub(in crate::core::agent_global_config) fn inspect_opencode(
         session_extension: false,
         model_specs,
         model_input_modalities,
-        approval_bridge: false,
         opencode_permission_bridge: permission_bridge,
         mcp_servers: Vec::new(),
     })

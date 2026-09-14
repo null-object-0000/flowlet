@@ -152,7 +152,6 @@ pub(in crate::core::agent_global_config) fn inspect_pi(
             session_extension,
             model_specs,
             model_input_modalities,
-            approval_bridge: false,
             opencode_permission_bridge: false,
             mcp_servers: Vec::new(),
         }

@@ -259,7 +259,6 @@ pub(in crate::core::agent_global_config) fn inspect_codex(
         session_extension: false,
         model_specs: false,
         model_input_modalities: BTreeMap::new(),
-        approval_bridge: false,
         opencode_permission_bridge: false,
         mcp_servers: Vec::new(),
     };

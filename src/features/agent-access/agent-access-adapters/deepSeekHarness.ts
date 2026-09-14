@@ -44,7 +44,6 @@ export const deepSeekHarnessAdapter: AgentAccessAdapter = {
   configControls: ({ globalConfig, t }) => {
     const sessionExtension = globalConfig?.session_extension ?? false;
     const modelSpecs = globalConfig?.model_specs ?? false;
-    const approvalBridge = globalConfig?.approval_bridge ?? false;
     const mcpServers = globalConfig?.mcp_servers ?? [];
     return [
       {
@@ -56,7 +55,7 @@ export const deepSeekHarnessAdapter: AgentAccessAdapter = {
         ],
         checked: sessionExtension,
         requiresRestart: true,
-        applyOptions: (checked) => ({ sessionExtension: checked, modelSpecs, approvalBridge, mcpServers }),
+        applyOptions: (checked) => ({ sessionExtension: checked, modelSpecs, mcpServers }),
       },
       {
         id: "model-specs",
@@ -66,25 +65,13 @@ export const deepSeekHarnessAdapter: AgentAccessAdapter = {
           t("图像请求会由 Flowlet 再次筛选支持图像的上游；不声明最大输出上限，保持 DSH 默认的保守值。"),
         ],
         checked: modelSpecs,
-        applyOptions: (checked) => ({ sessionExtension, modelSpecs: checked, approvalBridge, mcpServers }),
-      },
-      {
-        id: "approval-bridge",
-        label: t("交互确认桥"),
-        descriptions: [
-          t("启用后会向已初始化的 DSH Profile 安装受管确认桥插件，把 headless 会话的权限请求经文件桥转交 Flowlet 桌面端确认或否决。"),
-          t("启用后需要重启正在运行的 DSH；关闭后移除受管插件，确认请求恢复为无人应答（fail-closed）。"),
-        ],
-        checked: approvalBridge,
-        requiresRestart: true,
-        applyOptions: (checked) => ({ sessionExtension, modelSpecs, approvalBridge: checked, mcpServers }),
+        applyOptions: (checked) => ({ sessionExtension, modelSpecs: checked, mcpServers }),
       },
     ];
   },
   applyOptions: ({ globalConfig }) => ({
     sessionExtension: globalConfig?.session_extension ?? false,
     modelSpecs: globalConfig?.model_specs ?? false,
-    approvalBridge: globalConfig?.approval_bridge ?? false,
     mcpServers: globalConfig?.mcp_servers ?? [],
   }),
   manualSnippets: ({ endpoint, token, displayedToken, globalConfig, t }) => {

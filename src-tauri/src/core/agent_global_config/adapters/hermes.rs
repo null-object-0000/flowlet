@@ -364,7 +364,6 @@ pub(in crate::core::agent_global_config) fn inspect_hermes(
         session_extension: bridge_installed,
         model_specs: false,
         model_input_modalities: BTreeMap::new(),
-        approval_bridge: false,
         mcp_servers: Vec::new(),
         opencode_permission_bridge: false,
     };

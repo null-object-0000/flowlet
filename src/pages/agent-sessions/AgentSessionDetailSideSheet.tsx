@@ -2,8 +2,8 @@ import { Button, SideSheet, Tag, Toast, Tooltip } from "@douyinfe/semi-ui-19";
 import { IconAlertTriangle, IconCopy, IconExternalOpen } from "@douyinfe/semi-icons";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
-import { agentSessionLabel, hermesSessionOrigin, type AgentSessionNativeSummary, type AgentSessionNativeUsage, type AgentSessionRow, type DshApprovalRequest, type OpenCodePermissionRequest } from "../../domains/agent-session/types";
-import { useAgentSessionChildren, useAgentSessionNativeSummary, useDshSessionPermissions, useOpenCodeSessionPermissions, useReplyDshPermission, useReplyOpenCodePermission } from "../../features/agent-sessions/useAgentSessions";
+import { agentSessionLabel, hermesSessionOrigin, type AgentSessionNativeSummary, type AgentSessionNativeUsage, type AgentSessionRow, type OpenCodePermissionRequest } from "../../domains/agent-session/types";
+import { useAgentSessionChildren, useAgentSessionNativeSummary, useOpenCodeSessionPermissions, useReplyOpenCodePermission } from "../../features/agent-sessions/useAgentSessions";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import { DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
 import { RefreshControl } from "../../shared/ui/RefreshControl";
@@ -38,7 +38,6 @@ export function AgentSessionDetailSideSheet({
   const children = useAgentSessionChildren(session, !remote);
   const nativeSummary = useAgentSessionNativeSummary(session);
   const openCodePermissions = useOpenCodeSessionPermissions(session, !remote);
-  const dshPermissions = useDshSessionPermissions(session, !remote);
   const nativeUsage = session.nativeSummary ?? nativeSummary.data;
   const overviewMetrics = overviewSessionMetrics(session, nativeUsage);
   /** 刷新整份会话数据（静默版，不带动按钮 loading）。手动刷新与自动刷新共用；
@@ -97,7 +96,7 @@ export function AgentSessionDetailSideSheet({
               <RefreshControl
                 autoRefresh={refreshControl.autoRefresh}
                 onToggleAutoRefresh={refreshControl.toggleAutoRefresh}
-                isFetching={remote ? false : children.isFetching || nativeSummary.isFetching || openCodePermissions.isFetching || dshPermissions.isFetching}
+                isFetching={remote ? false : children.isFetching || nativeSummary.isFetching || openCodePermissions.isFetching}
                 lastUpdatedAt={lastUpdatedAt}
                 intervalMs={refreshControl.intervalMs}
                 onRefresh={() => void refetchAll()}
@@ -110,8 +109,6 @@ export function AgentSessionDetailSideSheet({
               <RemoteSnapshotNotice session={session} />
             ) : session.agentType === "opencode" ? (
               <OpenCodeApprovalSection session={session} permissions={openCodePermissions} />
-            ) : session.agentType === "deepseek-harness" ? (
-              <DshApprovalSection session={session} permissions={dshPermissions} />
             ) : null}
 
             <DetailSection title={t("会话信息")}>
@@ -229,58 +226,6 @@ function OpenCodeApprovalSection({ session, permissions }: { session: AgentSessi
               </div>
             </div>
             {request.patterns.length > 0 ? <pre>{request.patterns.join("\n")}</pre> : null}
-          </article>
-        );
-      })}
-    </div>
-  );
-}
-
-function DshApprovalSection({ session, permissions }: { session: AgentSessionRow; permissions: ReturnType<typeof useDshSessionPermissions> }) {
-  const { t } = useAppPreferences();
-  const reply = useReplyDshPermission(session);
-  if (session.agentType !== "deepseek-harness") return null;
-  if (permissions.isLoading) {
-    return <div className={styles.approvalNotice}>{t("正在检查 DeepSeek Harness 待确认操作")}</div>;
-  }
-  if (permissions.isError) {
-    return <div className={styles.approvalNotice}>{t("DeepSeek Harness 待确认操作读取失败：{message}", { message: permissions.error.message })}</div>;
-  }
-  if (!permissions.data?.available) {
-    return (
-      <div className={styles.approvalNotice}>
-        <strong>{t("DeepSeek Harness 确认桥未连接")}</strong>
-        <span>{t("请确保已启用「交互确认桥」高级选项并重启了 DeepSeek Harness；之后可在这里同意或否决待确认操作。")}</span>
-      </div>
-    );
-  }
-  if (permissions.data.permissions.length === 0) return null;
-
-  const decide = async (request: DshApprovalRequest, decision: "allow_once" | "reject") => {
-    try {
-      await reply.mutateAsync({ permissionId: request.approvalId, decision });
-      Toast.success(decision === "allow_once" ? t("已同意 DeepSeek Harness 本次操作") : t("已否决 DeepSeek Harness 操作"));
-    } catch (error) {
-      Toast.error(t("DeepSeek Harness 操作提交失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
-    }
-  };
-
-  return (
-    <div className={styles.approvalList}>
-      {permissions.data.permissions.map((request) => {
-        const submitting = reply.isPending && reply.variables?.permissionId === request.approvalId;
-        return (
-          <article className={styles.approvalCard} key={request.approvalId}>
-            <div className={styles.approvalHeader}>
-              <IconAlertTriangle className={styles.approvalIcon} />
-              <strong>{t("DeepSeek Harness 等待确认")}</strong>
-              <code>{request.toolName}</code>
-              <div className={styles.approvalActions}>
-                <Button size="small" type="danger" theme="borderless" loading={submitting && reply.variables?.decision === "reject"} disabled={reply.isPending && !submitting} onClick={() => void decide(request, "reject")}>{t("否决")}</Button>
-                <Button size="small" type="primary" theme="solid" loading={submitting && reply.variables?.decision === "allow_once"} disabled={reply.isPending && !submitting} onClick={() => void decide(request, "allow_once")}>{t("同意本次")}</Button>
-              </div>
-            </div>
-            {request.reason ? <pre>{request.reason}</pre> : null}
           </article>
         );
       })}

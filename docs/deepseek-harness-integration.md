@@ -16,7 +16,7 @@ Desktop：用户主要通过 `dsh web` 打开的本地浏览器界面使用它�
 | Adapter | 当前能力 | 明确边界 |
 |---|---|---|
 | Environment | 分别检测 `$DSH_HOME`/`~/.dsh`、3080 Web 运行状态、PATH 中的 `dsh` 与包版本，并挂载可选 Runtime 能力 | 可只读识别无歧义的 `_npx/<hash>` 包版本并解析 bin 入口供任务执行；多版本共存时要求全局安装。已安装不等于 Web 正在运行 |
-| Global Config | 解析配置状态；直接安全合并官方 YAML，一键写入/恢复 Provider、默认模型和 Client Token；精确会话插件、模型规格声明与交互确认桥均为默认关闭的高级能力 | 基础接入不依赖 DSH Web 或 Profile；复用 DSH 的文件锁协议，保留非受管配置和注释 |
+| Global Config | 解析配置状态；直接安全合并官方 YAML，一键写入/恢复 Provider、默认模型和 Client Token；精确会话插件与模型规格声明均为默认关闭的高级能力 | 基础接入不依赖 DSH Web 或 Profile；复用 DSH 的文件锁协议，保留非受管配置和注释 |
 | Session | 读取 `sessions/**/session.jsonl(.zstd)` v0，展示最终消息、工具事件和原生 Token 用量 | DSH 预发布格式无迁移承诺；其它版本明确拒绝；打包 delta chunk 不作为最终消息展示 |
 | Identity | 使用官方 User-Agent 识别客户端；可选会话桥启用时读取并剥离 `x-flowlet-session` | 与其他 Agent 共用编译期 Identity Adapter registry，实时请求与历史修复规则一致 |
 | Runner | 通过稳定全局 `dsh` 命令或 npx 缓存包入口（`node <包 bin>`）执行 `dsh --profile headless <task>` | 仅 fresh session；DSH 没有稳定 resume 参数时明确失败 |
@@ -111,7 +111,7 @@ YAML 顶层数组，防止再次生成 `[]` 后直接追加 `- insert` 这类原
 模型规格声明同样有基于真实上游 fixture 的生命周期契约：写入、重复写入、关闭、恢复每一步都重新
 解析 `settings.yaml`，断言 `contextWindow` 与各模型的 `input` 出现在模型条目、关闭后不残留、恢复后逐字节还原。
 
-任何可选高级能力（精确会话关联、模型规格声明、交互确认桥）都由用户显式开启，默认不启用；未开启时基础
+任何可选高级能力（精确会话关联、模型规格声明、MCP 服务器）都由用户显式开启，默认不启用；未开启时基础
 接入不依赖 DSH Web 或 Profile。开关与主操作“重新写入 Flowlet 配置”互为独立：按钮按当前报告
 状态保留已启用的高级能力，不会被默认值覆盖关闭。
 
@@ -135,30 +135,6 @@ session id 后按 DSH UA 门控归属，并在转发上游前剥离该 Header；
 会话运行状态按最新一组 `turn/start` / `turn/end` 判断：新的 turn 已开始但尚未结束、且会话文件
 仍在活跃更新时显示为运行中；`turn/end` 只代表单轮结束，不能用历史任意一条 completed 事件
 判定整个 Web 会话已结束。异常退出遗留的未闭合 turn 会在新鲜度窗口后降级为空闲。
-
-### 交互确认桥（approval bridge）
-
-DSH 的 `ApprovalService` 提供 `approval/request` 瀑布：当工具需要批准时，瀑布按注册顺序依次询问
-answerer，第一个返回 `allowed-once` / `rejected` / `cancelled` 的 answerer 生效；无人应答时
-fail-closed 为 `unavailable`（工具被拒）。Web 模式下 approval 由 DSH 内置 answerer 转发给浏览器
-用户确认。`--profile headless` 模式下无人应答，因此所有需要批准的操作都静默被拒。
-
-只有用户显式开启“交互确认桥（高级）”后，一键接入才会在每个已初始化的 DSH Profile 中部署受管的
-`flowlet-approval-bridge.mjs`。插件监听 `approval/request` 瀑布作为 answerer，把请求参数（toolName、
-callId、reason、DSH 会话 id）经文件桥写入 `~/.flowlet/dsh-control/request-<uuid>.json`，并在等待
-期间每秒刷新心跳（Flowlet 端按 5 秒新鲜度窗口过滤活跃请求）。用户确认后 Flowlet 写入
-`reply-<uuid>.json`（`"allow-once"` / `"reject"`），插件轮询读回并换算为 DSH 的 `allowed-once` /
-`rejected` 结果结束瀑布。请求被取消（signal abort）时插件返回 `cancelled`；超时
-（默认 10 分钟）时返回 `unavailable`，避免 Flowlet 未运行时任务永久挂起。
-
-该桥与已有 OpenCode 权限桥同构，复用同一个文件桥目录层次（`~/.flowlet/*-control/`）。桌面端在
-会话详情侧滑的“概览”Tab 中展示待确认卡片（toolName + reason + 允许一次/否决按钮），
-`waiting_user` 运行态与 OpenCode 的待确认状态共用同一套会话状态推断逻辑。移动端远程确认暂
-未覆盖，后续通过泛化 `lan_sync` 的权限端点加入。
-
-插件文件与 `cordis.patch.yml` 的原始内容均纳入同一备份和事务，旧备份（无 `approval_plugin` 字段）
-会在 apply 时自动补录。关闭选项会移除受管块并恢复/删除受管插件文件。该能力独立于精确会话关联
-和模型规格声明，三者的开关互不影响。
 
 ### MCP 服务器管理（dsh-mcp-client）
 
@@ -185,7 +161,7 @@ serverName 语法与长度、同列表唯一、stdio 必须有 command、http �
 先校验后落盘，任一服务器非法则整次 apply 失败并返回可读错误。未初始化任何 Profile 时
 部署非空列表会明确报错（与精确会话关联一致）。
 
-生效方式与两个插件桥不同：dsh-mcp-client 官方支持 HMR 热替换——修改配置项触发断开并
+生效方式与会话插件桥不同：dsh-mcp-client 官方支持 HMR 热替换——修改配置项触发断开并
 重连，无需重启 DSH。开关关闭移除受管块后，已注册工具注销、已有连接断开。
 
 前端在接入抽屉提供独立的「MCP 服务器」Tab（仅 DeepSeek Harness 显示，高级配置区不再
@@ -214,8 +190,8 @@ CrUX 上报时可追加 `--no-performance-crux`。「连接登录」模式会暴
 正式账号请只在可信会话中使用；「隔离」模式使用临时 Profile，不携带登录态。
 
 契约测试：真实上游 `cordis.patch.yml` fixture 走 inspect → apply（含 stdio 与
-streamable-http 服务器）→ reapply（幂等）→ disable（空列表只移除 MCP 块，保留会话桥
-与确认桥）→ restore（逐字节还原）全生命周期；每步重新解析 YAML 顶层数组，并验证受管块
+streamable-http 服务器）→ reapply（幂等）→ disable（空列表只移除 MCP 块，保留会话桥）
+→ restore（逐字节还原）全生命周期；每步重新解析 YAML 顶层数组，并验证受管块
 能无损解析回原列表。
 
 ## 仍保留的能力边界
@@ -360,4 +336,3 @@ css-variables 主题，boot 语法 ts/bash/json，常用语言按需加载，未
   思考参数的**回传**侧已由代理层 `ensure_reasoning_content_passback` 处理（见上文），
   仅缺失字段补全、不转换思考参数。
 - 模型规格声明 `contextWindow` 与按当前可用路由计算的 `input`，仍不声明 `maxTokens`，理由见上文。
-- 交互确认桥的移动端远程确认未在 MVP 覆盖，后续通过泛化 `lan_sync` 的权限端点加入。

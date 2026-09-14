@@ -95,10 +95,6 @@ pub struct AgentGlobalConfigReport {
     /// 从受管配置中解析出的聚合模型输入模态，供状态展示与手动片段保持一致。
     #[serde(default)]
     pub model_input_modalities: BTreeMap<String, Vec<String>>,
-    /// 仅 DeepSeek Harness：Flowlet 交互确认桥（approval bridge）是否在位。
-    /// 桥接把 DSH headless 会话的 approval/request 转交 Flowlet 桌面端确认或否决。
-    #[serde(default)]
-    pub approval_bridge: bool,
     /// 仅 DeepSeek Harness：从各 base Profile 受管块回读的 MCP 服务器列表
     /// （按 id 合并，首个出现的 Profile 优先）。
     #[serde(default)]
@@ -138,11 +134,6 @@ pub struct AgentGlobalConfigOptions {
     /// 未传或非法时使用 Adapter 默认值（flowlet-pro）；其余 Agent 忽略该字段。
     #[serde(default)]
     pub primary_model: Option<String>,
-    /// 仅 DeepSeek Harness：是否部署受管交互确认桥（approval bridge）。
-    /// 部署后 DSH headless 会话的 approval/request 会经文件桥转交 Flowlet
-    /// 桌面端确认或否决。未传选项时保持已有状态不变。
-    #[serde(default)]
-    pub approval_bridge: Option<bool>,
     /// 仅 DeepSeek Harness：受管 MCP 服务器列表。`Some(非空)` 把列表整块写入
     /// 每个 base Profile 的 cordis.patch.yml；`Some(空)` 移除全部受管 MCP 块；
     /// `None` 表示不触碰 MCP 配置（兼容旧前端）。

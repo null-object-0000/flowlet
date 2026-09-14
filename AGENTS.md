@@ -508,15 +508,6 @@ Flowlet 在 Provider 的 `models` 条目写入 `contextWindow: 1048576`（仅当
 headless 任务执行兼容 npx 官方启动方式：npm 缓存中只存在唯一版本时，Flowlet 直接解析包入口
 （`node <包 bin>`）执行 `dsh --profile headless`，无需全局安装；多版本共存时要求全局安装，
 确保版本确定性。
-用户开启“交互确认桥”（approval bridge）后，Flowlet 在每个已初始化的 DSH Profile 中部署受管
-`flowlet-approval-bridge.mjs`：插件作为 DSH `approval/request` 瀑布的 answerer，把 headless 会话
-的权限请求（toolName / callId / reason / 会话 id）经文件桥写入
-`~/.flowlet/dsh-control/request-<uuid>.json`（等待期间每秒心跳），桌面端在会话详情侧滑确认或否决后
-写回 `reply-<uuid>.json`，插件换算为 DSH 的 `allowed-once` / `rejected` 结束瀑布；取消返回
-`cancelled`、超时返回 `unavailable`。桥接目录与 OpenCode 权限桥同构；`waiting_user` 运行态与
-OpenCode 共用同一套会话状态推断。插件随 Profile 配置一同备份、原子写入和恢复，旧备份
-（无 approval 字段）在 apply 时自动补录，关闭选项移除受管桥接；启用或关闭后需重启正在运行的
-DSH。该能力独立于精确会话关联与模型规格声明，三者的开关互不影响。
 用户开启“MCP 服务器”（`configCapabilities` 中 kind 为 `list`）后，Flowlet 在每个已初始化的
 base-bundle DSH Profile 的 `cordis.patch.yml` 部署受管 `deepseek-harness-mcp-servers` 块：块内每个
 服务器一个 `- insert:` 的 `@deepseek-ai/dsh-mcp-client` 插件实例（stdio 或 streamable-http），
@@ -528,7 +519,7 @@ command / args / env / cwd / url / headers，camelCase）在 Rust 与前端同�
 受管块按 id 跨 Profile 合并回读当前列表。管理界面位于接入抽屉的独立「MCP 服务器」Tab
 （仅 DeepSeek Harness 显示，高级配置区不重复渲染），面板本地维护草稿、点「写回 Flowlet」
 一次性提交。env/headers 只写普通字符串，不生成 `!!js` 运行时注入表达式。该能力独立于
-精确会话关联、模型规格声明与交互确认桥，四者开关互不影响；预设（Chrome DevTools / GitHub /
+精确会话关联与模型规格声明，三者开关互不影响；预设（Chrome DevTools / GitHub /
 Sequential Thinking / 自定义）与字段约束见 `docs/deepseek-harness-integration.md`。
 
 ### Codex 系一键接入

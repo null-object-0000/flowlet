@@ -181,8 +181,6 @@ export type AgentGlobalConfigReport = {
   model_specs?: boolean;
   /** 从当前受管配置解析出的 flowlet-pro / flowlet-flash 输入模态。 */
   model_input_modalities?: Record<string, string[]>;
-  /** 仅 DeepSeek Harness：Flowlet 交互确认桥（approval bridge）是否在位。 */
-  approval_bridge?: boolean;
   /** 仅 DeepSeek Harness：从各 base Profile 受管块回读的 MCP 服务器列表。 */
   mcp_servers?: McpServerSpec[];
   /** 仅 OpenCode：用于发现 CLI/Desktop 进程内权限事件的全局插件是否在位。 */
@@ -201,8 +199,6 @@ export type AgentGlobalConfigOptions = {
   sessionExtension?: boolean;
   /** 是否按 Agent 官方格式声明聚合模型规格与输入模态。 */
   modelSpecs?: boolean;
-  /** 仅 DeepSeek Harness：是否部署受管交互确认桥（approval bridge）。 */
-  approvalBridge?: boolean;
   /** 仅 DeepSeek Harness：受管 MCP 服务器列表；空数组移除全部受管 MCP 块。 */
   mcpServers?: McpServerSpec[];
   /** 仅 Hermes Agent：默认模型（`flowlet-pro` / `flowlet-flash`）。 */

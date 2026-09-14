@@ -23,7 +23,6 @@ pub mod custom_scrape;
 pub(crate) mod detail_windows;
 pub mod device_identity;
 pub mod device_sync;
-pub mod dsh_control;
 pub mod job_runtime;
 pub mod lan_sync;
 pub mod logging;

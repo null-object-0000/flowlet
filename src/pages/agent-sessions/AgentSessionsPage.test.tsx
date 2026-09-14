@@ -177,14 +177,6 @@ vi.mock("../../features/agent-sessions/useAgentSessions", () => ({
     error: null,
     refetch: nativeSummaryRefetchMock,
   }),
-  useDshSessionPermissions: () => ({
-    data: { available: false, permissions: [], error: null },
-    isLoading: false,
-    isFetching: false,
-    isError: false,
-    error: null,
-  }),
-  useReplyDshPermission: () => ({ mutateAsync: vi.fn(), isPending: false, variables: undefined }),
   useAgentSessionClients: () => ({ data: [], isLoading: false }),
 }));
 

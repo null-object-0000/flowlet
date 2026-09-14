@@ -207,7 +207,7 @@ describe("OverviewAgentAccessCard", () => {
     expect(screen.getByRole("button", { name: "停止服务" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "停止服务" }));
     expect(runtimeMutateAsync).toHaveBeenCalledTimes(1);
-    // 三项增强能力只在高级配置中展示，避免与全局配置状态重复。
+    // 两项增强能力只在高级配置中展示，避免与全局配置状态重复。
     expect(screen.getByText("均未启用")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "高级配置（可选能力）" }));
     const sessionSwitch = screen.getByRole("switch", { name: "精确会话关联" });
@@ -216,7 +216,6 @@ describe("OverviewAgentAccessCard", () => {
     expect(mutateAsync).toHaveBeenLastCalledWith({
       sessionExtension: true,
       modelSpecs: false,
-      approvalBridge: false,
       mcpServers: [],
     });
     const specsSwitch = screen.getByRole("switch", { name: "聚合模型规格" });
@@ -225,9 +224,9 @@ describe("OverviewAgentAccessCard", () => {
     expect(mutateAsync).toHaveBeenLastCalledWith({
       sessionExtension: false,
       modelSpecs: true,
-      approvalBridge: false,
       mcpServers: [],
     });
+    expect(screen.queryByRole("switch", { name: "交互确认桥" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "重新写入 Flowlet 配置" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "恢复接入前配置" })).toBeEnabled();
   });
@@ -250,7 +249,6 @@ describe("OverviewAgentAccessCard", () => {
     expect(mutateAsync).toHaveBeenLastCalledWith({
       sessionExtension: false,
       modelSpecs: false,
-      approvalBridge: false,
       mcpServers: [
         {
           id: "chrome",

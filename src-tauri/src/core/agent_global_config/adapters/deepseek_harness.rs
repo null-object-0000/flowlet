@@ -21,12 +21,6 @@ const SESSION_BRIDGE_FILE: &str = "flowlet-session-bridge.mjs";
 const SESSION_BRIDGE_START: &str = "# flowlet-managed:start deepseek-harness-session-bridge";
 const SESSION_BRIDGE_END: &str = "# flowlet-managed:end deepseek-harness-session-bridge";
 
-const APPROVAL_BRIDGE_SOURCE: &str =
-    include_str!("../../../../resources/agent-plugins/deepseek-harness/flowlet-approval-bridge.mjs");
-const APPROVAL_BRIDGE_FILE: &str = "flowlet-approval-bridge.mjs";
-const APPROVAL_BRIDGE_START: &str = "# flowlet-managed:start deepseek-harness-approval-bridge";
-const APPROVAL_BRIDGE_END: &str = "# flowlet-managed:end deepseek-harness-approval-bridge";
-
 /// MCP 服务器受管块：块内每个服务器是一个 `- insert:` 的 dsh-mcp-client 插件实例。
 /// 增删改都整块重写（patch_mcp_servers），restore/关闭时整块移除。
 const MCP_SERVERS_START: &str = "# flowlet-managed:start deepseek-harness-mcp-servers";
@@ -62,9 +56,6 @@ impl AgentGlobalConfigAdapter for DeepSeekHarnessAdapter {
                 .and_then(|options| options.model_specs)
                 .unwrap_or(false),
             options.and_then(|options| options.model_input_modalities.as_ref()),
-            options
-                .and_then(|options| options.approval_bridge)
-                .unwrap_or(false),
             options.and_then(|options| options.mcp_servers.as_deref()),
         )
     }
@@ -91,10 +82,6 @@ struct DshProfileBackup {
     profile: String,
     patch: BackedUpText,
     plugin: BackedUpText,
-    /// 接入前受管 approval bridge 插件文件的原文。None 表示旧版备份未记录该
-    /// 字段（apply 时会按当前文件补录，保证恢复能还原到 Flowlet 触碰前的状态）。
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    approval_plugin: Option<BackedUpText>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -233,16 +220,6 @@ fn profile_paths(root: &Path) -> (PathBuf, PathBuf) {
     )
 }
 
-fn approval_plugin_path(root: &Path) -> PathBuf {
-    root.join(SESSION_BRIDGE_DIR).join(APPROVAL_BRIDGE_FILE)
-}
-
-fn approval_bridge_block() -> String {
-    format!(
-        "{APPROVAL_BRIDGE_START}\n- insert:\n    - id: flowlet-approval-bridge\n      name: ./.flowlet/{APPROVAL_BRIDGE_FILE}\n      config:\n        provider: flowlet\n{APPROVAL_BRIDGE_END}\n"
-    )
-}
-
 fn session_bridge_block(expected_base_url: &str) -> String {
     format!(
         "{SESSION_BRIDGE_START}\n- insert:\n    - id: flowlet-session-bridge\n      name: ./.flowlet/{SESSION_BRIDGE_FILE}\n      config:\n        provider: flowlet\n        baseURL: {}\n{SESSION_BRIDGE_END}\n",
@@ -367,75 +344,6 @@ fn profile_bridge_matches(root: &Path, expected_base_url: &str) -> bool {
             text.contains(SESSION_BRIDGE_START)
                 && text.contains(SESSION_BRIDGE_END)
                 && text.contains(&format!("baseURL: {}", normalize_url(expected_base_url)))
-        })
-}
-
-fn patch_approval_bridge(text: &str) -> Result<Vec<u8>, String> {
-    let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
-    let normalized = text.replace("\r\n", "\n");
-    let start = normalized.find(APPROVAL_BRIDGE_START);
-    let end = normalized.find(APPROVAL_BRIDGE_END);
-    let mut unmanaged = match (start, end) {
-        (None, None) => normalized.trim_end_matches(['\r', '\n']).to_string(),
-        (Some(start), Some(end)) if end >= start => {
-            let end = end + APPROVAL_BRIDGE_END.len();
-            let mut value = format!("{}{}", &normalized[..start], &normalized[end..]);
-            while value.contains("\n\n\n") {
-                value = value.replace("\n\n\n", "\n\n");
-            }
-            value.trim_end_matches(['\r', '\n']).to_string()
-        }
-        _ => {
-            return Err(
-                "DSH cordis.patch.yml 中的 Flowlet 交互确认桥标记不完整，拒绝覆盖".to_string(),
-            )
-        }
-    };
-    unmanaged = prepare_patch_list_for_append(&unmanaged)?;
-    if !unmanaged.is_empty() {
-        unmanaged.push_str("\n\n");
-    }
-    unmanaged.push_str(&approval_bridge_block());
-    Ok(unmanaged.replace('\n', newline).into_bytes())
-}
-
-fn remove_approval_bridge(text: &str) -> Result<Vec<u8>, String> {
-    let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
-    let normalized = text.replace("\r\n", "\n");
-    let start = normalized.find(APPROVAL_BRIDGE_START);
-    let end = normalized.find(APPROVAL_BRIDGE_END);
-    let output = match (start, end) {
-        (None, None) => return Ok(text.as_bytes().to_vec()),
-        (Some(start), Some(end)) if end >= start => {
-            let end = end + APPROVAL_BRIDGE_END.len();
-            let mut value = format!("{}{}", &normalized[..start], &normalized[end..]);
-            while value.contains("\n\n\n") {
-                value = value.replace("\n\n\n", "\n\n");
-            }
-            ensure_patch_list_after_removal(&value)
-        }
-        _ => {
-            return Err(
-                "DSH cordis.patch.yml 中的 Flowlet 交互确认桥标记不完整，拒绝覆盖".to_string(),
-            )
-        }
-    };
-    Ok(if output.is_empty() {
-        Vec::new()
-    } else {
-        format!("{}{}", output.replace('\n', newline), newline).into_bytes()
-    })
-}
-
-fn profile_approval_bridge_matches(root: &Path) -> bool {
-    let plugin = approval_plugin_path(root);
-    let patch = root.join("cordis.patch.yml");
-    // 插件文件用容错比较（容忍 text_file_bytes 补的尾换行与 CRLF），
-    // 与 managed_text_file_matches 语义一致；patch 只要求受管标记在位。
-    plugin.is_file()
-        && managed_text_file_matches(&plugin, APPROVAL_BRIDGE_SOURCE)
-        && std::fs::read_to_string(patch).ok().is_some_and(|text| {
-            text.contains(APPROVAL_BRIDGE_START) && text.contains(APPROVAL_BRIDGE_END)
         })
 }
 
@@ -759,11 +667,6 @@ fn inspect_dsh_at(home: &Path, expected_base_url: &str) -> Result<AgentGlobalCon
         && profiles
             .iter()
             .all(|(_, root)| profile_bridge_matches(root, expected_base_url));
-    // 交互确认桥：所有 base-bundle Profile 都部署了 Flowlet approval bridge。
-    let approval_bridge = !profiles.is_empty()
-        && profiles
-            .iter()
-            .all(|(_, root)| profile_approval_bridge_matches(root));
     // MCP 服务器：跨全部 base Profile 合并受管列表（按 id 去重）。
     let mcp_servers = collect_mcp_servers(&profiles)?;
     // 聚合模型规格声明：settings.yaml 中 flowlet-pro 模型条目携带 contextWindow。
@@ -803,7 +706,6 @@ fn inspect_dsh_at(home: &Path, expected_base_url: &str) -> Result<AgentGlobalCon
         session_extension,
         model_specs,
         model_input_modalities: BTreeMap::new(),
-        approval_bridge,
         mcp_servers: mcp_servers.clone(),
         opencode_permission_bridge: false,
     };
@@ -1355,7 +1257,6 @@ fn apply_dsh(
     session_extension: bool,
     model_specs: bool,
     model_inputs: Option<&std::collections::BTreeMap<String, Vec<String>>>,
-    approval_bridge: bool,
     mcp_servers: Option<&[McpServerSpec]>,
 ) -> Result<AgentGlobalConfigReport, String> {
     let home = dsh_home()?;
@@ -1365,7 +1266,6 @@ fn apply_dsh(
         client_token,
         session_extension,
         model_specs,
-        approval_bridge,
         model_inputs,
         mcp_servers,
     )
@@ -1378,7 +1278,6 @@ fn apply_dsh_at(
     client_token: &str,
     session_extension: bool,
     model_specs: bool,
-    approval_bridge: bool,
 ) -> Result<AgentGlobalConfigReport, String> {
     apply_dsh_at_with_inputs(
         home,
@@ -1386,7 +1285,6 @@ fn apply_dsh_at(
         client_token,
         session_extension,
         model_specs,
-        approval_bridge,
         None,
         None,
     )
@@ -1398,7 +1296,6 @@ fn apply_dsh_at_with_inputs(
     client_token: &str,
     session_extension: bool,
     model_specs: bool,
-    approval_bridge: bool,
     model_inputs: Option<&std::collections::BTreeMap<String, Vec<String>>>,
     mcp_servers: Option<&[McpServerSpec]>,
 ) -> Result<AgentGlobalConfigReport, String> {
@@ -1467,20 +1364,7 @@ fn apply_dsh_at_with_inputs(
             profile: profile.clone(),
             patch: backed_up_text(&patch)?,
             plugin: backed_up_text(&plugin)?,
-            approval_plugin: Some(backed_up_text(&approval_plugin_path(root))?),
         });
-    }
-    // 旧版备份无 approval_plugin 字段，补录当前文件原文，保证恢复时能完整还原。
-    for item in &mut backup_value.profiles {
-        if item.approval_plugin.is_none() {
-            if let Some(root) = profiles
-                .iter()
-                .find(|(p, _)| p == &item.profile)
-                .map(|(_, r)| r)
-            {
-                item.approval_plugin = Some(backed_up_text(&approval_plugin_path(root))?);
-            }
-        }
     }
     let mut writes = vec![
         (settings_path, Some(settings_output)),
@@ -1488,9 +1372,6 @@ fn apply_dsh_at_with_inputs(
     ];
     for (profile, root) in &profiles {
         let (patch, plugin) = profile_paths(root);
-        let approval_plugin = approval_plugin_path(root);
-        // 会话桥接与交互确认桥共用同一份 patch 文本，按序叠加各自的受管块，
-        // 最终只提交一次 patch 写入（write_files_transactionally 不做去重，后写覆盖先写）。
         let mut patch_text = read_yaml_text(&patch)?;
         let mut patch_changed = false;
         if session_extension {
@@ -1518,34 +1399,6 @@ fn apply_dsh_at_with_inputs(
                 writes.push((plugin, previous_plugin));
             }
         }
-        if approval_bridge {
-            patch_text = String::from_utf8(patch_approval_bridge(&patch_text)?)
-                .map_err(|_| "DSH 交互确认桥输出不是合法 UTF-8".to_string())?;
-            patch_changed = true;
-            writes.push((
-                approval_plugin,
-                Some(text_file_bytes(APPROVAL_BRIDGE_SOURCE)),
-            ));
-        } else {
-            let patch_output = remove_approval_bridge(&patch_text)?;
-            if patch_output != patch_text.as_bytes() {
-                patch_text = String::from_utf8(patch_output)
-                    .map_err(|_| "DSH 交互确认桥输出不是合法 UTF-8".to_string())?;
-                patch_changed = true;
-            }
-            let previous_approval_plugin = backup_value
-                .profiles
-                .iter()
-                .find(|item| item.profile == *profile)
-                .and_then(|item| {
-                    item.approval_plugin
-                        .as_ref()
-                        .and_then(|backup| backup.present.then(|| text_file_bytes(&backup.content)))
-                });
-            if managed_text_file_matches(&approval_plugin, APPROVAL_BRIDGE_SOURCE) {
-                writes.push((approval_plugin, previous_approval_plugin));
-            }
-        }
         // MCP 服务器受管块：`Some(非空)` 整块重写，`Some(空)` 移除，`None` 不触碰。
         if let Some(servers) = mcp_servers {
             if servers.is_empty() {
@@ -1571,7 +1424,7 @@ fn apply_dsh_at_with_inputs(
             .map_err(|error| format!("序列化 DSH 配置备份失败：{error}"))?,
     )?;
     if let Err(error) =
-        write_files_transactionally("DeepSeek Harness 配置与 Flowlet 会话/确认插件", &writes)
+        write_files_transactionally("DeepSeek Harness 配置与 Flowlet 会话插件", &writes)
     {
         if created_backup && error.rolled_back {
             let _ = std::fs::remove_file(&backup);
@@ -1648,15 +1501,8 @@ fn restore_dsh_at(home: &Path, expected_base_url: &str) -> Result<AgentGlobalCon
                 .present
                 .then(|| text_file_bytes(&profile.plugin.content)),
         ));
-        writes.push((
-            approval_plugin_path(&root),
-            profile
-                .approval_plugin
-                .as_ref()
-                .and_then(|backup| backup.present.then(|| text_file_bytes(&backup.content))),
-        ));
     }
-    write_files_transactionally("DeepSeek Harness 配置与 Flowlet 会话/确认插件", &writes)
+    write_files_transactionally("DeepSeek Harness 配置与 Flowlet 会话插件", &writes)
         .map_err(|error| error.message)?;
     std::fs::remove_file(&backup_path)
         .map_err(|error| format!("删除 DSH 配置备份失败：{error}"))?;
@@ -1986,7 +1832,6 @@ mod tests {
             "flowlet-client-token",
             true,
             false,
-            false,
         )
         .unwrap();
         assert_eq!(report.state, AgentGlobalConfigState::Flowlet);
@@ -2012,7 +1857,6 @@ mod tests {
             "flowlet-client-token",
             true,
             false,
-            false,
         )
         .unwrap();
         assert_versioned_credentials(
@@ -2029,7 +1873,6 @@ mod tests {
             &home,
             "http://127.0.0.1:18640/v1",
             "flowlet-client-token",
-            false,
             false,
             false,
         )
@@ -2061,110 +1904,6 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(profile.join("cordis.patch.yml")).unwrap(),
             UPSTREAM_PATCH
-        );
-        assert!(!backup_path(&home).exists());
-        std::fs::remove_dir_all(home).unwrap();
-    }
-
-    #[test]
-    fn real_upstream_approval_bridge_passes_apply_reapply_disable_restore_contract() {
-        const UPSTREAM_PATCH: &str =
-            include_str!("../../../../tests/fixtures/deepseek-harness/web/cordis.patch.yml");
-        let home = std::env::temp_dir().join(format!(
-            "flowlet-dsh-approval-bridge-contract-{}",
-            uuid::Uuid::new_v4()
-        ));
-        let profile = home.join("profiles").join("web");
-        std::fs::create_dir_all(&profile).unwrap();
-        let settings = "# keep user settings\nllm-pi-ai:\n  providers:\n    existing:\n      baseURL: https://example.com/v1\nagent-default-model:\n  provider: existing\n  model: existing-model\n";
-        let credentials = "# keep user credentials\nEXISTING_TOKEN: keep-me\n";
-        std::fs::write(home.join("settings.yaml"), settings).unwrap();
-        std::fs::write(home.join(".credentials.yaml"), credentials).unwrap();
-        std::fs::write(
-            profile.join("package.json"),
-            r#"{"dsh":{"profile":{"bundles":["@deepseek-ai/dsh-base","@deepseek-ai/dsh-web-app"]}}}"#,
-        )
-        .unwrap();
-        std::fs::write(profile.join("cordis.patch.yml"), UPSTREAM_PATCH).unwrap();
-
-        // apply：同时启用精确会话关联与交互确认桥。
-        let report = apply_dsh_at(
-            &home,
-            "http://127.0.0.1:18640/v1",
-            "flowlet-client-token",
-            true,
-            false,
-            true,
-        )
-        .unwrap();
-        assert_eq!(report.state, AgentGlobalConfigState::Flowlet);
-        assert!(report.session_extension);
-        assert!(report.approval_bridge, "apply 后 report 必须报告确认桥在位");
-        let plugin = approval_plugin_path(&profile);
-        assert!(plugin.is_file());
-        // 部署文件由 text_file_bytes 补尾换行（源文件不以 \n 结尾），
-        // 容错比较仍必须识别为受管文件（回归：曾因精确 == 比较导致 toggle 恒为关闭）。
-        assert!(profile_approval_bridge_matches(&profile));
-        let deployed = std::fs::read_to_string(&plugin).unwrap();
-        assert!(
-            deployed == APPROVAL_BRIDGE_SOURCE
-                || deployed == format!("{}\n", APPROVAL_BRIDGE_SOURCE),
-            "部署文件要么与源一致、要么只多一个尾换行"
-        );
-        let managed_patch = std::fs::read_to_string(profile.join("cordis.patch.yml")).unwrap();
-        let parsed: serde_yaml::Value = serde_yaml::from_str(&managed_patch).unwrap();
-        assert!(parsed
-            .as_sequence()
-            .is_some_and(|entries| entries.len() == 2));
-
-        // reapply：幂等，patch 与插件文件均不变。
-        apply_dsh_at(
-            &home,
-            "http://127.0.0.1:18640/v1",
-            "flowlet-client-token",
-            true,
-            false,
-            true,
-        )
-        .unwrap();
-        assert_eq!(
-            std::fs::read_to_string(profile.join("cordis.patch.yml")).unwrap(),
-            managed_patch,
-            "reapply must be idempotent"
-        );
-        assert!(profile_approval_bridge_matches(&profile));
-
-        // disable：只关确认桥、保留会话桥，插件文件移除、patch 标记清除。
-        let disabled = apply_dsh_at(
-            &home,
-            "http://127.0.0.1:18640/v1",
-            "flowlet-client-token",
-            true,
-            false,
-            false,
-        )
-        .unwrap();
-        assert!(!disabled.approval_bridge);
-        assert!(disabled.session_extension);
-        assert!(!profile_approval_bridge_matches(&profile));
-        assert!(!plugin.exists(), "关闭后受管确认桥插件文件应被移除");
-        let disabled_patch = std::fs::read_to_string(profile.join("cordis.patch.yml")).unwrap();
-        assert!(!disabled_patch.contains(APPROVAL_BRIDGE_START));
-
-        // restore：恢复原始 patch 与受管文件。
-        let restored = restore_dsh_at(&home, "http://127.0.0.1:18640/v1").unwrap();
-        assert_eq!(restored.state, AgentGlobalConfigState::NotConfigured);
-        assert_eq!(
-            std::fs::read_to_string(profile.join("cordis.patch.yml")).unwrap(),
-            UPSTREAM_PATCH
-        );
-        assert_eq!(
-            std::fs::read_to_string(home.join("settings.yaml")).unwrap(),
-            settings
-        );
-        assert_eq!(
-            std::fs::read_to_string(home.join(".credentials.yaml")).unwrap(),
-            credentials
         );
         assert!(!backup_path(&home).exists());
         std::fs::remove_dir_all(home).unwrap();
@@ -2203,7 +1942,6 @@ mod tests {
             "flowlet-client-token",
             false,
             true,
-            false,
             Some(&model_inputs),
             None,
         )
@@ -2245,7 +1983,6 @@ mod tests {
             "flowlet-client-token",
             false,
             true,
-            false,
             Some(&model_inputs),
             None,
         )
@@ -2256,7 +1993,6 @@ mod tests {
             &home,
             "http://127.0.0.1:18640/v1",
             "flowlet-client-token",
-            false,
             false,
             false,
         )
@@ -2591,7 +2327,6 @@ mod tests {
             "token",
             false,
             false,
-            false,
             None,
             Some(&servers),
         )
@@ -2603,7 +2338,6 @@ mod tests {
             &home,
             "http://127.0.0.1:18640/v1",
             "token",
-            false,
             false,
             false,
             None,
@@ -2648,7 +2382,6 @@ mod tests {
             "flowlet-client-token",
             true,
             false,
-            true,
             None,
             Some(&servers),
         )
@@ -2656,7 +2389,6 @@ mod tests {
         assert_eq!(report.state, AgentGlobalConfigState::Flowlet);
         assert_eq!(report.mcp_servers, servers);
         assert!(report.session_extension);
-        assert!(report.approval_bridge);
 
         let managed_patch = std::fs::read_to_string(profile.join("cordis.patch.yml")).unwrap();
         let parsed: serde_yaml::Value = serde_yaml::from_str(&managed_patch).unwrap();
@@ -2683,7 +2415,6 @@ mod tests {
             "flowlet-client-token",
             true,
             false,
-            true,
             None,
             Some(&servers),
         )
@@ -2694,26 +2425,23 @@ mod tests {
             "reapply must be idempotent"
         );
 
-        // disable：Some(空) 只移除 MCP 块，保留会话桥与确认桥。
+        // disable：Some(空) 只移除 MCP 块，保留会话桥。
         let disabled = apply_dsh_at_with_inputs(
             &home,
             "http://127.0.0.1:18640/v1",
             "flowlet-client-token",
             true,
             false,
-            true,
             None,
             Some(&[]),
         )
         .unwrap();
         assert!(disabled.mcp_servers.is_empty());
         assert!(disabled.session_extension);
-        assert!(disabled.approval_bridge);
         let disabled_patch = std::fs::read_to_string(profile.join("cordis.patch.yml")).unwrap();
         assert!(!disabled_patch.contains(MCP_SERVERS_START));
         assert!(!disabled_patch.contains("dsh-mcp-client"));
         assert!(disabled_patch.contains(SESSION_BRIDGE_START));
-        assert!(disabled_patch.contains(APPROVAL_BRIDGE_START));
 
         // restore：恢复原始 patch（逐字节），备份删除。
         let restored = restore_dsh_at(&home, "http://127.0.0.1:18640/v1").unwrap();

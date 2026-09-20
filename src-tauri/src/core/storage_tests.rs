@@ -3522,3 +3522,167 @@ fn importing_device_breakdown_snapshot_removes_stale_rows() {
         .collect::<Vec<_>>();
     assert_eq!(remote_models, vec!["current-model"]);
 }
+
+// ─── 派生用量数据保留策略（2026-09-19 事故配套） ─────────────────────────────
+//
+// `account_balance_snapshots` 是派生数据：渠道资源自动同步每 5 分钟为每个账号插入
+// 一行，且每行带完整 `raw_scraped_json`。事故现场的数据库里该表 43,634 行、约
+// 500 MB，占 951 MB 的一半以上，其中一个账号独占 470 MB。
+
+fn snapshot_row(
+    id: &str,
+    account_id: &str,
+    created_at: &str,
+    raw_scraped_json: Option<&str>,
+) -> crate::core::config::AccountBalanceSnapshot {
+    crate::core::config::AccountBalanceSnapshot {
+        id: id.to_string(),
+        account_id: account_id.to_string(),
+        balance: Some(1.0),
+        currency: Some("USD".to_string()),
+        token_pack_total: None,
+        token_pack_used: None,
+        token_pack_remaining: None,
+        token_pack_expire_at: None,
+        token_packs: None,
+        raw_scraped_json: raw_scraped_json.map(|value| value.to_string()),
+        source: "sync".to_string(),
+        synced_at: Some(created_at.to_string()),
+        remark: None,
+        created_at: created_at.to_string(),
+        updated_at: created_at.to_string(),
+    }
+}
+
+fn snapshot_test_storage() -> Storage {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate schema");
+    storage
+}
+
+fn count_snapshots(storage: &Storage, account_id: &str) -> i64 {
+    storage
+        .list_balance_snapshots(account_id)
+        .expect("list snapshots")
+        .len() as i64
+}
+
+#[test]
+fn prune_balance_snapshots_drops_rows_past_retention_days() {
+    let storage = snapshot_test_storage();
+    // 同时覆盖历史行里实际存在的两种时间戳写法。
+    storage
+        .save_balance_snapshot(&snapshot_row(
+            "old-z",
+            "account-a",
+            "2020-01-01T00:00:00.497Z",
+            None,
+        ))
+        .unwrap();
+    storage
+        .save_balance_snapshot(&snapshot_row(
+            "old-offset",
+            "account-a",
+            "2020-01-02T00:00:00.535798757+00:00",
+            None,
+        ))
+        .unwrap();
+    let recent = chrono::Utc::now().to_rfc3339();
+    storage
+        .save_balance_snapshot(&snapshot_row("recent", "account-a", &recent, None))
+        .unwrap();
+
+    let (expired, over_limit) = storage.prune_balance_snapshots(30, 0).unwrap();
+    assert_eq!(expired, 2, "两条 2020 年的快照都必须被判定为过期");
+    assert_eq!(over_limit, 0);
+    assert_eq!(count_snapshots(&storage, "account-a"), 1);
+}
+
+#[test]
+fn prune_balance_snapshots_negative_retention_keeps_everything() {
+    let storage = snapshot_test_storage();
+    storage
+        .save_balance_snapshot(&snapshot_row(
+            "old",
+            "account-a",
+            "2020-01-01T00:00:00.497Z",
+            None,
+        ))
+        .unwrap();
+
+    let (expired, over_limit) = storage.prune_balance_snapshots(-1, 0).unwrap();
+    assert_eq!((expired, over_limit), (0, 0));
+    assert_eq!(count_snapshots(&storage, "account-a"), 1);
+}
+
+#[test]
+fn prune_balance_snapshots_caps_rows_per_account_independently() {
+    let storage = snapshot_test_storage();
+    let now = chrono::Utc::now().to_rfc3339();
+    for index in 0..5 {
+        storage
+            .save_balance_snapshot(&snapshot_row(
+                &format!("a-{index}"),
+                "account-a",
+                &now,
+                Some("{\"payload\":\"x\"}"),
+            ))
+            .unwrap();
+    }
+    for index in 0..2 {
+        storage
+            .save_balance_snapshot(&snapshot_row(
+                &format!("b-{index}"),
+                "account-b",
+                &now,
+                None,
+            ))
+            .unwrap();
+    }
+
+    let (expired, over_limit) = storage.prune_balance_snapshots(-1, 3).unwrap();
+    assert_eq!(expired, 0);
+    assert_eq!(over_limit, 2, "只有 account-a 超出每账号 3 条的上限");
+    // 每个账号的上限独立计算，且保留的是最新的若干条。
+    assert_eq!(count_snapshots(&storage, "account-a"), 3);
+    assert_eq!(count_snapshots(&storage, "account-b"), 2);
+    let kept = storage.list_balance_snapshots("account-a").unwrap();
+    let kept_ids = kept
+        .iter()
+        .map(|snapshot| snapshot.id.as_str())
+        .collect::<Vec<_>>();
+    for expected in ["a-2", "a-3", "a-4"] {
+        assert!(kept_ids.contains(&expected), "应保留最新的 {expected}");
+    }
+}
+
+#[test]
+fn prune_balance_snapshots_is_a_noop_without_a_policy() {
+    let storage = snapshot_test_storage();
+    storage
+        .save_balance_snapshot(&snapshot_row(
+            "old",
+            "account-a",
+            "2020-01-01T00:00:00.497Z",
+            None,
+        ))
+        .unwrap();
+
+    let (expired, over_limit) = storage.prune_balance_snapshots(-1, 0).unwrap();
+    assert_eq!((expired, over_limit), (0, 0));
+    assert_eq!(count_snapshots(&storage, "account-a"), 1);
+}
+
+#[test]
+fn prune_balance_snapshots_ignores_unparseable_timestamps() {
+    let storage = snapshot_test_storage();
+    // julianday() 解析失败返回 NULL，`NULL < x` 不为真，因此格式异常的行不会被误删。
+    storage
+        .save_balance_snapshot(&snapshot_row("broken", "account-a", "not-a-timestamp", None))
+        .unwrap();
+
+    let (expired, _) = storage.prune_balance_snapshots(0, 0).unwrap();
+    assert_eq!(expired, 0);
+    assert_eq!(count_snapshots(&storage, "account-a"), 1);
+}

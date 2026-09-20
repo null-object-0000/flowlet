@@ -612,6 +612,75 @@ fn parse_auth_strategy(raw: &str) -> AuthStrategy {
 mod tests {
     use super::*;
 
+    /// 2026-09-19 事故的配套回归：控制台抓取注入脚本里的页面 stash 必须有容量上限。
+    ///
+    /// 该 stash 是 append-only 的，只在 probe 抓取循环里被 drain。窗口被遗留在后台时
+    /// 控制台页面会持续写入，renderer 内存无界增长（事故中进程 RSS 峰值 3.8G）。
+    /// 新增/修改任何 `interceptor_js` 都必须走带上限的 `__flowlet_scrape_push`。
+    #[test]
+    fn embedded_interceptors_cap_the_page_stash() {
+        let raw: serde_json::Value =
+            serde_json::from_str(DEFAULT_CONFIG_JSON).expect("内置 config.json 必须可解析");
+        let mut checked = 0usize;
+        let mut stack = vec![raw];
+        while let Some(node) = stack.pop() {
+            match node {
+                serde_json::Value::Object(map) => {
+                    for (key, value) in map {
+                        if key == "interceptor_js" {
+                            let js = value.as_str().expect("interceptor_js 必须是字符串");
+                            assert!(
+                                js.contains("__flowlet_scrape_push"),
+                                "interceptor_js 必须使用带上限的 __flowlet_scrape_push"
+                            );
+                            assert!(
+                                !js.contains(
+                                    "(window.__flowlet_scrape_stash=window.__flowlet_scrape_stash||[]).push("
+                                ),
+                                "interceptor_js 不得直接向页面 stash 无上限 push"
+                            );
+                            assert!(
+                                js.contains("s.length>M") && js.contains("splice(0,s.length-M)"),
+                                "interceptor_js 的 stash 必须丢弃最旧条目以限制容量"
+                            );
+                            checked += 1;
+                        } else {
+                            stack.push(value);
+                        }
+                    }
+                }
+                serde_json::Value::Array(items) => stack.extend(items),
+                _ => {}
+            }
+        }
+        assert_eq!(checked, 4, "内置配置里的控制台抓取注入脚本数量发生变化，请同步检查");
+    }
+
+    /// 内置 `config.json` 必须带上 `usage_retention` 段，否则新装用户的数据库会
+    /// 重新回到「派生快照无界增长」的老状态（事故现场该表约 500 MB）。
+    #[test]
+    fn embedded_config_declares_usage_retention() {
+        let raw: serde_json::Value =
+            serde_json::from_str(DEFAULT_CONFIG_JSON).expect("内置 config.json 必须可解析");
+        let section = raw
+            .get("usage_retention")
+            .expect("内置 config.json 必须包含 usage_retention");
+        assert!(
+            section
+                .get("balance_snapshot_retention_days")
+                .and_then(|value| value.as_i64())
+                .is_some_and(|days| days >= 0),
+            "内置配置必须给出一个有效的余额快照保留天数"
+        );
+        assert!(
+            section
+                .get("balance_snapshot_max_per_account")
+                .and_then(|value| value.as_i64())
+                .is_some_and(|count| count > 0),
+            "内置配置必须给出一个有效的每账号条数上限"
+        );
+    }
+
     #[test]
     fn parse_minimal_config() {
         let json = serde_json::json!({

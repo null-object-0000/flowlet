@@ -1392,6 +1392,68 @@ pub struct AccountStatsRow {
 mod tests {
     use super::*;
 
+    /// `usage_retention` 的解析必须对缺失、部分缺失和显式取值都稳健：旧配置里没有
+    /// 这一段，不能因此启动失败，也不能默默退化成「不清理」。
+    #[test]
+    fn usage_retention_falls_back_to_defaults() {
+        let defaults = UsageRetentionConfig::default();
+        assert_eq!(defaults.balance_snapshot_retention_days, 30);
+        assert_eq!(defaults.balance_snapshot_max_per_account, 200);
+
+        // 整段缺失
+        let missing = serde_json::json!({ "log_capture": {} });
+        let parsed = UsageRetentionConfig::from_config_json(&missing);
+        assert_eq!(
+            parsed.balance_snapshot_retention_days,
+            defaults.balance_snapshot_retention_days
+        );
+        assert_eq!(
+            parsed.balance_snapshot_max_per_account,
+            defaults.balance_snapshot_max_per_account
+        );
+
+        // 只有其中一个字段
+        let partial = serde_json::json!({ "usage_retention": { "balance_snapshot_retention_days": 7 } });
+        let parsed = UsageRetentionConfig::from_config_json(&partial);
+        assert_eq!(parsed.balance_snapshot_retention_days, 7);
+        assert_eq!(
+            parsed.balance_snapshot_max_per_account,
+            defaults.balance_snapshot_max_per_account
+        );
+
+        // 两个字段都显式给出，含「永久保留 / 不限制」这类关闭值
+        let explicit = serde_json::json!({
+            "usage_retention": {
+                "balance_snapshot_retention_days": -1,
+                "balance_snapshot_max_per_account": 0
+            }
+        });
+        let parsed = UsageRetentionConfig::from_config_json(&explicit);
+        assert_eq!(parsed.balance_snapshot_retention_days, -1);
+        assert_eq!(parsed.balance_snapshot_max_per_account, 0);
+    }
+
+    /// 类型不对时回退到默认值，而不是 panic 或当成 0（0 会删掉全部历史）。
+    #[test]
+    fn usage_retention_ignores_wrong_types() {
+        let defaults = UsageRetentionConfig::default();
+        let wrong = serde_json::json!({
+            "usage_retention": {
+                "balance_snapshot_retention_days": "三十天",
+                "balance_snapshot_max_per_account": true
+            }
+        });
+        let parsed = UsageRetentionConfig::from_config_json(&wrong);
+        assert_eq!(
+            parsed.balance_snapshot_retention_days,
+            defaults.balance_snapshot_retention_days
+        );
+        assert_eq!(
+            parsed.balance_snapshot_max_per_account,
+            defaults.balance_snapshot_max_per_account
+        );
+    }
+
     #[test]
     fn classify_simple_chat() {
         let body = br#"{"messages":[{"role":"user","content":"Hello, how are you?"}]}"#;
@@ -1934,5 +1996,57 @@ impl LogCaptureConfig {
             "set-cookie",
             "x-auth-token",
         ]
+    }
+}
+
+// ─── Usage Retention Configuration ───────────────────────────────────────────
+
+/// 派生存量数据（自动同步产生的余额 / 资源快照）的保留策略。
+///
+/// 这类数据是**派生**的：界面只读每个账号最近若干条（`LIMIT 10`），历史行仅用于
+/// 事后排查。渠道资源自动同步每 5 分钟为每个账号插入一行，且每行都带完整的
+/// `raw_scraped_json`；没有上限时它会成为数据库体积的最大来源——2026-09-19 事故
+/// 现场的 `flowlet.sqlite` 里，`account_balance_snapshots` 共 43,634 行、约 500 MB，
+/// 占 951 MB 数据库的一半以上，其中一个账号独占 470 MB。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UsageRetentionConfig {
+    /// 余额 / 资源快照保留天数。
+    /// `-1` = 永久保留；`0` = 不保留历史（删除全部既有快照，之后新写入的保留）；
+    /// `N` = 只保留最近 N 天。
+    pub balance_snapshot_retention_days: i64,
+    /// 每个账号最多保留的快照条数（按插入顺序保留最新的）。`0` = 不限制。
+    ///
+    /// 天数无法约束「同步频率高但时间跨度短」的场景，因此再给一个条数上限。
+    pub balance_snapshot_max_per_account: i64,
+}
+
+impl Default for UsageRetentionConfig {
+    fn default() -> Self {
+        Self {
+            balance_snapshot_retention_days: 30,
+            balance_snapshot_max_per_account: 200,
+        }
+    }
+}
+
+impl UsageRetentionConfig {
+    /// 从完整 `config.json` 的 JSON 值读取 `usage_retention`。
+    ///
+    /// 缺失该段或字段时回退到默认值；不做严格校验，保证旧配置能继续启动。
+    pub fn from_config_json(value: &serde_json::Value) -> Self {
+        let defaults = Self::default();
+        let Some(section) = value.get("usage_retention") else {
+            return defaults;
+        };
+        Self {
+            balance_snapshot_retention_days: section
+                .get("balance_snapshot_retention_days")
+                .and_then(|item| item.as_i64())
+                .unwrap_or(defaults.balance_snapshot_retention_days),
+            balance_snapshot_max_per_account: section
+                .get("balance_snapshot_max_per_account")
+                .and_then(|item| item.as_i64())
+                .unwrap_or(defaults.balance_snapshot_max_per_account),
+        }
     }
 }

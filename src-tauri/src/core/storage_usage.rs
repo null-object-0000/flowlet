@@ -802,6 +802,61 @@ impl Storage {
         Ok(deleted)
     }
 
+    /// 按保留策略清理派生的余额 / 资源快照，返回 `(过期删除条数, 超量删除条数)`。
+    ///
+    /// `account_balance_snapshots` 是**派生**数据：界面只读每个账号最近若干条，
+    /// 但渠道资源自动同步每 5 分钟就会插入一行，且每行带完整 `raw_scraped_json`。
+    /// 没有保留策略时它是数据库体积的最大来源（2026-09-19 事故现场 43,634 行、
+    /// 约 500 MB，占 951 MB 数据库的一半以上）。
+    ///
+    /// - `retention_days < 0`：不做过期清理；`0`：删除全部既有快照；
+    ///   `N`：只保留最近 N 天。
+    /// - `max_per_account <= 0`：不做条数限制；否则每个账号只保留最新 N 条。
+    pub fn prune_balance_snapshots(
+        &self,
+        retention_days: i64,
+        max_per_account: i64,
+    ) -> Result<(usize, usize), StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+
+        let mut expired = 0usize;
+        if retention_days >= 0 {
+            // 用 julianday() 而不是字符串比较：历史行的时间戳同时存在
+            // `...Z` 与 `...+00:00` 两种写法，字符串比较不可靠。
+            // julianday() 解析失败会返回 NULL，`NULL < x` 不为真，因此格式异常的
+            // 行不会被误删。
+            expired = connection.execute(
+                "DELETE FROM account_balance_snapshots \
+                 WHERE julianday(created_at) < julianday('now', ?1)",
+                params![format!("-{retention_days} days")],
+            )?;
+        }
+
+        let mut over_limit = 0usize;
+        if max_per_account > 0 {
+            over_limit = connection.execute(
+                r#"
+                DELETE FROM account_balance_snapshots
+                WHERE rowid IN (
+                    SELECT rowid FROM (
+                        SELECT rowid, ROW_NUMBER() OVER (
+                            PARTITION BY account_id ORDER BY rowid DESC
+                        ) AS rank_in_account
+                        FROM account_balance_snapshots
+                    )
+                    WHERE rank_in_account > ?1
+                )
+                "#,
+                params![max_per_account],
+            )?;
+        }
+
+        Ok((expired, over_limit))
+    }
+
     // ─── Request Logs ────────────────────────────────────────────────────────
 
     pub fn insert_request_log(&self, log: &RequestLogInput) -> Result<String, StorageError> {

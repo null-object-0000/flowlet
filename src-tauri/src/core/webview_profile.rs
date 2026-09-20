@@ -255,6 +255,65 @@ fn runtime_cache_paths(profile: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
+/// per-account 抓取 WebView 数据目录的固定前缀，与 `build_scrape_webview` 保持一致。
+pub const SCRAPE_WEBVIEW_PROFILE_PREFIX: &str = "scrape-webview-";
+
+#[derive(Debug, Default)]
+pub struct WebviewProfileReclaimReport {
+    pub removed: usize,
+    pub bytes_removed: u64,
+    pub failures: Vec<String>,
+}
+
+/// 删除不再对应任何现存账号的 `scrape-webview-<account_id>` 数据目录。
+///
+/// 每个抓取过的账号都会在 WebView 数据根目录下留下一个独立 profile（Cookie /
+/// LocalStorage / Network / 缓存），而 `account_id` 是 UUID：删号后重新添加会生成
+/// **新**目录，旧目录永远留在磁盘上。仓库里没有任何代码删除这类目录，因此它只增
+/// 不减，属于与 SQLite 无关的第二条磁盘增长路径。
+///
+/// 只删除 `live_account_ids` 中不存在的账号目录，所以不会破坏任何仍在使用中的
+/// 控制台登录态；账号已经被删除时，它的登录态本来也不再有用。
+pub fn reclaim_orphan_scrape_profiles(
+    app_local_data_dir: &Path,
+    live_account_ids: &std::collections::HashSet<String>,
+) -> WebviewProfileReclaimReport {
+    let mut report = WebviewProfileReclaimReport::default();
+    let profiles = match flowlet_webview_profiles(app_local_data_dir) {
+        Ok(profiles) => profiles,
+        Err(error) => {
+            report.failures.push(error);
+            return report;
+        }
+    };
+
+    for profile in profiles {
+        let Some(name) = profile.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        let Some(account_id) = name.strip_prefix(SCRAPE_WEBVIEW_PROFILE_PREFIX) else {
+            // main-webview 与其它 profile 不归这里管。
+            continue;
+        };
+        if account_id.is_empty() || live_account_ids.contains(account_id) {
+            continue;
+        }
+        let size = directory_size(&profile).unwrap_or_default();
+        match std::fs::remove_dir_all(&profile) {
+            Ok(()) => {
+                report.removed += 1;
+                report.bytes_removed = report.bytes_removed.saturating_add(size);
+            }
+            Err(error) => report.failures.push(format!(
+                "删除孤儿抓取 WebView 目录 {} 失败: {error}",
+                profile.display()
+            )),
+        }
+    }
+
+    report
+}
+
 fn directory_size(path: &Path) -> std::io::Result<u64> {
     let metadata = match std::fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
@@ -280,8 +339,105 @@ fn directory_size(path: &Path) -> std::io::Result<u64> {
 mod tests {
     use super::{
         migrate_webview_profiles_to_portable, prune_oversized_webview_caches_with_threshold,
+        reclaim_orphan_scrape_profiles,
     };
+    use std::collections::HashSet;
     use std::path::Path;
+
+    /// 账号 id 是 UUID：删号重加会生成新的 `scrape-webview-<uuid>` 目录，旧目录
+    /// 永远留在磁盘上。这里只回收「已不存在账号」的目录，绝不碰仍在使用中的账号，
+    /// 也不碰 `main-webview` 或无关目录。
+    #[test]
+    fn reclaims_only_orphan_scrape_profiles() {
+        let root = std::env::temp_dir().join(format!(
+            "flowlet-webview-orphan-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let live = root.join("scrape-webview-account-live");
+        let orphan = root.join("scrape-webview-account-orphan");
+        let main = root.join("main-webview");
+        let unrelated = root.join("some-other-app");
+        for dir in [&live, &orphan, &main, &unrelated] {
+            std::fs::create_dir_all(dir.join("EBWebView").join("Default")).expect("create dir");
+        }
+        std::fs::write(live.join("EBWebView").join("Default").join("Cookies"), b"live-login")
+            .expect("write live cookies");
+        std::fs::write(
+            orphan.join("EBWebView").join("Default").join("Cookies"),
+            b"orphan-login",
+        )
+        .expect("write orphan cookies");
+
+        let live_account_ids = HashSet::from(["account-live".to_string()]);
+        let report = reclaim_orphan_scrape_profiles(&root, &live_account_ids);
+
+        assert_eq!(report.removed, 1);
+        assert!(report.bytes_removed > 0);
+        assert!(report.failures.is_empty(), "{:?}", report.failures);
+        assert!(!orphan.exists(), "孤儿账号目录必须被删除");
+        assert!(live.exists(), "仍存在的账号目录不得被删除");
+        assert_eq!(
+            std::fs::read(live.join("EBWebView").join("Default").join("Cookies"))
+                .expect("read live cookies"),
+            b"live-login"
+        );
+        assert!(main.exists(), "main-webview 不归这里管");
+        assert!(unrelated.exists(), "无关目录不得被删除");
+
+        std::fs::remove_dir_all(&root).expect("remove test root");
+    }
+
+    /// 没有任何账号时（例如全新安装或账号被清空）必须清掉全部抓取 profile，
+    /// 但不能把 `main-webview` 一起删掉。
+    #[test]
+    fn reclaims_every_scrape_profile_when_no_accounts_exist() {
+        let root = std::env::temp_dir().join(format!(
+            "flowlet-webview-orphan-empty-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(root.join("scrape-webview-a")).expect("create a");
+        std::fs::create_dir_all(root.join("scrape-webview-b")).expect("create b");
+        std::fs::create_dir_all(root.join("main-webview")).expect("create main");
+
+        let report = reclaim_orphan_scrape_profiles(&root, &HashSet::new());
+
+        assert_eq!(report.removed, 2);
+        assert!(!root.join("scrape-webview-a").exists());
+        assert!(!root.join("scrape-webview-b").exists());
+        assert!(root.join("main-webview").exists());
+
+        std::fs::remove_dir_all(&root).expect("remove test root");
+    }
+
+    /// 前缀后为空（目录名恰好是 `scrape-webview-`）属于异常数据，不得当成账号处理。
+    #[test]
+    fn ignores_scrape_profile_without_an_account_suffix() {
+        let root = std::env::temp_dir().join(format!(
+            "flowlet-webview-orphan-nosuffix-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let nameless = root.join("scrape-webview-");
+        std::fs::create_dir_all(&nameless).expect("create nameless");
+
+        let report = reclaim_orphan_scrape_profiles(&root, &HashSet::new());
+
+        assert_eq!(report.removed, 0);
+        assert!(nameless.exists());
+
+        std::fs::remove_dir_all(&root).expect("remove test root");
+    }
+
+    /// 目录不存在时（全新安装）必须安静地返回空报告，不能报错。
+    #[test]
+    fn reclaim_is_quiet_when_the_root_does_not_exist() {
+        let root = std::env::temp_dir().join(format!(
+            "flowlet-webview-orphan-missing-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let report = reclaim_orphan_scrape_profiles(&root, &HashSet::new());
+        assert_eq!(report.removed, 0);
+        assert!(report.failures.is_empty(), "{:?}", report.failures);
+    }
 
     #[test]
     fn prunes_only_regenerable_flowlet_webview_caches() {

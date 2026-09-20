@@ -416,6 +416,37 @@ fn run_desktop() {
             }
 
             let state = build_app_state(app_database_path(app), config_path.clone());
+
+            // 删除已不存在账号遗留的 per-account 抓取 WebView 目录。账号 id 是 UUID，
+            // 删号重加会生成新目录而旧目录永远留在磁盘上；这些目录里是控制台登录态，
+            // 对已删除的账号没有价值。
+            let live_account_ids = state
+                .storage
+                .list_channel_accounts()
+                .map(|accounts| {
+                    accounts
+                        .into_iter()
+                        .map(|account| account.id)
+                        .collect::<std::collections::HashSet<_>>()
+                })
+                .unwrap_or_default();
+            let reclaim_report = core::webview_profile::reclaim_orphan_scrape_profiles(
+                &webview_root,
+                &live_account_ids,
+            );
+            if reclaim_report.removed > 0 || !reclaim_report.failures.is_empty() {
+                tracing::info!(
+                    removed = reclaim_report.removed,
+                    reclaimed_mb =
+                        format!("{:.1}", reclaim_report.bytes_removed as f64 / 1048576.0),
+                    failures = reclaim_report.failures.len(),
+                    "setup: 孤儿抓取 WebView 目录清理完成"
+                );
+                for error in reclaim_report.failures {
+                    tracing::warn!(%error, "setup: 孤儿抓取 WebView 目录清理失败");
+                }
+            }
+
             app.manage(state.clone());
             let state_for_tray = state.clone();
 
@@ -812,7 +843,9 @@ fn run_desktop() {
                 }
             });
 
-            // 定时 Body 清理：启动后 15 分钟触发第一次，之后每 15 分钟跑一次。
+            // 定时存储清理：启动后 15 分钟触发第一次，之后每 15 分钟跑一次。
+            // 覆盖请求/响应 Body 的过期与超限清理，以及派生的余额/资源快照保留策略
+            // （见 config.json 的 `log_capture` 与 `usage_retention`）。
             // 启动时不做任何清理动作，全部交给定时任务。
             // 每次清理在 spawn_blocking 中执行（不阻塞主线程），结果写入 background_jobs。
             let timer_storage = state.storage.clone();
@@ -842,11 +875,11 @@ fn run_desktop() {
                                 pruned,
                                 before_mb = format!("{before_mb:.1}"),
                                 after_mb = format!("{after_mb:.1}"),
-                                "scheduled body cleanup finished"
+                                "scheduled storage cleanup finished"
                             );
                         }
                         Ok(Err(error)) => {
-                            tracing::warn!(error = %error, "scheduled body cleanup job failed");
+                            tracing::warn!(error = %error, "scheduled storage cleanup job failed");
                         }
                         Err(error) => {
                             tracing::warn!(error = %error, "scheduled body cleanup task panicked");

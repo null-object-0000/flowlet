@@ -54,6 +54,7 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 {
   "ua_rules": [ ... ],          // UA 客户端识别规则
   "log_capture": { ... },       // 请求日志捕获配置
+  "usage_retention": { ... },   // 派生用量数据（余额/资源快照）保留策略
   "bind": { ... },              // 代理监听地址
   "usage_cost": { ... },        // 用量费用展示与固定汇率
   "network": { ... },           // 上游代理等网络配置
@@ -65,6 +66,7 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 |------|------|------|------|
 | `ua_rules` | `UaClientRule[]` | 是 | 基于 User-Agent 子串的客户端身份识别规则 |
 | `log_capture` | `object` | 是 | 请求/响应日志的捕获与脱敏配置 |
+| `usage_retention` | `object` | 否 | 派生用量数据（`account_balance_snapshots`）的保留策略；缺失时使用默认值 |
 | `bind` | `object` | 是 | 本地代理监听的 host/port |
 | `usage_cost` | `object` | 否 | 费用统一展示币种与手工维护的固定汇率；仅影响展示，不改写原始费用 |
 | `network` | `object` | 否 | Flowlet 自身对外请求的上游代理等网络配置 |
@@ -237,6 +239,40 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 
 ---
 
+## 4.1 `usage_retention` — 派生用量数据保留策略
+
+```jsonc
+"usage_retention": {
+  "balance_snapshot_retention_days": 30,   // 余额/资源快照保留天数（-1=永久, 0=不保留历史, N=N 天）
+  "balance_snapshot_max_per_account": 200  // 每个账号最多保留条数（0=不限制）
+}
+```
+
+**字段说明**：
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `balance_snapshot_retention_days` | `number` | `30` | `account_balance_snapshots` 的保留天数：`-1` = 永久保留；`0` = 删除全部既有快照（之后新写入的保留）；`N` = 只保留最近 N 天 |
+| `balance_snapshot_max_per_account` | `number` | `200` | 每个账号最多保留的快照条数（按插入顺序保留最新）。`0` = 不限制 |
+
+**行为**：
+
+- 缺失整个 `usage_retention` 段或其中任一字段时使用上述默认值，旧配置可继续启动。
+- 修改后在下一次定时清理时生效（热读 `config.json`），无需重启。
+- 与 `log_capture` 的 Body 清理共用同一个定时任务（启动后 15 分钟第一次，之后每
+  15 分钟一次，任务类型仍是 `body-cleanup`），在任务日志里显示为「存储清理」。
+- 为什么需要它：`account_balance_snapshots` 是**派生**数据——界面只读每个账号最近
+  若干条（`LIMIT 10`），历史行仅用于事后排查；而渠道资源自动同步每 5 分钟就会为每个
+  账号插入一行，且每行都带完整 `raw_scraped_json`。2026-09-19 事故现场的
+  `flowlet.sqlite` 中该表共 43,634 行、约 500 MB，占 951 MB 数据库的一半以上，其中
+  单个账号独占 470 MB。仅靠 `VACUUM` 无法解决，必须先有保留策略。
+- 天数按 `julianday(created_at)` 判断，兼容历史行同时存在的 `...Z` 与 `...+00:00`
+  两种时间戳格式；解析失败的行不会被删除。
+- 条数上限用窗口函数按 `account_id` 分区、按插入顺序（`rowid`）保留最新 N 条，用于
+  约束「同步频率高但时间跨度短」的场景。
+
+---
+
 ## 5. `bind` — 代理监听地址
 
 ```jsonc
@@ -337,6 +373,19 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 | `supports_scrape_balance` | `bool` | 否 | `false` | 是否支持通过后台 webview 登录控制台并拦截 API 抓取套餐余量 |
 | `endpoints` | `object` | 否 | `{}` | 端点 URL 覆盖，key 如 `"models"` / `"model_detail"` / `"balance"`；OpenRouter 额外使用 `"credits"` |
 | `scrape` | `object` | 否 | `{}` | 控制台抓取配置。key 为渠道内的抓取模式（当前 LongCat 为 `"hybrid"`，Qwen 为 `"token_plan"` 与 `"freetier"`），value 可包含 `console_url`、可选的 `console_url_secondary`、可选的 `console_url_tertiary`（第三阶段导航 URL，用于 LongCat 加载 `/platform/fuel_pack` 补全已用尽/已过期的历史资源包）、`interceptor_js`、`extractor_js`、`aggregate` 与 `required_slots`。聚合模式按 `required_slots` 判断完整性；单页面模式等待全部必需槽位，多页面且槽位数与页面数一致时按顺序让每个页面等待对应槽位。`extractor_js` 返回统一汇总字段；LongCat 还返回完整 `token_packs` 数组（活跃包来自第一阶段 `token-packs/summary`，历史包来自第三阶段 `token-packs/list`，按 `lotId=resourceId` 去重合并，历史包以 `_fromList: true` 标记），原始接口 payload 单独写入 `raw_scraped_json`。Qwen `token_plan` 模式额外拦截 `/tokenplan/personal/api/v2/reset-card/list`（页面加载时自动请求的可选槽位：有重置卡时进入 `raw_scraped_json` bundle，无卡不阻断同步，不进入 `required_slots`）。Qwen `freetier` 模式拦截福利页接口：`ListBailianFreetier`（槽位 `freetier_list`）、`DescribeFqInstance`（槽位 `fq_instance`，页面按 40 个模板一批连续发多批，Rust 侧按 `Template.Code` 跨批合并并裁剪字段，`required_slots` 只列一个槽位）、`GetBillingAccountAvailableAmount`（槽位 `billing_amount`，余额写入快照 `balance`）、`ListSettleBillTotalSummary`（槽位 `settle_bill`，可选），以及可选的 `queryCurrentCertInfo`（`cert_info`）与 `tool/user/info.json`（`session_info`，页面会话探针）。页面始终自行生成 Cookie、签名和 Header（`sec_token` 由 `tool/user/info.json` 下发，Flowlet 不伪造请求）；Windows/Linux 优先从原生 WebView 网络层读取精确匹配的目标响应，macOS 与原生监听失败时使用 document-start `interceptor_js` fallback。未捕获响应不会被判定为未登录；任务日志会记录渠道、账号标识及缺失槽位。 |
+
+**`interceptor_js` 的页面暂存（`window.__flowlet_scrape_stash`）必须带上限**：
+
+拦截器把命中的响应体暂存到页面全局数组，供 Rust 侧 `drain_scrape_page_stash` 周期性
+取走。该数组是 append-only 的，只在 probe 抓取循环运行期间被 drain；窗口被遗留在
+后台时控制台页面会持续写入，renderer 内存无界增长（2026-09-19 事故中进程 RSS 峰值
+3.8 G 的最可疑来源）。
+
+因此内置注入脚本统一通过 `window.__flowlet_scrape_push(obj)` 写入，该 helper 在超过
+8 条时丢弃最旧条目（`splice(0, s.length - 8)`）。**新增或修改任何 `interceptor_js`
+都必须走这个 helper，不得再直接对 stash 调用 `.push()`**；`channels_config.rs` 的
+`embedded_interceptors_cap_the_page_stash` 测试会校验内置配置。上限值写在脚本内的
+`var M=8`，需要调整时同步修改该常量与本文档。
 
 内置 `custom` 模板用于中转站等完全自定义账号。渠道级 Base URL 保持为空，
 真实地址保存在账号的 `base_url_override` / `anthropic_base_url_override`；至少填写
@@ -543,6 +592,7 @@ Key 一样包含在端到端加密的账号目录中。
 |------|-----------|
 | `ua_rules` | **热更新**：下次请求立即生效 |
 | `log_capture` | **热更新**：下次请求立即生效 |
+| `usage_retention` | **热更新**：下一次定时清理（最长 15 分钟）生效 |
 | `usage_cost` | **前端热更新**：保存后费用展示查询立即使用新口径；不影响代理请求 |
 | `network.upstream_proxy` | **进程内热更新**：设置页保存后立即生效；手改文件需重启应用 |
 | `bind` | **需重启代理**：监听地址在启动时绑定 |
@@ -595,8 +645,9 @@ LongCat、DeepSeek、Kimi 对照、SQLite 升级迁移、模型/余额同步、�
 |--------|------|
 | 资源声明（打包到 exe 旁） | `src-tauri/tauri.conf.json`（`resources` 字段） |
 | JSON 反序列化结构 | `src-tauri/src/core/channels_config.rs` |
-| 运行时配置结构（`ChannelPreset`、`ProxyBindConfig`、`LogCaptureConfig`、`UaClientRule`） | `src-tauri/src/core/config.rs` |
+| 运行时配置结构（`ChannelPreset`、`ProxyBindConfig`、`LogCaptureConfig`、`UsageRetentionConfig`、`UaClientRule`） | `src-tauri/src/core/config.rs` |
 | 配置读写与热加载 | `src-tauri/src/core/proxy.rs`、`src-tauri/src/core/proxy_http.rs` |
+| 保留策略执行（Body + 余额快照） | `src-tauri/src/core/storage_tasks.rs`、`src-tauri/src/core/storage_usage.rs` |
 | 上游代理配置解析与运行时全局 | `src-tauri/src/core/upstream_proxy.rs`、`src-tauri/src/core/services.rs`、`src-tauri/src/commands/maintenance.rs` |
 | 启动时加载与回退 | `src-tauri/src/lib.rs`（`build_app_state`、`load_channels_config_from`） |
 | 前端读写 command | `src-tauri/src/commands.rs`（`read_config`、`write_config`） |

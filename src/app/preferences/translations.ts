@@ -206,6 +206,7 @@ const english: Record<string, string> = {
   "任务类型": "Task type",
   "全部类型": "All types",
   "Body 清理": "Body cleanup",
+  "存储清理": "Storage cleanup",
   "Agent 数据同步": "Agent data sync",
   "Codex 账号同步": "Codex account sync",
   "渠道资源自动同步": "Channel resource auto sync",

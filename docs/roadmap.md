@@ -68,7 +68,7 @@ LongCat + DeepSeek first 阶段使用 Channel / Account / Model 三层概念，�
 - [x] 接入 Agent 数据、Codex 账号、渠道资源、S3 设备、账号工作区和项目工作区同步
 - [x] 将后台任务的作用域、timeout、retry policy 与可取消等待统一为显式 `JobDefinition`
 - [x] 模型目录下载接入安全的 attempt timeout、分类重试与指数退避
-- [x] 定时 Body 清理接入统一排他作用域，并在各清理阶段之间响应取消
+- [x] 定时存储清理接入统一排他作用域，并在各清理阶段之间响应取消
 - [x] 项目 Agent / 重复任务按动态项目作用域接入 JobRuntime，同时保留子进程与看板领域状态
 - [x] 数据诊断和修复保持前台 command + 实时进度事件，不伪装成可恢复后台任务
 
@@ -310,6 +310,7 @@ LongCat + DeepSeek first 阶段使用 Channel / Account / Model 三层概念，�
 ## 运维维护
 
 - [x] 请求日志与 Body 清理（按保留策略释放 SQLite 页面）
+- [x] 派生用量数据保留策略（`usage_retention`：余额/资源快照按天数与每账号条数清理）
 - [x] 数据库空间维护（旧库一次性完整优化 + 新旧库后续限量增量回收）
 - [x] 数据库统计（日志数、用量记录数、文件大小和可回收空间）
 

@@ -88,4 +88,57 @@ describe("useScrapeConsole", () => {
     expect(commandMocks.scrapeBalance).not.toHaveBeenCalled();
     expect(commandMocks.closeScrapeConsole).not.toHaveBeenCalled();
   });
+
+  it("releases the kept console window when the drawer unmounts", async () => {
+    commandMocks.probeScrapeLogin.mockResolvedValue({
+      is_logged_in: false,
+      channel_id: "qwen",
+      account_hint: null,
+      probe_state: "login_required",
+      message: "检测到控制台登录页。",
+    });
+    const { result, unmount } = renderHook(() => useScrapeConsole());
+
+    await act(async () => {
+      await result.current.startScrape("account-qwen");
+    });
+    // 登录窗口是故意保留的，此时不能关。
+    expect(commandMocks.closeScrapeConsole).not.toHaveBeenCalled();
+
+    // 用户放弃登录并关闭抽屉：必须释放窗口，否则 Rust 侧会把这个账号永久标记为
+    // “等待人工处理”，后台同步从此每轮跳过它。
+    unmount();
+    await act(async () => {});
+    expect(commandMocks.closeScrapeConsole).toHaveBeenCalledWith("account-qwen");
+  });
+
+  it("does not close anything on mount/unmount without a scrape", async () => {
+    // StrictMode 的“挂载 → 卸载 → 再挂载”不得误关窗口。
+    const { unmount } = renderHook(() => useScrapeConsole());
+    unmount();
+    await act(async () => {});
+    expect(commandMocks.closeScrapeConsole).not.toHaveBeenCalled();
+  });
+
+  it("releases the kept console window when the user dismisses it", async () => {
+    commandMocks.probeScrapeLogin.mockResolvedValue({
+      is_logged_in: false,
+      channel_id: "qwen",
+      account_hint: null,
+      probe_state: "console_action_required",
+      message: "请在已打开的控制台中检查页面后重新抓取。",
+    });
+    const { result } = renderHook(() => useScrapeConsole());
+
+    await act(async () => {
+      await result.current.startScrape("account-qwen");
+    });
+    expect(commandMocks.closeScrapeConsole).not.toHaveBeenCalled();
+
+    await act(async () => {
+      result.current.dismiss();
+    });
+    expect(commandMocks.closeScrapeConsole).toHaveBeenCalledWith("account-qwen");
+    expect(result.current.state).toBe("idle");
+  });
 });

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { accountCommands, type ScrapeBalanceResult } from "../../domains/account/commands";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 
@@ -28,6 +28,22 @@ export function useScrapeConsole(runScrape?: (accountId: string) => Promise<Scra
   const [needLogin, setNeedLogin] = useState(false);
   const [consoleActionMessage, setConsoleActionMessage] = useState<string | null>(null);
   const activeAccountId = useRef<string | null>(null);
+
+  // 卸载时释放仍被占用的隐藏控制台 WebView。
+  //
+  // 进入 need-login / need-console-action 时窗口是**故意**保留的，用户若直接关掉抽屉
+  // 或切换渠道，就没有任何路径再关它：Rust 侧会把该账号标记为“等待人工处理”，后台
+  // 同步从此永久跳过它，窗口也会一直占着 WebKit 子进程与文件描述符。
+  //
+  // StrictMode 安全性：React 在开发模式下的“挂载 → 卸载 → 再挂载”发生在首次挂载后
+  // 立即执行，此时 activeAccountId.current 仍是 null，因此不会误关任何窗口。
+  useEffect(() => () => {
+    const accountId = activeAccountId.current;
+    activeAccountId.current = null;
+    if (accountId) {
+      void accountCommands.closeScrapeConsole(accountId).catch(() => undefined);
+    }
+  }, []);
 
   const startScrape = useCallback(async (accountId: string) => {
     activeAccountId.current = accountId;
@@ -86,6 +102,12 @@ export function useScrapeConsole(runScrape?: (accountId: string) => Promise<Scra
   }, [startScrape]);
 
   const dismiss = useCallback(() => {
+    // 用户主动结束本次控制台交互：把仍然保留的窗口一并释放。
+    const accountId = activeAccountId.current;
+    activeAccountId.current = null;
+    if (accountId) {
+      void accountCommands.closeScrapeConsole(accountId).catch(() => undefined);
+    }
     setState("idle");
     setError(null);
     setNeedLogin(false);

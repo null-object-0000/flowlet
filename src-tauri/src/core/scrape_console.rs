@@ -680,6 +680,145 @@ pub fn build_aggregate_bundle(slots: &HashMap<String, String>) -> serde_json::Va
     serde_json::Value::Object(bundle)
 }
 
+// ─── 隐藏抓取 WebView 的资源护栏 ─────────────────────────────────────────────
+//
+// 2026-09-19 事故：长时间运行的 Flowlet 进程在创建隐藏抓取 WebView 时，webkitgtk
+// 拉起子进程失败，GLib 在 `gsubprocess.c:421` 触发 `g_error()` → `abort()`，整个
+// 进程（连同 127.0.0.1:18640 本地代理）一起退出，且没有任何机制把它拉起来。
+//
+// 这条失败路径**无法**被 panic hook 或 `catch_unwind` 拦截：`g_error()` 直接调用
+// `abort()`，不走 Rust 的 unwind。因此唯一可行的防御是「不要让进程走到资源耗尽的
+// 那一步」——在创建 WebView 之前检查余量，并给同时存活的 WebView 一个硬上限。
+
+/// 同时存活的隐藏抓取 WebView 上限。
+///
+/// 每个 webkitgtk WebView 会拉起 WebKitWebProcess / NetworkProcess / GPUProcess
+/// 一组子进程并占用大量文件描述符，因此这里给一个很小的硬上限。后台同步是串行的，
+/// 正常路径下同时只需要 1 个。
+pub const SCRAPE_WEBVIEW_MAX_LIVE: usize = 3;
+
+/// 文件描述符占用达到该比例时拒绝再创建 WebView。
+pub const SCRAPE_WEBVIEW_FD_REFUSE_RATIO: f64 = 0.8;
+
+/// 系统可用内存低于该值时拒绝再创建 WebView。
+pub const SCRAPE_WEBVIEW_MIN_AVAILABLE_MEMORY_BYTES: u64 = 512 * 1024 * 1024;
+
+/// 纯函数：文件描述符占用是否已达拒绝阈值。
+///
+/// `soft_limit == 0` 表示读不到上限，此时不做判断（返回 `false`）。
+pub(crate) fn fd_pressure_exceeds(open_fds: usize, soft_limit: usize) -> bool {
+    if soft_limit == 0 {
+        return false;
+    }
+    open_fds as f64 >= soft_limit as f64 * SCRAPE_WEBVIEW_FD_REFUSE_RATIO
+}
+
+/// 纯函数：可用内存是否已低于拒绝阈值。
+pub(crate) fn memory_pressure_exceeds(available_bytes: u64) -> bool {
+    available_bytes < SCRAPE_WEBVIEW_MIN_AVAILABLE_MEMORY_BYTES
+}
+
+/// 纯函数：给出应当回收的抓取 WebView 账号。
+///
+/// 只回收「没有被人工刷新会话占用」且「不是本次要打开的账号」的窗口。人工登录
+/// 窗口必须保留，否则会把用户正在操作的窗口关掉。
+pub(crate) fn scrape_webview_reclaim_candidates(
+    live_account_ids: &[String],
+    interactive_account_ids: &std::collections::HashSet<String>,
+    keep_account_id: &str,
+) -> Vec<String> {
+    live_account_ids
+        .iter()
+        .filter(|id| id.as_str() != keep_account_id)
+        .filter(|id| !interactive_account_ids.contains(id.as_str()))
+        .cloned()
+        .collect()
+}
+
+/// 纯函数：综合资源读数判断是否还能再创建一个抓取 WebView。
+pub(crate) fn evaluate_scrape_webview_budget(
+    open_fds: Option<usize>,
+    fd_soft_limit: Option<usize>,
+    available_memory_bytes: Option<u64>,
+) -> Result<(), String> {
+    if let (Some(open), Some(limit)) = (open_fds, fd_soft_limit) {
+        if fd_pressure_exceeds(open, limit) {
+            return Err(format!(
+                "进程文件描述符接近上限（{open}/{limit}），已跳过本次控制台抓取以避免 WebView 子进程创建失败导致应用退出"
+            ));
+        }
+    }
+    if let Some(available) = available_memory_bytes {
+        if memory_pressure_exceeds(available) {
+            return Err(format!(
+                "系统可用内存不足（{} MB），已跳过本次控制台抓取以避免 WebView 子进程创建失败导致应用退出",
+                available / (1024 * 1024)
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Linux：读取 `/proc/self/fd` 的条目数与 `/proc/self/limits` 的 soft nofile。
+#[cfg(target_os = "linux")]
+fn read_process_fd_usage() -> (Option<usize>, Option<usize>) {
+    let open = std::fs::read_dir("/proc/self/fd")
+        .ok()
+        .map(|entries| entries.filter_map(Result::ok).count());
+    let soft_limit = std::fs::read_to_string("/proc/self/limits")
+        .ok()
+        .and_then(|content| parse_nofile_soft_limit(&content));
+    (open, soft_limit)
+}
+
+/// 解析 `/proc/self/limits` 中 `Max open files` 行的 soft limit。
+pub(crate) fn parse_nofile_soft_limit(content: &str) -> Option<usize> {
+    content.lines().find_map(|line| {
+        let rest = line.strip_prefix("Max open files")?;
+        let mut parts = rest.split_whitespace();
+        let soft = parts.next()?;
+        // `unlimited` 表示没有软上限，此时不做判断。
+        soft.parse::<usize>().ok()
+    })
+}
+
+/// Linux：从 `/proc/meminfo` 读取 `MemAvailable`。
+#[cfg(target_os = "linux")]
+fn read_available_memory_bytes() -> Option<u64> {
+    let content = std::fs::read_to_string("/proc/meminfo").ok()?;
+    parse_mem_available_bytes(&content)
+}
+
+/// 解析 `/proc/meminfo` 的 `MemAvailable` 行（单位 kB）。
+pub(crate) fn parse_mem_available_bytes(content: &str) -> Option<u64> {
+    content.lines().find_map(|line| {
+        let rest = line.strip_prefix("MemAvailable:")?;
+        let kb = rest.split_whitespace().next()?.parse::<u64>().ok()?;
+        Some(kb.saturating_mul(1024))
+    })
+}
+
+/// 创建隐藏抓取 WebView 之前的资源余量检查。
+///
+/// 返回 `Err` 时调用方**必须**放弃创建并把它当作一次普通的同步失败上报，
+/// 不得继续调用 webkitgtk：那条路径的失败是 `g_error()` + `abort()`，
+/// 会带走整个 Flowlet 进程。
+pub fn ensure_scrape_webview_budget() -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        let (open_fds, fd_soft_limit) = read_process_fd_usage();
+        return evaluate_scrape_webview_budget(
+            open_fds,
+            fd_soft_limit,
+            read_available_memory_bytes(),
+        );
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1251,5 +1390,111 @@ mod tests {
         assert!(!aggregate_complete(&slots_single, &mode_single));
         slots_single.insert("token_packs_summary".to_string(), "{}".to_string());
         assert!(aggregate_complete(&slots_single, &mode_single));
+    }
+
+    // ─── 隐藏抓取 WebView 资源护栏 ──────────────────────────────────────────
+
+    #[test]
+    fn fd_pressure_thresholds_are_enforced() {
+        // 读不到软上限时不做判断，避免误拒。
+        assert!(!fd_pressure_exceeds(10_000, 0));
+        // 明显有余量。
+        assert!(!fd_pressure_exceeds(100, 524_288));
+        // 恰好 80% 即视为达到阈值。
+        assert!(fd_pressure_exceeds(80, 100));
+        assert!(fd_pressure_exceeds(95, 100));
+        assert!(!fd_pressure_exceeds(79, 100));
+    }
+
+    #[test]
+    fn memory_pressure_thresholds_are_enforced() {
+        assert!(memory_pressure_exceeds(0));
+        assert!(memory_pressure_exceeds(
+            SCRAPE_WEBVIEW_MIN_AVAILABLE_MEMORY_BYTES - 1
+        ));
+        assert!(!memory_pressure_exceeds(
+            SCRAPE_WEBVIEW_MIN_AVAILABLE_MEMORY_BYTES
+        ));
+        assert!(!memory_pressure_exceeds(8 * 1024 * 1024 * 1024));
+    }
+
+    #[test]
+    fn budget_rejects_only_under_pressure() {
+        // 读数缺失时不阻塞创建。
+        assert!(evaluate_scrape_webview_budget(None, None, None).is_ok());
+        // 健康机器。
+        assert!(evaluate_scrape_webview_budget(
+            Some(100),
+            Some(524_288),
+            Some(4 * 1024 * 1024 * 1024)
+        )
+        .is_ok());
+        // fd 接近上限。
+        let fd_error = evaluate_scrape_webview_budget(Some(90), Some(100), None)
+            .expect_err("fd 压力必须被拒绝");
+        assert!(fd_error.contains("文件描述符"), "unexpected: {fd_error}");
+        // 内存不足。
+        let mem_error = evaluate_scrape_webview_budget(None, None, Some(1024))
+            .expect_err("内存压力必须被拒绝");
+        assert!(mem_error.contains("可用内存不足"), "unexpected: {mem_error}");
+    }
+
+    #[test]
+    fn reclaim_keeps_interactive_and_current_account() {
+        let live = vec![
+            "account-a".to_string(),
+            "account-b".to_string(),
+            "account-c".to_string(),
+        ];
+        let mut interactive = std::collections::HashSet::new();
+        interactive.insert("account-b".to_string());
+
+        // account-a 是非交互式残留，应被回收；account-b 是人工登录窗口，
+        // account-c 是本次要打开的账号，都必须保留。
+        let candidates = scrape_webview_reclaim_candidates(&live, &interactive, "account-c");
+        assert_eq!(candidates, vec!["account-a".to_string()]);
+
+        // 没有任何人工会话时，除本次账号外全部回收。
+        let empty = std::collections::HashSet::new();
+        let all = scrape_webview_reclaim_candidates(&live, &empty, "account-a");
+        assert_eq!(
+            all,
+            vec!["account-b".to_string(), "account-c".to_string()]
+        );
+    }
+
+    #[test]
+    fn parse_nofile_soft_limit_reads_proc_limits_line() {
+        // 真实 /proc/self/limits 的片段（单位列必须被忽略）。
+        let content = "Limit                     Soft Limit           Hard Limit           Units     \n\
+                       Max cpu time              unlimited            unlimited            seconds   \n\
+                       Max open files            524288               524288               files     \n\
+                       Max locked memory         65536                65536                bytes     \n";
+        assert_eq!(parse_nofile_soft_limit(content), Some(524_288));
+        // `unlimited` 不能被解析成数字。
+        let unlimited = "Max open files            unlimited            unlimited            files     \n";
+        assert_eq!(parse_nofile_soft_limit(unlimited), None);
+        assert_eq!(parse_nofile_soft_limit("Max cpu time 1 1 seconds\n"), None);
+    }
+
+    #[test]
+    fn parse_mem_available_reads_proc_meminfo_line() {
+        let content = "MemTotal:       32757736 kB\n\
+                       MemFree:         1234567 kB\n\
+                       MemAvailable:    8192000 kB\n";
+        assert_eq!(parse_mem_available_bytes(content), Some(8_192_000 * 1024));
+        assert_eq!(parse_mem_available_bytes("MemFree: 100 kB\n"), None);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_resource_probe_reads_real_procfs() {
+        let (open_fds, fd_soft_limit) = read_process_fd_usage();
+        // 测试进程至少打开了 stdin/stdout/stderr。
+        assert!(open_fds.is_some_and(|count| count >= 3));
+        assert!(fd_soft_limit.is_some_and(|limit| limit > 0));
+        assert!(read_available_memory_bytes().is_some_and(|bytes| bytes > 0));
+        // 健康环境下必须放行，否则抓取会被误拒。
+        assert!(ensure_scrape_webview_budget().is_ok());
     }
 }

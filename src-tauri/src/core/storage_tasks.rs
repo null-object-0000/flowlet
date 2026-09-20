@@ -255,7 +255,8 @@ impl Storage {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
-    /// 定时触发的 Body 清理任务：过期清理 + 超限清理，结果写入 background_jobs。
+    /// 定时触发的存储清理任务：请求/响应 Body 的过期与超限清理，加上派生的
+    /// 余额/资源快照保留策略，结果写入 background_jobs。
     /// 返回 (job_id, expired_cleared, pruned, before_bytes, after_bytes)。
     pub fn run_scheduled_body_cleanup_job(
         &self,
@@ -270,25 +271,29 @@ impl Storage {
             .try_acquire_definition(&definition)
             .map_err(|conflict| {
                 StorageError::JobRuntime(match conflict.job_id {
-                    Some(job_id) => format!("Body 清理已在运行（任务 {job_id}）"),
-                    None => "Body 清理已在运行".to_string(),
+                    Some(job_id) => format!("存储清理已在运行（任务 {job_id}）"),
+                    None => "存储清理已在运行".to_string(),
                 })
             })?;
 
-        let capture = read_config_raw(config_path)
+        let config_value = read_config_raw(config_path)
             .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
-            .map(|value| extract_log_capture(&value))
-            .unwrap_or_default();
+            .unwrap_or(serde_json::Value::Null);
+        let capture = extract_log_capture(&config_value);
+        // 同一个定时任务同时负责派生存量数据（余额/资源快照）的保留策略：
+        // 它每 5 分钟被渠道资源同步写入一行，是数据库体积的最大来源。
+        let usage_retention =
+            crate::core::config::UsageRetentionConfig::from_config_json(&config_value);
 
         let job_id = uuid::Uuid::new_v4().to_string();
         self.create_job(
             &job_id,
             definition.job_type,
-            "Body 清理",
-            "按保留策略自动清理过期与超限的请求/响应 Body",
+            "存储清理",
+            "按保留策略自动清理过期与超限的请求/响应 Body，以及派生的余额/资源快照",
             "scheduled",
-            4,
-            "开始按保留策略自动清理请求与响应 Body",
+            5,
+            "开始按保留策略自动清理请求/响应 Body 与派生的余额快照",
         )?;
         lease.attach_job_id(job_id.clone());
 
@@ -301,9 +306,9 @@ impl Storage {
                 &job_id,
                 "cancelled",
                 &serde_json::json!({ "cancelled": true }).to_string(),
-                "Body 清理已取消",
+                "存储清理已取消",
             )?;
-            Err(StorageError::JobRuntime("Body 清理已取消".to_string()))
+            Err(StorageError::JobRuntime("存储清理已取消".to_string()))
         };
         ensure_not_cancelled()?;
 
@@ -415,10 +420,44 @@ impl Storage {
                 "体积上限设为 0（不限制），跳过",
             );
         }
-        self.update_job_progress(&job_id, 3, 4)?;
+        self.update_job_progress(&job_id, 3, 5)?;
         ensure_not_cancelled()?;
 
-        // 第四步：新库或已执行过一次完整优化的旧库，按固定上限增量归还磁盘页。
+        // 第四步：派生的余额/资源快照保留策略。
+        // 界面只读每个账号最近若干条，历史行仅用于排查；不设上限时渠道资源自动同步
+        // （每 5 分钟）会持续插入带完整 raw_scraped_json 的新行，成为数据库体积的
+        // 最大来源。清理失败不阻断后续的空间回收。
+        let (snapshot_expired, snapshot_over_limit) = match self.prune_balance_snapshots(
+            usage_retention.balance_snapshot_retention_days,
+            usage_retention.balance_snapshot_max_per_account,
+        ) {
+            Ok(counts) => counts,
+            Err(error) => {
+                let _ = self.add_job_event(
+                    &job_id,
+                    "warning",
+                    "用量快照清理",
+                    &format!("余额/资源快照清理失败：{error}"),
+                );
+                (0, 0)
+            }
+        };
+        if snapshot_expired > 0 || snapshot_over_limit > 0 {
+            let _ = self.add_job_event(
+                &job_id,
+                "info",
+                "用量快照清理",
+                &format!(
+                    "保留 {} 天 / 每账号最多 {} 条：删除过期 {snapshot_expired} 条、超量 {snapshot_over_limit} 条",
+                    usage_retention.balance_snapshot_retention_days,
+                    usage_retention.balance_snapshot_max_per_account
+                ),
+            );
+        }
+        self.update_job_progress(&job_id, 4, 5)?;
+        ensure_not_cancelled()?;
+
+        // 第五步：新库或已执行过一次完整优化的旧库，按固定上限增量归还磁盘页。
         // 旧库 auto_vacuum=NONE 时安全跳过，由设置页提示用户先执行一次完整优化。
         let incremental_reclaimed = match self
             .incremental_vacuum(super::storage_maintenance::SCHEDULED_INCREMENTAL_VACUUM_BYTES)
@@ -449,7 +488,7 @@ impl Storage {
                 0
             }
         };
-        self.update_job_progress(&job_id, 4, 4)?;
+        self.update_job_progress(&job_id, 5, 5)?;
         ensure_not_cancelled()?;
 
         let after_bytes = self.get_total_body_size_bytes().unwrap_or(0);
@@ -464,6 +503,10 @@ impl Storage {
             "maxSizeMb": capture.body_max_size_mb,
             "pruneRatio": capture.body_prune_ratio,
             "incrementalReclaimedBytes": incremental_reclaimed,
+            "balanceSnapshotExpired": snapshot_expired,
+            "balanceSnapshotOverLimit": snapshot_over_limit,
+            "balanceSnapshotRetentionDays": usage_retention.balance_snapshot_retention_days,
+            "balanceSnapshotMaxPerAccount": usage_retention.balance_snapshot_max_per_account,
         })
         .to_string();
         self.finish_job(
@@ -471,11 +514,13 @@ impl Storage {
             "succeeded",
             &summary,
             &format!(
-                "Body 清理完成：过期 {} 条，超限 {} 条，清理前 {:.1} MB → 清理后 {:.1} MB",
+                "存储清理完成：Body 过期 {} 条、超限 {} 条，清理前 {:.1} MB → 清理后 {:.1} MB；余额快照过期 {} 条、超量 {} 条",
                 expired_cleared,
                 pruned,
                 before_bytes as f64 / 1048576.0,
-                after_bytes as f64 / 1048576.0
+                after_bytes as f64 / 1048576.0,
+                snapshot_expired,
+                snapshot_over_limit
             ),
         )?;
 

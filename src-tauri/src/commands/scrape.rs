@@ -463,16 +463,18 @@ pub(crate) async fn query_balance(
             .as_deref()
             .is_some_and(|value| !value.trim().is_empty());
 
-    // 在 spawn_blocking 中执行 HTTP 调用，避免 Send 问题
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap_or_else(|_| panic!("创建运行时失败"));
-        rt.block_on(query_channel_balance(&account, &config))
-    })
-    .await
-    .map_err(|e| format!("任务执行失败: {e}"))??;
+    // 直接在命令自身的 async 上下文里 await。适配器返回的 Future 全部是 `Send`
+    // （见 `channel_capability_adapter` 的 `BalanceQueryFuture`），底层 HTTP 也是异步
+    // 实现，因此既不需要 `spawn_blocking`，更不能在阻塞线程里自建嵌套 tokio runtime。
+    //
+    // 2026-09-19 事故现场：这里原先是「在 spawn_blocking 内自建 current-thread tokio
+    // runtime，并用 unwrap_or_else 把 runtime 搭建失败转成 panic」。一旦搭建因进程资源
+    // 耗尽返回 Err（tokio 的 build() 只在创建 IO/signal driver 失败时报错），一次本可
+    // 上报给用户的 I/O 错误就被升级成 panic。嵌套 runtime 本身在 spawn_blocking 里是
+    // 允许的（tokio 只在 block_on 时检查运行上下文，build() 不检查），所以这不是
+    // 「必然 panic」的写法——但它是纯粹的重复开销与风险面，必须去掉。禁止该 bug class
+    // 复现的回归测试见文件末尾的 `nested_runtime_regression_tests`。
+    let result = query_channel_balance(&account, &config).await?;
 
     // 更新账号凭证状态与最后错误信息。
     // 测试连接成功 → 重置为 healthy；若返回 401 则标记为 invalid_key。
@@ -581,15 +583,8 @@ pub(crate) async fn fetch_channel_models(
         .find(|preset| preset.id == channel_id)
         .cloned();
 
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap_or_else(|_| panic!("创建运行时失败"));
-        rt.block_on(sync_channel_models(&account, preset.as_ref(), &config))
-    })
-    .await
-    .map_err(|e| format!("任务执行失败: {e}"))??;
+    // 同 `query_balance`：`ModelSyncFuture` 是 `Send`，直接 await，不要嵌套 runtime。
+    let result = sync_channel_models(&account, preset.as_ref(), &config).await?;
 
     // 更新渠道模型目录（按 channel_id 替换），供模型服务页展示该渠道上游实际提供的模型。
     if result.errors.is_empty() {
@@ -767,13 +762,27 @@ pub(crate) async fn open_scrape_console(
         )
         .ok_or("该账号所属渠道不支持控制台抓取")?
     };
-    {
-        let mut guard = state
-            .scrape_modes
-            .lock()
-            .map_err(|_| "锁定抓取模式失败".to_string())?;
-        guard.insert(account_id.clone(), mode.clone());
+
+    // 创建 WebView 之前的护栏。顺序不能颠倒：先回收遗留窗口，上限判断才反映真实需要。
+    let reclaimed = reclaim_stale_scrape_webviews(&state, &account_id)?;
+    if reclaimed > 0 {
+        tracing::info!(
+            account_id = %account_id,
+            reclaimed,
+            "回收历史遗留的控制台抓取 WebView"
+        );
     }
+    let live = scrape_webview_live_count(&app, &state)?;
+    if live >= crate::core::scrape_console::SCRAPE_WEBVIEW_MAX_LIVE {
+        return Err(format!(
+            "同时打开的控制台抓取窗口已达上限（{live}/{}），请先关闭已打开的控制台窗口再重试",
+            crate::core::scrape_console::SCRAPE_WEBVIEW_MAX_LIVE
+        ));
+    }
+    // webkitgtk 子进程创建失败会走 GLib `g_error()` → `abort()`，panic hook 与
+    // `catch_unwind` 都拦不住，整个进程会连同本地代理一起退出。资源不足时必须在这里
+    // 放弃，把一次抓取降级成普通错误。
+    crate::core::scrape_console::ensure_scrape_webview_budget()?;
 
     let channel_id = {
         let snapshot = state.runtime_config.snapshot();
@@ -785,6 +794,13 @@ pub(crate) async fn open_scrape_console(
             .ok_or("账号不存在")?
     };
     let window = build_scrape_webview(&app, &account_id, &channel_id, &mode)?;
+
+    // 窗口创建成功之后才登记抓取模式。登记失败必须立刻销毁窗口：否则会留下一个
+    // 任何逻辑都找不到、也无法再关闭的孤儿 WebView 及其 WebKit 子进程。
+    if let Err(error) = register_scrape_mode(&state, &account_id, &mode) {
+        let _ = window.destroy();
+        return Err(error);
+    }
     #[cfg(windows)]
     if let Err(error) = scrape_console::install_windows_response_capture(
         &window,
@@ -839,12 +855,123 @@ pub(crate) async fn open_scrape_console(
         }
     });
 
+    let mut guard = match state.scrape_webviews.lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            // 登记不进去就销毁窗口，绝不让它变成孤儿。
+            let _ = window.destroy();
+            destroy_scrape_webview(&state, &account_id);
+            return Err("锁定抓取 webview 失败".to_string());
+        }
+    };
+    guard.insert(account_id, window);
+    Ok(())
+}
+
+/// 登记 per-account 抓取模式。原生网络监听与页面 IPC 回传都按它做 URL→槽位分派。
+fn register_scrape_mode(
+    state: &tauri::State<'_, AppState>,
+    account_id: &str,
+    mode: &crate::core::scrape_console::ScrapeModeRuntime,
+) -> Result<(), String> {
+    let mut guard = state
+        .scrape_modes
+        .lock()
+        .map_err(|_| "锁定抓取模式失败".to_string())?;
+    guard.insert(account_id.to_string(), mode.clone());
+    Ok(())
+}
+
+/// 销毁并注销一个账号的隐藏抓取 WebView 及其全部 per-account 状态。
+///
+/// 用 `destroy()` 而不是 `close()`：`close()` 只发出关闭请求，仍要走
+/// CloseRequested 处理链，可能被推迟甚至拦截；`destroy()` 绕过该链路直接销毁窗口，
+/// 才能保证 webkitgtk / WebView2 的子进程与文件描述符真的被释放。登录态保存在
+/// per-account 数据目录里，不依赖窗口存活，因此强制销毁不会让用户重新登录。
+///
+/// 注意 `destroy()` 与 `close()` 一样是发往事件循环的**异步**消息，本函数返回时
+/// 子进程可能尚未回收；真正保证资源不累积的是「窗口上限 + 每次创建前回收 + 每次
+/// 同步前回收」这一组约束，而不是这里的同步性。
+fn destroy_scrape_webview(state: &AppState, account_id: &str) {
+    let window = state
+        .scrape_webviews
+        .lock()
+        .ok()
+        .and_then(|mut guard| guard.remove(account_id));
+    if let Some(window) = window {
+        let _ = window.destroy();
+    }
+    if let Ok(mut guard) = state.scrape_pending.lock() {
+        guard.remove(account_id);
+    }
+    if let Ok(mut guard) = state.scrape_modes.lock() {
+        guard.remove(account_id);
+    }
+    if let Ok(mut guard) = state.scrape_ready.lock() {
+        guard.remove(account_id);
+    }
+    if let Ok(mut guard) = state.scrape_native_ready.lock() {
+        guard.remove(account_id);
+    }
+    // 人工刷新标记必须一并清除。它们原先只在「一次完整的交互式抓取成功」时才复位，
+    // 于是用户进入登录页后直接关掉抽屉/窗口，账号就会被永久标记为「等待人工处理」：
+    // 后台同步从此每轮都跳过它（直到进程重启），同时窗口也不再被任何回收逻辑接管。
+    // 关闭控制台就意味着这次人工接管结束，登录态仍在 per-account 数据目录里。
+    if let Ok(mut guard) = state.scrape_interactive_sessions.lock() {
+        guard.remove(account_id);
+    }
+    if let Ok(mut guard) = state.scrape_interaction_required.lock() {
+        guard.remove(account_id);
+    }
+}
+
+/// 统计仍在 Tauri 中真实存在的抓取 WebView，并顺手剔除已失效的句柄。
+///
+/// 用户可能直接关掉登录窗口，此时 HashMap 里的 `WebviewWindow` 句柄会残留；
+/// 不做存活校验会让「上限」被幽灵窗口占满。
+fn scrape_webview_live_count(
+    app: &AppHandle,
+    state: &tauri::State<'_, AppState>,
+) -> Result<usize, String> {
     let mut guard = state
         .scrape_webviews
         .lock()
         .map_err(|_| "锁定抓取 webview 失败".to_string())?;
-    guard.insert(account_id, window);
-    Ok(())
+    guard.retain(|_, window| app.get_webview_window(window.label()).is_some());
+    Ok(guard.len())
+}
+
+/// 回收历史遗留的隐藏抓取 WebView：既不属于人工刷新会话，也不是本次要打开的账号。
+///
+/// 后台同步是串行的，正常路径下同时只应存在一个抓取 WebView。这里做兜底回收，
+/// 防止遗留窗口（例如用户进入登录页后直接关掉抽屉）长期占用 WebKit 子进程与文件
+/// 描述符，把进程推到资源耗尽、GLib `g_error()` → `abort()` 的致命路径上——
+/// 那条路径会带走整个 Flowlet 进程，包括本地代理端点。
+fn reclaim_stale_scrape_webviews(
+    state: &tauri::State<'_, AppState>,
+    keep_account_id: &str,
+) -> Result<usize, String> {
+    let interactive = state
+        .scrape_interactive_sessions
+        .lock()
+        .map_err(|_| "锁定控制台人工刷新状态失败".to_string())?
+        .clone();
+    let live_account_ids = {
+        let guard = state
+            .scrape_webviews
+            .lock()
+            .map_err(|_| "锁定抓取 webview 失败".to_string())?;
+        guard.keys().cloned().collect::<Vec<_>>()
+    };
+    let candidates = crate::core::scrape_console::scrape_webview_reclaim_candidates(
+        &live_account_ids,
+        &interactive,
+        keep_account_id,
+    );
+    for account_id in &candidates {
+        destroy_scrape_webview(state, account_id);
+    }
+    Ok(candidates.len())
 }
 
 /// 关闭并 drop per-account 抓取 webview。
@@ -853,28 +980,7 @@ pub(crate) async fn close_scrape_console(
     state: tauri::State<'_, AppState>,
     account_id: String,
 ) -> Result<(), String> {
-    let window = {
-        let mut guard = state
-            .scrape_webviews
-            .lock()
-            .map_err(|_| "锁定抓取 webview 失败".to_string())?;
-        guard.remove(&account_id)
-    };
-    if let Some(window) = window {
-        let _ = window.close();
-    }
-    if let Ok(mut guard) = state.scrape_pending.lock() {
-        guard.remove(&account_id);
-    }
-    if let Ok(mut guard) = state.scrape_modes.lock() {
-        guard.remove(&account_id);
-    }
-    if let Ok(mut guard) = state.scrape_ready.lock() {
-        guard.remove(&account_id);
-    }
-    if let Ok(mut guard) = state.scrape_native_ready.lock() {
-        guard.remove(&account_id);
-    }
+    destroy_scrape_webview(&state, &account_id);
     Ok(())
 }
 
@@ -2588,6 +2694,19 @@ pub(crate) async fn sync_scrape_balances(
         .map_err(|error| format!("创建渠道资源同步任务失败：{error}"))?;
     lease.attach_job_id(&job_id);
 
+    // 进入本轮同步前先回收历史遗留的隐藏抓取 WebView。它们不参与本轮抓取，却持续
+    // 占用 WebKit 子进程与文件描述符；长期累积会把进程推到资源耗尽、GLib
+    // `g_error()` → `abort()` 的致命路径上（2026-09-19 事故）。
+    match reclaim_stale_scrape_webviews(&state, "") {
+        Ok(reclaimed) if reclaimed > 0 => {
+            tracing::info!(job_id = %job_id, reclaimed, "同步前回收历史遗留的控制台抓取 WebView");
+        }
+        Ok(_) => {}
+        Err(error) => {
+            tracing::warn!(job_id = %job_id, error = %error, "同步前回收抓取 WebView 失败");
+        }
+    }
+
     let mut synced = 0usize;
     let mut failed = 0usize;
     let mut skipped = 0usize;
@@ -2754,4 +2873,152 @@ pub(crate) fn reload_custom_scrape_registry(
             account_name: descriptor.account_name.clone(),
         })
         .collect())
+}
+
+/// 2026-09-19 事故的结构性回归测试。
+///
+/// 事故现场是 `spawn_blocking` 内自建 tokio runtime 并 `unwrap_or_else(panic!)`。
+/// 这类写法一旦重新出现就会再次把「可恢复的 I/O 错误」升级成 panic，因此用一个
+/// 扫描源码的测试把 bug class 钉死，而不是只依赖代码评审。
+#[cfg(test)]
+mod nested_runtime_regression_tests {
+    use std::path::{Path, PathBuf};
+
+    fn collect_rust_sources(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_rust_sources(&path, out);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    fn source_tree() -> Vec<(PathBuf, String)> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        collect_rust_sources(&root, &mut files);
+        files
+            .into_iter()
+            .filter_map(|path| {
+                let content = std::fs::read_to_string(&path).ok()?;
+                Some((path, content))
+            })
+            .collect()
+    }
+
+    /// 被禁写法用 `concat!` 拼出来，避免本测试自身的源码命中扫描。
+    fn forbidden_nested_runtime_needle() -> String {
+        concat!("Builder::new_", "current_thread").to_string()
+    }
+
+    fn forbidden_runtime_panic_needle() -> String {
+        concat!("创建运行时", "失败").to_string()
+    }
+
+    fn forbidden_setup_panic_needle() -> String {
+        concat!("unwrap_or_else(|_| ", "panic!").to_string()
+    }
+
+    fn offenders_for(needles: &[String]) -> Vec<String> {
+        let mut offenders = Vec::new();
+        for (path, content) in source_tree() {
+            if needles.iter().any(|needle| content.contains(needle)) {
+                offenders.push(path.display().to_string());
+            }
+        }
+        offenders
+    }
+
+    #[test]
+    fn no_command_builds_a_nested_tokio_runtime() {
+        let offenders = offenders_for(&[
+            forbidden_nested_runtime_needle(),
+            forbidden_runtime_panic_needle(),
+        ]);
+        assert!(
+            offenders.is_empty(),
+            "禁止在 Tauri command 内自建嵌套 tokio runtime（2026-09-19 事故 bug class）：{offenders:?}"
+        );
+    }
+
+    #[test]
+    fn no_command_maps_runtime_setup_failure_to_panic() {
+        let offenders = offenders_for(&[
+            forbidden_setup_panic_needle(),
+            forbidden_runtime_panic_needle(),
+        ]);
+        assert!(
+            offenders.is_empty(),
+            "禁止把运行时/子进程搭建失败升级为 panic：{offenders:?}"
+        );
+    }
+
+    /// 抓取 WebView 的创建入口必须经过资源护栏，否则会重新暴露 GLib `g_error()`
+    /// → `abort()` 这条会带走整个进程的致命路径。
+    #[test]
+    fn scrape_webview_creation_is_guarded() {
+        let source = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("src/commands/scrape.rs"),
+        )
+        .expect("读取 scrape.rs 失败");
+        let guard_index = source
+            .find("ensure_scrape_webview_budget()")
+            .expect("创建抓取 WebView 前必须调用 ensure_scrape_webview_budget()");
+        let build_index = source
+            .find("build_scrape_webview(&app")
+            .expect("找不到抓取 WebView 的创建点");
+        assert!(
+            guard_index < build_index,
+            "资源护栏必须在创建 WebView 之前执行"
+        );
+        assert!(
+            source.contains("SCRAPE_WEBVIEW_MAX_LIVE"),
+            "抓取 WebView 必须受硬上限约束"
+        );
+    }
+
+    /// `close_scrape_console` 必须强制销毁窗口，而不是只发出关闭请求。
+    #[test]
+    fn close_scrape_console_destroys_the_window() {
+        let source = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("src/commands/scrape.rs"),
+        )
+        .expect("读取 scrape.rs 失败");
+        assert!(
+            source.contains("window.destroy()"),
+            "关闭抓取 WebView 必须用 destroy() 才能真正释放 WebKit 子进程"
+        );
+    }
+
+    /// 关闭控制台必须同时解除人工刷新标记。
+    ///
+    /// 这两个集合原先只在「一次完整的交互式抓取成功」时复位，于是用户进入登录页后
+    /// 直接关掉抽屉/窗口，账号就被永久标记为「等待人工处理」：后台同步从此每轮跳过它，
+    /// 直到进程重启。这是纯 Rust 侧的状态不变式，用源码级断言钉住。
+    #[test]
+    fn destroying_a_console_releases_the_manual_session_markers() {
+        let source = std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("src/commands/scrape.rs"),
+        )
+        .expect("读取 scrape.rs 失败");
+        let helper_start = source
+            .find("fn destroy_scrape_webview(")
+            .expect("找不到 destroy_scrape_webview");
+        // 辅助函数的函数体到下一个顶层项之前结束。
+        let helper_body = &source[helper_start..];
+        let helper_body = &helper_body[..helper_body
+            .find("\n/// 统计仍在 Tauri 中真实存在的抓取 WebView")
+            .expect("找不到 destroy_scrape_webview 之后的顶层项")];
+        for field in ["scrape_interactive_sessions", "scrape_interaction_required"] {
+            assert!(
+                helper_body.contains(field),
+                "destroy_scrape_webview 必须清除 {field}，否则账号会被永久跳过自动同步"
+            );
+        }
+    }
 }

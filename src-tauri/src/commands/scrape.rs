@@ -1094,8 +1094,9 @@ pub(crate) async fn handle_intercepted_response(
 #[cfg(test)]
 mod scrape_capture_tests {
     use super::{
-        channel_resource_sync_completion_status, channel_resource_sync_method,
-        merge_longcat_token_packs, normalize_scrape_token_packs, record_stash_items,
+        build_extractor_call, channel_resource_sync_completion_status,
+        channel_resource_sync_method, credential_key_context, merge_longcat_token_packs,
+        normalize_scrape_token_packs, parse_extractor_output, record_stash_items,
         scrape_responses_complete, ChannelResourceSyncMethod, ScrapeSlotEngine,
     };
     use crate::core::channel_capability_adapter::is_explicit_login_url;
@@ -1107,6 +1108,71 @@ mod scrape_capture_tests {
         let json: serde_json::Value =
             serde_json::from_str(DEFAULT_CONFIG_JSON).expect("valid embedded config");
         ChannelsConfig::from_config_json(&json).expect("valid channels config")
+    }
+
+    #[test]
+    fn credential_context_uses_console_prefix_and_last_four() {
+        let context = credential_key_context("sk-8cce6b31245e45a7a426acc72551c5d8")
+            .expect("长 Key 应派生出指纹");
+        assert_eq!(context["keyPrefix"], "sk-8cce6");
+        assert_eq!(context["keyLastFour"], "c5d8");
+    }
+
+    #[test]
+    fn credential_context_is_omitted_for_short_or_blank_keys() {
+        assert!(credential_key_context("sk-abc").is_none());
+        assert!(credential_key_context("   ").is_none());
+        assert!(credential_key_context("").is_none());
+    }
+
+    #[test]
+    fn extractor_call_passes_credential_context_as_second_argument() {
+        let context = credential_key_context("sk-1a49e000000000000000000000003d65")
+            .expect("长 Key 应派生出指纹");
+        let call = build_extractor_call(
+            "function extract(bundle, credential){ return null; }",
+            r#"{"usage":{"items":[]}}"#,
+            Some(&context),
+        );
+        assert!(
+            call.contains(r#"({"usage":{"items":[]}}, {"#),
+            "payload 与凭据应作为两个实参传入: {call}"
+        );
+        assert!(call.contains(r#""keyPrefix":"sk-1a49e""#), "{call}");
+        assert!(call.contains(r#""keyLastFour":"3d65""#), "{call}");
+    }
+
+    #[test]
+    fn extractor_call_passes_null_when_credential_is_unavailable() {
+        let call = build_extractor_call("function extract(bundle){ return null; }", "{}", None);
+        assert!(call.contains("({}, null)"), "{call}");
+    }
+
+    #[test]
+    fn empty_extractor_result_reports_the_real_cause() {
+        let error = parse_extractor_output("").expect_err("空串必须报错");
+        assert!(error.contains("未返回任何结果"), "{error}");
+        assert!(error.contains("单个函数声明"), "{error}");
+        // 旧行为只会暴露 JSON EOF,用户无法据此定位到 extractor 脚本本身。
+        assert!(!error.contains("EOF while parsing"), "{error}");
+    }
+
+    #[test]
+    fn double_encoded_extractor_result_is_decoded() {
+        let value = parse_extractor_output(r#""{\"balance\":1.5}""#).expect("双重编码应被解开");
+        assert_eq!(value["balance"], 1.5);
+    }
+
+    #[test]
+    fn extractor_error_payload_becomes_an_error() {
+        let error = parse_extractor_output(r#"{"error":"boom"}"#).expect_err("error 字段必须报错");
+        assert!(error.contains("boom"), "{error}");
+    }
+
+    #[test]
+    fn null_extractor_result_reports_empty_result() {
+        let error = parse_extractor_output("null").expect_err("null 必须报错");
+        assert!(error.contains("返回空结果"), "{error}");
     }
 
     #[test]
@@ -2323,6 +2389,86 @@ fn surface_scrape_webview(
     Ok(())
 }
 
+/// 控制台 key 指纹里前缀的字符数。
+///
+/// Friday 这类控制台 `/api-keys` 返回的 `key_prefix` 是 Key 的前 8 位
+/// (如 `sk-8cce6`)、`key_last_four` 是末 4 位;extractor 只能用这两个字段
+/// 把「本账号实际使用的 key」从列表里认出来。extractor 侧做双向前缀匹配,
+/// 控制台前缀长度变化时仍能对上。
+pub(crate) const CREDENTIAL_KEY_PREFIX_CHARS: usize = 8;
+
+/// 由账号 API Key 派生控制台 key 对账指纹(`keyPrefix` + `keyLastFour`)。
+///
+/// 只传派生指纹而不是明文 Key:extractor 在 IIFE 闭包内执行,参数不进页面全局,
+/// 控制台页面自身的脚本读不到;但即便如此也没有把完整凭据交给描述符脚本的必要。
+/// 太短的 Key 无法形成有意义的指纹,返回 `None` 而不是猜一个。
+pub(crate) fn credential_key_context(api_key: &str) -> Option<serde_json::Value> {
+    let chars: Vec<char> = api_key.trim().chars().collect();
+    if chars.len() < CREDENTIAL_KEY_PREFIX_CHARS + 4 {
+        return None;
+    }
+    let prefix: String = chars.iter().take(CREDENTIAL_KEY_PREFIX_CHARS).collect();
+    let last_four: String = chars[chars.len() - 4..].iter().collect();
+    Some(serde_json::json!({
+        "keyPrefix": prefix,
+        "keyLastFour": last_four,
+    }))
+}
+
+/// 构造 extractor 调用脚本。
+///
+/// 第二个实参是可选的账号凭据上下文:内置渠道 extractor 声明为
+/// `function extract(bundle)`,多传一个实参会被忽略,行为不变;自定义描述符
+/// 可声明 `function extract(bundle, credential)` 用它把控制台列表里的 key
+/// 与账号实际使用的 key 对上(见 `docs/custom-scrape-discovery.md` 4.6)。
+pub(crate) fn build_extractor_call(
+    extractor_js: &str,
+    payload: &str,
+    credential: Option<&serde_json::Value>,
+) -> String {
+    let credential_json = match credential {
+        Some(value) => value.to_string(),
+        None => "null".to_string(),
+    };
+    format!(
+        "(function(){{ try {{ return JSON.stringify(({})({}, {})); }} catch(e) {{ return JSON.stringify({{error:String(e)}}); }} }})()",
+        extractor_js, payload, credential_json
+    )
+}
+
+/// 解析 extractor 的 eval 返回值。
+///
+/// wry 的 `eval_with_callback` 在脚本抛错(含语法错误)时会把异常吞成**空字符串**
+/// (`unwrap_or_default()`),因此空串必须单独报错:否则用户只会看到
+/// 「EOF while parsing a value at line 1 column 0」这种指不到根因的信息。
+/// 最常见的成因是 `extractor_js` 不是单个函数声明——Rust 以
+/// `(extractor_js)(bundle, credential)` 调用,顶层多一条语句就是语法错误。
+pub(crate) fn parse_extractor_output(raw_result: &str) -> Result<serde_json::Value, String> {
+    if raw_result.trim().is_empty() {
+        return Err(
+            "extractor 未返回任何结果：脚本存在语法错误，或 extractor_js 不是单个函数声明\
+             （Rust 以 (extractor_js)(bundle, credential) 形式调用，顶层不能再有第二条语句，\
+             helper 需内联到该函数内）"
+                .to_string(),
+        );
+    }
+    let mut parsed: serde_json::Value = serde_json::from_str(raw_result)
+        .map_err(|e| format!("extractor 输出解析失败: {e}, raw={raw_result}"))?;
+    // WebView2 会把 JS 字符串返回值再次 JSON 序列化；兼容配置中返回
+    // JSON.stringify(...) 的 extractor，避免把结果误判成普通字符串。
+    if let Some(encoded) = parsed.as_str() {
+        parsed = serde_json::from_str(encoded)
+            .map_err(|e| format!("extractor 字符串结果解析失败: {e}, raw={raw_result}"))?;
+    }
+    if let Some(err) = parsed.get("error").and_then(|v| v.as_str()) {
+        return Err(format!("extractor 执行错误: {err}"));
+    }
+    if parsed.is_null() {
+        return Err("extractor 返回空结果,请确认页面已加载目标数据".to_string());
+    }
+    Ok(parsed)
+}
+
 /// 编排器:抓取余额的主入口(前端按钮调用)。
 /// 流程:探测登录态 → 未登录则弹出 webview 并提前返回;已登录则继续拦截+提取。
 /// 注意:前端在调 scrape_balance 之前应先调 probe_scrape_login 显式处理登录态;
@@ -2338,8 +2484,9 @@ pub(crate) async fn scrape_balance(
     if !interactive && scrape_interaction_required(&state, &account_id)? {
         return Err("账号正在等待控制台登录或人工处理，本轮自动同步已跳过".to_string());
     }
-    // 1. 解析模式配置。
-    let (channel_id, mode) = {
+    // 1. 解析模式配置。同时派生账号凭据指纹,供 extractor 把控制台列表里的 key
+    //    与本账号实际使用的 key 对上(仅自定义描述符会用到,见 4.6)。
+    let (channel_id, mode, credential) = {
         let snapshot = state.runtime_config.snapshot();
         let account = snapshot
             .accounts
@@ -2357,7 +2504,11 @@ pub(crate) async fn scrape_balance(
             Some(&account.name),
         )
         .ok_or("该账号所属渠道不支持控制台抓取")?;
-        (account.channel_id.clone(), mode)
+        (
+            account.channel_id.clone(),
+            mode,
+            credential_key_context(&account.api_key),
+        )
     };
 
     // 2. 前端通常已调用 probe_scrape_login 完成一次“清缓冲 → 刷新 → 捕获”。
@@ -2396,13 +2547,10 @@ pub(crate) async fn scrape_balance(
         guard.remove(&account_id);
     }
 
-    // 4. 执行 extractor
+    // 4. 执行 extractor(第二个实参为账号凭据指纹,见 build_extractor_call)
     let extractor_call = if mode.aggregate {
         let bundle = scrape_console::build_aggregate_bundle(&slots);
-        format!(
-            "(function(){{ try {{ return JSON.stringify(({})({})); }} catch(e) {{ return JSON.stringify({{error:String(e)}}); }} }})()",
-            mode.extractor_js, bundle
-        )
+        build_extractor_call(&mode.extractor_js, &bundle.to_string(), credential.as_ref())
     } else {
         // 单响应模式:取唯一目标槽
         let target_key = if mode.console_url.contains("tab=api") {
@@ -2411,10 +2559,7 @@ pub(crate) async fn scrape_balance(
             "token_packs_summary"
         };
         let raw = slots.get(target_key).ok_or("未找到目标响应")?;
-        format!(
-            "(function(){{ try {{ return JSON.stringify(({})({})); }} catch(e) {{ return JSON.stringify({{error:String(e)}}); }} }})()",
-            mode.extractor_js, raw
-        )
+        build_extractor_call(&mode.extractor_js, raw, credential.as_ref())
     };
 
     let raw_result = {
@@ -2444,20 +2589,7 @@ pub(crate) async fn scrape_balance(
     };
 
     // 7. 解析 extractor 输出
-    let mut parsed: serde_json::Value = serde_json::from_str(&raw_result)
-        .map_err(|e| format!("extractor 输出解析失败: {e}, raw={raw_result}"))?;
-    // WebView2 会把 JS 字符串返回值再次 JSON 序列化；兼容配置中返回
-    // JSON.stringify(...) 的 extractor，避免把结果误判成普通字符串。
-    if let Some(encoded) = parsed.as_str() {
-        parsed = serde_json::from_str(encoded)
-            .map_err(|e| format!("extractor 字符串结果解析失败: {e}, raw={raw_result}"))?;
-    }
-    if let Some(err) = parsed.get("error").and_then(|v| v.as_str()) {
-        return Err(format!("extractor 执行错误: {err}"));
-    }
-    if parsed.is_null() || parsed == serde_json::Value::Null {
-        return Err("extractor 返回空结果,请确认页面已加载目标数据".to_string());
-    }
+    let parsed = parse_extractor_output(&raw_result)?;
 
     let balance = parsed.get("balance").and_then(|v| v.as_f64());
     let currency = parsed

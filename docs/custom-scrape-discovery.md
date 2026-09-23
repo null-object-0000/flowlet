@@ -1,6 +1,7 @@
 # 自定义渠道资源用量抓取：文件夹发现机制（设计文档）
 
-> 状态：待确认（尚未实现）。
+> 状态：已实现（`core/custom_scrape.rs` 注册表 + `commands/scrape.rs` 接入）；
+> 2026-09 补充 4.6.1「账号凭据指纹」第二个实参。
 > 决策记录：Friday 这类定制渠道，以 `custom` 渠道下的一个账号承载；
 > 「资源用量抓取」的实现通过本机文件夹里的声明式描述符被发现，不进 `config.json`、
 > 不进编译期 adapter；抓取脚本只在本机执行，设备同步只传去敏后的观测摘要。
@@ -213,6 +214,33 @@ token_expire_at, token_packs(数组)
 - `aggregate == true`：extractor 签名 `function extract(bundle)`，`bundle` 为
   `{ slotKey: 已解析响应 JSON, ... }`（与 `build_aggregate_bundle` 一致）。
 - `aggregate == false`：extractor 签名 `function extract(raw)`，`raw` 为唯一目标槽位。
+- **`extractor.js` 必须是单个顶层函数声明**：Rust 以 `(extractor_js)(bundle, credential)`
+  的形式求值，顶层再出现第二条语句（例如并列的 helper 函数）就是语法错误。helper 必须
+  内联在该函数内部。这类语法错误会被 wry 吞成空字符串，代理侧统一报
+  「extractor 未返回任何结果：脚本存在语法错误，或 extractor_js 不是单个函数声明」。
+
+#### 4.6.1 第二个实参：账号凭据指纹（可选）
+
+控制台的一个 workspace 下可能有多把 key（Friday 的 `/api-keys` 同时返回
+`knowledge` / `public` / `resource-mark`，各自独立额度）。只按「当月消费最高」挑选
+会跟踪到与本账号实际发请求用的 key 不一致的那把，因此 Rust 侧在调用 extractor 时
+额外传入第二个实参 `credential`：
+
+```js
+function extract(bundle, credential) {
+  // credential = { keyPrefix: "sk-8cce6", keyLastFour: "c5d8" } 或 null
+}
+```
+
+- 由账号 `api_key` 派生（`commands/scrape.rs` 的 `credential_key_context`）：
+  `keyPrefix` 取前 8 位、`keyLastFour` 取末 4 位，与控制台 `/api-keys` 返回的
+  `key_prefix` / `key_last_four` 同构；Key 过短时传 `null`。
+- **只传派生指纹，不传明文 Key**；参数在 IIFE 闭包内求值，不写入页面全局，
+  控制台页面自身的脚本读不到。
+- 内置渠道 extractor 声明为单参 `function extract(bundle)`，多传一个实参会被忽略，
+  行为不变；自定义描述符按需声明第二个形参。
+- 指纹缺失或对不上时由描述符自行决定回退策略（Friday 回退到「当月消费最高」并在
+  `plan_name` 标注，避免再次静默跟踪到错误的 key）。
 
 ---
 

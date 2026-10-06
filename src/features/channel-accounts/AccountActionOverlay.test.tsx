@@ -286,12 +286,14 @@ describe("AccountActionOverlay", () => {
     );
 
     expect(await screen.findByText("个人版 Standard 套餐")).toBeInTheDocument();
-    // 5 小时只有额度总量、没有用量百分比：保留「5 小时 -」占位行。
-    expect(screen.getByText("5 小时 -")).toBeInTheDocument();
-    // 主额度槽位按上游声明的月额度展示，不再错标成「7 天」。
+    // 上游不再报 5 小时用量：整块空占位（5 小时 - / 总量 - / 额度重置时间 -）都不渲染，
+    // 只保留真正有数据的月额度卡片一张。
+    expect(screen.queryByText("5 小时 -")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("5 小时额度")).not.toBeInTheDocument();
     expect(screen.getByText("每月 19.9%")).toBeInTheDocument();
     expect(screen.getByText("总量 45,000 Credits")).toBeInTheDocument();
     expect(screen.getByLabelText("每月额度")).toBeInTheDocument();
+    expect(screen.getAllByText("额度重置时间")).toHaveLength(1);
     expect(screen.queryByText(/^7 天 /)).not.toBeInTheDocument();
   });
 

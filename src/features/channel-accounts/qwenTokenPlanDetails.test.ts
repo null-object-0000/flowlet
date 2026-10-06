@@ -52,7 +52,6 @@ describe("parseQwenTokenPlanDetails", () => {
         resetAt: new Date(1785130440000).toISOString(),
       },
     });
-    expect(details?.primaryLabel).toBe("7 天");
     expect(details?.windows.map((window) => window.key)).toEqual(["five_hour", "weekly"]);
     expect(details?.primary?.remainingPercent).toBeCloseTo(21.1);
   });
@@ -82,11 +81,11 @@ describe("parseQwenTokenPlanDetails", () => {
       resetAt: new Date(1792598400000).toISOString(),
     });
     expect(details?.primary?.remainingPercent).toBeCloseTo(19.92, 2);
-    expect(details?.primaryLabel).toBe("每月");
   });
 
-  it("keeps the declared primary window label when the usage percentage is missing", () => {
-    // 额度配置声明了月额度但用量还没回来时，主额度槽位仍必须显示「每月」而不是「7 天」。
+  it("produces no quota window when the usage percentage is missing", () => {
+    // 额度配置声明了月额度但用量还没回来：不产出窗口，界面因此不会渲染
+    //「总量 - / 额度重置时间 -」这类空占位。
     const raw = JSON.stringify({
       subscription: response({ specCode: "standard", status: "VALID" }),
       quota_config: response({ standard: { five_hour: 3000, monthly: 45000 } }),
@@ -97,7 +96,6 @@ describe("parseQwenTokenPlanDetails", () => {
     expect(details?.windows).toEqual([]);
     expect(details?.fiveHour).toBeNull();
     expect(details?.primary).toBeNull();
-    expect(details?.primaryLabel).toBe("每月");
   });
 
   it("returns null for legacy summary-only snapshots", () => {

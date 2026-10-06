@@ -102,6 +102,8 @@
 .scrapeSynced { color: var(--semi-color-text-2); font-size: 12px; }
 .qwenSummaryGrid { grid-template-columns: minmax(0, 1.65fr) minmax(0, 1.65fr) minmax(0, 1.15fr); }
 .qwenProgress { display: grid; gap: 5px; }
+/* 只剩一个额度窗口时（上游改版后不再报 5 小时用量）让它占满两列，右侧到期/同步卡片位置不变。 */
+.qwenProgressSpanAll { grid-column: span 2; }
 .qwenProgressHeading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .qwenProgressHeading strong { color: var(--semi-color-text-1); font-size: 12px; white-space: nowrap; }
 .qwenProgressHeading small { text-align: right; }

@@ -1318,7 +1318,11 @@ function QwenTokenPlanPanel({
   const inactiveKind = qwenSubscriptionInactiveKind(details);
   const fiveHour = subscriptionActive ? details?.fiveHour : null;
   const primaryQuota = subscriptionActive ? details?.primary : null;
-  const primaryQuotaLabel = details?.primaryLabel ?? "7 天";
+  // 上游控制台改版后不再返回 5 小时用量（usage 只有 per1MonthPercentage），旧写法会留下
+  // 「5 小时 - / 总量 - / 额度重置时间 -」三个空占位。只渲染真正有数据的额度窗口。
+  const quotaWindows: QwenQuotaWindow[] = [];
+  if (fiveHour && fiveHour.key !== primaryQuota?.key) quotaWindows.push(fiveHour);
+  if (primaryQuota) quotaWindows.push(primaryQuota);
   const resetCards = subscriptionActive ? details?.resetCards : null;
 
   async function handleScrape() {
@@ -1343,8 +1347,16 @@ function QwenTokenPlanPanel({
         <div className={`${styles.longCatSummaryGrid} ${styles.qwenSummaryGrid}`}>
           {subscriptionActive ? (
             <>
-              <QwenQuotaProgress period={t("5 小时")} quota={fiveHour} language={language} t={t} />
-              <QwenQuotaProgress period={t(primaryQuotaLabel)} quota={primaryQuota} language={language} t={t} />
+              {quotaWindows.map((window) => (
+                <QwenQuotaProgress
+                  key={window.key}
+                  period={t(window.label)}
+                  quota={window}
+                  spanAll={quotaWindows.length === 1}
+                  language={language}
+                  t={t}
+                />
+              ))}
             </>
           ) : (
             <div className={styles.qwenTimeSummary}>
@@ -1686,33 +1698,34 @@ function formatZhipuPackAmount(
 function QwenQuotaProgress({
   period,
   quota,
+  spanAll,
   language,
   t,
 }: {
   period: string;
-  quota: QwenQuotaWindow | null | undefined;
+  quota: QwenQuotaWindow;
+  spanAll: boolean;
   language: "zh-CN" | "en-US";
   t: (k: string, params?: Record<string, string | number> | undefined) => string;
 }) {
-  const percent = quota ? Math.round(quota.remainingPercent * 10) / 10 : null;
+  // 只在窗口确实有数据时才渲染（调用方已过滤），因此这里不再需要「-」占位分支。
+  const percent = Math.round(quota.remainingPercent * 10) / 10;
   return (
-    <div className={styles.qwenProgress}>
+    <div className={`${styles.qwenProgress} ${spanAll ? styles.qwenProgressSpanAll : ""}`}>
       <div className={styles.qwenProgressHeading}>
         <strong>
-          {percent == null
-            ? t("{period} -", { period })
-            : t("{period} {percent}%", { period, percent: percent.toFixed(1) })}
+          {t("{period} {percent}%", { period, percent: percent.toFixed(1) })}
         </strong>
-        <small>{t("总量")} {quota ? formatCredits(quota.total, language) : "-"}</small>
+        <small>{t("总量")} {formatCredits(quota.total, language)}</small>
       </div>
       <Progress
         aria-label={t("{period}额度", { period })}
-        percent={percent ?? 0}
+        percent={percent}
         size="small"
         showInfo={false}
       />
       <small className={styles.qwenResetTime}>
-        {t("额度重置时间")} <b>{quota?.resetAt ? formatFullTimestamp(quota.resetAt, language) : "-"}</b>
+        {t("额度重置时间")} <b>{quota.resetAt ? formatFullTimestamp(quota.resetAt, language) : "-"}</b>
       </small>
     </div>
   );

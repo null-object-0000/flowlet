@@ -318,6 +318,15 @@ fn parse_qwen_details(raw: &str) -> Option<QwenDetails> {
         usage.get("per1WeekPercentage"),
         usage.get("per1WeekResetTime"),
     );
+    // 上游控制台改版后主额度窗口由「周」改为「月」。两种口径都保留：历史快照仍是周，
+    // 新快照是月；月额度排在最后，移动端 `primaryResource` 取最后一个窗口作为主额度。
+    push_qwen_window(
+        &mut windows,
+        "每月",
+        tier.get("monthly"),
+        usage.get("per1MonthPercentage"),
+        usage.get("per1MonthResetTime"),
+    );
     Some(QwenDetails {
         plan,
         expires_at: timestamp_string(subscription.get("endTime")),
@@ -414,6 +423,43 @@ mod tests {
         assert!(!serde_json::to_string(&details.windows)
             .unwrap()
             .contains("DataV2"));
+    }
+
+    #[test]
+    fn qwen_monthly_quota_window_is_reported_after_console_revamp() {
+        // 2026-10 真实抓取样本：额度配置只有 five_hour + monthly，用量只有
+        // per1MonthPercentage，旧的 weekly / per1WeekPercentage 已消失。
+        let raw = serde_json::json!({
+            "subscription": {"data":{"DataV2":{"data":{"data":{
+                "instanceCode":"sfm_tokenplansolo_public_cn-u5i4xb5mo05","specCode":"standard","status":"VALID","endTime":1795000000000_i64}}}}},
+            "quota_config": {"data":{"DataV2":{"data":{"data":{"standard":{"five_hour":3000.0,"monthly":45000.0}}}}}},
+            "usage": {"data":{"DataV2":{"data":{"data":{"per1MonthPercentage":0.8008054844444444,"per1MonthResetTime":1792598400000_i64}}}}}
+        })
+        .to_string();
+        let details = parse_qwen_details(&raw).expect("qwen details");
+        assert_eq!(details.plan.as_deref(), Some("standard"));
+        assert_eq!(details.windows.len(), 1, "5 小时无用量百分比时不产出窗口");
+        assert_eq!(details.windows[0].label, "每月");
+        assert!((details.windows[0].used_percent - 80.08054844444444).abs() < 1e-9);
+        assert_eq!(
+            details.windows[0].resets_at.as_deref(),
+            // 1792598400000 == 2026-10-22 00:00 +08:00（即控制台页面显示的额度重置时间）。
+            Some("2026-10-21T16:00:00+00:00")
+        );
+    }
+
+    #[test]
+    fn qwen_monthly_window_sorts_last_when_weekly_also_present() {
+        // 过渡期两种口径同时存在时，月额度必须排在最后：移动端取最后一个窗口作为主额度。
+        let raw = serde_json::json!({
+            "subscription": {"data":{"DataV2":{"data":{"data":{"specCode":"standard","status":"VALID"}}}}},
+            "quota_config": {"data":{"DataV2":{"data":{"data":{"standard":{"weekly":10000,"monthly":45000}}}}}},
+            "usage": {"data":{"DataV2":{"data":{"data":{"per1WeekPercentage":0.2,"per1WeekResetTime":1780000000000_i64,"per1MonthPercentage":0.5,"per1MonthResetTime":1792598400000_i64}}}}}
+        })
+        .to_string();
+        let details = parse_qwen_details(&raw).expect("qwen details");
+        let labels: Vec<&str> = details.windows.iter().map(|window| window.label.as_str()).collect();
+        assert_eq!(labels, vec!["7 天", "每月"]);
     }
 
     #[test]

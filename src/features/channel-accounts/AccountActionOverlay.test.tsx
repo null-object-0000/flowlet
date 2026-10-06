@@ -230,6 +230,71 @@ describe("AccountActionOverlay", () => {
     ]);
   });
 
+  it("labels the monthly quota window after the Qwen console revamp", async () => {
+    const qwenAccount: ChannelAccount = {
+      ...account,
+      id: "account-qwen-monthly",
+      channel_id: "qwen",
+      name: "千问 Token Plan",
+      resource_mode: "token_plan",
+      resource_sync_mode: "manual",
+    };
+    // 2026-10 控制台改版后的真实形态：额度只有 five_hour + monthly，
+    // 用量只有 per1MonthPercentage。
+    const raw = JSON.stringify({
+      subscription: qwenResponse({ specCode: "standard", endTime: 1795000000000, status: "VALID" }),
+      quota_config: qwenResponse({ standard: { five_hour: 3000, monthly: 45000 } }),
+      usage: qwenResponse({ per1MonthPercentage: 0.8008054844444444, per1MonthResetTime: 1792598400000 }),
+    });
+
+    render(
+      <AccountActionOverlay
+        request={{ kind: "edit", accountId: qwenAccount.id }}
+        accounts={[qwenAccount]}
+        snapshots={[{
+          id: "snapshot-qwen-monthly",
+          account_id: qwenAccount.id,
+          balance: null,
+          currency: null,
+          token_pack_total: null,
+          token_pack_used: null,
+          token_pack_remaining: null,
+          token_pack_expire_at: null,
+          token_packs: null,
+          raw_scraped_json: raw,
+          source: "scrape",
+          synced_at: "2026-10-06T10:00:00Z",
+          remark: "控制台抓取",
+          created_at: "2026-10-06T10:00:00Z",
+          updated_at: "2026-10-06T10:00:00Z",
+        }]}
+        presets={[{
+          ...preset,
+          id: "qwen",
+          name: "Qwen",
+          supports_scrape_balance: true,
+          supports_balance_query: false,
+        }]}
+        busy={false}
+        onClose={vi.fn()}
+        onSaveAccounts={vi.fn().mockResolvedValue(undefined)}
+        onTestConnection={vi.fn().mockResolvedValue(undefined)}
+        onSaveBalanceSnapshot={vi.fn().mockResolvedValue(undefined)}
+        onSyncBalance={vi.fn().mockResolvedValue(undefined)}
+        onScrape={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(await screen.findByText("个人版 Standard 套餐")).toBeInTheDocument();
+    // 5 小时只有额度总量、没有用量百分比：保留「5 小时 -」占位行。
+    expect(screen.getByText("5 小时 -")).toBeInTheDocument();
+    // 主额度槽位按上游声明的月额度展示，不再错标成「7 天」。
+    expect(screen.getByText("每月 19.9%")).toBeInTheDocument();
+    expect(screen.getByText("总量 45,000 Credits")).toBeInTheDocument();
+    expect(screen.getByLabelText("每月额度")).toBeInTheDocument();
+    expect(screen.queryByText(/^7 天 /)).not.toBeInTheDocument();
+  });
+
   it("shows balance refresh feedback in a toast", async () => {
     const user = userEvent.setup();
     const onSyncBalance = vi.fn().mockResolvedValue(undefined);

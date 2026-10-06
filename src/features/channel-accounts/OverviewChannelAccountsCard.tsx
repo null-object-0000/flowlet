@@ -257,11 +257,14 @@ function resourceSummary(account: ChannelAccount, snapshot: AccountBalanceSnapsh
         secondary: details.expireAt ? t("有效期至 {date}", { date: details.expireAt.slice(0, 10) }) : "",
       };
     }
-    const sevenDay = details?.sevenDay ? t("7天剩余 {percent}%", { percent: details.sevenDay.remainingPercent.toFixed(1) }) : "";
-    const resetAt = details?.sevenDay?.resetAt
-      ? formatFullTimestamp(details.sevenDay.resetAt, language)
+    const primary = details?.primary;
+    const remaining = primary
+      ? t("{period}剩余 {percent}%", { period: primary.label, percent: primary.remainingPercent.toFixed(1) })
       : "";
-    return { label: "", value: sevenDay, secondary: resetAt };
+    const resetAt = primary?.resetAt
+      ? formatFullTimestamp(primary.resetAt, language)
+      : "";
+    return { label: "", value: remaining, secondary: resetAt };
   }
   // LongCat hybrid:主列展示余额，副列展示资源包剩余。
   if (account.channel_id === "longcat") {
@@ -317,7 +320,7 @@ function nameLineSummary(account: ChannelAccount, snapshot: AccountBalanceSnapsh
     }
     return t("有效期至 {date}", { date: snapshot.token_pack_expire_at.slice(0, 10) });
   }
-  // Qwen Token Plan 名称行展示具体套餐；7 天重置时间与剩余额度放在资源行。
+  // Qwen Token Plan 名称行展示具体套餐；主额度窗口的重置时间与剩余额度放在资源行。
   if (isQwenTokenPlanAccount(account)) {
     const details = parseQwenTokenPlanDetails(snapshot?.raw_scraped_json);
     if (!details || !isQwenSubscriptionActive(details)) return "";

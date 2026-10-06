@@ -1,5 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render as renderView, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
 import type { CodexAccountReport } from "../../domains/agent/types";
@@ -10,6 +12,19 @@ import { OverviewChannelAccountsCard } from "./OverviewChannelAccountsCard";
 vi.mock("lottie-web", () => ({
   default: { loadAnimation: vi.fn(() => ({ destroy: vi.fn() })) },
 }));
+
+/** 卡片内部用 TanStack Query 读取自定义抓取渠道；不提供 QueryClient 时每次渲染都会
+ *  抛 “No QueryClient set”，整套用例（含 Qwen 额度窗口回归）都无法执行。 */
+function render(ui: ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+
+  return renderView(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
+}
 
 const account = {
   id: "account-longcat",
@@ -282,13 +297,50 @@ describe("OverviewChannelAccountsCard", () => {
     );
 
     const resetAt = new Date(1_785_331_200_000).toISOString();
-    const sevenDay = screen.getByText("7天剩余 78.9%");
+    const primaryQuota = screen.getByText("7 天剩余 78.9%");
     const resetTime = screen.getByText(formatFullTimestamp(resetAt, "zh-CN"));
-    expect(sevenDay.parentElement?.parentElement).toContainElement(resetTime);
+    expect(primaryQuota.parentElement?.parentElement).toContainElement(resetTime);
     expect(screen.getByText("个人版 Standard 套餐")).toBeInTheDocument();
     expect(screen.queryByText(/5小时 剩余/)).not.toBeInTheDocument();
     expect(screen.queryByText(/七天重置/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Token Plan 订阅/)).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it("renders the monthly primary quota after the Qwen console revamp", () => {
+    vi.setSystemTime(new Date("2026-10-06T10:00:00Z"));
+    const qwenAccount = {
+      id: "account-qwen-monthly",
+      channel_id: "qwen",
+      name: "千问 Token Plan",
+      api_key: "sk-sp-configured",
+      enabled: true,
+      credential_status: "healthy",
+      resource_mode: "token_plan",
+    } as ChannelAccount;
+    const resetAt = 1_792_598_400_000;
+    const qwenSnapshot = {
+      account_id: qwenAccount.id,
+      raw_scraped_json: JSON.stringify({
+        subscription: { data: { DataV2: { data: { data: { status: "VALID", specCode: "standard" } } } } },
+        quota_config: { data: { DataV2: { data: { data: { standard: { five_hour: 3000, monthly: 45000 } } } } } },
+        usage: { data: { DataV2: { data: { data: { per1MonthPercentage: 0.8008054844444444, per1MonthResetTime: resetAt } } } } },
+      }),
+    } as AccountBalanceSnapshot;
+
+    render(
+      <OverviewChannelAccountsCard
+        accounts={[qwenAccount]}
+        channels={channels}
+        snapshots={[qwenSnapshot]}
+        onCreate={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("每月剩余 19.9%")).toBeInTheDocument();
+    expect(screen.getByText(formatFullTimestamp(new Date(resetAt).toISOString(), "zh-CN"))).toBeInTheDocument();
+    expect(screen.queryByText(/7 天剩余/)).not.toBeInTheDocument();
     vi.useRealTimers();
   });
 

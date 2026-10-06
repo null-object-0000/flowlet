@@ -98,7 +98,12 @@ Token Plan 模式时自动写入覆盖。两种资源模式均由官方控制台
 
 - **Token Plan**（scrape mode `token_plan`，控制台
   `/home/billing/subscription/token-plan-individual`）抓订阅额度
-  （`subscription` / `quota-config` / `usage` / `reset-card/list`）；
+  （`subscription` / `quota-config` / `usage` / `reset-card/list`）。2026-10 控制台
+  改版后主额度窗口由周额度（`weekly` + `per1WeekPercentage`）改为月额度
+  （`monthly` + `per1MonthPercentage`）：槽位校验只要求业务信封存在且含任一数值型
+  额度窗口 / 任一 `per*Percentage`，账号资源同步按 5 小时 → 7 天 → 每月 输出全部窗口
+  （月额度排最后，移动端取最后一个作为主额度），`extractor_js` 按 月 → 周 → 5 小时
+  回退。历史快照仍是周口径，向后兼容不得移除；详见 `docs/config.md` 的 `scrape` 字段；
 - **API 按量付费**（scrape mode `freetier`，控制台 `/home/benefits` 福利页）抓
   免费额度与账单：`ListBailianFreetier`（freetier 模板清单）、
   `DescribeFqInstance`（免费额度实例，页面按 40 个模板一批连发多批，Rust 侧按

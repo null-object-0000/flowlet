@@ -2,7 +2,13 @@ import type { CodexRateLimitResetCredit, CodexRateLimitResetCredits } from "../.
 
 type JsonRecord = Record<string, unknown>;
 
+/** 上游额度窗口键。改版前主窗口是 `weekly`，改版后是 `monthly`，两者都要认。 */
+export type QwenQuotaWindowKey = "five_hour" | "weekly" | "monthly";
+
 export type QwenQuotaWindow = {
+  key: QwenQuotaWindowKey;
+  /** 展示周期（中文源文案，渲染时经 t() 翻译）。 */
+  label: string;
   total: number;
   used: number;
   remaining: number;
@@ -17,11 +23,38 @@ export type QwenTokenPlanDetails = {
   remainingDays: number | null;
   startAt: string | null;
   expireAt: string | null;
+  /** 额度总量与用量百分比都到位的窗口，按周期由短到长。 */
+  windows: QwenQuotaWindow[];
+  /** 5 小时窗口；抽屉固定槽位，无数据时渲染「5 小时 -」占位。 */
   fiveHour: QwenQuotaWindow | null;
-  sevenDay: QwenQuotaWindow | null;
+  /**
+   * 主额度窗口：上游声明的最长窗口。
+   *
+   * 2026-10 控制台改版后由周额度（`weekly` + `per1WeekPercentage`）换成月额度
+   * （`monthly` + `per1MonthPercentage`）；改版前的历史快照仍是周口径。
+   */
+  primary: QwenQuotaWindow | null;
+  /** 主额度槽位标签：即使缺少用量百分比（无法算进度）也保留正确周期名。 */
+  primaryLabel: string;
   /** 重置卡列表，字段结构与 Codex 重置机会对齐；无生效中的卡时为 null。 */
   resetCards: CodexRateLimitResetCredits | null;
 };
+
+type QuotaWindowDefinition = {
+  key: QwenQuotaWindowKey;
+  label: string;
+  percentageKey: string;
+  resetKey: string;
+};
+
+/** 周期由短到长：主额度取最后一个有数据的窗口。 */
+const QUOTA_WINDOWS: readonly QuotaWindowDefinition[] = [
+  { key: "five_hour", label: "5 小时", percentageKey: "per5HourPercentage", resetKey: "per5HourResetTime" },
+  { key: "weekly", label: "7 天", percentageKey: "per1WeekPercentage", resetKey: "per1WeekResetTime" },
+  { key: "monthly", label: "每月", percentageKey: "per1MonthPercentage", resetKey: "per1MonthResetTime" },
+];
+
+const PRIMARY_FALLBACK_LABEL = "7 天";
 
 export function parseQwenTokenPlanDetails(raw?: string | null): QwenTokenPlanDetails | null {
   if (!raw) return null;
@@ -41,6 +74,21 @@ export function parseQwenTokenPlanDetails(raw?: string | null): QwenTokenPlanDet
   const tier = recordValue(quotaConfig[specCode]) ?? recordValue(quotaConfig.standard);
   if (!tier) return null;
 
+  const windows = QUOTA_WINDOWS.flatMap((definition) => {
+    const window = quotaWindow(
+      definition,
+      numberValue(tier[definition.key]),
+      numberValue(usage[definition.percentageKey]),
+      usage[definition.resetKey],
+    );
+    return window ? [window] : [];
+  });
+  // 主额度槽位按「上游声明的周期」判定，而不是按有数据的窗口判定：只有额度总量、
+  // 用量百分比缺失时仍要显示正确的周期名（「每月 -」）而不是错标的「7 天 -」。
+  const primaryDefinition =
+    findLastDefinition(QUOTA_WINDOWS, (definition) => numberValue(tier[definition.key]) != null) ??
+    findLastDefinition(QUOTA_WINDOWS, (definition) => numberValue(usage[definition.percentageKey]) != null);
+
   return {
     specCode,
     status: stringValue(subscription.status),
@@ -48,18 +96,24 @@ export function parseQwenTokenPlanDetails(raw?: string | null): QwenTokenPlanDet
     remainingDays: numberValue(subscription.remainingDays),
     startAt: timestampValue(subscription.startTime),
     expireAt: timestampValue(subscription.endTime),
-    fiveHour: quotaWindow(
-      numberValue(tier.five_hour),
-      numberValue(usage.per5HourPercentage),
-      usage.per5HourResetTime,
-    ),
-    sevenDay: quotaWindow(
-      numberValue(tier.weekly),
-      numberValue(usage.per1WeekPercentage),
-      usage.per1WeekResetTime,
-    ),
+    windows,
+    fiveHour: windows.find((window) => window.key === "five_hour") ?? null,
+    primary: primaryDefinition
+      ? windows.find((window) => window.key === primaryDefinition.key) ?? null
+      : windows[windows.length - 1] ?? null,
+    primaryLabel: primaryDefinition?.label ?? PRIMARY_FALLBACK_LABEL,
     resetCards: parseQwenResetCards(bundle.reset_card_list),
   };
+}
+
+function findLastDefinition(
+  definitions: readonly QuotaWindowDefinition[],
+  predicate: (definition: QuotaWindowDefinition) => boolean,
+): QuotaWindowDefinition | null {
+  for (let index = definitions.length - 1; index >= 0; index -= 1) {
+    if (predicate(definitions[index])) return definitions[index];
+  }
+  return null;
 }
 
 /** 订阅是否有效：接口明确返回非 VALID（EXPIRED 等）时为无效。
@@ -133,12 +187,19 @@ function responseData(value: unknown): JsonRecord | null {
   return recordValue(envelope?.data);
 }
 
-function quotaWindow(total: number | null, consumedRatio: number | null, resetValue: unknown): QwenQuotaWindow | null {
+function quotaWindow(
+  definition: QuotaWindowDefinition,
+  total: number | null,
+  consumedRatio: number | null,
+  resetValue: unknown,
+): QwenQuotaWindow | null {
   if (total == null || consumedRatio == null) return null;
   const normalizedRatio = Math.min(1, Math.max(0, consumedRatio > 1 ? consumedRatio / 100 : consumedRatio));
   const used = Math.round(total * normalizedRatio);
   const remaining = Math.max(0, total - used);
   return {
+    key: definition.key,
+    label: definition.label,
     total,
     used,
     remaining,

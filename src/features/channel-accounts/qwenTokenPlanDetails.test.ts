@@ -35,20 +35,69 @@ describe("parseQwenTokenPlanDetails", () => {
       startAt: new Date(1784512320000).toISOString(),
       expireAt: new Date(1787241600000).toISOString(),
       fiveHour: {
+        key: "five_hour",
+        label: "5 小时",
         total: 3000,
         used: 0,
         remaining: 3000,
         remainingPercent: 100,
         resetAt: null,
       },
-      sevenDay: {
+      primary: {
+        key: "weekly",
+        label: "7 天",
         total: 10000,
         used: 7890,
         remaining: 2110,
         resetAt: new Date(1785130440000).toISOString(),
       },
     });
-    expect(details?.sevenDay?.remainingPercent).toBeCloseTo(21.1);
+    expect(details?.primaryLabel).toBe("7 天");
+    expect(details?.windows.map((window) => window.key)).toEqual(["five_hour", "weekly"]);
+    expect(details?.primary?.remainingPercent).toBeCloseTo(21.1);
+  });
+
+  it("reads the monthly quota window from the revamped console payload", () => {
+    // 2026-10 控制台改版后的真实形态：额度只有 five_hour + monthly，
+    // 用量只有 per1MonthPercentage（旧的 weekly / per1WeekPercentage 已消失）。
+    const raw = JSON.stringify({
+      subscription: response({ specCode: "standard", status: "VALID", endTime: 1795000000000 }),
+      quota_config: response({ standard: { five_hour: 3000, monthly: 45000 } }),
+      usage: response({
+        per1MonthPercentage: 0.8008054844444444,
+        per1MonthResetTime: 1792598400000,
+      }),
+    });
+
+    const details = parseQwenTokenPlanDetails(raw);
+    // 5 小时只有额度总量、没有用量百分比，不产出进度窗口。
+    expect(details?.fiveHour).toBeNull();
+    expect(details?.windows.map((window) => window.key)).toEqual(["monthly"]);
+    expect(details?.primary).toMatchObject({
+      key: "monthly",
+      label: "每月",
+      total: 45000,
+      used: Math.round(45000 * 0.8008054844444444),
+      remaining: 45000 - Math.round(45000 * 0.8008054844444444),
+      resetAt: new Date(1792598400000).toISOString(),
+    });
+    expect(details?.primary?.remainingPercent).toBeCloseTo(19.92, 2);
+    expect(details?.primaryLabel).toBe("每月");
+  });
+
+  it("keeps the declared primary window label when the usage percentage is missing", () => {
+    // 额度配置声明了月额度但用量还没回来时，主额度槽位仍必须显示「每月」而不是「7 天」。
+    const raw = JSON.stringify({
+      subscription: response({ specCode: "standard", status: "VALID" }),
+      quota_config: response({ standard: { five_hour: 3000, monthly: 45000 } }),
+      usage: response({}),
+    });
+
+    const details = parseQwenTokenPlanDetails(raw);
+    expect(details?.windows).toEqual([]);
+    expect(details?.fiveHour).toBeNull();
+    expect(details?.primary).toBeNull();
+    expect(details?.primaryLabel).toBe("每月");
   });
 
   it("returns null for legacy summary-only snapshots", () => {

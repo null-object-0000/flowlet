@@ -165,8 +165,24 @@ fn scrape_response_satisfies(kind: &str, body: &str) -> Option<bool> {
     }
 }
 
+/// Token Plan 的额度窗口键。
+///
+/// 上游控制台改版后主额度窗口由周（`weekly` + `per1WeekPercentage`）换成月
+/// （`monthly` + `per1MonthPercentage`）；旧账号的历史快照仍是周口径。校验必须同时
+/// 接受两种口径，否则新版页面会被误判成「未抓全」而中断同步。
+const TOKEN_PLAN_QUOTA_WINDOWS: [&str; 3] = ["five_hour", "weekly", "monthly"];
+
+/// 用量百分比键：`per5HourPercentage` / `per1WeekPercentage` / `per1MonthPercentage`
+/// 等。按前缀 + 后缀匹配而不枚举具体窗口，避免上游再增窗口时又要改一次。
+fn is_usage_percentage_key(key: &str) -> bool {
+    key.starts_with("per") && key.ends_with("Percentage")
+}
+
 /// Token Plan 槽位沿用原校验：解析 data.DataV2.data.data 业务信封，登录失效时
 /// 返回合法 JSON 但缺少业务结构，判定未抓全并进入 console_action_required。
+///
+/// 额度/用量只要求「信封在 + 至少一个窗口有值」，不锁定具体窗口名：
+/// 只认 `weekly` / `per1WeekPercentage` 会让改版后的月额度账号永远抓不全。
 fn token_plan_payload_satisfies(kind: &str, body: &str) -> Option<bool> {
     let Ok(root) = serde_json::from_str::<serde_json::Value>(body) else {
         return None;
@@ -179,16 +195,17 @@ fn token_plan_payload_satisfies(kind: &str, body: &str) -> Option<bool> {
     match kind {
         "subscription" => Some(payload.is_some_and(Value::is_object)),
         "quota_config" => Some(payload.and_then(Value::as_object).is_some_and(|tiers| {
-            tiers
-                .values()
-                .any(|tier| tier.get("weekly").and_then(Value::as_f64).is_some())
+            tiers.values().any(|tier| {
+                TOKEN_PLAN_QUOTA_WINDOWS
+                    .iter()
+                    .any(|key| tier.get(key).and_then(Value::as_f64).is_some())
+            })
         })),
-        "usage" => Some(
-            payload
-                .and_then(|value| value.get("per1WeekPercentage"))
-                .and_then(Value::as_f64)
-                .is_some(),
-        ),
+        "usage" => Some(payload.and_then(Value::as_object).is_some_and(|usage| {
+            usage
+                .iter()
+                .any(|(key, value)| is_usage_percentage_key(key) && value.as_f64().is_some())
+        })),
         "reset_card_list" => Some(payload.is_some_and(|value| value.is_array() || value.is_object())),
         _ => None,
     }
@@ -210,6 +227,21 @@ mod tests {
 
     fn gateway(payload: serde_json::Value) -> String {
         serde_json::json!({ "data": { "Data": payload } }).to_string()
+    }
+
+    /// 上游 `BroadScopeAspnGateway` 真实信封（2026-10 抓取样本）：比 `response()` 多一层
+    /// `ret` / `msg` / `code` 包装，用来验证改版后的响应仍能满足槽位校验。
+    fn broad_scope_gateway(payload: serde_json::Value) -> String {
+        serde_json::json!({
+            "code": "200",
+            "data": {
+                "DataV2": {
+                    "ret": ["SUCCESS::接口调用成功"],
+                    "data": { "msg": "Success.", "code": "SUCCESS", "data": payload }
+                }
+            }
+        })
+        .to_string()
     }
 
     #[test]
@@ -234,6 +266,77 @@ mod tests {
                 &response(serde_json::json!({ "per1WeekPercentage": 0.304 }))
             ),
             Some(true)
+        );
+    }
+
+    #[test]
+    fn accepts_qwen_token_plan_monthly_payloads_after_console_revamp() {
+        // 改版后主额度窗口由 weekly 换成 monthly，用量键由 per1WeekPercentage 换成
+        // per1MonthPercentage。真实样本见 logs 的「控制台抓取原始响应明细」。
+        assert_eq!(
+            scrape_response_satisfies(
+                "subscription",
+                &broad_scope_gateway(serde_json::json!({
+                    "instanceCode": "sfm_tokenplansolo_public_cn-u5i4xb5mo05",
+                    "specCode": "standard",
+                    "status": "VALID"
+                }))
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            scrape_response_satisfies(
+                "quota_config",
+                &broad_scope_gateway(serde_json::json!({
+                    "standard": { "five_hour": 3000.0, "monthly": 45000.0 }
+                }))
+            ),
+            Some(true)
+        );
+        assert_eq!(
+            scrape_response_satisfies(
+                "usage",
+                &broad_scope_gateway(serde_json::json!({
+                    "per1MonthPercentage": 0.8008054844444444,
+                    "per1MonthResetTime": 1_792_598_400_000_i64
+                }))
+            ),
+            Some(true)
+        );
+        // 只有 five_hour 没有用量百分比的额度配置也算抓全（真实样本就是这种形态）。
+        assert_eq!(
+            scrape_response_satisfies(
+                "quota_config",
+                &broad_scope_gateway(serde_json::json!({ "standard": { "five_hour": 3000 } }))
+            ),
+            Some(true)
+        );
+    }
+
+    #[test]
+    fn rejects_qwen_quota_payloads_without_any_window() {
+        // 信封在但没有额度窗口（例如仅返回套餐附加信息）时仍算未抓全。
+        assert_eq!(
+            scrape_response_satisfies(
+                "quota_config",
+                &broad_scope_gateway(serde_json::json!({ "standard": { "monthlyLabel": "月额度" } }))
+            ),
+            Some(false)
+        );
+        // 用量键必须带数值，非百分比键或字符串数值都不算。
+        assert_eq!(
+            scrape_response_satisfies(
+                "usage",
+                &broad_scope_gateway(serde_json::json!({ "per1MonthResetTime": 1_792_598_400_000_i64 }))
+            ),
+            Some(false)
+        );
+        assert_eq!(
+            scrape_response_satisfies(
+                "usage",
+                &broad_scope_gateway(serde_json::json!({ "per1MonthPercentage": "n/a" }))
+            ),
+            Some(false)
         );
     }
 

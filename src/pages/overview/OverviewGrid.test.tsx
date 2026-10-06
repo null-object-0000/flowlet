@@ -1,5 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render as renderView, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 import type { AccountBalanceSnapshot } from "../../domains/account/types";
@@ -12,6 +14,19 @@ import { OverviewGrid } from "./OverviewGrid";
 vi.mock("lottie-web", () => ({
   default: { loadAnimation: vi.fn(() => ({ destroy: vi.fn() })) },
 }));
+
+/** OverviewGrid 内的渠道账号卡片用 TanStack Query 读取自定义抓取渠道；不提供
+ *  QueryClient 时渲染会抛 “No QueryClient set”，用例无法执行。 */
+function render(ui: ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+
+  return renderView(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>);
+}
 
 vi.mock("../../features/agent-access/useAgentEnvironment", () => ({
   useAgentEnvironments: () => new Map(["claude-code", "opencode", "pi", "codex"].map((id) => [id, {

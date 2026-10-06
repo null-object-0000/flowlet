@@ -1317,7 +1317,8 @@ function QwenTokenPlanPanel({
   const subscriptionActive = isQwenSubscriptionActive(details);
   const inactiveKind = qwenSubscriptionInactiveKind(details);
   const fiveHour = subscriptionActive ? details?.fiveHour : null;
-  const sevenDay = subscriptionActive ? details?.sevenDay : null;
+  const primaryQuota = subscriptionActive ? details?.primary : null;
+  const primaryQuotaLabel = details?.primaryLabel ?? "7 天";
   const resetCards = subscriptionActive ? details?.resetCards : null;
 
   async function handleScrape() {
@@ -1343,7 +1344,7 @@ function QwenTokenPlanPanel({
           {subscriptionActive ? (
             <>
               <QwenQuotaProgress period={t("5 小时")} quota={fiveHour} language={language} t={t} />
-              <QwenQuotaProgress period={t("7 天")} quota={sevenDay} language={language} t={t} />
+              <QwenQuotaProgress period={t(primaryQuotaLabel)} quota={primaryQuota} language={language} t={t} />
             </>
           ) : (
             <div className={styles.qwenTimeSummary}>

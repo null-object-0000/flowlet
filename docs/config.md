@@ -418,6 +418,16 @@ Key 一样包含在端到端加密的账号目录中。
 都明确为 0 时标记“免费”，并按“免费且支持 → 付费且支持 → 免费但不支持 → 付费或价格未知
 且不支持”排序；价格缺失或无法解析时不推测为免费。
 
+**入站模型名归一**：代理匹配路由前，会先用 `model-catalog.json` 把客户端请求体里的
+`model` 归一到规范模型 ID（Rust `model_catalog::routing_model_id`，复用 `find` 的
+别名 + `vendor/` 前缀 + 大小写查表，未登记的名字原样透传）。因此客户端可以直接用厂商
+官方 API 名或别名请求：`deepseek-flash` → `deepseek-v4.1-flash`（DSH 原生 DeepSeek
+Provider 固定发这个官方名），`deepseek-v4-flash-0731` → `deepseek-v4-flash`。
+归一后命中该规范模型已启用的路由，`/models` 仍只暴露规范模型 ID；`flowlet-pro` /
+`flowlet-flash` 与历史 `auto` 不在目录里，保持原有的严格匹配。日期快照变体与规范名
+共享同一候选池，客户端指定具体变体不保证由该变体自身的上游资源承载。请求日志里
+`public_model` 保留客户端原始名，`virtual_model` 记录归一后的规范 ID。
+
 **Responses 协议端点解析**：
 
 `responses` 不引入独立的 Base URL / 鉴权字段，统一从 OpenAI 配置派生：

@@ -4,6 +4,7 @@ use super::config::{
     classify_request, ChannelAccount, ChannelPreset, LogCaptureConfig, ProtocolType, ProxyBindConfig,
     RequestLogInput, RouteCandidate, UsageRecordInput,
 };
+use super::model_catalog::routing_model_id;
 use super::power::{ActivityPermit, ActivityTracker};
 use super::rate_limiter::RateLimiter;
 #[cfg(test)]
@@ -505,6 +506,7 @@ async fn forward_request(
 ) -> Result<Response, ProxyForwardError> {
     let request_id = uuid::Uuid::new_v4().to_string();
     let (parts, body) = request.into_parts();
+
     let body_bytes = axum::body::to_bytes(body, usize::MAX)
         .await
         .unwrap_or_default();
@@ -590,6 +592,11 @@ async fn forward_request(
     }
 
     let public_model = extract_model(&body_bytes, &detected_protocol);
+    // 客户端可能用厂商官方 API 名、目录登记的别名、大小写变体或带厂商前缀的写法请求对外模型
+    // （如 DSH 原生 DeepSeek Provider 固定发 deepseek-flash），而对外的模型身份是规范模型 ID
+    // （virtual_model_id）。这里按 model-catalog.json 归一一次，规则与路由都用它匹配；
+    // 目录里未登记的名字原样透传（仍走 model_not_exposed）。日志保留客户端原始名。
+    let routing_model = public_model.as_deref().map(routing_model_id);
 
     // token 身份：仅用于鉴权、路由匹配、限流 key，不再写日志/用量
     let token_client = identify_client(&parts.headers, &default_client_token);
@@ -627,7 +634,7 @@ async fn forward_request(
             &routes,
             &rules,
             &scores,
-            public_model.as_deref(),
+            routing_model.as_deref(),
             &detected_protocol,
             token_client_id.as_deref(),
             &accounts,
@@ -676,6 +683,7 @@ async fn forward_request(
         &accounts,
         channels,
         public_model.as_deref(),
+        routing_model.as_deref(),
         request_type.as_str(),
         &method,
         &path,
@@ -692,6 +700,7 @@ async fn forward_request(
         &accounts,
         channels,
         public_model.as_deref(),
+        routing_model.as_deref(),
         request_type.as_str(),
         &method,
         &path,
@@ -775,7 +784,7 @@ async fn forward_request(
             account_name: None,
             client_protocol: detected_protocol.as_str().to_string(),
             upstream_protocol: detected_protocol.as_str().to_string(),
-            virtual_model: public_model.clone(),
+            virtual_model: routing_model.clone(),
             public_model,
             upstream_model: None,
             request_type: request_type.as_str().to_string(),
@@ -815,7 +824,8 @@ async fn forward_request(
     let protocol_str = detected_protocol.as_str().to_string();
     let method_clone = method.clone();
     let path_clone = path.clone();
-    let public_model_for_routing = public_model.clone();
+    let public_model_for_log = public_model.clone();
+    let routing_model_for_request = routing_model.clone();
     let request_id_for_routing = request_id.clone();
     let client_id_for_routing = client_id;
     let client_name_for_routing = client_name;
@@ -897,8 +907,8 @@ async fn forward_request(
             account_id: candidate.account_id.clone(),
             account_name: account.name.clone(),
             upstream_model: effective_model.clone(),
-            virtual_model: public_model_for_routing.clone(),
-            public_model: public_model_for_routing.clone(),
+            virtual_model: routing_model_for_request.clone(),
+            public_model: public_model_for_log.clone(),
             request_type: request_type_str.clone(),
             method: method_clone.clone(),
             path: path_clone.clone(),
@@ -959,7 +969,7 @@ async fn forward_request(
 
                 let route_reason = if fallback_count > 0 {
                     "fallback_success".to_string()
-                } else if public_model_for_routing.as_deref() == Some("auto") {
+                } else if routing_model_for_request.as_deref() == Some("auto") {
                     "auto".to_string()
                 } else {
                     "direct".to_string()
@@ -1695,6 +1705,7 @@ fn record_skipped_route_logs(
     accounts: &[ChannelAccount],
     channels: &[ChannelPreset],
     public_model: Option<&str>,
+    virtual_model: Option<&str>,
     request_type: &str,
     method: &str,
     path: &str,
@@ -1720,7 +1731,7 @@ fn record_skipped_route_logs(
                 account_name: account.map(|value| value.name.clone()),
                 client_protocol: detected_protocol.as_str().to_string(),
                 upstream_protocol: detected_protocol.as_str().to_string(),
-                virtual_model: public_model.map(str::to_string),
+                virtual_model: virtual_model.map(str::to_string),
                 public_model: public_model.map(str::to_string),
                 upstream_model: Some(candidate.upstream_model.clone()),
                 request_type: request_type.to_string(),

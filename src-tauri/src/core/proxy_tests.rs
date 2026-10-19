@@ -1,6 +1,6 @@
 use super::proxy_routing::rank_candidates_by_score;
 use super::*;
-use crate::core::config::{AuthStrategy, ChannelModel, UaClientRule};
+use crate::core::config::{AuthStrategy, ChannelModel, RequestLogRow, UaClientRule};
 use axum::{
     http::{header, HeaderValue, Uri},
     routing::post,
@@ -4541,4 +4541,418 @@ async fn e2e_dual_protocol_models_list_consistent_with_direct() {
     );
     // 不暴露账号名称
     assert!(!openai_body.to_vec().windows(4).any(|w| w == b"acc-"));
+
+// ─── 入站模型名归一（别名 / 官方 API 名 / 大小写 / 厂商前缀）──────────────────
+//
+// 客户端可能用厂商官方 API 名或目录登记的别名请求对外模型（DSH 原生 DeepSeek Provider
+// 固定发 deepseek-flash）。对外身份是规范 ID，因此代理在匹配前按 model-catalog.json
+// 归一；日志仍分别保留客户端原始名（public_model）与规范 ID（virtual_model）。
+
+/// 记录上游收到的请求体，供断言转发前的 model 改写。
+async fn spawn_body_capturing_upstream() -> (String, Arc<Mutex<Vec<u8>>>) {
+    let captured = Arc::new(Mutex::new(Vec::<u8>::new()));
+    let captured_state = captured.clone();
+    let upstream = Router::new()
+        .route(
+            "/v1/chat/completions",
+            post({
+                let captured = captured_state.clone();
+                move |body: Bytes| {
+                    let captured = captured.clone();
+                    async move {
+                        *captured.lock().unwrap() = body.to_vec();
+                        (
+                            StatusCode::OK,
+                            [("content-type", "application/json")],
+                            r#"{"choices":[]}"#,
+                        )
+                    }
+                }
+            }),
+        )
+        .route(
+            "/v1/messages",
+            post(move |body: Bytes| {
+                let captured = captured_state.clone();
+                async move {
+                    *captured.lock().unwrap() = body.to_vec();
+                    (
+                        StatusCode::OK,
+                        [("content-type", "application/json")],
+                        r#"{"type":"message","content":[]}"#,
+                    )
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, upstream).await.unwrap();
+    });
+    (format!("http://{addr}"), captured)
+}
+
+async fn wait_for_request_logs(storage: &Storage, expected: usize) -> Vec<RequestLogRow> {
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            let final_rows = storage.list_request_logs().unwrap();
+            if let Some(final_row) = final_rows.first() {
+                let rows = storage
+                    .list_request_logs_by_request_id(&final_row.request_id)
+                    .unwrap();
+                if rows.len() == expected {
+                    break rows;
+                }
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn e2e_alias_inbound_routes_to_canonical_route() {
+    // deepseek-flash 是白名单规范 ID deepseek-v4.1-flash 的上游官方名/别名；
+    // 客户端按官方名请求必须命中该规范模型的路由，并把上游模型名改写回原始 ID。
+    let (addr, captured_body) = spawn_body_capturing_upstream().await;
+    let state = build_test_state(
+        vec![dual_protocol_channel("deepseek", "DeepSeek", &addr)],
+        vec![test_account("ds", "deepseek", "key-ds", 0)],
+        vec![test_route(
+            "ds-route",
+            "deepseek-v4.1-flash",
+            "deepseek",
+            "ds",
+            "deepseek-flash",
+            ProtocolType::OpenAi,
+            0,
+        )],
+    );
+    let storage = state.storage.clone();
+
+    let response = forward_request(state, chat_request("deepseek-flash"), ProtocolType::OpenAi)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let _ = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+
+    let forwarded: serde_json::Value =
+        serde_json::from_slice(&captured_body.lock().unwrap()).unwrap();
+    assert_eq!(forwarded["model"], "deepseek-flash");
+
+    let logs = wait_for_request_logs(&storage, 1).await;
+    assert_eq!(logs[0].public_model.as_deref(), Some("deepseek-flash"));
+    assert_eq!(
+        logs[0].virtual_model.as_deref(),
+        Some("deepseek-v4.1-flash")
+    );
+    assert_eq!(logs[0].upstream_model.as_deref(), Some("deepseek-flash"));
+    assert_eq!(logs[0].route_reason.as_deref(), Some("direct"));
+    assert_eq!(logs[0].status, Some(200));
+}
+
+#[tokio::test]
+async fn e2e_alias_inbound_routes_on_anthropic_messages() {
+    // DSH 原生 DeepSeek Provider 走 Anthropic Messages 线协议并发日期快照名。
+    let (addr, captured_body) = spawn_body_capturing_upstream().await;
+    let state = build_test_state(
+        vec![dual_protocol_channel("deepseek", "DeepSeek", &addr)],
+        vec![test_account("ds", "deepseek", "key-ds", 0)],
+        vec![test_route(
+            "ds-route",
+            "deepseek-v4-pro",
+            "deepseek",
+            "ds",
+            "deepseek-v4-pro",
+            ProtocolType::Anthropic,
+            0,
+        )],
+    );
+    let storage = state.storage.clone();
+
+    let request = Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            r#"{"model":"deepseek-v4-pro-0813","max_tokens":10,"messages":[]}"#,
+        ))
+        .unwrap();
+    let response = forward_request(state, request, ProtocolType::Anthropic)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let _ = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+
+    let forwarded: serde_json::Value =
+        serde_json::from_slice(&captured_body.lock().unwrap()).unwrap();
+    assert_eq!(forwarded["model"], "deepseek-v4-pro");
+
+    let logs = wait_for_request_logs(&storage, 1).await;
+    assert_eq!(
+        logs[0].public_model.as_deref(),
+        Some("deepseek-v4-pro-0813")
+    );
+    assert_eq!(logs[0].virtual_model.as_deref(), Some("deepseek-v4-pro"));
+    assert_eq!(
+        logs[0].upstream_url.as_deref(),
+        Some(format!("{addr}/v1/messages").as_str())
+    );
+}
+
+#[tokio::test]
+async fn e2e_unregistered_model_still_model_not_exposed() {
+    // 目录里没有的名字不归一、不回退：仍然 404 model_not_exposed，且不发上游。
+    let (addr, seen) = spawn_spy_upstream(status_map(&[])).await;
+    let state = build_test_state(
+        vec![dual_protocol_channel("deepseek", "DeepSeek", &addr)],
+        vec![test_account("ds", "deepseek", "key-ds", 0)],
+        vec![test_route(
+            "ds-route",
+            "deepseek-v4.1-flash",
+            "deepseek",
+            "ds",
+            "deepseek-flash",
+            ProtocolType::OpenAi,
+            0,
+        )],
+    );
+    let storage = state.storage.clone();
+
+    let response = forward_request(state, chat_request("gpt-5.6-luna"), ProtocolType::OpenAi)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert!(seen.lock().unwrap().is_empty());
+
+    let logs = wait_for_request_logs(&storage, 1).await;
+    assert_eq!(logs[0].route_reason.as_deref(), Some("model_not_exposed"));
+    assert_eq!(logs[0].public_model.as_deref(), Some("gpt-5.6-luna"));
+    assert_eq!(logs[0].virtual_model.as_deref(), Some("gpt-5.6-luna"));
+    assert_eq!(logs[0].upstream_url, None);
+    assert!(logs[0].is_last_attempt);
+}
+
+#[tokio::test]
+async fn e2e_alias_inbound_protocol_mismatch_uses_canonical_name() {
+    // 别名请求在协议不匹配时也必须按规范 ID 定位候选：降级节点与终态错误都要能对上，
+    // 且两行日志分别保留客户端原始名与规范 ID。
+    let (addr, seen) = spawn_spy_upstream(status_map(&[])).await;
+    let state = build_test_state(
+        vec![dual_protocol_channel("deepseek", "DeepSeek", &addr)],
+        vec![test_account("ds", "deepseek", "key-ds", 0)],
+        vec![test_route(
+            "openai-route",
+            "deepseek-v4.1-flash",
+            "deepseek",
+            "ds",
+            "deepseek-flash",
+            ProtocolType::OpenAi,
+            0,
+        )],
+    );
+    let storage = state.storage.clone();
+
+    let request = Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            r#"{"model":"deepseek-flash","max_tokens":10,"messages":[]}"#,
+        ))
+        .unwrap();
+    let response = forward_request(state, request, ProtocolType::Anthropic)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert!(seen.lock().unwrap().is_empty());
+
+    let attempts = wait_for_request_logs(&storage, 2).await;
+    assert_eq!(
+        attempts[0].route_reason.as_deref(),
+        Some("protocol_unsupported")
+    );
+    assert_eq!(
+        attempts[1].route_reason.as_deref(),
+        Some("model_protocol_unsupported")
+    );
+    for attempt in &attempts {
+        assert_eq!(attempt.public_model.as_deref(), Some("deepseek-flash"));
+        assert_eq!(
+            attempt.virtual_model.as_deref(),
+            Some("deepseek-v4.1-flash")
+        );
+    }
+}
+
+#[tokio::test]
+async fn e2e_alias_inbound_shares_round_robin_cursor_with_canonical_name() {
+    // 轮询游标按归一后的模型名分组，别名请求与规范名请求共享同一账号池。
+    let (addr, seen) = spawn_spy_upstream(status_map(&[
+        ("key-a", StatusCode::OK),
+        ("key-b", StatusCode::OK),
+    ]))
+    .await;
+    let state = build_test_state(
+        vec![dual_protocol_channel("deepseek", "DeepSeek", &addr)],
+        vec![
+            test_account("a", "deepseek", "key-a", 0),
+            test_account("b", "deepseek", "key-b", 0),
+        ],
+        vec![
+            test_route(
+                "route-a",
+                "deepseek-v4.1-flash",
+                "deepseek",
+                "a",
+                "deepseek-flash",
+                ProtocolType::OpenAi,
+                0,
+            ),
+            test_route(
+                "route-b",
+                "deepseek-v4.1-flash",
+                "deepseek",
+                "b",
+                "deepseek-flash",
+                ProtocolType::OpenAi,
+                0,
+            ),
+        ],
+    );
+
+    for model in ["deepseek-flash", "deepseek-v4.1-flash", "deepseek-flash"] {
+        let response = forward_request(state.clone(), chat_request(model), ProtocolType::OpenAi)
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let _ = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+    }
+
+    assert_eq!(
+        seen.lock().unwrap().clone(),
+        vec![
+            "key-a".to_string(),
+            "key-b".to_string(),
+            "key-a".to_string()
+        ]
+    );
+}
+
+#[tokio::test]
+async fn e2e_case_variant_inbound_name_routes_to_canonical_case() {
+    // 目录查表大小写不敏感，但命中后必须回落到目录里的规范大小写（路由存的是 LongCat-2.0）。
+    let (addr, captured_body) = spawn_body_capturing_upstream().await;
+    let state = build_test_state(
+        vec![dual_protocol_channel("longcat", "LongCat", &addr)],
+        vec![test_account("lc", "longcat", "key-lc", 0)],
+        vec![test_route(
+            "lc-route",
+            "LongCat-2.0",
+            "longcat",
+            "lc",
+            "LongCat-2.0",
+            ProtocolType::OpenAi,
+            0,
+        )],
+    );
+    let storage = state.storage.clone();
+
+    let response = forward_request(state, chat_request("LONGCAT-2.0"), ProtocolType::OpenAi)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let _ = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let forwarded: serde_json::Value =
+        serde_json::from_slice(&captured_body.lock().unwrap()).unwrap();
+    assert_eq!(forwarded["model"], "LongCat-2.0");
+
+    let logs = wait_for_request_logs(&storage, 1).await;
+    assert_eq!(logs[0].public_model.as_deref(), Some("LONGCAT-2.0"));
+    assert_eq!(logs[0].virtual_model.as_deref(), Some("LongCat-2.0"));
+}
+
+#[tokio::test]
+async fn model_list_does_not_advertise_aliases() {
+    // 接受别名但不对外宣传别名：/models 仍只暴露规范模型 ID。
+    let (addr, _seen) = spawn_spy_upstream(status_map(&[])).await;
+    let state = build_test_state(
+        vec![dual_protocol_channel("deepseek", "DeepSeek", &addr)],
+        vec![test_account("ds", "deepseek", "key-ds", 0)],
+        vec![test_route(
+            "ds-route",
+            "deepseek-v4.1-flash",
+            "deepseek",
+            "ds",
+            "deepseek-flash",
+            ProtocolType::OpenAi,
+            0,
+        )],
+    );
+    let request = Request::builder()
+        .method("GET")
+        .uri("/v1/models")
+        .body(Body::empty())
+        .unwrap();
+    let response = forward_request(state, request, ProtocolType::OpenAi)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let ids: Vec<&str> = body["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|model| model["id"].as_str().unwrap())
+        .collect();
+    assert!(ids.contains(&"deepseek-v4.1-flash"));
+    assert!(!ids.contains(&"deepseek-flash"));
+}
+
+#[test]
+fn match_candidates_keeps_exact_match_contract_for_aliases() {
+    // 归一发生在 proxy.rs、match_candidates 之上；匹配器本身仍是精确匹配，
+    // 直接把别名交给它会落空（用它证明归一没有被塞进匹配器）。
+    let channels = vec![dual_protocol_channel(
+        "deepseek",
+        "DeepSeek",
+        "http://upstream",
+    )];
+    let accounts = vec![test_account("ds", "deepseek", "key-ds", 0)];
+    let routes = vec![test_route(
+        "ds-route",
+        "deepseek-v4.1-flash",
+        "deepseek",
+        "ds",
+        "deepseek-flash",
+        ProtocolType::OpenAi,
+        0,
+    )];
+    let mut round_robin = std::collections::HashMap::new();
+    let selection = match_candidates(
+        &routes,
+        &[],
+        &[],
+        Some("deepseek-flash"),
+        &ProtocolType::OpenAi,
+        None,
+        &accounts,
+        &channels,
+        &mut round_robin,
+    );
+    assert!(selection.matched.is_empty());
+    assert!(selection.protocol_skipped.is_empty());
+}
 }

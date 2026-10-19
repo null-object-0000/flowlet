@@ -168,11 +168,13 @@ Flowlet 不做模型级拦截。
 
 ### 4.2 对外模型名
 
-- 直接模型请求使用规范化模型 ID，例如 `deepseek-v4-pro`；
-- 聚合模型使用 `flowlet-pro` 和 `flowlet-flash`；
-- 对外请求必须匹配 `virtual_model_id`；
+- 直接模型请求先用 `model-catalog.json` 把入站模型名归一到规范模型 ID，再匹配
+  `virtual_model_id`：登记别名（`deepseek-flash` → `deepseek-v4.1-flash`）、厂商官方 API 名、
+  `vendor/` 前缀写法与大小写变体都归一；未登记的名字仍返回 `model_not_exposed`；
+- 聚合模型使用 `flowlet-pro` 和 `flowlet-flash`（不走目录归一，保持严格匹配）；
 - 真正发送上游前才把模型名替换成 `upstream_model`；
-- `/models` 只暴露当前协议下存在可用候选的模型。
+- `/models` 只暴露当前协议下存在可用候选的模型，且只暴露规范模型 ID——接受别名但不对外
+  宣传别名。
 
 ## 5. Agent 支持
 

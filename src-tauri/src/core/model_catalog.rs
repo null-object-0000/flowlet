@@ -147,6 +147,23 @@ pub(crate) fn official_channel_id_for_model(model_id: &str) -> Option<&'static s
         .map(|model| model.owner_channel_id.as_str())
 }
 
+/// 入站请求的模型名 → 路由使用的规范模型 ID；目录里未登记的名字原样返回。
+///
+/// 客户端可能用厂商官方 API 名、目录登记的别名、大小写变体或带厂商前缀的写法请求
+/// 对外模型（如 DSH 原生 DeepSeek Provider 固定发 `deepseek-flash`），而路由的
+/// `virtual_model_id` 由 `merge_default_routes` 统一存规范 ID。这里只做「目录内归一」，
+/// 不引入第二份别名表；未登记的名字（含聚合模型 `flowlet-pro` / `flowlet-flash` 与
+/// 历史 `auto`）原样透传，保持它们原有的严格匹配语义。
+///
+/// 不能用 `canonical_model_key` 代替：它会小写化，`LongCat-2.0` 这类规范 ID 会对不上
+/// 路由里存的 `virtual_model_id`。`find` 只在查表键上小写，返回的仍是目录里的原始 `id`。
+pub(crate) fn routing_model_id(model_id: &str) -> String {
+    model_catalog()
+        .find(model_id)
+        .map(|identity| identity.id.clone())
+        .unwrap_or_else(|| model_id.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -271,6 +288,34 @@ mod tests {
             canonical_model_key("deepseek-flash"),
             "deepseek-v4.1-flash"
         );
+    }
+
+    #[test]
+    fn routing_model_id_normalizes_registered_names_only() {
+        // 入站归一只认目录里登记过的名字，命中的是路由实际存储的规范 ID（保留目录原始大小写）。
+        assert_eq!(routing_model_id("deepseek-flash"), "deepseek-v4.1-flash");
+        assert_eq!(
+            routing_model_id("deepseek-v4.1-flash"),
+            "deepseek-v4.1-flash"
+        );
+        assert_eq!(routing_model_id("deepseek-v4-pro-0813"), "deepseek-v4-pro");
+        assert_eq!(
+            routing_model_id("deepseek/deepseek-v4-flash-0731"),
+            "deepseek-v4-flash"
+        );
+        assert_eq!(
+            routing_model_id("nvidia/nemotron-3.5-lightning:free"),
+            "nemotron-3.5-lightning"
+        );
+        assert_eq!(routing_model_id("stealth/ox-alpha"), "ox-alpha");
+        // 大小写变体查得到，但必须回落到目录里的规范大小写（路由存的就是 LongCat-2.0）。
+        assert_eq!(routing_model_id("LONGCAT-2.0"), "LongCat-2.0");
+        assert_eq!(routing_model_id("LongCat-2.0"), "LongCat-2.0");
+        // 未登记的模型名（含聚合模型与历史 auto）原样透传，保持各自的严格匹配语义。
+        assert_eq!(routing_model_id("flowlet-pro"), "flowlet-pro");
+        assert_eq!(routing_model_id("flowlet-flash"), "flowlet-flash");
+        assert_eq!(routing_model_id("auto"), "auto");
+        assert_eq!(routing_model_id("gpt-5.6-luna"), "gpt-5.6-luna");
     }
 
     #[test]

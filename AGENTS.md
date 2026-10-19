@@ -211,8 +211,12 @@ Flowlet 当前支持：
   当前由 LongCat、DeepSeek、Qwen、OpenRouter 渠道承载，Kimi 不支持该协议；
 * 对外模型名使用 `virtual_model_id`；
 * `upstream_model` 只用于向上游发起请求前替换模型名；
-* 直接模型请求必须匹配 `virtual_model_id`；
-* `/models` 只能暴露当前协议下可用的开放模型；
+* 直接模型请求先用 `model-catalog.json` 把入站模型名归一到规范模型 ID，再匹配
+  `virtual_model_id`（登记别名、厂商官方 API 名、厂商前缀写法与大小写变体都归一到同一
+  规范 ID；目录里未登记的名字不归一，仍返回 `model_not_exposed`）。这是「客户端按上游
+  官方名接入」的兼容点，详见第 6 节；
+* `/models` 只能暴露当前协议下可用的开放模型，且只暴露规范模型 ID（接受别名但不对外
+  宣传别名）；
 * 空配置时 `/models` 应返回合法空列表，而不是 500。
 
 ---
@@ -327,6 +331,16 @@ Flowlet 在 `model-catalog.json` 维护「上游变体 → 规范模型 ID」映
 `upstream_model` 均保留 `/models` 返回的上游原名，路由 `virtual_model_id` 使用规范 ID。
 同一规范模型的多个上游 ID 不新增对外模型身份，但会生成多个可独立启停、排序和失败
 降级的 Route Candidate；`/models` 对外仍只返回一次规范模型 ID。
+
+同一份映射也用于**入站**：代理在路由前把客户端请求里的模型名按该目录归一
+（Rust `model_catalog::routing_model_id`，复用 `find` 的别名 + 厂商前缀 + 大小写查表，
+未登记的名字原样透传），因此客户端可以直接用厂商官方 API 名或别名发请求
+（如 DSH 原生 DeepSeek Provider 固定发 `deepseek-flash`）。归一必须发生在路由匹配之前
+（`proxy.rs`），`match_candidates` 只做精确匹配、不解析别名；日志里 `public_model` 保留
+客户端原始名、`virtual_model` 记录归一后的规范 ID。别名是目录里**明确、可审计**的登记项，
+不得借此引入跨厂商的模糊身份映射（见 `docs/competitor-analysis.md`）。
+日期快照变体（如 `deepseek-v4-flash-0731`）归一后与规范模型共享同一候选池，客户端指定
+具体变体不保证由该变体自身的上游资源承载；规则表 `match_model` 也必须按规范 ID 登记。
 
 `models-cn.json` 目录按**厂商自己的模型名**收录，可能与白名单规范 ID 不同：例如 DeepSeek
 V4.1 Flash 的官方 API 名是 `deepseek-flash`，目录以该名收录，而白名单规范 ID 是

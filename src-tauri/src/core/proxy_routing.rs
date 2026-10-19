@@ -9,6 +9,9 @@ pub(super) struct CandidateSelection {
     pub protocol_skipped: Vec<RouteCandidate>,
 }
 
+// `public_model` 期望是**规范模型 ID**：调用方（proxy.rs）已把入站模型名按
+// model-catalog.json 归一（`routing_model_id`），这里只做精确匹配，不解析别名。
+// 因此高级规则的 `match_model` 也须按规范 ID（或 `flowlet-pro` / `flowlet-flash`）登记。
 pub(super) fn match_candidates(
     routes: &[RouteCandidate],
     rules: &[RouteRule],

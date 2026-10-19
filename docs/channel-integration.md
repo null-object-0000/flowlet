@@ -282,7 +282,8 @@ AccountEditorDrawer
 - 每个真实支持的协议都生成对应路由；
 - 全局第一个渠道账号生成的新路由默认开启；此后新增的任何官方或自定义渠道账号，
   路由仍自动创建但默认关闭，必须由用户手动开启；
-- 直接模型使用 `virtual_model_id == upstream_model`；
+- 直接模型使用 `virtual_model_id == upstream_model`（入站模型名先按 `model-catalog.json`
+  归一到规范 ID 再匹配，别名写入 `upstream_model`、规范 ID 写入 `virtual_model_id`）；
 - 账号保存只补齐直连路由，不自动加入 `flowlet-pro` 或 `flowlet-flash`；
 - 用户可在模型服务页把任意已有渠道模型显式加入任一聚合模型；
 - 已存在路由不被重复创建；

@@ -311,6 +311,8 @@ Anthropic-compatible Channel Account
 代理只在请求侧做有限处理：
 
 - 根据开放模型和可用账号选择 Channel Account。
+- 按 `model-catalog.json` 把入站模型名归一到规范模型 ID（别名 / 官方 API 名 / `vendor/`
+  前缀 / 大小写变体），未登记的名字不归一。
 - 将本地协议入口路径拼接到渠道模板的协议 `base_url`。
 - 替换上游 `Authorization` Header 或 `X-Api-Key` Header。
 - 必要时将虚拟模型名映射为上游模型名。

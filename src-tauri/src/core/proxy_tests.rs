@@ -2480,6 +2480,86 @@ fn chat_request(model: &str) -> Request<Body> {
 }
 
 #[tokio::test]
+async fn anthropic_thinking_compat_repairs_client_stream_but_captures_raw_upstream() {
+    const RAW: &str = include_str!("../../tests/fixtures/dsh/missing-thinking-start.sse");
+    let upstream = Router::new()
+        .route(
+            "/v1/messages",
+            post(|| async { ([(header::CONTENT_TYPE, "text/event-stream")], RAW) }),
+        )
+        .route(
+            "/v1/chat/completions",
+            post(|| async { ([(header::CONTENT_TYPE, "text/event-stream")], RAW) }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, upstream).await.unwrap() });
+    for protocol in [ProtocolType::Anthropic, ProtocolType::OpenAi] {
+        // Use the same SSE bytes for both protocols to prove compatibility is gated.
+        let channel = dual_protocol_channel("custom", "Custom", &addr);
+        let mut state = build_test_state(
+            vec![channel],
+            vec![test_account("a", "custom", "key", 0)],
+            vec![test_route(
+                "r",
+                "flowlet-pro",
+                "custom",
+                "a",
+                "deepseek-v4.1-flash",
+                protocol.clone(),
+                0,
+            )],
+        );
+        state.capture.capture_res_body = true;
+        let storage = state.storage.clone();
+        let path = if protocol == ProtocolType::Anthropic {
+            "/anthropic/v1/messages"
+        } else {
+            "/v1/chat/completions"
+        };
+        let request = Request::builder()
+            .method("POST")
+            .uri(path)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"model":"flowlet-pro","stream":true,"messages":[]}"#,
+            ))
+            .unwrap();
+        let response = forward_request(state, request, protocol.clone())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        if protocol == ProtocolType::Anthropic {
+            assert!(response.headers().get(header::CONTENT_LENGTH).is_none());
+        }
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        if protocol == ProtocolType::Anthropic {
+            assert!(String::from_utf8_lossy(&body).contains("\"thinking\":\"\""));
+        } else {
+            assert_eq!(body, RAW);
+        }
+        let logs = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let logs = storage.list_request_logs().unwrap();
+                if logs.first().is_some_and(|log| log.res_body_b64.is_some()) {
+                    break logs;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            logs[0].res_body_b64.as_deref(),
+            Some(encode_body_base64(RAW.as_bytes()).as_str())
+        );
+    }
+    server.abort();
+}
+
+#[tokio::test]
 async fn streaming_idle_timeout_resets_after_each_chunk() {
     let upstream = futures_util::stream::unfold(0usize, |index| async move {
         if index >= 4 {

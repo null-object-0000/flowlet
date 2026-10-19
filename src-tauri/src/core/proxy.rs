@@ -125,6 +125,8 @@ fn extract_agent_session(headers: &HeaderMap) -> Option<AgentSessionIdentity> {
 
 #[path = "proxy_http.rs"]
 mod proxy_http;
+#[path = "proxy_anthropic_compat.rs"]
+mod proxy_anthropic_compat;
 // Re-export 给 lib.rs 用（proxy_http mod 本身是私有的，需要手动暴露）
 pub use proxy_http::extract_log_capture;
 
@@ -1688,6 +1690,10 @@ async fn build_response(
 
         let (tx_done, rx_done) = tokio::sync::oneshot::channel::<StreamDone>();
         let res_content_encoding = proxy_http::content_encoding_value(&headers);
+        let normalize_thinking = *protocol == ProtocolType::Anthropic
+            && res_content_encoding
+                .as_deref()
+                .is_none_or(|value| value == "identity");
         let stream = capture_timed_stream(
             upstream_response.bytes_stream(),
             tx_done,
@@ -1697,6 +1703,7 @@ async fn build_response(
             Duration::from_secs(timeout_seconds),
             activity_permit,
         );
+        let stream = proxy_anthropic_compat::normalize_thinking_starts(stream, normalize_thinking);
 
         let usage_capture = UsageCapture {
             storage: storage.clone(),
@@ -1754,6 +1761,11 @@ async fn build_response(
         let mut response = Response::new(Body::from_stream(stream));
         *response.status_mut() = status;
         copy_response_headers(&headers, response.headers_mut());
+        if normalize_thinking {
+            response
+                .headers_mut()
+                .remove(axum::http::header::CONTENT_LENGTH);
+        }
         return Ok(response);
     }
 

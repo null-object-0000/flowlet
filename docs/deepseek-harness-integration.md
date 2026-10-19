@@ -78,6 +78,26 @@ DSH 0.1.1 使用上述 versioned credentials 文档。Flowlet 仍可读取旧预
 检测到 `version` / `refs` / `records` 任一新版字段时，只会在 `refs` 下写入受管 Token，并自动移除
 旧版 Flowlet 曾误写的同名根级键，避免 DSH 因未知顶层字段拒绝启动。
 
+### Anthropic thinking 起始块兼容（代理层）
+
+DSH 原生 DeepSeek Provider 指向 Flowlet `/anthropic` 时，部分中转渠道会返回
+`content_block_start` / `content_block: {"type":"thinking"}`，省略初始 `thinking`
+字符串。DSH 的 `startBlock` 严格读取该字段，会报
+`DeepSeek Messages expected a string field`（`MALFORMED_RESPONSE`）并断开流，
+即使上游返回 HTTP 200 且后续已有正常 `thinking_delta`。
+
+Flowlet 在 `proxy_anthropic_compat.rs` 中为这种起始块追加 `thinking: ""`。
+范围为所有客户端的 Anthropic 未压缩（无 Content-Encoding 或 identity）SSE 响应；
+不依赖模型、渠道或 UA，不做跨协议转换。仅修复完整单行 data JSON 中缺失的字段，
+已有字段值（含 null）、signature、文本/工具块、usage、错误和增量事件均原样保留。
+解析支持跨网络 chunk、UTF-8 分片以及 LF / CRLF / CR；每行最多缓冲 64 KiB，
+超长、无法解析、多行 JSON、不完整尾部和压缩响应原样透传。
+
+兼容层位于 `capture_timed_stream` 之后，请求详情与用量解析仍基于上游原始字节；
+仅发往客户端的响应补字段，并移除可能失效的 Content-Length。传输错误和空闲超时
+继续向客户端传播。本行为是响应原样透传的受控例外，修改时须同步 `AGENTS.md`。
+无需新增配置或数据库迁移；更新 Flowlet 可执行文件并重启应用后生效，DSH 无需改配置。
+
 ### reasoning_content 回传补全（代理层）
 
 DeepSeek 推理（thinking）模型要求多轮会话中每条 `assistant` 消息都携带

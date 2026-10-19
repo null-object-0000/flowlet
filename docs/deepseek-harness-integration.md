@@ -17,7 +17,7 @@ Desktop：用户主要通过 `dsh web` 打开的本地浏览器界面使用它�
 |---|---|---|
 | Environment | 分别检测 `$DSH_HOME`/`~/.dsh`、3080 Web 运行状态、PATH 中的 `dsh` 与包版本，并挂载可选 Runtime 能力 | 可只读识别无歧义的 `_npx/<hash>` 包版本并解析 bin 入口供任务执行；多版本共存时要求全局安装。已安装不等于 Web 正在运行 |
 | Global Config | 解析配置状态；直接安全合并官方 YAML，一键写入/恢复 Provider、默认模型和 Client Token；精确会话插件与模型规格声明均为默认关闭的高级能力 | 基础接入不依赖 DSH Web 或 Profile；复用 DSH 的文件锁协议，保留非受管配置和注释 |
-| Session | 读取 `sessions/**/session.jsonl(.zstd)` v0，展示最终消息、工具事件和原生 Token 用量 | DSH 预发布格式无迁移承诺；其它版本明确拒绝；打包 delta chunk 不作为最终消息展示 |
+| Session | 读取 `sessions/**/session.jsonl(.zstd)` v0–v4，展示最终消息、工具事件和原生 Token 用量 | DSH 预发布格式无迁移承诺；更高代际只降级该会话；打包 delta chunk 不作为最终消息展示 |
 | Identity | 使用官方 User-Agent 识别客户端；读取 `x-flowlet-session`（受管桥接注入）或 DSH 原生 `x-deepseek-harness-session-id`，两者都只做归属、不剥离原生头 | 与其他 Agent 共用编译期 Identity Adapter registry，实时请求与历史修复规则一致 |
 | Runner | 通过稳定全局 `dsh` 命令或 npx 缓存包入口（`node <包 bin>`）执行 `dsh --profile headless <task>` | 仅 fresh session；DSH 没有稳定 resume 参数时明确失败 |
 | Runtime（Environment 可选能力） | 在接入抽屉内启动、停止并展示 DSH Web 状态；全局 npm 安装执行 `dsh web --no-open`，npx 缓存安装执行 `npx @deepseek-ai/dsh web --no-open`；Windows 下托管子进程绑定 Job Object（KILL_ON_JOB_CLOSE），Flowlet 异常退出时由内核回收整棵进程树 | 只停止当前 Flowlet 启动并记录的子进程；手动或其他程序启动的 3080 进程仅显示为外部运行，不接管、不强杀；Job Object 只覆盖 Flowlet 自己启动的进程，孤儿进程仍需在原启动位置停止 |
@@ -221,11 +221,11 @@ streamable-http 服务器）→ reapply（幂等）→ disable（空列表只移
 `compaction/summary` 折叠为 compacted 行），inbox/request transport 事件不生成可见行，工具
 call/result 按 `callId` 合并，Turn 数按原生 turn 坐标去重而不是按 assistant step 计数。
 
-### 会话格式代际（v0 → v3）
+### 会话格式代际（v0 → v4）
 
 DSH 用「不可变代际」持久化会话：格式迁移不改写旧文件，而是在同一会话目录里新增
 `session.vN.jsonl[.zstd]`，旧代文件原样保留。因此磁盘上同一个会话目录可能同时存在 v0 与
-v3 两份记录（本机实测有 5 个会话处于这种状态）。
+v4 两份记录（本机实测 493 个会话文件里 v0 191 / v3 124 / v4 178，8 个会话目录 v3 与 v4 并存）。
 
 - **文件名按官方 `sessionFormatLogFilename` / `parseSessionFormatLogFilename` 解析**：
   `session.jsonl`（v0）与 `session.vN.jsonl`（N ≥ 1），可带 `.zstd`；临时名、大写、
@@ -233,7 +233,7 @@ v3 两份记录（本机实测有 5 个会话处于这种状态）。
 - **列表按会话目录归并**，取可读取的最高代际；目录里只有高于 Flowlet 支持版本的文件时，
   退回其中最新的一份而不是静默丢弃，保证会话仍可见。
 - **逻辑版本以文件内 header 的 `version` 为准**（`session_row` 只读第一个 zstd 分帧拿
-  header，不解压整份正文）。Flowlet 当前支持 v0–v3；更高代际只降级该会话，
+  header，不解压整份正文）。Flowlet 当前支持 v0–v4；更高代际只降级该会话，
   不隐藏整份会话列表。
 - **seeded 会话必须裁掉继承前缀**：`isSeeded`（v2/v3）或 `seedLength`（v0/v1）为真时，
   本地正文从最后一条 `session/end-seed` 之后开始（v0/v1 的该记录 `data` 为空，
@@ -263,6 +263,15 @@ v0–v3 轨迹事件的解析覆盖（与官方 `ui-conversation` / `ui-trajecto
 - **`assistant/attempt`（v2 新增）**：未产出 surface message 的失败/取消尝试，投影为
   `error` 行（`interrupted: true` → cancelled），失败原因取内嵌 stream 的
   `chunk.reason.failure`，其 `chunk.usage` 计入会话总用量。
+- **v4 的 `tool/result` 形状变化**：v4 把内容块从 `[{type:"tool-result", toolCallId,
+  content:[{type:"text"}]}]` 改成扁平的 `[{type:"text"}]`，并把 `toolCallId` / `isError`
+  提升到 `data.message` 上。文本提取对两种形状都生效；callId 依次读
+  `data.callId → /message/source/callId → /message/content/0/toolCallId`，v4 仍命中原位，
+  配对不破；`message.isError`（v4）与 `content[0].isError`（v3）都会读成 tool-result 行的
+  error 状态。
+- **v4 的传输记录**：`session-log-deepseek/delivery-accepted`、`developer/message` 无
+  `seq`/`time`，按 transport 忽略、不生成事件；文件收尾时取「最后一条带 `seq` 的记录」作为
+  未闭合工具的 sequence，避免被这些记录顶成 0。
 - **内容与模型归属的多形状兼容**：内容块统一读 `data.message.content`（`assistant/message`
   的 `tool-call` 块仍由并行的 `tool/call` 事件承接），模型读
   `data.message.source.model`（v2/v3）并兼容 `data.provenance.model`（v0）。

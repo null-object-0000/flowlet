@@ -15,9 +15,14 @@ const RUNNING_FRESHNESS: Duration = Duration::from_secs(30 * 60);
 
 /// Flowlet 能投影为轨迹的最新一代 DSH 会话格式。DSH 用「不可变代际」的方式持久化：
 /// 迁移不会就地改写旧文件，而是在同一会话目录里新增 `session.vN.jsonl[.zstd]`，
-/// 旧代文件保留在同一目录。因此一个会话目录可能同时有 v0 与 v3 两份记录，
+/// 旧代文件保留在同一目录。因此一个会话目录可能同时有 v0 与 v4 两份记录，
 /// 必须按代际取最新的一份，而不是把同一次会话列成两行。
-const DSH_CURRENT_FORMAT_VERSION: i64 = 3;
+///
+/// v4 与 v3 的记录形状实测只差 `tool/result`（内容块由 `tool-result` 变 `text`，
+/// `toolCallId`/`isError` 提升到 `data.message`）；v4 新增的
+/// `session-log-deepseek/delivery-accepted`、`developer/message` 是传输记录，无 `seq`/`time`，
+/// 由 `_ => {}` 忽略。因此这里只需要抬版本号，解析代码不需要按代际分支。
+const DSH_CURRENT_FORMAT_VERSION: i64 = 4;
 
 /// 会话列表按文件元数据缓存的解析结果。DSH 会话文件是整段 zstd 流，列出会话时
 /// 不需要反复解压/解析 100+ 个文件；只有文件长度或 mtime 变化时才重新读取，
@@ -1428,6 +1433,7 @@ fn read_timeline_records(records: &[Value]) -> Result<AgentSessionTimeline, Stri
             "tool/result" => {
                 let output = data.get("message").and_then(message_text);
                 trace.output = output.clone();
+                let status = tool_result_is_error(data).then(|| "error".to_string());
                 let title = trace
                     .call_id
                     .as_ref()
@@ -1460,7 +1466,7 @@ fn read_timeline_records(records: &[Value]) -> Result<AgentSessionTimeline, Stri
                     duration_ms,
                     None,
                     Some(trace),
-                    None,
+                    status,
                 );
             }
             // v3 把 code dispatch 词汇重命名为 PTC（官方 v2→v3：tool/code-dispatch-start
@@ -1669,15 +1675,18 @@ fn read_timeline_records(records: &[Value]) -> Result<AgentSessionTimeline, Stri
         }
     }
     // 文件收尾时仍未闭合的工具调用（异常退出等）→ 合成中断结果。
+    // 取最后一条**带 seq 的记录**：v4 会在文件尾部追加 `session-log-deepseek/delivery-accepted`
+    // 这类无 `seq`/`time` 的传输记录，直接用 `records.last()` 会把这些工具的
+    // sequence 写成 0。
     let last_seq = records
-        .last()
-        .and_then(|v| v.get("seq"))
-        .and_then(Value::as_i64)
+        .iter()
+        .rev()
+        .find_map(|value| value.get("seq").and_then(Value::as_i64))
         .unwrap_or_default();
     let last_time = records
-        .last()
-        .and_then(|v| v.get("time"))
-        .and_then(Value::as_i64);
+        .iter()
+        .rev()
+        .find_map(|value| value.get("time").and_then(Value::as_i64));
     close_interrupted_tools(
         &mut timeline,
         &mut open_tools,
@@ -1851,6 +1860,20 @@ fn json_text(value: &Value) -> Option<String> {
     } else {
         serde_json::to_string_pretty(value).ok()
     }
+}
+
+/// `tool/result` 是否标记为失败。v3 把 `isError` 放在内容块里
+/// （`message.content[0].isError`），v4 把它提升到 `message.isError`；两种形状都要认，
+/// 否则 v4 会话的工具失败在轨迹里会显示成成功。
+fn tool_result_is_error(data: &Value) -> bool {
+    data.pointer("/message/isError")
+        .and_then(Value::as_bool)
+        .or_else(|| {
+            data.pointer("/message/content/0/isError")
+                .and_then(Value::as_bool)
+        })
+        .unwrap_or(false)
+        || data.get("error").is_some()
 }
 
 fn message_block_text(value: &Value, block_type: &str) -> Option<String> {
@@ -2507,7 +2530,7 @@ mod tests {
 
     #[test]
     fn accepts_every_released_session_format_and_rejects_newer_generations() {
-        // v0（预发布）到 v3（当前）都必须可投影：DSH 用不可变代际持久化，
+        // v0（预发布）到 v4（当前）都必须可投影：DSH 用不可变代际持久化，
         // 老会话继续以老版本留在磁盘上。
         for version in 0..=DSH_CURRENT_FORMAT_VERSION {
             let records = vec![
@@ -2522,7 +2545,7 @@ mod tests {
 
         // 更高的未来代际只降级该会话。
         let records = vec![
-            serde_json::json!({"type":"session","version":4,"id":"future","createdAt":0,"isSeeded":false,"delegationDepth":0}),
+            serde_json::json!({"type":"session","version":5,"id":"future","createdAt":0,"isSeeded":false,"delegationDepth":0}),
         ];
         let error = read_timeline_records(&records).unwrap_err();
         assert!(error.contains("尚未支持"), "实际错误: {error}");
@@ -2581,17 +2604,27 @@ mod tests {
 
     #[test]
     fn parses_only_the_current_generation_of_a_session_directory() {
-        // 同一会话目录里同时存在 v0 与 v3 时，只保留最新一代。
+        // 同一会话目录里同时存在 v0 与 v4 时，只保留最新一代。
         let v0 = CandidateSessionFile {
             path: PathBuf::from("/sessions/--D-repo--/session-x/session.jsonl.zstd"),
             version: 0,
         };
+        let v4 = CandidateSessionFile {
+            path: PathBuf::from("/sessions/--D-repo--/session-x/session.v4.jsonl.zstd"),
+            version: 4,
+        };
+        let selected = select_generation_files(vec![v0.clone(), v4.clone()]);
+        assert_eq!(selected, vec![v4.path.clone()]);
+
+        // v3 与 v4 并存（本机真实存在这种目录）时取 v4。
         let v3 = CandidateSessionFile {
             path: PathBuf::from("/sessions/--D-repo--/session-x/session.v3.jsonl.zstd"),
             version: 3,
         };
-        let selected = select_generation_files(vec![v0.clone(), v3.clone()]);
-        assert_eq!(selected, vec![v3.path.clone()]);
+        assert_eq!(
+            select_generation_files(vec![v0.clone(), v3.clone(), v4.clone()]),
+            vec![v4.path.clone()]
+        );
 
         // 只有更高代际时不做静默丢弃：退回可用的一份，保证会话仍可见。
         let future = CandidateSessionFile {
@@ -2614,6 +2647,67 @@ mod tests {
             select_generation_files(vec![v0.clone(), v3.clone(), other]),
             expected
         );
+    }
+
+    #[test]
+    fn v4_tool_result_flat_text_block_keeps_call_id_and_error_status() {
+        // v4 把 `tool/result` 的内容块从 `tool-result`（文本嵌在 content 里）改成扁平的
+        // `text`，并把 `toolCallId`/`isError` 提升到 `message` 上；配对与文本必须仍然成立，
+        // 失败的工具不能在轨迹里显示成成功。
+        let records = vec![
+            serde_json::json!({"type":"session","version":4,"id":"session-v4-tools","createdAt":1_792_087_400_000i64,"cwd":"/repo"}),
+            serde_json::json!({"type":"turn/start","seq":0,"time":1_792_087_400_001i64,"data":{"turn":1}}),
+            serde_json::json!({"type":"tool/call","seq":1,"time":1_792_087_400_002i64,"data":{"turn":1,"step":1,"callId":"call-1","name":"bash","arguments":"{\"command\":\"ls\"}"}}),
+            serde_json::json!({"type":"tool/result","seq":2,"time":1_792_087_400_003i64,"data":{"turn":1,"step":1,"message":{"role":"tool","isError":true,"toolCallId":"call-1","source":{"kind":"tool","callId":"call-1"},"content":[{"type":"text","text":"boom"}]}}}),
+            serde_json::json!({"type":"turn/end","seq":3,"time":1_792_087_400_004i64,"data":{"turn":1,"reason":{"kind":"completed"}}}),
+        ];
+
+        let timeline = read_timeline_records(&records).unwrap();
+        let result = timeline
+            .events
+            .iter()
+            .find(|event| event.kind == "tool-result")
+            .unwrap();
+        assert_eq!(result.title.as_deref(), Some("bash"));
+        assert_eq!(result.content.as_deref(), Some("boom"));
+        assert_eq!(result.status.as_deref(), Some("error"));
+        assert_eq!(
+            result
+                .trace
+                .as_ref()
+                .and_then(|trace| trace.call_id.as_deref()),
+            Some("call-1")
+        );
+    }
+
+    #[test]
+    fn v4_transport_records_do_not_create_events_or_zero_the_closing_sequence() {
+        // v4 在文件尾部追加 `session-log-deepseek/delivery-accepted`（无 seq/time）等传输
+        // 记录。它们既不能投影成事件，也不能让收尾工具行的 sequence 退化成 0。
+        let records = vec![
+            serde_json::json!({"type":"session","version":4,"id":"session-v4-transport","createdAt":1_792_087_400_000i64}),
+            serde_json::json!({"type":"turn/start","seq":0,"time":1_792_087_400_001i64,"data":{"turn":1}}),
+            serde_json::json!({"type":"tool/call","seq":7,"time":1_792_087_400_002i64,"data":{"turn":1,"step":1,"callId":"call-1","name":"bash","arguments":"{}"}}),
+            serde_json::json!({"type":"session-log-deepseek/delivery-accepted","data":{"ok":true}}),
+            serde_json::json!({"type":"developer/message","data":{"text":"transport only"}}),
+        ];
+
+        let timeline = read_timeline_records(&records).unwrap();
+        let ids: Vec<&str> = timeline
+            .events
+            .iter()
+            .map(|event| event.id.as_str())
+            .collect();
+        assert_eq!(
+            ids,
+            vec!["dsh-0-turn", "dsh-7-tool-call", "dsh-7-tool-result"]
+        );
+        let synthesized = timeline
+            .events
+            .iter()
+            .find(|event| event.kind == "tool-result")
+            .unwrap();
+        assert_eq!(synthesized.status.as_deref(), Some("error"));
     }
 
     #[test]
@@ -2755,7 +2849,8 @@ mod tests {
     }
 
     #[test]
-    fn reads_real_v0_session_into_trajectory() {        // v0 会话必须继续可读（regression）。
+    fn reads_real_v0_session_into_trajectory() {
+        // v0 会话必须继续可读（regression）。
         let records = fixture("session-v0-basic.jsonl");
         let header = parse_session_header(&records[0]).expect("v0 header 应可解析");
         assert_eq!(header.version, 0);

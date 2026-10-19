@@ -188,7 +188,7 @@ Flowlet 不做模型级拦截。
 | OpenCode | ✅ CLI + Desktop | ✅ | OpenAI Chat Completions | ✅ User-Agent 与原生 Session Header | ✅ | CLI/Desktop 共用 Provider 和凭据配置；可选按路由声明 `modalities` |
 | Pi | ✅ CLI | ✅ | OpenAI Chat Completions | ✅ `x-flowlet-client: pi` | ✅ | 可选声明模型 `input`；可部署原生扩展注入 `x-flowlet-session` |
 | Codex | ✅ Desktop + CLI | ✅ | Responses（一键写入 `~/.codex/config.toml` + `auth.json`，覆盖 CLI / Desktop / VS Code 插件） | ✅ User-Agent（`codex_cli_rs/`） | ✅，Desktop 与 CLI 分开识别 | 账号发现/授权/套餐用量/credits 查询与单账号删除（承载于渠道账号卡片伪账号行的详情抽屉；删除只移除 Flowlet 本地凭据与观测快照，不影响 Codex 端登录态） |
-| DeepSeek Harness | ✅ Web + Harness 目录 + 启动入口 | ✅，安全合并官方 YAML；Cordis 精确会话桥为显式可选高级能力 | OpenAI Chat Completions | ✅ 官方 User-Agent | ✅，DSH v0 原生会话；可选插件注入原生 session id 精确合并代理请求 | `dsh --profile headless` fresh task；暂不支持 resume |
+| DeepSeek Harness | ✅ Web + Harness 目录 + 启动入口 | ✅，安全合并官方 YAML；Cordis 精确会话桥为显式可选高级能力（原生 Provider 路径不需要它） | OpenAI Chat Completions（原生 DeepSeek Provider 走 Anthropic Messages；`deepseek-flash` 等原生名按目录归一到规范 ID） | ✅ 官方 User-Agent | ✅，DSH v0–v4 原生会话；受管桥注入 `x-flowlet-session` 或直读原生 `x-deepseek-harness-session-id` 精确合并代理请求 | `dsh --profile headless` fresh task；暂不支持 resume |
 | Hermes Agent | ✅ CLI、版本 | ✅，写入 `~/.hermes/config.yaml` 的 `model:` 段与 `${HERMES_CUSTOM_…_API_KEY}` 引用，密钥写入 `~/.hermes/.env`，注入 `x-flowlet-client: hermes` | OpenAI Chat Completions（`provider: "custom"`） | ✅ `x-flowlet-client: hermes`（复用 OpenAI Python SDK 通用 UA，无法靠 UA 区分） | ✅，`~/.hermes/state.db` SQLite 会话与消息（默认 + 各命名 Profile） | `hermes chat --oneshot --yolo` fresh task；可选「精确会话关联」受管插件；暂不支持 resume |
 
 Codex 账号的新增/重新授权通过独立 Codex CLI 的 `codex app-server` 完成。Desktop 仍参与

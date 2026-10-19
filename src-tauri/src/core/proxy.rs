@@ -167,16 +167,16 @@ use proxy_http::{
     add_cors_headers, apply_request_headers, build_model_detail_response,
     build_model_list_response, build_upstream_url, build_upstream_url_without_openai_v1,
     copy_response_headers, cors_preflight_response, encode_body_base64, ensure_config_file,
-    ensure_reasoning_content_passback, extract_model, identify_client, identify_client_agent,
-    is_model_list_request, is_streaming_response, load_ua_rules, model_detail_request_id,
-    rewrite_model, sanitize_headers,
+    ensure_reasoning_content_passback, extract_model, files_api_request, identify_client,
+    identify_client_agent, is_model_list_request, is_streaming_response, load_ua_rules,
+    model_detail_request_id, rewrite_model, sanitize_headers, FilesApiOp,
 };
 // 仅测试（proxy_tests）需要直接调用 UA 子串匹配；非测试构建不应引入以免告警。
 #[cfg(test)]
 use proxy_http::identify_client_by_ua;
 use proxy_routing::{
     body_contains_account_deactivated, body_contains_product_not_activated,
-    body_contains_quota_exceeded, enrich_upstream_error_log, match_candidates,
+    body_contains_quota_exceeded, enrich_upstream_error_log, files_account, match_candidates,
     network_error_route_reason, resolve_small_model, should_inspect_fallback_body,
     should_try_next_status,
 };
@@ -499,6 +499,220 @@ async fn forward_anthropic_compatible(
 
 // ─── Core Forward Logic ────────────────────────────────────────────────────
 
+/// Anthropic Files API 的转发体积上限：DeepSeek 单文件上限 128 MiB，另留 1 MiB 给
+/// multipart 封装。模型请求沿用 `usize::MAX`，这里必须有界，避免一次恶意/失控上传吃光内存。
+const FILES_UPLOAD_LIMIT_BYTES: usize = 128 * 1024 * 1024 + 1024 * 1024;
+
+/// 转发一个 Anthropic Files API 请求（upload / list / retrieve / delete）。
+///
+/// 与模型请求的差别：这些请求**没有 `model` 字段**，不能走 `match_candidates`；而 file id
+/// 只在上传它的那把 API Key 上有效，所以固定走渠道级绑定账号（见 `proxy_routing::files_account`）。
+/// 因此这里独立转发：不做模型改写、不做 body 捕获、不记用量，响应原样透传（DSH 的
+/// 「list + delete + 重传」自愈依赖上游错误原文）。
+async fn forward_files_api_request(
+    state: ProxyAppState,
+    parts: axum::http::request::Parts,
+    body: Body,
+) -> Result<Response, ProxyForwardError> {
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let path = parts
+        .uri
+        .path_and_query()
+        .map(|value| value.as_str().to_string())
+        .unwrap_or_else(|| "/".to_string());
+    let agent_session = extract_agent_session(&parts.headers);
+    let ua_rules = load_ua_rules(&state.config_path);
+    let (client_id, client_name) = match identify_client_agent(&parts.headers, &ua_rules) {
+        Some((id, name)) => (Some(id), Some(name)),
+        None => (None, Some("未知".to_string())),
+    };
+
+    // 模型三列留空：Files 请求没有模型，不伪造一个假模型名。
+    let mut log = RequestLogInput {
+        request_id: request_id.clone(),
+        agent_type: agent_session.as_ref().map(|value| value.agent_type.clone()),
+        agent_session_id: agent_session.as_ref().map(|value| value.session_id.clone()),
+        parent_agent_session_id: agent_session
+            .as_ref()
+            .and_then(|value| value.parent_session_id.clone()),
+        client_id,
+        client_name,
+        channel_id: None,
+        channel_name: None,
+        account_id: None,
+        account_name: None,
+        client_protocol: ProtocolType::Anthropic.as_str().to_string(),
+        upstream_protocol: ProtocolType::Anthropic.as_str().to_string(),
+        virtual_model: None,
+        public_model: None,
+        upstream_model: None,
+        request_type: "files".to_string(),
+        method: parts.method.to_string(),
+        path,
+        upstream_url: None,
+        status: None,
+        latency_ms: Some(0),
+        is_stream: false,
+        error_message: None,
+        fallback_count: 0,
+        route_reason: Some("files_api".to_string()),
+        ttfb_ms: None,
+        duration_ms: None,
+        attempt_seq: 0,
+        req_headers_json: capture_headers(&parts.headers, &state.capture, true),
+        // multipart 上传可能到 128 MiB，不再额外复制一份进日志。
+        req_body_b64: None,
+        res_headers_json: None,
+        res_body_b64: None,
+        is_last_attempt: true,
+    };
+    let record = |log: RequestLogInput| record_request_log(state.storage.clone(), log);
+
+    let body_bytes = match axum::body::to_bytes(body, FILES_UPLOAD_LIMIT_BYTES).await {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            let error_code = "files_upload_too_large";
+            let message = "The uploaded file exceeds Flowlet's 128 MiB passthrough limit";
+            log.status = Some(StatusCode::PAYLOAD_TOO_LARGE.as_u16() as i64);
+            log.error_message = Some(format!("{error_code}: {message}"));
+            log.route_reason = Some(error_code.to_string());
+            record(log);
+            return Ok(anthropic_error_response(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                error_code,
+                message,
+            ));
+        }
+    };
+
+    let snapshot = state.shared.runtime_config.snapshot();
+    let mut accounts = snapshot.accounts.clone();
+    for account in &mut accounts {
+        if is_transient_deactivated_account(account) {
+            account.credential_status = crate::core::config::ACCOUNT_CREDENTIAL_HEALTHY.to_string();
+        }
+    }
+    let Some((channel, account)) = files_account(&snapshot.channels, &accounts) else {
+        let error_code = "files_account_unavailable";
+        let message = "No enabled account on a files-capable channel is available";
+        log.status = Some(StatusCode::SERVICE_UNAVAILABLE.as_u16() as i64);
+        log.error_message = Some(format!("{error_code}: {message}"));
+        log.route_reason = Some(error_code.to_string());
+        record(log);
+        return Ok(anthropic_error_response(
+            StatusCode::SERVICE_UNAVAILABLE,
+            error_code,
+            message,
+        ));
+    };
+
+    let base_url = account
+        .effective_anthropic_base_url()
+        .filter(|url| !url.trim().is_empty())
+        .unwrap_or_else(|| channel.base_url_for(&ProtocolType::Anthropic));
+    let upstream_url = build_upstream_url(base_url, &parts.uri, &ProtocolType::Anthropic);
+    let timeout_seconds = channel
+        .timeout_seconds
+        .unwrap_or(state.upstream_timeout_seconds);
+
+    let builder = state
+        .client
+        .request(parts.method.clone(), upstream_url.clone());
+    let builder = apply_request_headers(
+        builder,
+        &parts.headers,
+        &account.api_key,
+        &ProtocolType::Anthropic,
+        channel.auth_strategy_for(&ProtocolType::Anthropic),
+    );
+    let upstream_request = builder.body(body_bytes).build()?;
+
+    log.channel_id = Some(channel.id.clone());
+    log.channel_name = Some(channel.name.clone());
+    log.account_id = Some(account.id.clone());
+    log.account_name = Some(account.name.clone());
+    log.upstream_url = Some(upstream_url);
+
+    let started_at = Instant::now();
+    let upstream_response = match tokio::time::timeout(
+        Duration::from_secs(timeout_seconds),
+        state.client.execute(upstream_request),
+    )
+    .await
+    {
+        Ok(Ok(response)) => response,
+        Ok(Err(error)) => {
+            log.error_message = Some(format!("files_api_transport_error: {error}"));
+            log.route_reason = Some("files_api_transport_error".to_string());
+            log.duration_ms = Some(started_at.elapsed().as_millis() as i64);
+            record(log);
+            return Err(ProxyForwardError::Network(error));
+        }
+        Err(_) => {
+            let error_message = format!("Files API 请求在 {timeout_seconds} 秒内未收到上游响应头");
+            log.error_message = Some(error_message.clone());
+            log.route_reason = Some("files_api_timeout".to_string());
+            log.duration_ms = Some(started_at.elapsed().as_millis() as i64);
+            record(log);
+            return Err(ProxyForwardError::Timeout {
+                phase: "Files API 响应头",
+                timeout_seconds,
+            });
+        }
+    };
+
+    let status = upstream_response.status();
+    let ttfb_ms = started_at.elapsed().as_millis() as i64;
+    let headers = upstream_response.headers().clone();
+    let body = read_buffered_body(upstream_response, timeout_seconds).await?;
+
+    log.status = Some(status.as_u16() as i64);
+    log.ttfb_ms = Some(ttfb_ms);
+    log.duration_ms = Some(started_at.elapsed().as_millis() as i64);
+    log.res_headers_json = capture_headers(&headers, &state.capture, false);
+    log.res_body_b64 = capture_body(&body, &state.capture, false);
+    // 上游状态一律不改写：DSH 依赖原文做配额自愈，delete 还要求 `type: "file_deleted"`。
+    if !status.is_success() {
+        log.error_message = Some(format!("files_api_upstream_status_{}", status.as_u16()));
+        log.route_reason = Some("upstream_error".to_string());
+    }
+    record(log);
+
+    let mut response = Response::new(Body::from(body));
+    *response.status_mut() = status;
+    copy_response_headers(&headers, response.headers_mut());
+    Ok(response)
+}
+
+/// 请求是否引用了 Anthropic Files API 的资源。DSH 只在 `/messages` 真的引用已上传
+/// 文件时才带上 `files-api-*` 这个 beta 令牌，因此它是最省事也最准确的判据
+/// （不必解析 messages body 找 file id）。用前缀匹配兼容后续的 `files-api-2026-*`。
+fn request_references_files_api(headers: &HeaderMap) -> bool {
+    headers
+        .get("anthropic-beta")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| {
+            value
+                .split(',')
+                .any(|token| token.trim().starts_with("files-api-"))
+        })
+}
+
+/// Anthropic 协议的错误信封；Files API 没有 model 上下文，错误体保持协议形态即可。
+fn anthropic_error_response(status: StatusCode, error_code: &str, message: &str) -> Response {
+    let payload = serde_json::json!({
+        "type": "error",
+        "error": { "type": error_code, "message": message }
+    });
+    let mut response = Response::new(Body::from(payload.to_string()));
+    *response.status_mut() = status;
+    response.headers_mut().insert(
+        axum::http::header::CONTENT_TYPE,
+        "application/json".parse().unwrap(),
+    );
+    response
+}
+
 async fn forward_request(
     state: ProxyAppState,
     request: Request,
@@ -506,6 +720,14 @@ async fn forward_request(
 ) -> Result<Response, ProxyForwardError> {
     let request_id = uuid::Uuid::new_v4().to_string();
     let (parts, body) = request.into_parts();
+
+    // Anthropic Files API 在读取 body 之前分流：它不带 model，走渠道级绑定账号；
+    // 提前分流也让 128 MiB 上传只缓冲一次，而不是被模型路径再复制两三份。
+    if detected_protocol == ProtocolType::Anthropic
+        && files_api_request(&parts.method, parts.uri.path()).is_some()
+    {
+        return forward_files_api_request(state, parts, body).await;
+    }
 
     let body_bytes = axum::body::to_bytes(body, usize::MAX)
         .await
@@ -665,6 +887,25 @@ async fn forward_request(
     };
     let image_input_unsupported = !skipped_for_input_modality.is_empty() && candidates.is_empty();
     let protocol_unsupported = !skipped_for_protocol.is_empty();
+
+    // Files API 的 file id 只在上传它的那把 API Key 上有效。DSH 在引用已上传文件的
+    // `/messages` 请求上带 `anthropic-beta: files-api-*`，据此把候选收窄到渠道级绑定账号，
+    // 保证「上传 → 引用 → 清理」落在同一账号。绑定账号不在候选里时不干预，按常规路由走。
+    let mut files_pin_reason: Option<&'static str> = None;
+    if detected_protocol == ProtocolType::Anthropic && request_references_files_api(&parts.headers)
+    {
+        if let Some((_, pinned)) = files_account(channels, &accounts) {
+            if candidates
+                .iter()
+                .any(|candidate| candidate.account_id == pinned.id)
+            {
+                candidates.retain(|candidate| candidate.account_id == pinned.id);
+                files_pin_reason = Some("files_api_pinned");
+            } else {
+                files_pin_reason = Some("files_api_pin_missed");
+            }
+        }
+    }
 
     // 识别请求类型
     let request_type = classify_request(&body_bytes, &detected_protocol);
@@ -969,6 +1210,9 @@ async fn forward_request(
 
                 let route_reason = if fallback_count > 0 {
                     "fallback_success".to_string()
+                } else if let Some(reason) = files_pin_reason {
+                    // 被 Files 绑定账号收窄过（或该账号不在候选里）时说明真实原因。
+                    reason.to_string()
                 } else if routing_model_for_request.as_deref() == Some("auto") {
                     "auto".to_string()
                 } else {

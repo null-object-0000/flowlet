@@ -62,6 +62,7 @@ describe("defaultExposedModels", () => {
       supports_quota_query: false,
       supports_usage_query: false,
       supports_scrape_balance: false,
+      supports_files_api: false,
       openai_base_url: "https://openrouter.ai/api/v1",
       anthropic_base_url: "https://openrouter.ai/api",
       openai_auth: "bearer",

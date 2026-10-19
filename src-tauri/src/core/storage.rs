@@ -1484,6 +1484,13 @@ impl Storage {
             "supports_scrape_balance",
             "INTEGER NOT NULL DEFAULT 0",
         )?;
+        // 渠道模板：补充 Anthropic Files API 能力标志
+        add_column_if_missing(
+            &connection,
+            "channel_presets",
+            "supports_files_api",
+            "INTEGER NOT NULL DEFAULT 0",
+        )?;
 
         // 渠道账号：补充 Base URL 覆盖字段
         add_column_if_missing(&connection, "channel_accounts", "base_url_override", "TEXT")?;

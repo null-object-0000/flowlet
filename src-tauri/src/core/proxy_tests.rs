@@ -1178,6 +1178,7 @@ async fn forwards_status_headers_body_and_replaces_authorization() {
                     supports_quota_query: false,
                     supports_usage_query: false,
                     supports_scrape_balance: false,
+                    supports_files_api: false,
                     platform_url: None,
                     created_at: String::new(),
                     updated_at: String::new(),
@@ -1609,6 +1610,69 @@ fn cleanup_old_logs_works() {
         assert!(storage.list_request_logs().unwrap().is_empty());
     }
     let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn files_api_request_recognizes_the_four_operations() {
+    assert_eq!(
+        files_api_request(&Method::POST, "/anthropic/v1/files"),
+        Some(FilesApiOp::Upload)
+    );
+    assert_eq!(
+        files_api_request(
+            &Method::GET,
+            "/anthropic/v1/files?limit=100&after_id=file-x"
+        ),
+        Some(FilesApiOp::List)
+    );
+    assert_eq!(
+        files_api_request(&Method::GET, "/anthropic/v1/files/file-abc"),
+        Some(FilesApiOp::Retrieve("file-abc".to_string()))
+    );
+    assert_eq!(
+        files_api_request(&Method::DELETE, "/anthropic/v1/files/file-abc"),
+        Some(FilesApiOp::Delete("file-abc".to_string()))
+    );
+    // 只认 Anthropic 入口：OpenAI 入口与裸根路径都不接管。
+    assert_eq!(files_api_request(&Method::POST, "/v1/files"), None);
+    assert_eq!(files_api_request(&Method::POST, "/openai/v1/files"), None);
+    assert_eq!(files_api_request(&Method::GET, "/v1/files/file-abc"), None);
+    // 方法、多段 id、相似前缀都不算 Files 请求。
+    assert_eq!(files_api_request(&Method::PUT, "/anthropic/v1/files"), None);
+    assert_eq!(
+        files_api_request(&Method::GET, "/anthropic/v1/files/a/b"),
+        None
+    );
+    assert_eq!(
+        files_api_request(&Method::GET, "/anthropic/v1/filesABC"),
+        None
+    );
+    assert_eq!(
+        files_api_request(&Method::GET, "/anthropic/v1/messages"),
+        None
+    );
+}
+
+#[test]
+fn request_references_files_api_detects_the_beta_token() {
+    let mut headers = HeaderMap::new();
+    assert!(!request_references_files_api(&headers));
+    headers.insert(
+        "anthropic-beta",
+        HeaderValue::from_static("context-1m-2025-08-07"),
+    );
+    assert!(!request_references_files_api(&headers));
+    headers.insert(
+        "anthropic-beta",
+        HeaderValue::from_static("context-1m-2025-08-07, files-api-2025-04-14"),
+    );
+    assert!(request_references_files_api(&headers));
+    // 前缀匹配：后续版本的 files-api beta 同样生效。
+    headers.insert(
+        "anthropic-beta",
+        HeaderValue::from_static("files-api-2026-01-01"),
+    );
+    assert!(request_references_files_api(&headers));
 }
 
 #[test]
@@ -4541,6 +4605,7 @@ async fn e2e_dual_protocol_models_list_consistent_with_direct() {
     );
     // 不暴露账号名称
     assert!(!openai_body.to_vec().windows(4).any(|w| w == b"acc-"));
+}
 
 // ─── 入站模型名归一（别名 / 官方 API 名 / 大小写 / 厂商前缀）──────────────────
 //
@@ -4955,4 +5020,426 @@ fn match_candidates_keeps_exact_match_contract_for_aliases() {
     assert!(selection.matched.is_empty());
     assert!(selection.protocol_skipped.is_empty());
 }
+
+// ─── Anthropic Files API（渠道级账号绑定）─────────────────────────────────────
+//
+// Files 请求不带 model，不能走 match_candidates；file id 只在绑定账号的 API Key 上有效，
+// 因此 upload/list/retrieve/delete 固定走渠道级绑定账号，引用文件的 /messages 也钉到它。
+
+#[derive(Clone, Debug)]
+struct SeenFilesRequest {
+    method: String,
+    path: String,
+    api_key: String,
+    body: Vec<u8>,
+}
+
+fn files_api_channel(id: &str, name: &str, base_url: &str) -> ChannelPreset {
+    ChannelPreset {
+        supports_files_api: true,
+        ..dual_protocol_channel(id, name, base_url)
+    }
+}
+
+/// 记录 Files 请求的服务端：捕获方法、路径、鉴权头与 body，按需返回固定状态。
+async fn spawn_files_upstream(
+    status: StatusCode,
+    response_body: &'static str,
+) -> (String, Arc<Mutex<Vec<SeenFilesRequest>>>) {
+    let seen = Arc::new(Mutex::new(Vec::<SeenFilesRequest>::new()));
+    let state = seen.clone();
+    let handler = move |method: Method, uri: Uri, headers: HeaderMap, body: Bytes| {
+        let state = state.clone();
+        async move {
+            state.lock().unwrap().push(SeenFilesRequest {
+                method: method.to_string(),
+                path: uri
+                    .path_and_query()
+                    .map(|v| v.as_str().to_string())
+                    .unwrap_or_default(),
+                api_key: headers
+                    .get("x-api-key")
+                    .and_then(|value| value.to_str().ok())
+                    .map(str::to_string)
+                    .or_else(|| {
+                        headers
+                            .get(header::AUTHORIZATION)
+                            .and_then(|value| value.to_str().ok())
+                            .and_then(|value| value.strip_prefix("Bearer "))
+                            .map(str::to_string)
+                    })
+                    .unwrap_or_default(),
+                body: body.to_vec(),
+            });
+            (
+                status,
+                [("content-type", "application/json")],
+                response_body,
+            )
+        }
+    };
+    use axum::handler::Handler;
+    let upstream = Router::new()
+        .route("/v1/files", post(handler.clone()).get(handler.clone()))
+        .route(
+            "/v1/files/{id}",
+            axum::routing::get(handler.clone()).delete(handler.clone()),
+        )
+        // 引用文件的 /messages 也打到同一个假上游，便于断言它落在哪个账号上。
+        .route("/v1/messages", post(handler))
+        .with_state(seen.clone());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, upstream).await.unwrap();
+    });
+    (format!("http://{addr}"), seen)
+}
+
+fn files_upload_request(path: &str, method: &str, body: &[u8]) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(path)
+        .header(
+            header::CONTENT_TYPE,
+            "multipart/form-data; boundary=----dsh-test-boundary",
+        )
+        .header("anthropic-version", "2023-06-01")
+        .header("anthropic-beta", "files-api-2025-04-14")
+        .body(Body::from(body.to_vec()))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn files_upload_forwards_to_the_bound_account_and_keeps_the_body() {
+    let (addr, seen) = spawn_files_upstream(
+        StatusCode::OK,
+        r#"{"id":"file-abc","type":"file","mime_type":"image/png","size_bytes":3,"created_at":"2026-10-19T00:00:00Z","filename":"dsh-x.png"}"#,
+    )
+    .await;
+    let state = build_test_state(
+        vec![files_api_channel("deepseek", "DeepSeek", &addr)],
+        vec![test_account("ds", "deepseek", "key-ds", 0)],
+        vec![],
+    );
+    let storage = state.storage.clone();
+
+    let payload = b"------dsh-test-boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"dsh-x.png\"\r\n\r\nPNG\r\n------dsh-test-boundary--\r\n";
+    let response = forward_request(
+        state,
+        files_upload_request("/anthropic/v1/files", "POST", payload),
+        ProtocolType::Anthropic,
+    )
+    .await
+    .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests.len(), 1);
+    // `/anthropic` 入口前缀被去掉，其余路径原样拼到渠道的 anthropic base URL 上。
+    assert_eq!(requests[0].path, "/v1/files");
+    assert_eq!(requests[0].method, "POST");
+    // 入站鉴权头被替换成绑定账号的 API Key（DeepSeek 走 x-api-key）。
+    assert_eq!(requests[0].api_key, "key-ds");
+    // multipart body 逐字节透传。
+    assert_eq!(requests[0].body, payload);
+
+    let logs = wait_for_request_logs(&storage, 1).await;
+    assert_eq!(logs[0].request_type, "files");
+    assert_eq!(logs[0].route_reason.as_deref(), Some("files_api"));
+    assert_eq!(logs[0].public_model, None);
+    assert_eq!(logs[0].virtual_model, None);
+    assert_eq!(logs[0].upstream_model, None);
+    assert_eq!(logs[0].account_name.as_deref(), Some("ds"));
+    assert_eq!(logs[0].status, Some(200));
+    assert!(logs[0].is_last_attempt);
+    // multipart 上传不再往日志里复制一份 body。
+    assert_eq!(logs[0].req_body_b64, None);
+}
+
+#[tokio::test]
+async fn files_request_keeps_the_operation_paths_and_methods() {
+    let (addr, seen) = spawn_files_upstream(StatusCode::OK, r#"{"data":[]}"#).await;
+    let state = build_test_state(
+        vec![files_api_channel("deepseek", "DeepSeek", &addr)],
+        vec![test_account("ds", "deepseek", "key-ds", 0)],
+        vec![],
+    );
+
+    for (method, path) in [
+        ("GET", "/anthropic/v1/files?limit=100&after_id=file-x"),
+        ("GET", "/anthropic/v1/files/file-abc"),
+        ("DELETE", "/anthropic/v1/files/file-abc"),
+    ] {
+        let response = forward_request(
+            state.clone(),
+            files_upload_request(path, method, b""),
+            ProtocolType::Anthropic,
+        )
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::OK, "{method} {path}");
+    }
+
+    let requests = seen.lock().unwrap().clone();
+    let paths: Vec<(String, String)> = requests
+        .iter()
+        .map(|request| (request.method.clone(), request.path.clone()))
+        .collect();
+    assert_eq!(
+        paths,
+        vec![
+            (
+                "GET".to_string(),
+                "/v1/files?limit=100&after_id=file-x".to_string()
+            ),
+            ("GET".to_string(), "/v1/files/file-abc".to_string()),
+            ("DELETE".to_string(), "/v1/files/file-abc".to_string()),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn files_request_without_a_files_capable_channel_returns_503() {
+    let (addr, seen) = spawn_files_upstream(StatusCode::OK, "{}").await;
+    let state = build_test_state(
+        // 渠道没有声明 supports_files_api：不上游发请求，明确报本地配置问题。
+        vec![dual_protocol_channel("deepseek", "DeepSeek", &addr)],
+        vec![test_account("ds", "deepseek", "key-ds", 0)],
+        vec![],
+    );
+    let storage = state.storage.clone();
+
+    let response = forward_request(
+        state,
+        files_upload_request("/anthropic/v1/files", "POST", b"x"),
+        ProtocolType::Anthropic,
+    )
+    .await
+    .unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(seen.lock().unwrap().is_empty());
+
+    let logs = wait_for_request_logs(&storage, 1).await;
+    assert_eq!(
+        logs[0].route_reason.as_deref(),
+        Some("files_account_unavailable")
+    );
+    assert_eq!(logs[0].status, Some(503));
+    assert_eq!(logs[0].upstream_url, None);
+}
+
+#[tokio::test]
+async fn files_upstream_error_status_and_body_pass_through_unchanged() {
+    // DSH 依赖上游错误原文做「list + delete + 重新上传」的配额自愈，不能改写。
+    let upstream_body = r#"{"error":{"type":"quota_exceeded","code":"file_quota_exceeded","message":"storage quota exceeded"}}"#;
+    let (addr, seen) = spawn_files_upstream(StatusCode::CONFLICT, upstream_body).await;
+    let state = build_test_state(
+        vec![files_api_channel("deepseek", "DeepSeek", &addr)],
+        vec![test_account("ds", "deepseek", "key-ds", 0)],
+        vec![],
+    );
+    let storage = state.storage.clone();
+
+    let response = forward_request(
+        state,
+        files_upload_request("/anthropic/v1/files", "POST", b"x"),
+        ProtocolType::Anthropic,
+    )
+    .await
+    .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(body, upstream_body.as_bytes());
+
+    // 只有一个绑定账号，不会换账号重试（换账号也认不到同一个 file id）。
+    assert_eq!(seen.lock().unwrap().len(), 1);
+    let logs = wait_for_request_logs(&storage, 1).await;
+    assert_eq!(logs[0].status, Some(409));
+}
+
+/// 两个候选账号：只有 `deepseek` 渠道声明了 Files API，绑定账号即它的账号。
+fn files_pinning_state(addr: &str) -> ProxyAppState {
+    build_test_state(
+        vec![
+            files_api_channel("deepseek", "DeepSeek", addr),
+            dual_protocol_channel("custom", "自定义渠道", addr),
+        ],
+        vec![
+            test_account("ds", "deepseek", "key-ds", 0),
+            test_account("alt", "custom", "key-alt", 0),
+        ],
+        vec![
+            test_route(
+                "route-ds",
+                "deepseek-v4.1-flash",
+                "deepseek",
+                "ds",
+                "deepseek-flash",
+                ProtocolType::Anthropic,
+                0,
+            ),
+            test_route(
+                "route-alt",
+                "deepseek-v4.1-flash",
+                "custom",
+                "alt",
+                "deepseek-v4.1-flash",
+                ProtocolType::Anthropic,
+                0,
+            ),
+        ],
+    )
+}
+
+fn messages_request(model: &str, files_beta: bool) -> Request<Body> {
+    let mut builder = Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header(header::CONTENT_TYPE, "application/json");
+    if files_beta {
+        builder = builder.header("anthropic-beta", "files-api-2025-04-14");
+    }
+    builder
+        .body(Body::from(format!(
+            r#"{{"model":"{model}","max_tokens":16,"messages":[]}}"#
+        )))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn messages_referencing_files_pin_to_the_bound_account() {
+    let (addr, seen) =
+        spawn_files_upstream(StatusCode::OK, r#"{"type":"message","content":[]}"#).await;
+    let state = files_pinning_state(&addr);
+    let storage = state.storage.clone();
+
+    let response = forward_request(
+        state,
+        messages_request("deepseek-flash", true),
+        ProtocolType::Anthropic,
+    )
+    .await
+    .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests.len(), 1);
+    // 钉到绑定账号，而不是轮询到另一个候选。
+    assert_eq!(requests[0].api_key, "key-ds");
+
+    let logs = wait_for_request_logs(&storage, 1).await;
+    assert_eq!(logs[0].route_reason.as_deref(), Some("files_api_pinned"));
+    assert_eq!(logs[0].account_name.as_deref(), Some("ds"));
+    assert_eq!(
+        logs[0].virtual_model.as_deref(),
+        Some("deepseek-v4.1-flash")
+    );
+}
+
+#[tokio::test]
+async fn messages_without_the_files_beta_keep_normal_routing() {
+    let (addr, seen) =
+        spawn_files_upstream(StatusCode::OK, r#"{"type":"message","content":[]}"#).await;
+    let state = files_pinning_state(&addr);
+    let storage = state.storage.clone();
+
+    let response = forward_request(
+        state,
+        messages_request("deepseek-flash", false),
+        ProtocolType::Anthropic,
+    )
+    .await
+    .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(seen.lock().unwrap().len(), 1);
+
+    let logs = wait_for_request_logs(&storage, 1).await;
+    assert_eq!(logs[0].route_reason.as_deref(), Some("direct"));
+}
+
+#[tokio::test]
+async fn files_beta_pin_miss_falls_back_to_normal_routing() {
+    // 绑定账号（deepseek 渠道）没有这个模型的路由 → 不干预，按常规候选走，并记下原因。
+    let (addr, seen) =
+        spawn_files_upstream(StatusCode::OK, r#"{"type":"message","content":[]}"#).await;
+    let state = build_test_state(
+        vec![
+            files_api_channel("deepseek", "DeepSeek", &addr),
+            dual_protocol_channel("custom", "自定义渠道", &addr),
+        ],
+        vec![
+            test_account("ds", "deepseek", "key-ds", 0),
+            test_account("alt", "custom", "key-alt", 0),
+        ],
+        vec![test_route(
+            "route-alt",
+            "deepseek-v4.1-flash",
+            "custom",
+            "alt",
+            "deepseek-v4.1-flash",
+            ProtocolType::Anthropic,
+            0,
+        )],
+    );
+    let storage = state.storage.clone();
+
+    let response = forward_request(
+        state,
+        messages_request("deepseek-flash", true),
+        ProtocolType::Anthropic,
+    )
+    .await
+    .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let requests = seen.lock().unwrap().clone();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].api_key, "key-alt");
+
+    let logs = wait_for_request_logs(&storage, 1).await;
+    assert_eq!(
+        logs[0].route_reason.as_deref(),
+        Some("files_api_pin_missed")
+    );
+}
+
+#[test]
+fn files_account_prefers_a_deterministic_account() {
+    // 绑定必须确定：同一配置反复取到同一个账号，不随轮询游标变化。
+    let channels = vec![
+        files_api_channel("deepseek", "DeepSeek", "http://upstream"),
+        files_api_channel("custom", "自定义渠道", "http://upstream"),
+    ];
+    let accounts = vec![
+        test_account("ds-late", "deepseek", "key-late", 5),
+        test_account("ds-first", "deepseek", "key-first", 1),
+        test_account("alt", "custom", "key-alt", 0),
+    ];
+    // 渠道 id 先排序（custom < deepseek），因此绑定的是自定义渠道优先级最高的账号。
+    for _ in 0..3 {
+        let (channel, account) = files_account(&channels, &accounts).unwrap();
+        assert_eq!(channel.id, "custom");
+        assert_eq!(account.id, "alt");
+    }
+
+    // 自定义渠道没有可路由账号时回落到下一个渠道里优先级最高的账号。
+    let mut disabled = accounts.clone();
+    disabled[2].enabled = false;
+    let (channel, account) = files_account(&channels, &disabled).unwrap();
+    assert_eq!(channel.id, "deepseek");
+    assert_eq!(account.id, "ds-first");
+
+    // 没有声明 Files API 的渠道不参与绑定。
+    assert!(files_account(
+        &[dual_protocol_channel(
+            "deepseek",
+            "DeepSeek",
+            "http://upstream"
+        )],
+        &accounts,
+    )
+    .is_none());
 }

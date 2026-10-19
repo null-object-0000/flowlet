@@ -246,6 +246,49 @@ pub(super) fn resolve_small_model(original_model: &str) -> String {
     original_model.to_string()
 }
 
+/// 账号是否可参与路由：启用、配了 API Key、且凭证健康。
+pub(crate) fn account_is_routable(account: &ChannelAccount) -> bool {
+    account.enabled
+        && !account.api_key.trim().is_empty()
+        && account.credential_status.as_str() == ACCOUNT_CREDENTIAL_HEALTHY
+}
+
+/// Anthropic Files API 的绑定账号：文件 id 只在**上传它的那把 API Key** 上有效，而
+/// `/messages` 会在候选池里轮询，两者必须落在同一账号上。这里给出确定性的那一个：
+/// 在声明了 `supports_files_api` 的渠道里，按 `(渠道 id, 优先级, 创建时间, 账号 id)`
+/// 全序取第一个可路由账号 —— 不用轮询、不用评分，保证任意时刻结果一致。
+pub(super) fn files_account<'a>(
+    channels: &'a [ChannelPreset],
+    accounts: &'a [ChannelAccount],
+) -> Option<(&'a ChannelPreset, &'a ChannelAccount)> {
+    let mut candidates: Vec<(&ChannelPreset, &ChannelAccount)> = channels
+        .iter()
+        .filter(|channel| {
+            channel.enabled
+                && channel.supports_files_api
+                && channel
+                    .supported_protocols
+                    .contains(&ProtocolType::Anthropic)
+        })
+        .flat_map(|channel| {
+            accounts
+                .iter()
+                .filter(move |account| account.channel_id == channel.id)
+                .filter(|account| account_is_routable(account))
+                .map(move |account| (channel, account))
+        })
+        .collect();
+    candidates.sort_by(|(channel_a, account_a), (channel_b, account_b)| {
+        channel_a
+            .id
+            .cmp(&channel_b.id)
+            .then(account_a.priority.cmp(&account_b.priority))
+            .then(account_a.created_at.cmp(&account_b.created_at))
+            .then(account_a.id.cmp(&account_b.id))
+    });
+    candidates.into_iter().next()
+}
+
 // ─── Fallback Rules ─────────────────────────────────────────────────────────
 
 pub(super) fn should_try_next_status(status: reqwest::StatusCode, channel_vendor: &str) -> bool {

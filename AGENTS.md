@@ -205,6 +205,14 @@ Flowlet 当前支持：
 * Responses 是独立的第三协议（`supported_protocols` 中的 `"responses"`），
   入站 `POST /v1/responses`（兼容裸根路径 `/responses`）按协议独立匹配路由，
   上游端点从渠道 OpenAI Base URL 派生、复用 OpenAI 鉴权；
+* Anthropic Files API（`<渠道 anthropic Base URL>/v1/files` 的 upload / list / retrieve / delete）
+  无 `model` 字段、无法参与模型路由，按渠道能力标志 `supports_files_api` **绑定到单一账号**
+  （`proxy_routing::files_account`，按 `(渠道 id, 优先级, 创建时间, 账号 id)` 全序取第一个可用账号）
+  转发；`/messages` 请求带 `anthropic-beta: files-api-*` 时把候选收窄到同一账号
+  （`route_reason` 记 `files_api_pinned`／`files_api_pin_missed`），因为 file id 只在上传它的
+  那把 API Key 上有效。这是「无模型请求也能被代理」的受控例外：上游 status / headers / body
+  一律原样透传（客户端依赖错误原文做配额自愈），新增/删除该行为须同步本说明与
+  `docs/deepseek-harness-integration.md`；
 * Responses 仅保证无状态透传：不支持存储响应管理接口
   （retrieve / delete / input_items，非 POST 请求返回 405），
   不保证 `previous_response_id` / `store` 的多账号粘性；

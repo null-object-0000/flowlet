@@ -55,6 +55,7 @@ function makePreset(overrides: Partial<ChannelPreset> = {}): ChannelPreset {
     supports_quota_query: false,
     supports_usage_query: false,
     supports_scrape_balance: true,
+    supports_files_api: false,
     created_at: "",
     updated_at: "",
     ...overrides,

@@ -67,6 +67,10 @@ pub struct ChannelJson {
     /// 是否支持通过后台 webview 登录控制台并拦截 API 抓取套餐余量。
     #[serde(default)]
     pub supports_scrape_balance: bool,
+    /// 是否支持 Anthropic Files API（`<anthropic_base>/v1/files`）。这些请求没有 model
+    /// 字段，由代理按渠道绑定到单一账号转发。
+    #[serde(default)]
+    pub supports_files_api: bool,
     /// 渠道级端点覆盖，key 例如 "models" / "model_detail" / "balance"。
     /// 优先于此处的配置，缺失时回退到 openai_base_url 拼接逻辑。
     #[serde(default)]
@@ -233,6 +237,7 @@ impl ChannelsConfig {
                     supports_quota_query: c.supports_quota_query,
                     supports_usage_query: c.supports_usage_query,
                     supports_scrape_balance: c.supports_scrape_balance,
+                    supports_files_api: c.supports_files_api,
                     platform_url: c.platform_url,
                     enabled: true,
                     created_at: now.clone(),

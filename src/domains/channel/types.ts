@@ -61,6 +61,7 @@ export const CHATGPT_PSEUDO_PRESET: ChannelPreset = {
   supports_quota_query: false,
   supports_usage_query: false,
   supports_scrape_balance: false,
+  supports_files_api: false,
   created_at: "",
   updated_at: "",
 };
@@ -84,6 +85,8 @@ export type ChannelPreset = {
   supports_quota_query: boolean;
   supports_usage_query: boolean;
   supports_scrape_balance: boolean;
+  /** 是否支持 Anthropic Files API（<base>/v1/files）。 */
+  supports_files_api: boolean;
   created_at: string;
   updated_at: string;
 };

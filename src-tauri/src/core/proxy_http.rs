@@ -72,6 +72,35 @@ pub(super) fn model_detail_request_id(method: &Method, path: &str) -> Option<Str
     (!id.is_empty() && !id.contains('/')).then(|| id.to_string())
 }
 
+/// Anthropic Files API 的操作。这些请求**不带 `model` 字段**，无法参与模型路由，
+/// 因此由代理按渠道能力（`supports_files_api`）绑定到单一账号转发。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum FilesApiOp {
+    Upload,
+    List,
+    Retrieve(String),
+    Delete(String),
+}
+
+/// 识别 Anthropic Files API 请求。只认 Anthropic 入口（`/anthropic/v1/files…`）；
+/// OpenAI 入口的同名路径不在此列，保持原有行为。
+pub(super) fn files_api_request(method: &Method, path: &str) -> Option<FilesApiOp> {
+    let path = path.split('?').next().unwrap_or(path);
+    let tail = path.strip_prefix("/anthropic")?.strip_prefix("/v1/files")?;
+    // 单段非空 id（与 `/v1/models/{id}` 同口径），避免把 `/v1/files/x/y` 当资源。
+    let file_id = |tail: &str| {
+        let id = tail.strip_prefix('/')?;
+        (!id.is_empty() && !id.contains('/')).then(|| id.to_string())
+    };
+    match (method, tail) {
+        (&Method::POST, "") => Some(FilesApiOp::Upload),
+        (&Method::GET, "") => Some(FilesApiOp::List),
+        (&Method::GET, tail) => file_id(tail).map(FilesApiOp::Retrieve),
+        (&Method::DELETE, tail) => file_id(tail).map(FilesApiOp::Delete),
+        _ => None,
+    }
+}
+
 pub(super) fn build_model_detail_response(
     requested_id: &str,
     routes: &[RouteCandidate],

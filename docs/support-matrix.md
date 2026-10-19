@@ -51,16 +51,16 @@ Flowlet 当前有七种渠道模板：LongCat、DeepSeek、Kimi、Qwen、Z.AI、
 
 ### 3.1 渠道能力矩阵
 
-| 渠道 | OpenAI Chat | Anthropic Messages | 模型列表 | 模型详情 | 余额/资源 | 上游 Responses API | Flowlet Responses 转发 |
-|------|-------------|--------------------|----------|----------|-----------|----------------------|------------------------|
-| LongCat | ✅ | ✅ | ✅ | ✅ | 控制台抓取资源包与按量余额 | ✅ 官方 Codex 文档确认（无状态） | ✅ |
-| DeepSeek | ✅ | ✅ | ✅ | — | ✅ 官方余额 API | ✅ 官方文档确认无状态；模型级可用范围由上游决定 | ✅ |
-| Kimi / Moonshot | ✅ | ✅ | ✅ | — | ✅ 官方余额 API | — 官方确认暂不支持 | —（不生成 responses 路由） |
-| Qwen 按量付费 | ✅ | ✅ | ✅ | — | — | ✅ 官方明确支持（含有状态 store/retrieve） | ✅（仅无状态透传） |
-| Qwen Token Plan | ✅ | ✅ | ✅ | — | ✅ 控制台抓取套餐额度 | ✅ 官方明确支持 | ✅（仅无状态透传） |
-| Z.AI | ✅（路径无 `/v1`：`/api/paas/v4/chat/completions`） | ✅ | ✅（端点 `/api/paas/v4/models`） | — | — 官方暂无公开余额接口，先只支持 API 模式 | — 官方文档未确认 | —（不生成 responses 路由） |
-| OpenRouter | ✅ | ✅（Anthropic Skin） | ✅ | — | ✅ API Key 用量与 Credits | ✅ 官方 `/api/v1/responses`（无状态） | ✅ |
-| 自定义渠道 | 取决于已填写的 OpenAI Base URL | 取决于已填写的 Anthropic Base URL | ✅ 使用标准 OpenAI `/models` | — | — | 取决于上游，当前无自动检测 | ✅（填写 OpenAI Base URL 即生成路由，上游是否支持由用户保证） |
+| 渠道 | OpenAI Chat | Anthropic Messages | Files API | 模型列表 | 模型详情 | 余额/资源 | 上游 Responses API | Flowlet Responses 转发 |
+|------|-------------|--------------------|-----------|----------|----------|-----------|----------------------|------------------------|
+| LongCat | ✅ | ✅ | — | ✅ | ✅ | 控制台抓取资源包与按量余额 | ✅ 官方 Codex 文档确认（无状态） | ✅ |
+| DeepSeek | ✅ | ✅ | ✅（`supports_files_api`：上传/列表/检索/删除绑定单一账号） | ✅ | — | ✅ 官方余额 API | ✅ 官方文档确认无状态；模型级可用范围由上游决定 | ✅ |
+| Kimi / Moonshot | ✅ | ✅ | — | ✅ | — | ✅ 官方余额 API | — 官方确认暂不支持 | —（不生成 responses 路由） |
+| Qwen 按量付费 | ✅ | ✅ | — | ✅ | — | — | ✅ 官方明确支持（含有状态 store/retrieve） | ✅（仅无状态透传） |
+| Qwen Token Plan | ✅ | ✅ | — | ✅ | — | ✅ 控制台抓取套餐额度 | ✅ 官方明确支持 | ✅（仅无状态透传） |
+| Z.AI | ✅（路径无 `/v1`：`/api/paas/v4/chat/completions`） | ✅ | — | ✅（端点 `/api/paas/v4/models`） | — | — 官方暂无公开余额接口，先只支持 API 模式 | — 官方文档未确认 | —（不生成 responses 路由） |
+| OpenRouter | ✅ | ✅（Anthropic Skin） | — | ✅ | — | ✅ API Key 用量与 Credits | ✅ 官方 `/api/v1/responses`（无状态） | ✅ |
+| 自定义渠道 | 取决于已填写的 OpenAI Base URL | 取决于已填写的 Anthropic Base URL | — | ✅ 使用标准 OpenAI `/models` | — | — | 取决于上游，当前无自动检测 | ✅（填写 OpenAI Base URL 即生成路由，上游是否支持由用户保证） |
 
 上游 Responses API 的当前结论：
 

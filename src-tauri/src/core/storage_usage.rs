@@ -2114,6 +2114,7 @@ impl Storage {
                 WHERE rl.is_last_attempt = 1
                   AND (rl.res_body_b64 IS NOT NULL OR (refs.state = 'ready' AND refs.res_body_bytes > 0))
                   AND lower(rl.path) NOT LIKE '%/messages/count_tokens%'
+                  AND lower(rl.path) NOT LIKE '%/v1/files%'
                   AND {}
                 "#,
                 repair_time_clause("rl.created_at", time_range)
@@ -2720,6 +2721,8 @@ impl Storage {
             WHERE request_logs.is_last_attempt = 1
               AND {}
               AND lower(request_logs.path) NOT LIKE '%/messages/count_tokens%'
+              -- Files API 请求不是模型推理，没有 token 用量，不能生成“未知用量”占位行。
+              AND lower(request_logs.path) NOT LIKE '%/v1/files%'
               AND NOT EXISTS (
                   SELECT 1 FROM usage_records
                   WHERE usage_records.request_id = request_logs.request_id

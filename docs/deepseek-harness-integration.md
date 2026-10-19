@@ -146,6 +146,30 @@ session id 后按 DSH UA 门控归属，并在转发上游前剥离该 Header；
 `deepseek-v4-pro`），代理按 `model-catalog.json` 归一到规范 ID 再匹配路由，`/models` 仍只暴露
 规范 ID。
 
+## Files API（文件上传 / 列表 / 检索 / 删除）
+
+DSH 的图片超过内联阈值（约 10 MiB / 20 张）时会先把图片上传到 DeepSeek 的 Anthropic Files API，
+再在 `/messages` 里引用返回的 `file_id`。它计算出的根路径是 `<baseURL>/v1`，方法为
+`POST /v1/files`（multipart，单文件 ≤128 MiB）、`GET /v1/files?after_id&limit`、
+`GET /v1/files/{id}`、`DELETE /v1/files/{id}`，并带 `anthropic-version: 2023-06-01` 与
+`anthropic-beta: files-api-2025-04-14`。
+
+- **渠道能力**：这些请求没有 `model` 字段，无法参与模型路由，因此由渠道级标志
+  `supports_files_api` 声明承载（当前只有 DeepSeek）。未声明的渠道返回 503
+  `files_account_unavailable`，不会转发上游。
+- **账号绑定**：`file_id` 只在上传它的那把 API Key 上有效，而 `/messages` 会在候选池里轮询。
+  代理把 Files 请求固定到该渠道确定性的单个账号（按渠道 id、优先级、创建时间、账号 id 全序取
+  第一个可用账号），并在 `/messages` 请求带 `anthropic-beta: files-api-*` 时把候选收窄到同一
+  账号（请求日志的 `route_reason` 记 `files_api_pinned`；绑定账号不在候选里时记
+  `files_api_pin_missed` 并回退常规路由）。代价是这类请求失去该档位的负载分散与失败降级 ——
+  这是 file id 归属的必然代价。
+- **透传边界**：请求 body（multipart）与上游响应一律逐字节透传，status 不改写、错误体不包装
+  ——DSH 的「list + delete + 重新上传」配额自愈依赖上游错误原文，`delete` 还要求响应形如
+  `{id, type:"file_deleted"}`。Files 请求也不做模型改写、不记 token 用量，但会写请求日志
+  （`request_type = "files"`，模型三列为空），上传请求的 body 不入日志。
+- **上限**：单次上传转发上限 128 MiB（超出返回 413 `files_upload_too_large`）。请求体仍完整驻留
+  内存，未做流式；大文件上传若在渠道 `timeout_seconds` 内传不完会超时，需要时调大该渠道超时。
+
 ## 仍保留的能力边界
 
 会话运行状态按最新一组 `turn/start` / `turn/end` 判断：新的 turn 已开始但尚未结束、且会话文件

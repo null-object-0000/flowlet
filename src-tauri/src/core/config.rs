@@ -272,6 +272,10 @@ pub struct ChannelPreset {
     pub supports_usage_query: bool,
     // 是否支持通过后台 webview 登录控制台并拦截 API 抓取套餐余量。
     pub supports_scrape_balance: bool,
+    // 是否支持 Anthropic Files API（`<base>/v1/files` 的上传/列表/检索/删除）。
+    // 这些请求没有 model 字段，无法走模型路由，因此按渠道绑定到单一账号
+    // （见 `proxy_routing::files_account`）。
+    pub supports_files_api: bool,
     // 渠道平台查看 API Key 的跳转地址（如控制台页面）
     pub platform_url: Option<String>,
     #[serde(default = "default_preset_enabled")]
@@ -304,6 +308,7 @@ impl Default for ChannelPreset {
             supports_quota_query: false,
             supports_usage_query: false,
             supports_scrape_balance: false,
+            supports_files_api: false,
             platform_url: None,
             enabled: true,
             created_at: String::new(),

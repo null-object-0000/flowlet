@@ -1,8 +1,8 @@
 use super::Storage;
 use crate::core::channels_config::{ChannelsConfig, DEFAULT_CONFIG_JSON};
 use crate::core::config::{
-    ChannelAccount, DeviceUsageBreakdownRow, LogsFilter, ModelPrice, ProtocolType, RequestLogInput,
-    RouteCandidate, UsageRecordInput, UsageSummaryRow,
+    ChannelAccount, ChannelPreset, DeviceUsageBreakdownRow, LogsFilter, ModelPrice, ProtocolType,
+    RequestLogInput, RouteCandidate, UsageRecordInput, UsageSummaryRow,
 };
 use crate::core::device_identity::{
     DailyUsageTotal, HourlyUsageTotal, SyncedAgentInstallation, SyncedAgentInteraction,
@@ -967,6 +967,39 @@ fn count_tokens_requests_never_become_unknown_usage_and_legacy_placeholders_are_
 }
 
 #[test]
+fn files_api_requests_never_become_unknown_usage() {
+    // Files API 请求不是模型推理：既没有模型三列也没有 token 用量，维护流程不得给它
+    // 造出「未知用量」占位行（那会污染用量页）。
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate request log schema");
+    let mut log = request_log_for_repair("req-files", 0, true);
+    log.path = "/anthropic/v1/files".to_string();
+    log.method = "POST".to_string();
+    log.request_type = "files".to_string();
+    log.virtual_model = None;
+    log.public_model = None;
+    log.upstream_model = None;
+    log.route_reason = Some("files_api".to_string());
+    storage.insert_request_log(&log).unwrap();
+    // 对照组：同一批次里的普通模型请求照旧生成占位行。
+    storage
+        .insert_request_log(&request_log_for_repair("req-chat", 0, true))
+        .unwrap();
+
+    assert_eq!(storage.analyze_unknown_usage("all").unwrap(), 1);
+    let connection = storage.connection.lock().unwrap();
+    let files_usage_rows: i64 = connection
+        .query_row(
+            "SELECT COUNT(*) FROM usage_records WHERE request_id = 'req-files'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(files_usage_rows, 0);
+}
+
+#[test]
 fn reanalyzes_longcat_stream_usage_from_captured_response() {
     let connection = Connection::open_in_memory().expect("open in-memory sqlite");
     let storage = Storage::from_connection_for_test(connection);
@@ -1289,6 +1322,54 @@ fn fills_preset_platform_urls_after_migration_without_relocking() {
     for suffix in ["", "-wal", "-shm"] {
         let _ = std::fs::remove_file(format!("{}{}", path.display(), suffix));
     }
+}
+
+#[test]
+fn files_api_capability_round_trips_and_defaults_to_disabled() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate request log schema");
+
+    let mut preset = ChannelPreset {
+        id: "deepseek".to_string(),
+        name: "DeepSeek".to_string(),
+        vendor: "deepseek".to_string(),
+        created_at: "2026-10-19T00:00:00Z".to_string(),
+        updated_at: "2026-10-19T00:00:00Z".to_string(),
+        ..Default::default()
+    };
+    storage.save_channel_presets(&[preset.clone()]).unwrap();
+    // 老库升级路径：新建的行默认关闭，由 config.json 的 ensure 迁移打开。
+    let stored = storage.list_channel_presets().unwrap();
+    assert!(!stored[0].supports_files_api);
+
+    preset.supports_files_api = true;
+    storage.ensure_preset_files_api(&[preset.clone()]).unwrap();
+    let stored = storage.list_channel_presets().unwrap();
+    assert!(stored[0].supports_files_api);
+
+    // 再次 save 后仍能读回（列已存在，INSERT/SELECT 口径一致）。
+    storage.save_channel_presets(&[preset.clone()]).unwrap();
+    let stored = storage.list_channel_presets().unwrap();
+    assert!(stored[0].supports_files_api);
+
+    let json: serde_json::Value =
+        serde_json::from_str(DEFAULT_CONFIG_JSON).expect("parse embedded config");
+    let config = ChannelsConfig::from_config_json(&json).expect("load channel defaults");
+    let deepseek = config
+        .presets
+        .iter()
+        .find(|preset| preset.id == "deepseek")
+        .expect("deepseek preset");
+    assert!(deepseek.supports_files_api, "DeepSeek 应声明 Files API");
+    assert!(
+        config
+            .presets
+            .iter()
+            .filter(|preset| preset.supports_files_api)
+            .all(|preset| preset.id == "deepseek"),
+        "当前只有 DeepSeek 声明 Files API"
+    );
 }
 
 #[test]

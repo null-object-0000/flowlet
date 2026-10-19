@@ -147,6 +147,7 @@
         "supports_balance_query": true,
         "supports_quota_query": false,
         "supports_usage_query": false,
+        "supports_files_api": true,
         "endpoints": {
           "models": "https://api.deepseek.com/models",
           "balance": "https://api.deepseek.com/user/balance"

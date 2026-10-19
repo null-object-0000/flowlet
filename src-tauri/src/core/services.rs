@@ -167,6 +167,7 @@ fn initialize_channel_presets(
         .and_then(|_| storage.sync_preset_maintained_config(&migration_presets))
         .and_then(|_| storage.ensure_preset_balance_query(&migration_presets))
         .and_then(|_| storage.ensure_preset_scrape_balance(&migration_presets))
+        .and_then(|_| storage.ensure_preset_files_api(&migration_presets))
         .map_err(|error| error.to_string())
 }
 

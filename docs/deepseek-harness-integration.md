@@ -18,7 +18,7 @@ Desktop：用户主要通过 `dsh web` 打开的本地浏览器界面使用它�
 | Environment | 分别检测 `$DSH_HOME`/`~/.dsh`、3080 Web 运行状态、PATH 中的 `dsh` 与包版本，并挂载可选 Runtime 能力 | 可只读识别无歧义的 `_npx/<hash>` 包版本并解析 bin 入口供任务执行；多版本共存时要求全局安装。已安装不等于 Web 正在运行 |
 | Global Config | 解析配置状态；直接安全合并官方 YAML，一键写入/恢复 Provider、默认模型和 Client Token；精确会话插件与模型规格声明均为默认关闭的高级能力 | 基础接入不依赖 DSH Web 或 Profile；复用 DSH 的文件锁协议，保留非受管配置和注释 |
 | Session | 读取 `sessions/**/session.jsonl(.zstd)` v0，展示最终消息、工具事件和原生 Token 用量 | DSH 预发布格式无迁移承诺；其它版本明确拒绝；打包 delta chunk 不作为最终消息展示 |
-| Identity | 使用官方 User-Agent 识别客户端；可选会话桥启用时读取并剥离 `x-flowlet-session` | 与其他 Agent 共用编译期 Identity Adapter registry，实时请求与历史修复规则一致 |
+| Identity | 使用官方 User-Agent 识别客户端；读取 `x-flowlet-session`（受管桥接注入）或 DSH 原生 `x-deepseek-harness-session-id`，两者都只做归属、不剥离原生头 | 与其他 Agent 共用编译期 Identity Adapter registry，实时请求与历史修复规则一致 |
 | Runner | 通过稳定全局 `dsh` 命令或 npx 缓存包入口（`node <包 bin>`）执行 `dsh --profile headless <task>` | 仅 fresh session；DSH 没有稳定 resume 参数时明确失败 |
 | Runtime（Environment 可选能力） | 在接入抽屉内启动、停止并展示 DSH Web 状态；全局 npm 安装执行 `dsh web --no-open`，npx 缓存安装执行 `npx @deepseek-ai/dsh web --no-open`；Windows 下托管子进程绑定 Job Object（KILL_ON_JOB_CLOSE），Flowlet 异常退出时由内核回收整棵进程树 | 只停止当前 Flowlet 启动并记录的子进程；手动或其他程序启动的 3080 进程仅显示为外部运行，不接管、不强杀；Job Object 只覆盖 Flowlet 自己启动的进程，孤儿进程仍需在原启动位置停止 |
 
@@ -131,6 +131,22 @@ Provider 配置与凭据可热加载。Profile 插件属于运行时组合能力
 强制携带的 `User-Agent: deepseek-harness/...` 识别，不额外注入 `x-flowlet-client`。Flowlet 捕获
 session id 后按 DSH UA 门控归属，并在转发上游前剥离该 Header；请求日志由此可与原生
 `session.jsonl(.zstd)` 精确合并，不按时间猜测。
+
+### 原生 Provider 直连（无需桥接）
+
+把 DSH **内置**的 DeepSeek Provider（`dsh-llm-deepseek`，默认打
+`https://api.deepseek.com/anthropic`）的 `baseURL` 指到 Flowlet 的 `/anthropic` 时，DSH 会为每个
+推理请求带上自己的 `x-deepseek-harness-session-id`（值即原生 `GenerateOptions.sessionId`，与
+受管桥接写入 `x-flowlet-session` 的值逐字节相同）。代理以 DSH UA 为门控读取它，
+`x-flowlet-session` 优先、缺失时回退原生头，因此这条路径**不需要部署受管桥接**也能把代理请求
+精确合并到原生会话。该头由 DSH 自己发往上游，Flowlet 识别后**原样透传、不剥离**（`apply_request_headers`
+的剥离名单不含它）。受管 `llm-pi-ai` Provider 不发这个头，两条路径的会话来源不同。
+
+这条路径同样支持入站模型名归一：DSH 固定发自己的原生模型名（`deepseek-flash`、
+`deepseek-v4-pro`），代理按 `model-catalog.json` 归一到规范 ID 再匹配路由，`/models` 仍只暴露
+规范 ID。
+
+## 仍保留的能力边界
 
 会话运行状态按最新一组 `turn/start` / `turn/end` 判断：新的 turn 已开始但尚未结束、且会话文件
 仍在活跃更新时显示为运行中；`turn/end` 只代表单轮结束，不能用历史任意一条 completed 事件

@@ -506,6 +506,12 @@ Agent ID 分支。`apply_request_headers` 仅负责统一剥离 Flowlet 保留�
 
 DeepSeek Harness 使用其强制携带的 `deepseek-harness/` User-Agent 识别来源，不注入
 `x-flowlet-client`。基础一键接入只写入官方 Provider、默认模型与 Token，不依赖插件。
+另外，把 DSH **原生** DeepSeek Provider（`dsh-llm-deepseek`）的 Base URL 指到 Flowlet 的
+`/anthropic` 时，DSH 会带着自己的 `x-deepseek-harness-session-id`（值即原生
+`GenerateOptions.sessionId`，与受管桥接写入 `x-flowlet-session` 的值同源）。代理以 DSH UA 为
+门控读取它，`x-flowlet-session` 优先、缺失时回退原生头，因此这条接入路径不需要部署受管桥接
+也能精确关联会话；该头由 DSH 自己发往上游，识别后**原样透传、不得剥离**（剥离会静默改变上游
+收到的报文）。受管 `llm-pi-ai` Provider 不发这个头，两条路径的会话来源不同。
 可选高级能力统一收纳在接入抽屉折叠的“高级配置”区，默认不启用，全部由用户显式开启：
 用户开启“精确会话关联”后，才通过 DSH 官方 Cordis Profile 配置部署受管
 `flowlet-session-bridge.mjs`：插件从 `llm/stream` 读取当前 `GenerateOptions.sessionId`，使用

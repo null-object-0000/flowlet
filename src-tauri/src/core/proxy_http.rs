@@ -726,6 +726,8 @@ pub(super) fn apply_request_headers(
             // 客户端归属标记头仅用于本地识别，识别后不再透传上游，避免泄露受管信息。
             || name.as_str() == AGENT_CLIENT_HEADER
             // Agent 会话标识头仅用于本地会话归属，识别后不再透传上游。
+            // 注意：`x-deepseek-harness-session-id` 虽然也用于会话归属，但它由 DSH 自己
+            // 发往上游，必须原样透传（不得加进本剥离名单，否则会静默改变上游 DSH 行为）。
             || name.as_str() == AGENT_SESSION_HEADER
         {
             continue;
@@ -906,7 +908,9 @@ pub(super) use crate::core::agent_identity_adapter::identify_client_by_ua;
 /// 读取本头，再回退到 UA 规则，确保开箱即可归属，不依赖用户 config.json 是否含
 /// 对应规则。该头仅用于本地归属，不参与鉴权或路由；Flowlet 在识别后、转发上游前
 /// 会将其剥离，不向上游泄露。
-pub(super) use crate::core::agent_session_identity::{AGENT_CLIENT_HEADER, AGENT_SESSION_HEADER};
+pub(super) use crate::core::agent_session_identity::{
+    AGENT_CLIENT_HEADER, AGENT_SESSION_HEADER, DSH_NATIVE_SESSION_HEADER,
+};
 
 /// Pi 与 Flowlet 约定的会话标识头。
 ///
@@ -1312,6 +1316,41 @@ mod tests {
         assert!(!request.headers().contains_key(AGENT_SESSION_HEADER));
         // 其余普通头（含 UA）照常透传。
         assert!(request.headers().contains_key(header::USER_AGENT));
+    }
+
+    #[test]
+    fn apply_request_headers_forwards_the_native_dsh_session_header() {
+        // `x-deepseek-harness-session-id` 虽被 Identity Adapter 用于会话归属，但它由 DSH
+        // 自己发往上游，必须原样透传；一旦加进剥离名单会静默改变上游收到 DSH 的报文。
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::USER_AGENT,
+            HeaderValue::from_static(
+                "deepseek-harness/0.2.1-rc.2 (+https://github.com/deepseek-ai/deepseek-harness)",
+            ),
+        );
+        headers.insert(
+            DSH_NATIVE_SESSION_HEADER,
+            HeaderValue::from_static("session-dec035ef-7d7f-47b6-80b8-ad63c4cc54d6"),
+        );
+
+        let request = apply_request_headers(
+            reqwest::Client::new().post("http://127.0.0.1/test"),
+            &headers,
+            "upstream-key",
+            &ProtocolType::Anthropic,
+            &AuthStrategy::XApiKey,
+        )
+        .body("{}")
+        .build()
+        .unwrap();
+
+        assert_eq!(
+            request.headers().get(DSH_NATIVE_SESSION_HEADER),
+            Some(&HeaderValue::from_static(
+                "session-dec035ef-7d7f-47b6-80b8-ad63c4cc54d6"
+            ))
+        );
     }
 
     #[test]

@@ -2,6 +2,10 @@ use axum::http::{HeaderMap, HeaderName, HeaderValue};
 
 pub(crate) const AGENT_CLIENT_HEADER: &str = "x-flowlet-client";
 pub(crate) const AGENT_SESSION_HEADER: &str = "x-flowlet-session";
+/// DeepSeek Harness 原生 Provider 每个推理请求自带的会话头（值 = `String(options.sessionId)`，
+/// 与受管桥接写入 `x-flowlet-session` 的值同源）。只有 `dsh-llm-deepseek` 发它，
+/// 受管 `llm-pi-ai` Provider 不发；两条路径共用同一个 Identity Adapter，因此头名放这里。
+pub(crate) const DSH_NATIVE_SESSION_HEADER: &str = "x-deepseek-harness-session-id";
 
 const MAX_AGENT_SESSION_ID_BYTES: usize = 512;
 
@@ -166,6 +170,71 @@ mod tests {
 
         headers.insert("user-agent", HeaderValue::from_static("other-agent/1.0"));
         assert_eq!(from_http_headers(&headers), None);
+    }
+
+    #[test]
+    fn deepseek_harness_falls_back_to_the_native_session_header() {
+        // DSH 原生 Provider（dsh-llm-deepseek）不部署受管桥接，只带它自己的会话头；
+        // 两条路径都必须能识别，值即 DSH 的原生 sessionId。
+        let ua = "deepseek-harness/0.2.1-rc.2 (+https://github.com/deepseek-ai/deepseek-harness)";
+        let session = "session-dec035ef-7d7f-47b6-80b8-ad63c4cc54d6";
+        let expected = AgentSessionIdentity {
+            agent_type: "deepseek-harness".to_string(),
+            session_id: session.to_string(),
+            parent_session_id: None,
+        };
+
+        let mut headers = HeaderMap::new();
+        headers.insert("user-agent", HeaderValue::from_static(ua));
+        headers.insert(DSH_NATIVE_SESSION_HEADER, HeaderValue::from_static(session));
+        assert_eq!(from_http_headers(&headers), Some(expected.clone()));
+        assert_eq!(
+            from_header_json(
+                &serde_json::json!({
+                    "User-Agent": ua,
+                    "x-deepseek-harness-session-id": session,
+                })
+                .to_string(),
+            ),
+            Some(expected),
+        );
+
+        // 原生头同样受 DSH UA 门控，其它 Agent 伪造它不会被归属成 DSH。
+        let mut spoofed = HeaderMap::new();
+        spoofed.insert("user-agent", HeaderValue::from_static("other-agent/1.0"));
+        spoofed.insert(DSH_NATIVE_SESSION_HEADER, HeaderValue::from_static(session));
+        assert_eq!(from_http_headers(&spoofed), None);
+    }
+
+    #[test]
+    fn managed_session_bridge_header_wins_over_the_native_one() {
+        let ua = "deepseek-harness/0.2.1-rc.2 (+https://github.com/deepseek-ai/deepseek-harness)";
+        let mut headers = HeaderMap::new();
+        headers.insert("user-agent", HeaderValue::from_static(ua));
+        headers.insert(
+            AGENT_SESSION_HEADER,
+            HeaderValue::from_static("from-bridge"),
+        );
+        headers.insert(
+            DSH_NATIVE_SESSION_HEADER,
+            HeaderValue::from_static("from-native"),
+        );
+        assert_eq!(
+            from_http_headers(&headers).map(|identity| identity.session_id),
+            Some("from-bridge".to_string()),
+        );
+        // 受管头为空/被脱敏时回退原生头（两者取值同源，实际不会不一致）。
+        let mut empty_bridge = HeaderMap::new();
+        empty_bridge.insert("user-agent", HeaderValue::from_static(ua));
+        empty_bridge.insert(AGENT_SESSION_HEADER, HeaderValue::from_static(""));
+        empty_bridge.insert(
+            DSH_NATIVE_SESSION_HEADER,
+            HeaderValue::from_static("from-native"),
+        );
+        assert_eq!(
+            from_http_headers(&empty_bridge).map(|identity| identity.session_id),
+            Some("from-native".to_string()),
+        );
     }
 
     #[test]

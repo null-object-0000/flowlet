@@ -71,23 +71,8 @@ export const queryKeys = {
       : [...queryKeys.agentSession.all, "timeline", agentType, sessionId] as const,
     clients: () => [...queryKeys.agentSession.all, "clients"] as const,
   },
-  project: {
-    all: ["project"] as const,
-    list: () => [...queryKeys.project.all, "list"] as const,
-    detail: (projectId: string) => [...queryKeys.project.all, "detail", projectId] as const,
-    tasks: (projectId: string) => [...queryKeys.project.all, "tasks", projectId] as const,
-    recurringTasks: (projectId: string) => [...queryKeys.project.all, "recurring-tasks", projectId] as const,
-    recurringRuns: (taskId: string) => [...queryKeys.project.all, "recurring-runs", taskId] as const,
-  },
-  projectTaskRunner: {
-    all: ["project", "task-runner"] as const,
-    state: () => [...queryKeys.projectTaskRunner.all, "state"] as const,
-    queued: () => [...queryKeys.projectTaskRunner.all, "queued"] as const,
-  },
   backgroundTask: {
     all: ["background-task"] as const,
-    list: (filter?: unknown) => [...queryKeys.backgroundTask.all, "list", filter] as const,
-    detail: (jobId: string) => [...queryKeys.backgroundTask.all, "detail", jobId] as const,
     agentSyncStatus: () => [...queryKeys.backgroundTask.all, "agent-sync-status"] as const,
   },
   agent: {
@@ -109,7 +94,6 @@ export const queryKeys = {
   deviceSync: {
     all: ["device-sync"] as const,
     devices: () => [...queryKeys.deviceSync.all, "devices"] as const,
-    projects: (deviceId: string | null) => [...queryKeys.deviceSync.all, "projects", deviceId ?? "all"] as const,
     dailyUsage: (deviceId: string | null) => [...queryKeys.deviceSync.all, "daily-usage", deviceId ?? "all"] as const,
     hourlyUsage: (deviceId: string | null) => [...queryKeys.deviceSync.all, "hourly-usage", deviceId ?? "all"] as const,
     sharedSessions: (deviceId: string | null) => [...queryKeys.deviceSync.all, "shared-sessions", deviceId ?? "all"] as const,
@@ -128,12 +112,10 @@ export const queryKeys = {
     permissions: (deviceId: string, sessionId: string) => [...queryKeys.mobileDeviceSync.all, "permissions", deviceId, sessionId] as const,
     s3Settings: () => [...queryKeys.mobileDeviceSync.all, "s3-settings"] as const,
     lanProbes: () => [...queryKeys.mobileDeviceSync.all, "lan-probes"] as const,
-    projects: (deviceId: string | null) => [...queryKeys.mobileDeviceSync.all, "projects", deviceId ?? "all"] as const,
   },
   settings: {
     all: ["settings"] as const,
     autostart: () => [...queryKeys.settings.all, "autostart"] as const,
-    taskReviewNotification: () => [...queryKeys.settings.all, "task-review-notification"] as const,
     logCapture: () => [...queryKeys.settings.all, "log-capture"] as const,
     usageCostDisplay: () => [...queryKeys.settings.all, "usage-cost-display"] as const,
     upstreamProxy: () => [...queryKeys.settings.all, "upstream-proxy"] as const,

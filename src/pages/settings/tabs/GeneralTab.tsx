@@ -4,7 +4,6 @@ import type { AppLanguage } from "../../../app/preferences/translations";
 import { useAppPreferences, type ThemePreference } from "../../../app/preferences/AppPreferences";
 import type { TokenUnit } from "../../../shared/formatters/number";
 import { useAutostartSetting } from "../../../features/settings/useAutostartSetting";
-import { useTaskReviewNotification } from "../../../features/settings/useTaskReviewNotification";
 import { useUpstreamProxySetting } from "../../../features/settings/useUpstreamProxySetting";
 import { useUsageCostDisplaySetting } from "../../../features/settings/useUsageCostDisplaySetting";
 import type { UpstreamProxyConfig, UsageCostDisplayConfig } from "../../../domains/settings/types";
@@ -14,7 +13,6 @@ import styles from "./GeneralTab.module.css";
 export function GeneralTab() {
   const { language, setLanguage, theme, setTheme, tokenUnit, setTokenUnit, t } = useAppPreferences();
   const autostart = useAutostartSetting();
-  const taskReviewNotification = useTaskReviewNotification();
   const usageCost = useUsageCostDisplaySetting();
   const upstreamProxy = useUpstreamProxySetting();
   const [rateDraft, setRateDraft] = useState<number | string>(7.2);
@@ -295,27 +293,6 @@ export function GeneralTab() {
           name={t("关闭窗口后继续运行")}
           help={t("点击关闭按钮时最小化到托盘，不中断本地代理服务")}
           control={<Switch aria-label={t("关闭窗口后继续运行")} defaultChecked />}
-        />
-      </SettingSection>
-
-      <SettingSection title={t("通知")} keywords="通知 系统通知 任务 待审核 完成">
-        <SettingRow
-          name={t("任务完成待审核通知")}
-          help={t("任务执行完成进入待审核时发送系统通知")}
-          control={(
-            <Switch
-              aria-label={t("任务完成待审核通知")}
-              checked={taskReviewNotification.query.data ?? true}
-              loading={
-                taskReviewNotification.query.isLoading ||
-                taskReviewNotification.mutation.isPending
-              }
-              disabled={taskReviewNotification.query.isError}
-              onChange={(checked) => {
-                void taskReviewNotification.mutation.mutateAsync(checked);
-              }}
-            />
-          )}
         />
       </SettingSection>
     </div>

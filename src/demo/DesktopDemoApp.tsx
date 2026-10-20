@@ -5,10 +5,8 @@ import {
   DesktopOverviewDemoView,
   DesktopSidebarView,
   ModelsServiceDemoView,
-  ProjectsBoardDemoView,
   RequestLogsDemoView,
   SettingsDemoView,
-  TaskLogsDemoView,
   UsageAnalysisDemoView,
   UsageStatisticsDemoView,
   type DesktopNavGroup,
@@ -16,9 +14,7 @@ import {
 import {
   IconComment,
   IconHistogram,
-  IconHistory,
   IconHome,
-  IconKanban,
   IconList,
   IconPieChart2Stroked,
   IconServer,
@@ -26,7 +22,7 @@ import {
 } from "@douyinfe/semi-icons";
 import styles from "./DesktopDemoApp.module.css";
 
-type DemoPage = "overview" | "models" | "projects" | "logs" | "sessions" | "tasks" | "usage" | "usage-analysis" | "settings";
+type DemoPage = "overview" | "models" | "logs" | "sessions" | "usage" | "usage-analysis" | "settings";
 
 export function DesktopDemoApp() {
   const [active, setActive] = useState<DemoPage>("overview");
@@ -35,12 +31,10 @@ export function DesktopDemoApp() {
     { id: "workspace", label: zh ? "工作台" : "Workspace", items: [
       { id: "overview", label: zh ? "运行概览" : "Overview", icon: <IconHome /> },
       { id: "models", label: zh ? "模型服务" : "Models", icon: <IconServer /> },
-      { id: "projects", label: zh ? "项目管理" : "Projects", icon: <IconKanban /> },
     ] },
     { id: "records", label: zh ? "运行记录" : "Activity", items: [
       { id: "logs", label: zh ? "请求日志" : "Requests", icon: <IconList /> },
       { id: "sessions", label: zh ? "会话管理" : "Sessions", icon: <IconComment /> },
-      { id: "tasks", label: zh ? "任务日志" : "Tasks", icon: <IconHistory /> },
     ] },
     { id: "analysis", label: zh ? "分析" : "Analysis", items: [
       { id: "usage", label: zh ? "用量统计" : "Usage", icon: <IconHistogram /> },
@@ -50,10 +44,8 @@ export function DesktopDemoApp() {
   const labels: Record<DemoPage, string> = {
     overview: zh ? "运行概览" : "Overview",
     models: zh ? "模型服务" : "Models",
-    projects: zh ? "项目管理" : "Projects",
     logs: zh ? "请求日志" : "Requests",
     sessions: zh ? "会话管理" : "Sessions",
-    tasks: zh ? "任务日志" : "Tasks",
     usage: zh ? "用量统计" : "Usage",
     "usage-analysis": zh ? "用量洞察" : "Usage insights",
     settings: zh ? "应用设置" : "Settings",
@@ -62,12 +54,10 @@ export function DesktopDemoApp() {
   let content: React.ReactNode;
   switch (active) {
     case "models": content = <ModelsServiceDemoView zh={zh} />; break;
-    case "projects": content = <ProjectsBoardDemoView zh={zh} />; break;
     case "logs": content = <RequestLogsDemoView zh={zh} />; break;
     case "sessions": content = <AgentSessionsDemoView zh={zh} />; break;
     case "usage-analysis": content = <UsageAnalysisDemoView zh={zh} />; break;
     case "usage": content = <UsageStatisticsDemoView zh={zh} />; break;
-    case "tasks": content = <TaskLogsDemoView zh={zh} />; break;
     case "settings": content = <SettingsDemoView zh={zh} appVersion={__FLOWLET_APP_VERSION__} />; break;
     default: content = <DesktopOverviewDemoView zh={zh} />;
   }

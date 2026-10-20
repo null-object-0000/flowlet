@@ -5,10 +5,8 @@ import {
   DesktopOverviewDemoView,
   DesktopSidebarView,
   ModelsServiceDemoView,
-  ProjectsBoardDemoView,
   RequestLogsDemoView,
   SettingsDemoView,
-  TaskLogsDemoView,
   UsageAnalysisDemoView,
   UsageStatisticsDemoView,
   type DesktopNavGroup,
@@ -16,9 +14,7 @@ import {
 import {
   IconComment,
   IconHistogram,
-  IconHistory,
   IconHome,
-  IconKanban,
   IconList,
   IconPieChart2Stroked,
   IconServer,
@@ -28,7 +24,7 @@ import { useI18n } from "../i18n/I18nContext";
 import { appVersion } from "../appVersion";
 import styles from "./AppMockup.module.css";
 
-type DemoPage = "overview" | "models" | "projects" | "requests" | "sessions" | "tasks" | "usage" | "insights" | "settings";
+type DemoPage = "overview" | "models" | "requests" | "sessions" | "usage" | "insights" | "settings";
 
 export function AppMockup() {
   const { lang } = useI18n();
@@ -39,12 +35,10 @@ export function AppMockup() {
     { id: "workspace", label: zh ? "工作台" : "Workspace", items: [
       { id: "overview", label: zh ? "运行概览" : "Overview", icon: <IconHome /> },
       { id: "models", label: zh ? "模型服务" : "Models", icon: <IconServer /> },
-      { id: "projects", label: zh ? "项目管理" : "Projects", icon: <IconKanban /> },
     ] },
     { id: "records", label: zh ? "运行记录" : "Activity", items: [
       { id: "requests", label: zh ? "请求日志" : "Requests", icon: <IconList /> },
       { id: "sessions", label: zh ? "会话管理" : "Sessions", icon: <IconComment /> },
-      { id: "tasks", label: zh ? "任务日志" : "Tasks", icon: <IconHistory /> },
     ] },
     { id: "analysis", label: zh ? "分析" : "Analysis", items: [
       { id: "usage", label: zh ? "用量统计" : "Usage", icon: <IconHistogram /> },
@@ -55,10 +49,8 @@ export function AppMockup() {
   const pageMeta: Record<DemoPage, { title: string; subtitle: string }> = {
     overview: { title: zh ? "运行概览" : "Overview", subtitle: zh ? "本地模型服务状态" : "Local model service" },
     models: { title: zh ? "模型服务" : "Model services", subtitle: zh ? "开放模型与路由候选" : "Exposed models and routes" },
-    projects: { title: zh ? "项目管理" : "Projects", subtitle: zh ? "交给 Agent 执行的任务" : "Tasks delegated to agents" },
     requests: { title: zh ? "请求日志" : "Request log", subtitle: zh ? "真实上游请求与响应" : "Actual upstream requests" },
     sessions: { title: zh ? "会话管理" : "Sessions", subtitle: zh ? "Agent 原生会话与活动" : "Native agent sessions" },
-    tasks: { title: zh ? "任务日志" : "Tasks", subtitle: zh ? "后台任务执行记录" : "Background task activity" },
     usage: { title: zh ? "用量统计" : "Usage", subtitle: zh ? "Token 与费用统计" : "Token and cost totals" },
     insights: { title: zh ? "用量洞察" : "Usage insights", subtitle: zh ? "Token、性能与费用" : "Tokens, performance and cost" },
     settings: { title: zh ? "应用设置" : "Settings", subtitle: zh ? "应用偏好与本地数据" : "Preferences and local data" },
@@ -67,10 +59,8 @@ export function AppMockup() {
   let content: React.ReactNode;
   switch (activePage) {
     case "models": content = <ModelsServiceDemoView zh={zh} />; break;
-    case "projects": content = <ProjectsBoardDemoView zh={zh} />; break;
     case "requests": content = <RequestLogsDemoView zh={zh} />; break;
     case "sessions": content = <AgentSessionsDemoView zh={zh} />; break;
-    case "tasks": content = <TaskLogsDemoView zh={zh} />; break;
     case "settings": content = <SettingsDemoView zh={zh} appVersion={appVersion} />; break;
     case "usage": content = <UsageStatisticsDemoView zh={zh} />; break;
     case "insights": content = <UsageAnalysisDemoView zh={zh} />; break;
@@ -88,7 +78,7 @@ export function AppMockup() {
         activeId={activePage}
         settings={{ id: "settings", label: zh ? "应用设置" : "Settings", icon: <IconSetting /> }}
         onNavigate={(id) => {
-          if (["overview", "models", "projects", "requests", "sessions", "tasks", "usage", "insights", "settings"].includes(id)) setActivePage(id as DemoPage);
+          if (["overview", "models", "requests", "sessions", "usage", "insights", "settings"].includes(id)) setActivePage(id as DemoPage);
         }}
       />}
     >

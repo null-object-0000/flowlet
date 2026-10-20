@@ -71,7 +71,6 @@ export function AgentSessionsPage() {
   );
   const syncAgentData = useAgentDataSync();
   const syncStatus = useAgentSyncStatus();
-  const [lastJobId, setLastJobId] = useState<string | null>(null);
 
   const remoteRows = useMemo(() => {
     if (isCurrentDevice || deviceId == null) return EMPTY_ROWS;
@@ -240,14 +239,13 @@ export function AgentSessionsPage() {
                 <div className={styles.syncActions}>
                   {isCurrentDevice ? (
                     <>
-                      {lastJobId ? <Button type="tertiary" onClick={() => navigate(`/tasks?jobId=${encodeURIComponent(lastJobId)}`)}>{t("查看任务")}</Button> : null}
                       <Button
                         className={`${secondaryButtonStyles.button} ${secondaryButtonStyles.compact}`}
                         icon={<IconRefresh />}
                         type="tertiary"
                         theme="outline"
                         loading={sessions.isFetching || syncAgentData.isPending || (syncStatus.data?.running ?? false)}
-                        onClick={() => void syncAgentData.mutateAsync({ force: true, triggerSource: "manual" }).then((result) => { setLastJobId(result.jobId); Toast.success(result.message); }).catch((error: Error) => Toast.error(error.message))}
+                        onClick={() => void syncAgentData.mutateAsync({ force: true, triggerSource: "manual" }).then((result) => { Toast.success(result.message); }).catch((error: Error) => Toast.error(error.message))}
                       >
                         {t("同步数据")}
                       </Button>

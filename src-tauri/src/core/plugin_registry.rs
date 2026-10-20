@@ -58,9 +58,7 @@ pub struct AgentPluginDescriptor {
     pub global_config_adapter_id: String,
     pub session_adapter_id: String,
     pub identity_adapter_id: String,
-    pub runner_adapter_id: String,
     pub session_types: Vec<AgentSessionTypeDescriptor>,
-    pub task_profile: AgentTaskProfileDescriptor,
     pub config_capabilities: Vec<AgentConfigCapabilityDescriptor>,
     pub endpoint_suffix: String,
     pub npm_package: String,
@@ -75,13 +73,6 @@ pub struct AgentSessionTypeDescriptor {
     pub id: String,
     pub name: String,
     pub client_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentTaskProfileDescriptor {
-    pub name: String,
-    pub session_type: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -124,7 +115,6 @@ impl PluginRegistry {
         let mut plugin_ids = HashSet::new();
         let mut contributions = HashSet::new();
         let mut session_type_ids = HashSet::new();
-        let mut task_profile_names = HashSet::new();
         let mut channels = Vec::new();
         let mut agents = Vec::new();
         let mut model_catalogs = 0;
@@ -178,24 +168,11 @@ impl PluginRegistry {
                         || agent.global_config_adapter_id.trim().is_empty()
                         || agent.session_adapter_id.trim().is_empty()
                         || agent.identity_adapter_id.trim().is_empty()
-                        || agent.runner_adapter_id.trim().is_empty()
                         || agent.session_types.is_empty()
-                        || agent.task_profile.name.trim().is_empty()
-                        || agent.task_profile.session_type.trim().is_empty()
                         || agent.npm_package.trim().is_empty()
                         || agent.surfaces.is_empty()
                     {
                         return Err(format!("Agent 插件声明不完整：{}", agent.id));
-                    }
-                    if !agent
-                        .session_types
-                        .iter()
-                        .any(|session| session.id == agent.task_profile.session_type)
-                    {
-                        return Err(format!(
-                            "Agent 插件 {} 的任务会话类型未注册：{}",
-                            agent.id, agent.task_profile.session_type
-                        ));
                     }
                     for session in &agent.session_types {
                         if session.id.trim().is_empty()
@@ -218,12 +195,6 @@ impl PluginRegistry {
                                 agent.id, capability.id
                             ));
                         }
-                    }
-                    if !task_profile_names.insert(agent.task_profile.name.clone()) {
-                        return Err(format!(
-                            "Agent 任务 Profile 重复：{}",
-                            agent.task_profile.name
-                        ));
                     }
                     if !crate::core::agent_environment::has_environment_adapter(
                         &agent.environment_adapter_id,
@@ -275,32 +246,6 @@ impl PluginRegistry {
                         return Err(format!(
                             "Agent 插件 {} 引用了未知身份适配器：{}",
                             agent.id, agent.identity_adapter_id
-                        ));
-                    }
-                    if !crate::core::agent_task_runner::has_runner_adapter(&agent.runner_adapter_id)
-                    {
-                        return Err(format!(
-                            "Agent 插件 {} 引用了未知任务执行适配器：{}",
-                            agent.id, agent.runner_adapter_id
-                        ));
-                    }
-                    let (profile, required_surface, _) =
-                        crate::core::agent_task_runner::runner_contract(&agent.runner_adapter_id)
-                            .expect("已校验 Runner Adapter 存在");
-                    let required_surface = match required_surface {
-                        crate::core::agent_environment::AgentSurface::Cli => "cli",
-                        crate::core::agent_environment::AgentSurface::Desktop => "desktop",
-                        crate::core::agent_environment::AgentSurface::Web => "web",
-                    };
-                    if agent.task_profile.name != profile
-                        || !agent
-                            .surfaces
-                            .iter()
-                            .any(|surface| surface == required_surface)
-                    {
-                        return Err(format!(
-                            "Agent 插件 {} 的任务 Profile 或执行 Surface 与 Runner Adapter 不一致",
-                            agent.id
                         ));
                     }
                     agents.push(agent);
@@ -441,7 +386,6 @@ mod tests {
             "codex"
         );
         assert_eq!(registry.agent("codex").unwrap().session_adapter_id, "codex");
-        assert_eq!(registry.agent("codex").unwrap().runner_adapter_id, "codex");
         assert!(
             registry
                 .agent("deepseek-harness")
@@ -511,7 +455,7 @@ mod tests {
 
     #[test]
     fn unknown_agent_global_config_adapter_is_rejected() {
-        let unknown = r#"{"schemaVersion":3,"plugins":[{"id":"models","kind":"model-catalog","source":"model-catalog.json"},{"id":"agent","kind":"agent","agent":{"id":"demo","name":"Demo","environmentAdapterId":"pi","globalConfigAdapterId":"missing","sessionAdapterId":"pi","identityAdapterId":"pi","runnerAdapterId":"pi","sessionTypes":[{"id":"pi","name":"Pi"}],"taskProfile":{"name":"Pi","sessionType":"pi"},"endpointSuffix":"/v1","npmPackage":"demo","surfaces":["cli"]}}]}"#;
+        let unknown = r#"{"schemaVersion":3,"plugins":[{"id":"models","kind":"model-catalog","source":"model-catalog.json"},{"id":"agent","kind":"agent","agent":{"id":"demo","name":"Demo","environmentAdapterId":"pi","globalConfigAdapterId":"missing","sessionAdapterId":"pi","identityAdapterId":"pi","sessionTypes":[{"id":"pi","name":"Pi"}],"endpointSuffix":"/v1","npmPackage":"demo","surfaces":["cli"]}}]}"#;
         let error = PluginRegistry::from_json(&current_schema_fixture(unknown)).unwrap_err();
         assert!(error.contains("未知全局配置适配器"));
         assert!(error.contains("missing"));
@@ -519,7 +463,7 @@ mod tests {
 
     #[test]
     fn unknown_agent_environment_adapter_is_rejected() {
-        let unknown = r#"{"schemaVersion":3,"plugins":[{"id":"models","kind":"model-catalog","source":"model-catalog.json"},{"id":"agent","kind":"agent","agent":{"id":"demo","name":"Demo","environmentAdapterId":"missing","globalConfigAdapterId":"pi","sessionAdapterId":"pi","identityAdapterId":"pi","runnerAdapterId":"pi","sessionTypes":[{"id":"pi","name":"Pi"}],"taskProfile":{"name":"Pi","sessionType":"pi"},"endpointSuffix":"/v1","npmPackage":"demo","surfaces":["cli"]}}]}"#;
+        let unknown = r#"{"schemaVersion":3,"plugins":[{"id":"models","kind":"model-catalog","source":"model-catalog.json"},{"id":"agent","kind":"agent","agent":{"id":"demo","name":"Demo","environmentAdapterId":"missing","globalConfigAdapterId":"pi","sessionAdapterId":"pi","identityAdapterId":"pi","sessionTypes":[{"id":"pi","name":"Pi"}],"endpointSuffix":"/v1","npmPackage":"demo","surfaces":["cli"]}}]}"#;
         let error = PluginRegistry::from_json(&current_schema_fixture(unknown)).unwrap_err();
         assert!(error.contains("未知环境适配器"));
         assert!(error.contains("missing"));
@@ -527,23 +471,15 @@ mod tests {
 
     #[test]
     fn unknown_agent_session_adapter_is_rejected() {
-        let unknown = r#"{"schemaVersion":3,"plugins":[{"id":"models","kind":"model-catalog","source":"model-catalog.json"},{"id":"agent","kind":"agent","agent":{"id":"demo","name":"Demo","environmentAdapterId":"pi","globalConfigAdapterId":"pi","sessionAdapterId":"missing","identityAdapterId":"pi","runnerAdapterId":"pi","sessionTypes":[{"id":"pi","name":"Pi"}],"taskProfile":{"name":"Pi","sessionType":"pi"},"endpointSuffix":"/v1","npmPackage":"demo","surfaces":["cli"]}}]}"#;
+        let unknown = r#"{"schemaVersion":3,"plugins":[{"id":"models","kind":"model-catalog","source":"model-catalog.json"},{"id":"agent","kind":"agent","agent":{"id":"demo","name":"Demo","environmentAdapterId":"pi","globalConfigAdapterId":"pi","sessionAdapterId":"missing","identityAdapterId":"pi","sessionTypes":[{"id":"pi","name":"Pi"}],"endpointSuffix":"/v1","npmPackage":"demo","surfaces":["cli"]}}]}"#;
         let error = PluginRegistry::from_json(&current_schema_fixture(unknown)).unwrap_err();
         assert!(error.contains("未知会话适配器"));
         assert!(error.contains("missing"));
     }
 
     #[test]
-    fn unknown_agent_runner_adapter_is_rejected() {
-        let unknown = r#"{"schemaVersion":3,"plugins":[{"id":"models","kind":"model-catalog","source":"model-catalog.json"},{"id":"agent","kind":"agent","agent":{"id":"demo","name":"Demo","environmentAdapterId":"pi","globalConfigAdapterId":"pi","sessionAdapterId":"pi","identityAdapterId":"pi","runnerAdapterId":"missing","sessionTypes":[{"id":"pi","name":"Pi"}],"taskProfile":{"name":"Pi","sessionType":"pi"},"endpointSuffix":"/v1","npmPackage":"demo","surfaces":["cli"]}}]}"#;
-        let error = PluginRegistry::from_json(&current_schema_fixture(unknown)).unwrap_err();
-        assert!(error.contains("未知任务执行适配器"));
-        assert!(error.contains("missing"));
-    }
-
-    #[test]
     fn unknown_agent_identity_adapter_is_rejected() {
-        let unknown = r#"{"schemaVersion":3,"plugins":[{"id":"models","kind":"model-catalog","source":"model-catalog.json"},{"id":"agent","kind":"agent","agent":{"id":"demo","name":"Demo","environmentAdapterId":"pi","globalConfigAdapterId":"pi","sessionAdapterId":"pi","identityAdapterId":"missing","runnerAdapterId":"pi","sessionTypes":[{"id":"pi","name":"Pi"}],"taskProfile":{"name":"Pi","sessionType":"pi"},"endpointSuffix":"/v1","npmPackage":"demo","surfaces":["cli"]}}]}"#;
+        let unknown = r#"{"schemaVersion":3,"plugins":[{"id":"models","kind":"model-catalog","source":"model-catalog.json"},{"id":"agent","kind":"agent","agent":{"id":"demo","name":"Demo","environmentAdapterId":"pi","globalConfigAdapterId":"pi","sessionAdapterId":"pi","identityAdapterId":"missing","sessionTypes":[{"id":"pi","name":"Pi"}],"endpointSuffix":"/v1","npmPackage":"demo","surfaces":["cli"]}}]}"#;
         let error = PluginRegistry::from_json(&current_schema_fixture(unknown)).unwrap_err();
         assert!(error.contains("未知身份适配器"));
         assert!(error.contains("missing"));

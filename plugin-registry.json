@@ -19,9 +19,7 @@
         "globalConfigAdapterId": "claude-code",
         "sessionAdapterId": "claude-code",
         "identityAdapterId": "claude-code",
-        "runnerAdapterId": "claude-code",
         "sessionTypes": [{ "id": "claude-code", "name": "Claude Code", "clientId": "claude-code" }],
-        "taskProfile": { "name": "Claude Code", "sessionType": "claude-code" },
         "configCapabilities": [
           { "id": "primary-long-context", "name": "主模型 1M 长上下文", "kind": "boolean", "defaultEnabled": false, "requiresRestart": true },
           { "id": "fast-long-context", "name": "快速模型 1M 长上下文", "kind": "boolean", "defaultEnabled": false, "requiresRestart": true }
@@ -54,9 +52,7 @@
         "globalConfigAdapterId": "opencode",
         "sessionAdapterId": "opencode",
         "identityAdapterId": "opencode",
-        "runnerAdapterId": "opencode",
         "sessionTypes": [{ "id": "opencode", "name": "OpenCode", "clientId": "opencode" }],
-        "taskProfile": { "name": "OpenCode", "sessionType": "opencode" },
         "configCapabilities": [
           { "id": "model-specs", "name": "输入模态声明", "kind": "boolean", "defaultEnabled": false, "requiresRestart": true }
         ],
@@ -87,9 +83,7 @@
         "globalConfigAdapterId": "pi",
         "sessionAdapterId": "pi",
         "identityAdapterId": "pi",
-        "runnerAdapterId": "pi",
         "sessionTypes": [{ "id": "pi", "name": "Pi", "clientId": "pi" }],
-        "taskProfile": { "name": "Pi", "sessionType": "pi" },
         "configCapabilities": [
           { "id": "session-extension", "name": "精确会话关联", "kind": "boolean", "defaultEnabled": false, "requiresRestart": true },
           { "id": "model-specs", "name": "输入模态声明", "kind": "boolean", "defaultEnabled": false, "requiresRestart": false }
@@ -121,12 +115,10 @@
         "globalConfigAdapterId": "codex",
         "sessionAdapterId": "codex",
         "identityAdapterId": "codex",
-        "runnerAdapterId": "codex",
         "sessionTypes": [
           { "id": "codex-desktop", "name": "Codex Desktop", "clientId": "codex-desktop" },
           { "id": "codex-cli", "name": "Codex CLI", "clientId": "codex" }
         ],
-        "taskProfile": { "name": "Codex", "sessionType": "codex-cli" },
         "configCapabilities": [],
         "endpointSuffix": "/v1",
         "npmPackage": "@openai/codex",
@@ -155,9 +147,7 @@
         "globalConfigAdapterId": "deepseek-harness",
         "sessionAdapterId": "deepseek-harness",
         "identityAdapterId": "deepseek-harness",
-        "runnerAdapterId": "deepseek-harness",
         "sessionTypes": [{ "id": "deepseek-harness", "name": "DeepSeek Harness", "clientId": "deepseek-harness" }],
-        "taskProfile": { "name": "DeepSeek Harness", "sessionType": "deepseek-harness" },
         "configCapabilities": [
           { "id": "session-extension", "name": "精确会话关联", "kind": "boolean", "defaultEnabled": false, "requiresRestart": true },
           { "id": "model-specs", "name": "模型规格声明", "kind": "boolean", "defaultEnabled": false, "requiresRestart": false },
@@ -190,9 +180,7 @@
         "globalConfigAdapterId": "hermes",
         "sessionAdapterId": "hermes",
         "identityAdapterId": "hermes",
-        "runnerAdapterId": "hermes",
         "sessionTypes": [{ "id": "hermes", "name": "Hermes Agent", "clientId": "hermes" }],
-        "taskProfile": { "name": "Hermes Agent", "sessionType": "hermes" },
         "configCapabilities": [
           { "id": "session-extension", "name": "精确会话关联", "kind": "boolean", "defaultEnabled": false, "requiresRestart": true }
         ],

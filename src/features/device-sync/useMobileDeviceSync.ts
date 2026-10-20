@@ -4,7 +4,6 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { mobileDeviceSyncCommands } from "../../domains/device-sync/commands";
 import { queryKeys } from "../../shared/query-keys";
 import type { OpenCodePermissionDecision } from "../../domains/agent-session/types";
-import type { TaskDeleteInput, TaskEditInput, TaskStatusInput, TaskSubmitInput } from "../../domains/device-sync/types";
 
 export function useMobileDevices() {
   return useQuery({
@@ -121,100 +120,6 @@ export function useMobileS3Settings() {
   });
 }
 
-/** 共享设备项目目录：移动端任务提交入口的数据源。
- *  deviceId 传 null 表示读取全部设备的项目快照（跨设备任务混合展示用）。 */
-export function useMobileProjects(deviceId: string | null) {
-  return useQuery({
-    queryKey: queryKeys.mobileDeviceSync.projects(deviceId),
-    queryFn: () => mobileDeviceSyncCommands.projects(deviceId),
-    staleTime: 15_000,
-  });
-}
-
-/** 向指定设备提交任务（签名 LAN 通道）。任务默认以草稿状态创建。
- *  deviceId 由页面从表单选中的可执行项目派生；成功后失效全部设备项目，保证跨设备混合列表即时更新。 */
-export function useMobileSubmitTask(deviceId: string | null) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (input: TaskSubmitInput) => {
-      if (!deviceId) throw new Error("请先选择设备");
-      return mobileDeviceSyncCommands.submitTask(deviceId, input);
-    },
-    onSuccess: async () => {
-      // LAN 提交只写入目标桌面端本地存储，本机共享项目快照不会自动包含新任务。
-      // 成功后先直连拉取目标设备最新快照并导入本地，再失效查询，让列表即时展示新任务；
-      // 直连刷新失败（如局域网抖动）时静默沿用旧缓存，由后台 S3 同步兜底。
-      if (!deviceId) return;
-      await mobileDeviceSyncCommands.refreshLan(deviceId).catch(() => undefined);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.projects(null) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.devices() }),
-      ]);
-    },
-  });
-}
-
-/** 通过签名 LAN 通道提交 / 撤回任务（草稿 ↔ 已提交），与 PC 看板交互一致。 */
-export function useMobileSetTaskStatus(deviceId: string | null) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (input: TaskStatusInput) => {
-      if (!deviceId) throw new Error("请先选择设备");
-      return mobileDeviceSyncCommands.setTaskStatus(deviceId, input);
-    },
-    onSuccess: async () => {
-      // 状态变更同样只落在目标桌面端本地存储，先直连刷新目标设备快照，
-      // 让任务列表的最新状态与折叠 Tab 计数即时同步；失败时沿用旧缓存等待后台同步。
-      if (!deviceId) return;
-      await mobileDeviceSyncCommands.refreshLan(deviceId).catch(() => undefined);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.projects(null) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.devices() }),
-      ]);
-    },
-  });
-}
-
-/** 通过签名 LAN 通道编辑草稿任务内容，与 PC 看板「草稿可编辑」语义一致。
- *  成功后直连刷新目标设备快照，让列表即时展示新内容；失败时沿用旧缓存等待后台同步。 */
-export function useMobileEditTask(deviceId: string | null) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (input: TaskEditInput) => {
-      if (!deviceId) throw new Error("请先选择设备");
-      return mobileDeviceSyncCommands.editTask(deviceId, input);
-    },
-    onSuccess: async () => {
-      if (!deviceId) return;
-      await mobileDeviceSyncCommands.refreshLan(deviceId).catch(() => undefined);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.projects(null) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.devices() }),
-      ]);
-    },
-  });
-}
-
-/** 通过签名 LAN 通道删除草稿任务，与 PC 看板「草稿可删除」语义一致。
- *  成功后直连刷新目标设备快照，让列表即时移除该任务；失败时沿用旧缓存等待后台同步。 */
-export function useMobileDeleteTask(deviceId: string | null) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (input: TaskDeleteInput) => {
-      if (!deviceId) throw new Error("请先选择设备");
-      return mobileDeviceSyncCommands.deleteTask(deviceId, input);
-    },
-    onSuccess: async () => {
-      if (!deviceId) return;
-      await mobileDeviceSyncCommands.refreshLan(deviceId).catch(() => undefined);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.projects(null) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.devices() }),
-      ]);
-    },
-  });
-}
-
 export function useMobileDeviceSyncActions() {
   const queryClient = useQueryClient();
   const invalidate = async () => {
@@ -249,7 +154,6 @@ export function useMobileDeviceRefresh(deviceId: string | null) {
         queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.dailyUsage(deviceId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.hourlyUsage(deviceId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.sessions(deviceId) }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.projects(deviceId) }),
         queryClient.invalidateQueries({ queryKey: queryKeys.mobileDeviceSync.lanProbes() }),
       ]);
     },

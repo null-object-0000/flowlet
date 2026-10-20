@@ -18,14 +18,6 @@ export type AgentSessionCapability = {
   clientId: string;
 };
 
-export type AgentTaskCapability = {
-  profile: string;
-  sessionType: string;
-  requiredSurface: AgentSurface;
-  supportsResume: boolean;
-  resumeUnsupportedMessage: string;
-};
-
 export type AgentConfigCapability = {
   id: string;
   name: string;
@@ -40,7 +32,6 @@ export type AgentCapability = {
   name: string;
   surfaces: AgentSurface[];
   sessionTypes: AgentSessionCapability[];
-  task: AgentTaskCapability;
   configCapabilities: AgentConfigCapability[];
 };
 

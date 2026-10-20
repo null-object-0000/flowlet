@@ -1,5 +1,4 @@
 import { IconChevronDown, IconChevronUp, IconDesktop } from "@douyinfe/semi-icons";
-import { Tag } from "@douyinfe/semi-ui-19";
 import type { ReactNode } from "react";
 import styles from "./MobilePageView.module.css";
 
@@ -29,51 +28,6 @@ export function MobilePageHeaderView({ title, subtitle, meta, picker = false }: 
 
 export function MobileCardView({ children, className = "" }: { children: ReactNode; className?: string }) {
   return <article className={`${styles.card} ${className}`}>{children}</article>;
-}
-
-export type MobileTaskTabModel = { id: string; label: string; count: number };
-export type MobileTaskRowModel = {
-  id: string;
-  project: string;
-  status: string;
-  statusColor?: "grey" | "blue" | "green" | "orange" | "light-blue";
-  title: string;
-  round: string;
-  device: string;
-  updated: string;
-};
-
-export function MobileTaskBoardView({ tabs, activeTab, rows, empty, onTabChange, onTaskOpen }: {
-  tabs: MobileTaskTabModel[];
-  activeTab: string;
-  rows: MobileTaskRowModel[];
-  empty?: ReactNode;
-  onTabChange?: (id: string) => void;
-  onTaskOpen?: (id: string) => void;
-}) {
-  return <>
-    <div className={styles.taskTabs} role="group">
-      {tabs.map((tab) => <button key={tab.id} type="button" aria-pressed={activeTab === tab.id} onClick={() => onTabChange?.(tab.id)}>{tab.label}<span>{tab.count}</span></button>)}
-    </div>
-    {rows.length === 0 ? empty : <div className={styles.taskList}>{rows.map((row) => (
-      <article
-        key={row.id}
-        className={styles.taskCard}
-        role={onTaskOpen ? "button" : undefined}
-        tabIndex={onTaskOpen ? 0 : undefined}
-        onClick={() => onTaskOpen?.(row.id)}
-        onKeyDown={(event) => {
-          if (!onTaskOpen || (event.key !== "Enter" && event.key !== " ")) return;
-          event.preventDefault();
-          onTaskOpen(row.id);
-        }}
-      >
-        <div className={styles.taskTopline}><span className={styles.taskProject}>{row.project}</span><Tag color={row.statusColor ?? "grey"} size="small">{row.status}</Tag></div>
-        <strong className={styles.taskTitle}>{row.title}</strong>
-        <div className={styles.taskMeta}><span className={styles.roundBadge}>{row.round}</span><span>{row.device}</span><time>{row.updated}</time></div>
-      </article>
-    ))}</div>}
-  </>;
 }
 
 export type MobileDeviceRowModel = {

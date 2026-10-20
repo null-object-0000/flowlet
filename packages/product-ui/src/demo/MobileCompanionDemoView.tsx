@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { IconChevronLeft, IconChevronRight, IconComment, IconDesktop, IconHome, IconList, IconRefresh, IconSetting } from "@douyinfe/semi-icons";
+import { IconChevronLeft, IconChevronRight, IconComment, IconDesktop, IconHome, IconRefresh, IconSetting } from "@douyinfe/semi-icons";
 import { Button, Select } from "@douyinfe/semi-ui-19";
 import { MobileAppFrameView, type MobileNavItem } from "../mobile/MobileAppFrameView";
 import {
@@ -7,15 +7,13 @@ import {
   MobileDeviceListView,
   MobilePageHeaderView,
   MobilePageView,
-  MobileTaskBoardView,
   mobileProductViewStyles as pageStyles,
   type MobileDeviceRowModel,
-  type MobileTaskRowModel,
 } from "../mobile/MobileProductViews";
 import { UsageSummaryGridView } from "../mobile/UsageSummaryGridView";
 import styles from "./MobileCompanionDemoView.module.css";
 
-type MobilePage = "overview" | "projects" | "devices" | "settings";
+type MobilePage = "overview" | "devices" | "settings";
 type Copy = {
   eyebrow: string;
   title: string;
@@ -28,30 +26,28 @@ const copy: Record<"zh" | "en", Copy> = {
   zh: {
     eyebrow: "移动辅助端",
     title: "离开电脑，也能掌握 Agent 正在做什么。",
-    description: "连接你自己的同步存储，在手机上汇总多台 Flowlet 设备；回到局域网后，还能把任务直接交给目标设备。",
-    nav: { overview: "概览", projects: "项目", devices: "设备", settings: "设置" },
+    description: "连接你自己的同步存储，在手机上汇总多台 Flowlet 设备的用量与会话。",
+    nav: { overview: "概览", devices: "设备", settings: "设置" },
     features: [
       { id: "overview", title: "跨设备用量", description: "按设备查看 Token、请求量、缓存和费用。" },
       { id: "devices", title: "会话与 Agent", description: "查看各设备的会话状态、已安装 Agent 与接入情况。" },
-      { id: "projects", title: "移动处理任务", description: "在局域网内提交项目任务，并处理 Agent 交互确认。" },
       { id: "settings", title: "同步由你掌控", description: "使用自己的 S3-compatible 存储连接多台设备。" },
     ],
   },
   en: {
     eyebrow: "Mobile companion",
     title: "Stay on top of your agents away from your desk.",
-    description: "Connect your own sync storage to bring multiple Flowlet devices together, then send work to a target device on the same LAN.",
-    nav: { overview: "Overview", projects: "Projects", devices: "Devices", settings: "Settings" },
+    description: "Connect your own sync storage to bring usage and sessions from multiple Flowlet devices together.",
+    nav: { overview: "Overview", devices: "Devices", settings: "Settings" },
     features: [
       { id: "overview", title: "Cross-device usage", description: "See tokens, requests, cache, and cost by device." },
       { id: "devices", title: "Sessions and agents", description: "Inspect sessions, installed agents, and connection status." },
-      { id: "projects", title: "Handle work on mobile", description: "Submit project tasks and respond to agent confirmations over LAN." },
       { id: "settings", title: "Your sync, your control", description: "Connect devices through your own S3-compatible storage." },
     ],
   },
 };
 
-const pageIcons: Record<MobilePage, ReactNode> = { overview: <IconHome />, projects: <IconList />, devices: <IconDesktop />, settings: <IconSetting /> };
+const pageIcons: Record<MobilePage, ReactNode> = { overview: <IconHome />, devices: <IconDesktop />, settings: <IconSetting /> };
 
 export function MobileCompanionDemoView({ zh = true, appVersion }: { zh?: boolean; appVersion: string; logoSrc?: string }) {
   const text = copy[zh ? "zh" : "en"];
@@ -66,7 +62,6 @@ export function MobileCompanionDemoView({ zh = true, appVersion }: { zh?: boolea
       <div className={styles.phoneTop}><span>9:41</span><i /><b /></div>
       <MobileAppFrameView embedded items={navItems} activeId={activePage} navigationLabel={zh ? "主导航" : "Main navigation"} onNavigate={(id) => setActivePage(id as MobilePage)}>
         {activePage === "overview" ? <OverviewDemoPage zh={zh} /> : null}
-        {activePage === "projects" ? <ProjectsDemoPage zh={zh} /> : null}
         {activePage === "devices" ? <DevicesDemoPage zh={zh} appVersion={appVersion} /> : null}
         {activePage === "settings" ? <SettingsDemoPage zh={zh} /> : null}
       </MobileAppFrameView>
@@ -89,18 +84,6 @@ function OverviewDemoPage({ zh }: { zh: boolean }) {
     ]} />
     <MobileCardView><div className={pageStyles.cardHeader}><div><strong>{zh ? "星期 × 小时 Token 热力图" : "Weekday × hour token heatmap"}</strong><span>{zh ? "点击时段查看汇总" : "Select a cell for details"}</span></div><div className={pageStyles.metricSeg}><button type="button" aria-pressed="true">Token</button><button type="button">{zh ? "预估费用" : "Cost"}</button></div></div><div className={pageStyles.heatmapLabels}>{(zh ? ["一","二","三","四","五","六","日"] : ["M","T","W","T","F","S","S"]).map((label, i) => <span key={`${label}-${i}`}>{label}</span>)}</div><div className={pageStyles.mobileHeatmap}>{Array.from({ length: 42 }, (_, index) => <button key={index} type="button" className={`${pageStyles.heatmapCell} ${pageStyles[`heatLevel${(index * 7 + 3) % 5}`]}`} />)}</div><div className={pageStyles.heatmapLegend}><span>{zh ? "少" : "Low"}</span>{[0,1,2,3,4].map((level) => <i key={level} className={`${pageStyles.heatmapCell} ${pageStyles[`heatLevel${level}`]}`} />)}<span>{zh ? "多" : "High"}</span></div></MobileCardView>
   </MobilePageView>;
-}
-
-function ProjectsDemoPage({ zh }: { zh: boolean }) {
-  const rows: MobileTaskRowModel[] = zh ? [
-    { id: "1", project: "Flowlet", status: "执行中", statusColor: "green", title: "官网发布前检查", round: "第 2 轮", device: "Windows 工作站", updated: "更新于 09:48" },
-    { id: "2", project: "Flowlet", status: "待审核", statusColor: "orange", title: "验证移动端同步", round: "第 1 轮", device: "开发主机", updated: "更新于 09:42" },
-    { id: "3", project: "Flowlet", status: "已提交", statusColor: "blue", title: "整理 v0.1.0 说明", round: "第 1 轮", device: "Windows 工作站", updated: "更新于 09:30" },
-  ] : [
-    { id: "1", project: "Flowlet", status: "Running", statusColor: "green", title: "Pre-release website check", round: "Round 2", device: "Windows workstation", updated: "Updated 09:48" },
-    { id: "2", project: "Flowlet", status: "Review", statusColor: "orange", title: "Verify mobile sync", round: "Round 1", device: "Dev machine", updated: "Updated 09:42" },
-  ];
-  return <MobilePageView><MobilePageHeaderView picker title={zh ? "项目 · Flowlet" : "Project · Flowlet"} meta={<small className={styles.lastRefresh}>{zh ? "刚刚刷新" : "Just refreshed"}</small>} subtitle={zh ? "查看所有设备上单个项目的任务，并提交新任务到指定设备" : "Review tasks across devices and submit new work"} /><MobileTaskBoardView tabs={[{ id: "pending", label: zh ? "待处理" : "Pending", count: 3 },{ id: "running", label: zh ? "进行中" : "Running", count: 1 },{ id: "review", label: zh ? "待审核" : "Review", count: 1 },{ id: "done", label: zh ? "已完成" : "Done", count: 8 }]} activeTab="pending" rows={rows} /><button type="button" className={pageStyles.addTaskFab}>+</button></MobilePageView>;
 }
 
 function DevicesDemoPage({ zh, appVersion }: { zh: boolean; appVersion: string }) {

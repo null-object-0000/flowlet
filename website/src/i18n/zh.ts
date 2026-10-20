@@ -45,8 +45,8 @@ export const zh = {
     mobileTab: "移动辅助端",
     title: "直接操作完整的 Flowlet 桌面界面。",
     subtitle: "从模型接入到 Agent 工作追踪，亲自体验 Flowlet 如何把运行状态、请求链路和用量成本收进一个本地控制台。",
-    mobileTitle: "从手机查看多台设备，也能把任务送回电脑。",
-    mobileSubtitle: "切换下方菜单，体验移动端如何汇总用量、设备、会话与项目，并在局域网内处理 Agent 工作。",
+    mobileTitle: "从手机查看多台设备的使用情况。",
+    mobileSubtitle: "切换下方菜单，体验移动端如何汇总多台设备的用量、设备与会话信息。",
   },
   value: {
     eyebrow: "为什么 Flowlet",
@@ -76,7 +76,7 @@ export const zh = {
     subtitle: "把“谁发起、走哪个模型、用哪个账号、上游怎么响应、最终花了多少”串成一条完整链路。",
     localEndpoint: "本地端点",
     upstream: "真实上游",
-    centerDesc: "统一入口 · 账号路由 · 请求追踪 · 用量归因 · 本机任务",
+    centerDesc: "统一入口 · 账号路由 · 请求追踪 · 用量归因",
     evidence: ["Agent 会话", "本地请求", "实际路由", "上游结果", "Token / Cost"],
   },
   trace: {
@@ -105,10 +105,10 @@ export const zh = {
     title: "接入现有 Agent 和模型账号，不改变工作方式。",
     subtitle: "检测本机安装，检查、备份、写入或恢复全局配置；接管入口，但不接管你的工具选择。",
     agents: [
-      { name: "Claude Code", detail: "接入 · 会话 · 任务" },
+      { name: "Claude Code", detail: "接入 · 会话" },
       { name: "Codex", detail: "CLI / Desktop / VS Code" },
       { name: "OpenCode", detail: "CLI / Desktop · 交互确认" },
-      { name: "Pi", detail: "接入 · 会话 · 任务" },
+      { name: "Pi", detail: "接入 · 会话" },
     ],
     channelsTitle: "连接多个模型渠道",
     channels: ["LongCat", "DeepSeek", "Kimi", "Qwen", "Z.AI", "OpenRouter", "自定义渠道"],

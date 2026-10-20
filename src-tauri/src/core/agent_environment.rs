@@ -128,10 +128,13 @@ pub struct AgentInstallation {
     pub version_output: Option<String>,
     pub available_on_path: bool,
     pub error: Option<String>,
-    /// 不经 PATH 即可由任务 Runner 直接调用的执行入口（如 npx 临时缓存包的
-    /// bin JS）。缺省时 Runner 使用 `executable_path`。DeepSeek Harness 在
-    /// npm 缓存中只存在唯一版本时会填入包入口，由 Runner 以 `node` 解释执行；
-    /// 多版本共存或未解析到入口时保持缺省并使用 `error` 说明原因。
+    /// 不经 PATH 即可直接调用的执行入口（如 npx 临时缓存包的 bin JS）。
+    /// 缺省时以 `executable_path` 为准。DeepSeek Harness 在 npm 缓存中只存在
+    /// 唯一版本时会填入包入口，可交由 `node` 解释执行；多版本共存或未解析到
+    /// 入口时保持缺省并使用 `error` 说明原因。
+    ///
+    /// 环境探测仍会解析该入口；原消费方（项目任务执行器）已随项目管理能力移除，
+    /// 当前前端未读取该字段，保留它只是为环境报告保留完整的可执行入口信息。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub runner_executable: Option<String>,
 }

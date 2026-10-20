@@ -51,25 +51,24 @@ LongCat + DeepSeek first 阶段使用 Channel / Account / Model 三层概念，�
 ## 插件化架构收口（进行中）
 
 - [x] 建立 `plugin-registry.json`，统一声明 Channel、模型目录与 Agent 贡献
-- [x] 建立 Agent Environment / Global Config / Session / Runner 四类编译期 Adapter registry
+- [x] 建立 Agent Environment / Global Config / Session / Identity 四类编译期 Adapter registry
 - [x] 完成四类 Agent 实现和前端 Agent Access Adapter 的物理拆分
 - [x] 完成 Session 时间线底层解析器按 Claude Code / Codex / OpenCode / Pi 物理拆分
 - [x] Channel Capability registry 改为直接绑定各渠道类型化异步函数，移除中央策略枚举二次分发
 - [x] 将 DeepSeek / Kimi / OpenRouter 官方余额 DTO、解析和错误处理归档到对应 Channel Adapter
 - [x] 将 LongCat / Qwen 控制台响应分类、合并和完成条件归档到对应 Channel Adapter
 - [x] 将 `sync.rs` 中 Kimi / LongCat 的模型专属 DTO、发布时间校准与详情转换器归档到对应 Channel Adapter
-- [x] 用 DeepSeek Harness 完成新增 Agent 端到端接入演练：新增 `web` Surface，通过直接安全合并 DSH 官方配置文件接通一键写入/恢复，并接通环境、v0 会话和 fresh headless Runner；显式保留 resume 能力边界
+- [x] 用 DeepSeek Harness 完成新增 Agent 端到端接入演练：新增 `web` Surface，通过直接安全合并 DSH 官方配置文件接通一键写入/恢复，并接通环境、v0 会话与原生会话身份识别
 - [ ] 用新增 Channel 完成一次端到端接入演练，固化脚手架与验收清单
 
 ## 后台任务运行时收口（进行中）
 
 - [x] 建立由 `FlowletServices` 持有的统一 `JobRuntime`
 - [x] 统一后台同步任务的作用域去重、活动 `job_id` 关联、RAII 释放与取消信号
-- [x] 接入 Agent 数据、Codex 账号、渠道资源、S3 设备、账号工作区和项目工作区同步
+- [x] 接入 Agent 数据、Codex 账号、渠道资源、S3 设备和账号工作区同步
 - [x] 将后台任务的作用域、timeout、retry policy 与可取消等待统一为显式 `JobDefinition`
 - [x] 模型目录下载接入安全的 attempt timeout、分类重试与指数退避
 - [x] 定时存储清理接入统一排他作用域，并在各清理阶段之间响应取消
-- [x] 项目 Agent / 重复任务按动态项目作用域接入 JobRuntime，同时保留子进程与看板领域状态
 - [x] 数据诊断和修复保持前台 command + 实时进度事件，不伪装成可恢复后台任务
 
 ## Milestone 0：需求校准与文档更新

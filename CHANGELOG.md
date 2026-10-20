@@ -2,6 +2,19 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [未发布]
+
+### 移除
+
+- 移除项目管理能力：删除桌面端项目页 / 项目详情窗口、移动端任务页与任务提交、共享包中的
+  项目看板与任务日志演示，以及对应的路由、侧边栏与底部导航入口；
+- 移除 Rust 侧项目与任务存储、Agent 任务执行器、项目工作区 S3 同步、LAN / 移动端任务提交，
+  以及插件契约中的 `runnerAdapterId` 与 `taskProfile`；Agent 编译期 Adapter 收敛为
+  Environment、Global Config、Session 与 Identity 四类；
+- 新增一次性迁移：删除 `projects` / `project_tasks` / `recurring_tasks` / `recurring_task_runs` /
+  `device_projects` 表，清理任务审核通知 / 项目工作区 ETag 等 `app_meta` 键，并删除
+  `background_jobs` 中项目任务、重复任务与项目工作区同步的孤儿记录及事件。
+
 ## [0.1.1] - 2026-09-11
 
 0.1.0 之后的第二个正式公开版本，补齐 Agent 生态、渠道与模型目录，并统一了内置插件契约。

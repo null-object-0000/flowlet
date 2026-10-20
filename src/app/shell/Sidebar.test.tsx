@@ -21,10 +21,8 @@ describe("Sidebar", () => {
     expect(screen.getAllByRole("link").map((link) => link.textContent)).toEqual([
       "运行概览",
       "模型服务",
-      "项目管理",
       "请求日志",
       "会话管理",
-      "任务日志",
       "用量统计",
       "用量洞察",
       "应用设置",
@@ -45,10 +43,8 @@ describe("Sidebar", () => {
     expect(screen.getAllByRole("link").map((link) => link.textContent)).toEqual([
       "Overview",
       "Models",
-      "Projects",
       "Requests",
       "Sessions",
-      "Tasks",
       "Usage",
       "Usage Insights",
       "Settings",

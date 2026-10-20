@@ -4,22 +4,21 @@
 
 DeepSeek Harness（DSH）在 Flowlet 中登记为本机 `web` Surface，而不是传统 CLI 或
 Desktop：用户主要通过 `dsh web` 打开的本地浏览器界面使用它；npm/npx 是分发与启动方式，
-`--profile headless` 是自动化 Runner 能力，两者都不改变产品 Surface。
+不改变产品 Surface。
 
 本次核对源码为 `D:\GitHub\deepseek-harness`，提交
 `47f943859bef60e4160492346772ded9b24f765a`（2026-08-13）。仓库 manifest 为
 `0.1.0-rc.5`，用户实际通过 npm 运行的是 `0.1.0-rc.6`；因此 Flowlet 只依赖已由源码和
 已安装包共同确认的稳定边界，不推断未发布内部 API。
 
-## 五类接入 Adapter 与可选 Runtime 能力
+## 四类接入 Adapter 与可选 Runtime 能力
 
 | Adapter | 当前能力 | 明确边界 |
 |---|---|---|
-| Environment | 分别检测 `$DSH_HOME`/`~/.dsh`、3080 Web 运行状态、PATH 中的 `dsh` 与包版本，并挂载可选 Runtime 能力 | 可只读识别无歧义的 `_npx/<hash>` 包版本并解析 bin 入口供任务执行；多版本共存时要求全局安装。已安装不等于 Web 正在运行 |
+| Environment | 分别检测 `$DSH_HOME`/`~/.dsh`、3080 Web 运行状态、PATH 中的 `dsh` 与包版本，并挂载可选 Runtime 能力 | 可只读识别无歧义的 `_npx/<hash>` 包版本并解析 bin 入口；多版本共存时要求全局安装。已安装不等于 Web 正在运行 |
 | Global Config | 解析配置状态；直接安全合并官方 YAML，一键写入/恢复 Provider、默认模型和 Client Token；精确会话插件与模型规格声明均为默认关闭的高级能力 | 基础接入不依赖 DSH Web 或 Profile；复用 DSH 的文件锁协议，保留非受管配置和注释 |
 | Session | 读取 `sessions/**/session.jsonl(.zstd)` v0–v4，展示最终消息、工具事件和原生 Token 用量 | DSH 预发布格式无迁移承诺；更高代际只降级该会话；打包 delta chunk 不作为最终消息展示 |
 | Identity | 使用官方 User-Agent 识别客户端；读取 `x-flowlet-session`（受管桥接注入）或 DSH 原生 `x-deepseek-harness-session-id`，两者都只做归属、不剥离原生头 | 与其他 Agent 共用编译期 Identity Adapter registry，实时请求与历史修复规则一致 |
-| Runner | 通过稳定全局 `dsh` 命令或 npx 缓存包入口（`node <包 bin>`）执行 `dsh --profile headless <task>` | 仅 fresh session；DSH 没有稳定 resume 参数时明确失败 |
 | Runtime（Environment 可选能力） | 在接入抽屉内启动、停止并展示 DSH Web 状态；全局 npm 安装执行 `dsh web --no-open`，npx 缓存安装执行 `npx @deepseek-ai/dsh web --no-open`；Windows 下托管子进程绑定 Job Object（KILL_ON_JOB_CLOSE），Flowlet 异常退出时由内核回收整棵进程树 | 只停止当前 Flowlet 启动并记录的子进程；手动或其他程序启动的 3080 进程仅显示为外部运行，不接管、不强杀；Job Object 只覆盖 Flowlet 自己启动的进程，孤儿进程仍需在原启动位置停止 |
 
 ## Flowlet Provider
@@ -399,7 +398,6 @@ css-variables 主题，boot 语法 ts/bash/json，常用语言按需加载，未
 - `cjkFriendlyStrong` 的闭合条件严格遵循官方实现：仅当 `**` 序列前一字符为 Unicode 标点符号
   且后一字符为 CJK 时额外闭合；其他无空格续排场景沿用 CommonMark 默认行为。
 
-- DSH headless 提供稳定 resume/session-id 参数后，再开放 continuation task。
 - DSH 提升 `SESSION_FORMAT_VERSION` 时，先按新版本语义补迁移/解析测试，再扩大接受范围。
 - 思考模式（`reasoningEfforts` / `compat.thinkingFormat` 声明）未在本次提供：Flowlet 聚合路由
   横跨多种上游思考格式（deepseek 的 `thinking` + `reasoning_effort`、qwen 的 `enable_thinking` 等），

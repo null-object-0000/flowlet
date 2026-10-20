@@ -1,4 +1,4 @@
-import { IconDesktop, IconHome, IconList, IconSetting } from "@douyinfe/semi-icons";
+import { IconDesktop, IconHome, IconSetting } from "@douyinfe/semi-icons";
 import { MobileAppFrameView, type MobileNavItem } from "@flowlet/product-ui";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAppPreferences } from "../app/preferences/AppPreferences";
@@ -11,7 +11,6 @@ export function MobileShell() {
   const location = useLocation();
   const items: MobileNavItem[] = [
     { id: "/", href: "/", label: t("概览"), icon: <IconHome /> },
-    { id: "/projects", href: "/projects", label: t("项目"), icon: <IconList /> },
     { id: "/devices", href: "/devices", label: t("资源"), icon: <IconDesktop /> },
     { id: "/settings", href: "/settings", label: t("设置"), icon: <IconSetting /> },
   ];

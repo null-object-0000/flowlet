@@ -11,10 +11,6 @@ import { backgroundTaskCommands } from "./commands";
 afterEach(() => invokeMock.mockReset());
 
 describe("backgroundTaskCommands contract", () => {
-  it("maps task pagination and filters to the Rust contract", async () => {
-    await backgroundTaskCommands.list({ page: 2, pageSize: 20, status: "failed", jobType: "agent-data-sync", triggerSource: "manual" });
-    expect(invokeMock).toHaveBeenCalledWith("list_background_jobs", { filter: { page: 2, page_size: 20, status: "failed", job_type: "agent-data-sync", trigger_source: "manual" } }, undefined);
-  });
   it("starts a forced manual Agent sync with the long-running timeout", async () => {
     await backgroundTaskCommands.syncAgentData(true, "manual");
     expect(invokeMock).toHaveBeenCalledWith("sync_agent_data", { force: true, triggerSource: "manual" }, 120_000);
@@ -35,17 +31,5 @@ describe("backgroundTaskCommands contract", () => {
     await backgroundTaskCommands.getModelsDevProviderCatalog("openrouter");
     expect(invokeMock).toHaveBeenNthCalledWith(1, "get_models_cn_catalog", undefined, undefined);
     expect(invokeMock).toHaveBeenNthCalledWith(2, "get_models_dev_provider_catalog", { providerId: "openrouter" }, undefined);
-  });
-
-  it("opens one persisted task detail", async () => {
-    await backgroundTaskCommands.detail("job-1");
-    expect(invokeMock).toHaveBeenCalledWith("get_background_job_detail", { jobId: "job-1" }, undefined);
-  });
-
-  it("cancels and cleans persisted tasks", async () => {
-    await backgroundTaskCommands.cancel("job-1");
-    await backgroundTaskCommands.cleanup(90);
-    expect(invokeMock).toHaveBeenNthCalledWith(1, "cancel_background_job", { jobId: "job-1" }, undefined);
-    expect(invokeMock).toHaveBeenNthCalledWith(2, "cleanup_background_jobs", { keepDays: 90 }, undefined);
   });
 });

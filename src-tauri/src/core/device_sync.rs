@@ -4,7 +4,6 @@ use crate::core::config::ProxyBindConfig;
 use crate::core::device_identity::{
     DeviceIdentity, DeviceUsageBundle, DeviceUsageSnapshot, SyncedAgentInstallation,
     SyncedAgentInteraction, SyncedAgentInteractionEvent, SyncedAgentProfile, SyncedAgentSession,
-    SyncedProject, SyncedProjectTask,
 };
 use crate::core::storage::Storage;
 use reqwest::{Client, Response, StatusCode};
@@ -249,62 +248,9 @@ pub async fn build_device_snapshot(
     let mut snapshot = DeviceUsageSnapshot::new(&identity, days, hours, sessions, agents);
     snapshot.lan_peer = crate::core::lan_sync::current_descriptor(&storage);
     snapshot.usage_breakdowns = usage_breakdowns;
-    // 轻量项目目录：让其他设备 / 移动端知道本机能执行哪些项目、任务状态如何。
-    // 刻意只带标题 / 状态 / 优先级，不带描述与执行历史（敏感任务正文不外泄）。
-    snapshot.projects = build_synced_projects(&storage)?;
     snapshot.account_resources =
         crate::core::account_resource_sync::build_synced_account_resources(&storage)?;
     Ok(snapshot)
-}
-
-/// 生成本机项目的轻量快照目录（见 `SyncedProject`）。
-fn build_synced_projects(storage: &Storage) -> Result<Vec<SyncedProject>, String> {
-    let projects = storage
-        .list_projects_for_workspace()
-        .map_err(|error| error.to_string())?;
-    let mut synced = Vec::with_capacity(projects.len());
-    for project in projects {
-        let tasks = storage
-            .list_project_tasks(&project.id)
-            .map_err(|error| error.to_string())?;
-        synced.push(SyncedProject {
-            // 未同步过的工作区 id 用本机 id 兜底（首次推送会以此作为工作区 id）。
-            project_id: project
-                .workspace_project_id
-                .clone()
-                .unwrap_or_else(|| project.id.clone()),
-            name: project.name,
-            archived: project.workspace_archived,
-            updated_at: project.updated_at,
-            has_local_binding: project.directory_path.is_some(),
-            tasks: tasks
-                .into_iter()
-                .map(|task| {
-                    // 执行轮次计数需在字段移动前读取（execution_history 借用整个 task）。
-                    let execution_count = project_task_execution_count(&task);
-                    SyncedProjectTask {
-                        id: task.id,
-                        title: task.title,
-                        status: task.status,
-                        priority: task.priority,
-                        execution_count,
-                        updated_at: task.updated_at,
-                    }
-                })
-                .collect(),
-        });
-    }
-    Ok(synced)
-}
-
-/// 任务已开始的执行轮次数（execution_history JSON 数组长度；缺失/非法按 0）。
-/// 供移动端展示「第 N 轮执行」。
-fn project_task_execution_count(task: &crate::core::storage::ProjectTask) -> u32 {
-    task.execution_history
-        .as_deref()
-        .and_then(|history| serde_json::from_str::<Vec<serde_json::Value>>(history).ok())
-        .map(|entries| entries.len() as u32)
-        .unwrap_or(0)
 }
 
 async fn build_synced_agent_profiles(
@@ -1096,17 +1042,6 @@ pub async fn pull_device_usage(
             ) {
                 tracing::warn!(device_id = %snapshot.device_id, %error, "failed to import S3 device breakdowns");
             }
-            // 轻量项目目录：让移动端 / 其他桌面看到该设备可执行的项目与任务状态。
-            // 与 sync_device_usage / refresh_known_peers 保持一致，否则 S3 pull
-            // 只更新用量与会话，device_projects 停留在旧快照（任务永远显示为空）。
-            if let Err(error) = import_storage.import_device_projects(
-                &snapshot.device_id,
-                &snapshot.generated_at,
-                &snapshot.projects,
-            ) {
-                tracing::warn!(device_id = %snapshot.device_id, %error, "failed to import S3 device projects");
-                import_failures.push(format!("{device_label}：项目目录导入失败：{error}"));
-            }
             if let Err(error) = import_storage.import_device_account_resources(
                 &snapshot.device_id,
                 &snapshot.generated_at,
@@ -1207,13 +1142,6 @@ async fn pull_device_usage_for_device(
                 &snapshot.device_id,
                 &snapshot.generated_at,
                 &snapshot.usage_breakdowns,
-            )
-            .map_err(|error| error.to_string())?;
-        import_storage
-            .import_device_projects(
-                &snapshot.device_id,
-                &snapshot.generated_at,
-                &snapshot.projects,
             )
             .map_err(|error| error.to_string())?;
         import_storage
@@ -1482,17 +1410,6 @@ pub async fn sync_device_usage(
                     &snapshot.device_id,
                     &snapshot.generated_at,
                     &snapshot.usage_breakdowns,
-                )
-                .is_err()
-            {
-                import_failures += 1;
-            }
-            // 轻量项目目录：让移动端 / 其他桌面看到该设备可执行的项目与任务状态。
-            if import_storage
-                .import_device_projects(
-                    &snapshot.device_id,
-                    &snapshot.generated_at,
-                    &snapshot.projects,
                 )
                 .is_err()
             {
@@ -2141,86 +2058,6 @@ mod tests {
                 "session-08",
             ]
         );
-    }
-
-    #[test]
-    fn imported_device_projects_roundtrip_preserves_tasks_and_overwrites_by_generated_at() {
-        let storage =
-            Storage::from_connection_for_test(rusqlite::Connection::open_in_memory().unwrap());
-        storage.migrate().unwrap();
-        let device_id = "8d58734f-0b71-49ea-b5a4-115b389a9ae7";
-        // imported_device_projects 需要 JOIN known_devices，先通过 import_device_usage 落一行。
-        storage
-            .import_device_usage(
-                6,
-                device_id,
-                "2026-07-28T00:00:00Z",
-                "工作电脑",
-                "windows",
-                "0.1.0",
-                "2026-08-09T00:00:00Z",
-                480,
-                &[],
-                &[],
-                &[],
-                &[],
-            )
-            .unwrap();
-
-        let older = vec![SyncedProject {
-            project_id: "proj-1".to_string(),
-            name: "dinner-for-two".to_string(),
-            archived: false,
-            updated_at: "2026-08-09T08:00:00Z".to_string(),
-            has_local_binding: true,
-            tasks: vec![SyncedProjectTask {
-                id: "task-old".to_string(),
-                title: "准备晚餐".to_string(),
-                status: "in_progress".to_string(),
-                priority: "p1".to_string(),
-                execution_count: 2,
-                updated_at: "2026-08-09T08:00:00Z".to_string(),
-            }],
-        }];
-        storage
-            .import_device_projects(device_id, "2026-08-09T00:10:00Z", &older)
-            .unwrap();
-        let shared = storage.imported_device_projects(None).unwrap();
-        assert_eq!(shared.len(), 1);
-        assert_eq!(shared[0].project_name, "dinner-for-two");
-        assert_eq!(shared[0].tasks.len(), 1);
-        assert_eq!(shared[0].tasks[0].id, "task-old");
-
-        // 更新的快照应整体替换旧快照（移动端 S3 pull 依赖该语义刷新任务状态）。
-        let newer = vec![SyncedProject {
-            project_id: "proj-1".to_string(),
-            name: "dinner-for-two".to_string(),
-            archived: false,
-            updated_at: "2026-08-09T09:00:00Z".to_string(),
-            has_local_binding: true,
-            tasks: vec![SyncedProjectTask {
-                id: "task-new".to_string(),
-                title: "收拾餐桌".to_string(),
-                status: "done".to_string(),
-                priority: "p2".to_string(),
-                execution_count: 3,
-                updated_at: "2026-08-09T09:00:00Z".to_string(),
-            }],
-        }];
-        storage
-            .import_device_projects(device_id, "2026-08-09T00:20:00Z", &newer)
-            .unwrap();
-        let shared = storage.imported_device_projects(None).unwrap();
-        assert_eq!(shared[0].tasks.len(), 1);
-        assert_eq!(shared[0].tasks[0].id, "task-new");
-        assert_eq!(shared[0].tasks[0].status, "done");
-
-        // 旧快照（snapshot_generated_at 更早）不得回退覆盖新快照。
-        storage
-            .import_device_projects(device_id, "2026-08-09T00:00:00Z", &older)
-            .unwrap();
-        let shared = storage.imported_device_projects(None).unwrap();
-        assert_eq!(shared[0].tasks[0].id, "task-new");
     }
 
     #[test]

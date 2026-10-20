@@ -68,13 +68,7 @@ pub const DEVICE_S3_SYNC: JobDefinition = JobDefinition::exclusive("device-s3-sy
 pub const DEVICE_S3_PULL: JobDefinition = JobDefinition::exclusive("device-s3-pull", "device-sync");
 pub const ACCOUNT_WORKSPACE_SYNC: JobDefinition =
     JobDefinition::exclusive("account-workspace-sync", "account-workspace-sync");
-pub const PROJECT_WORKSPACE_SYNC: JobDefinition =
-    JobDefinition::exclusive("project-workspace-sync", "project-workspace-sync");
 pub const BODY_CLEANUP: JobDefinition = JobDefinition::exclusive("body-cleanup", "body-cleanup");
-pub const PROJECT_TASK_RUN: JobDefinition =
-    JobDefinition::exclusive("project-task-run", "project-task");
-pub const RECURRING_TASK_RUN: JobDefinition =
-    JobDefinition::exclusive("recurring-task-run", "project-task");
 pub const MODELS_CN_SYNC: JobDefinition = JobDefinition::retryable(
     "models-cn-sync",
     "models-cn-sync",
@@ -213,7 +207,7 @@ impl JobRuntime {
         self.try_acquire(definition.job_type, definition.scope_key)
     }
 
-    /// 使用定义中的稳定任务类型，但由领域提供动态作用域（例如按 project_id 隔离）。
+    /// 使用稳定任务类型，但由领域提供动态作用域（例如按实体 id 隔离）。
     pub fn try_acquire_in_scope(
         &self,
         definition: &JobDefinition,
@@ -404,24 +398,6 @@ mod tests {
         drop(second);
     }
 
-    #[test]
-    fn dynamic_project_scopes_share_a_definition_without_global_serialization() {
-        let runtime = JobRuntime::default();
-        let first = runtime
-            .try_acquire_in_scope(&PROJECT_TASK_RUN, "project-task:project-a")
-            .unwrap();
-        let other_project = runtime
-            .try_acquire_in_scope(&RECURRING_TASK_RUN, "project-task:project-b")
-            .unwrap();
-        let same_project = runtime
-            .try_acquire_in_scope(&RECURRING_TASK_RUN, "project-task:project-a")
-            .unwrap_err();
-
-        assert_eq!(same_project.job_type, PROJECT_TASK_RUN.job_type);
-        drop(first);
-        drop(other_project);
-    }
-
     #[tokio::test]
     async fn retries_retryable_attempts_but_not_terminal_errors() {
         let runtime = JobRuntime::default();
@@ -533,6 +509,5 @@ mod tests {
         );
         assert_eq!(ACCOUNT_WORKSPACE_SYNC.retry, RetryPolicy::NONE);
         assert_eq!(BODY_CLEANUP.job_type, "body-cleanup");
-        assert_eq!(PROJECT_TASK_RUN.scope_key, RECURRING_TASK_RUN.scope_key);
     }
 }

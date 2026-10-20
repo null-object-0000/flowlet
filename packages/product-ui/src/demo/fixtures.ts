@@ -4,7 +4,6 @@ import type { RequestLogsRowModel, RequestLogsStatItem, RequestLogsLabels } from
 import type { AgentSessionRowModel, AgentSessionsLabels } from "../desktop/AgentSessionsView";
 import type { UsageAnalysisRankEntryModel, UsageAnalysisMatrixColumnModel, UsageAnalysisMatrixRowModel, UsageAnalysisDetailModel, UsageAnalysisLabels } from "../desktop/UsageAnalysisView";
 import type { ModelsServiceStatModel, ModelsServiceItemModel, ModelsServiceLabels } from "../desktop/ModelsServiceView";
-import type { ProjectsBoardColumnModel, ProjectsBoardLabels } from "../desktop/ProjectsBoardView";
 
 export function createOverviewServiceFixture(zh: boolean): { model: OverviewServiceStripModel; labels: OverviewServiceStripLabels } {
   return {
@@ -418,49 +417,6 @@ export function createModelsServiceFixture(zh: boolean): {
       ready: zh ? "可用" : "Ready",
       off: zh ? "关闭" : "Off",
       empty: zh ? "没有匹配的模型" : "No matching models",
-    },
-  };
-}
-
-export function createProjectsBoardFixture(zh: boolean): {
-  columns: ProjectsBoardColumnModel[];
-  labels: ProjectsBoardLabels;
-} {
-  return {
-    columns: [
-      {
-        id: "queued",
-        title: zh ? "待处理" : "Queued",
-        count: 2,
-        tone: "primary",
-        tasks: [
-          { id: "t-1", title: zh ? "补齐官网产品演示的共享组件" : "Complete shared website demo components", roundLabel: zh ? "第 1 轮" : "Round 1", contextLabel: zh ? "代码修改 · Codex" : "Code · Codex", status: "queued", meta: zh ? "等待 1 min" : "Waiting 1 min" },
-          { id: "t-2", title: zh ? "检查桌面端 1200×720 布局" : "Check the 1200×720 desktop layout", roundLabel: zh ? "第 1 轮" : "Round 1", contextLabel: zh ? "只读分析 · Claude Code" : "Analysis · Claude Code", status: "queued", meta: zh ? "等待 2 min" : "Waiting 2 min" },
-        ],
-      },
-      {
-        id: "running",
-        title: zh ? "进行中" : "Running",
-        count: 1,
-        tone: "primary",
-        tasks: [
-          { id: "t-3", title: zh ? "统一任务看板与官网 Demo" : "Unify the task board and website demo", roundLabel: zh ? "第 1 轮" : "Round 1", contextLabel: zh ? "代码修改 · OpenCode" : "Code · OpenCode", status: "running", meta: zh ? "执行 3m 24s" : "Running 3m 24s", trailing: zh ? "4.28M tokens ≈¥0.22" : "4.28M tokens ≈¥0.22" },
-        ],
-      },
-      {
-        id: "review",
-        title: zh ? "待审核" : "Review",
-        count: 2,
-        tone: "warning",
-        tasks: [
-          { id: "t-4", title: zh ? "修复请求日志底部分页布局" : "Fix request log footer pagination", roundLabel: zh ? "第 1 轮" : "Round 1", contextLabel: zh ? "代码修改 · Claude Code" : "Code · Claude Code", status: "review", meta: zh ? "执行 8 min" : "Ran 8 min", trailing: zh ? "7.90M tokens ≈¥0.39" : "7.90M tokens ≈¥0.39" },
-          { id: "t-5", title: zh ? "完善多维归因矩阵折叠规则" : "Refine attribution matrix collapsing", roundLabel: zh ? "第 2 轮" : "Round 2", contextLabel: zh ? "代码修改 · Pi" : "Code · Pi", status: "review", meta: zh ? "执行 5.4 min" : "Ran 5.4 min", trailing: zh ? "3.16M tokens ≈¥0.18" : "3.16M tokens ≈¥0.18" },
-        ],
-      },
-    ],
-    labels: {
-      emptyHint: zh ? "暂无任务" : "No tasks",
-      running: zh ? "运行中" : "Running",
     },
   };
 }

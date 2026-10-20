@@ -58,9 +58,7 @@ struct AppState {
     /// 因为后台轮次也会在发现登录失效后设置 interaction_required，但它仍应关闭自己
     /// 创建的隐藏窗口；已经开始的后台轮次则不得关闭前端正在等待登录的窗口。
     scrape_interactive_sessions: Arc<Mutex<std::collections::HashSet<String>>>,
-    /// 已打开的「项目详情独立窗口」的 project_id 记录，用于应用重启后自动恢复。
-    detail_windows: Arc<core::detail_windows::DetailWindowRegistry>,
-    /// 应用是否正在退出。退出时窗口销毁事件不应再清空上面的独立窗口记录。
+    /// 应用是否正在退出。
     app_exiting: Arc<Mutex<bool>>,
 }
 #[cfg(desktop)]
@@ -136,29 +134,6 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
             failed = pi_migration.failed,
             "Pi 历史任务会话迁移完成"
         );
-    }
-
-    // 应用重启恢复：上次退出时仍处于执行中（in_progress）的项目任务会被恢复为
-    // submitted（待处理），调度器会自动重新领取执行（--resume 复用上次会话）；
-    // 被中断的那轮执行记录打上 interrupted 标记，供看板 / 执行历史标注异常。
-    // 只在 desktop 主进程启动时执行一次；其他设备领取且在租约窗口内的任务不受影响。
-    let current_device_id = device_identity.device_id.clone();
-    match storage.recover_interrupted_project_tasks(&current_device_id) {
-        Ok(recovered) => {
-            if recovered > 0 {
-                tracing::info!(recovered, "已恢复应用重启中断的项目任务");
-            }
-        }
-        Err(error) => {
-            tracing::warn!(error = %error, "恢复中断的项目任务失败");
-        }
-    }
-    match storage.recover_interrupted_recurring_runs() {
-        Ok(recovered) if recovered > 0 => {
-            tracing::info!(recovered, "已恢复应用重启中断的重复任务运行")
-        }
-        Ok(_) => {}
-        Err(error) => tracing::warn!(error = %error, "恢复中断的重复任务运行失败"),
     }
 
     storage
@@ -238,12 +213,6 @@ fn build_app_state(db_path: std::path::PathBuf, config_path: std::path::PathBuf)
         scrape_native_ready: Arc::new(Mutex::new(std::collections::HashSet::new())),
         scrape_interaction_required: Arc::new(Mutex::new(std::collections::HashSet::new())),
         scrape_interactive_sessions: Arc::new(Mutex::new(std::collections::HashSet::new())),
-        detail_windows: Arc::new(core::detail_windows::DetailWindowRegistry::new(
-            db_path
-                .parent()
-                .unwrap_or_else(|| std::path::Path::new("."))
-                .join("detail-windows.json"),
-        )),
         app_exiting: Arc::new(Mutex::new(false)),
     };
     tracing::info!(
@@ -505,10 +474,9 @@ fn run_desktop() {
 
             // 主窗口状态插件会异步恢复上次的尺寸/位置/最大化。延时校验一次，
             // 把因显示器布局变化或上次关闭位置异常而「一半在屏外」的主窗口拉回
-            // 可见区域；同时恢复上次退出时仍打开的「项目详情独立窗口」。
+            // 可见区域。
             {
                 let app_handle_restore = app_handle.clone();
-                let state_restore = state.clone();
                 tauri::async_runtime::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_millis(400)).await;
                     if let Some(window) = app_handle_restore.get_webview_window("main") {
@@ -518,22 +486,6 @@ fn run_desktop() {
                             tracing::warn!(%error, "校正主窗口最小客户区失败");
                         }
                         crate::core::window_visibility::ensure_window_on_screen(&window);
-                    }
-                    for project_id in state_restore.detail_windows.snapshot() {
-                        if let Err(error) = crate::commands::open_detail_window(
-                            &app_handle_restore,
-                            &state_restore,
-                            &project_id,
-                            None,
-                        )
-                        .await
-                        {
-                            tracing::warn!(
-                                project_id = %project_id,
-                                %error,
-                                "恢复项目详情独立窗口失败"
-                            );
-                        }
                     }
                 });
             }
@@ -687,34 +639,6 @@ fn run_desktop() {
                 *tray_guard = Some(tray);
             }
 
-            // 重复任务常驻调度：窗口隐藏到托盘后仍继续运行。每轮先把到期定义转换成
-            // 独立 Run（唯一索引防重复），再尝试领取排队 Run；同项目槽被普通任务或
-            // 另一条 Run 占用时保留排队，下轮继续。错过多个周期只生成最近一次到期 Run。
-            let recurring_storage = state.storage.clone();
-            let recurring_jobs = state.jobs.clone();
-            tauri::async_runtime::spawn(async move {
-                let period = std::time::Duration::from_secs(30);
-                let mut interval = tokio::time::interval(period);
-                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-                loop {
-                    interval.tick().await;
-                    if let Err(error) = recurring_storage.claim_due_recurring_runs() {
-                        tracing::warn!(error = %error, "创建到期重复任务运行失败");
-                    }
-                    let queued = match recurring_storage.list_queued_recurring_runs() {
-                        Ok(queued) => queued,
-                        Err(error) => { tracing::warn!(error = %error, "读取重复任务运行队列失败"); continue; }
-                    };
-                    for run in queued {
-                        match crate::core::agent_task_runner::run_recurring_task_run(recurring_storage.clone(), recurring_jobs.clone(), run.id.clone()).await {
-                            Ok(result) if result.started => {}
-                            Ok(_) => {}
-                            Err(error) => tracing::warn!(run_id = %run.id, error = %error, "领取重复任务运行失败"),
-                        }
-                    }
-                }
-            });
-
             // S3 设备用量后台同步：启动后 5 秒首次检查，以尽快发布 LAN 端点；
             // 之后每 15 分钟执行一次。
             // 未配置时静默跳过；与手动同步重叠时由共享 guard 去重。窗口隐藏到托盘后
@@ -810,32 +734,6 @@ fn run_desktop() {
                                 tracing::warn!(
                                     error = %error,
                                     "scheduled S3 account workspace sync failed"
-                                );
-                            }
-                        }
-                    }
-
-                    // 项目工作区同步：与账号工作区共用密钥。拉取远端项目/任务变更，
-                    // 并把本机项目/任务的变更推送到各自对象。
-                    if crate::core::project_workspace_sync::is_enabled(&s3_timer_storage) {
-                        match crate::core::project_workspace_sync::sync_all(
-                            s3_timer_storage.clone(),
-                            &s3_timer_jobs,
-                            "background",
-                        )
-                        .await
-                        {
-                            Ok(result) => {
-                                tracing::info!(
-                                    synced_projects = result.synced_projects,
-                                    uploaded_objects = result.uploaded_objects,
-                                    "scheduled project workspace sync finished"
-                                );
-                            }
-                            Err(error) => {
-                                tracing::warn!(
-                                    error = %error,
-                                    "scheduled project workspace sync failed"
                                 );
                             }
                         }
@@ -989,7 +887,6 @@ fn run_desktop() {
             commands::device_usage_snapshot,
             commands::list_known_devices,
             commands::list_shared_devices,
-            commands::list_shared_device_projects,
             commands::device_daily_usage,
             commands::device_hourly_usage,
             commands::shared_device_daily_usage,
@@ -1016,27 +913,6 @@ fn run_desktop() {
             commands::list_request_logs,
             commands::list_agent_sessions,
             commands::list_agent_capabilities,
-            commands::list_projects,
-            commands::get_project,
-            commands::save_project,
-            commands::delete_project,
-            commands::list_project_tasks,
-            commands::list_recurring_tasks,
-            commands::save_recurring_task,
-            commands::delete_recurring_task,
-            commands::list_recurring_task_runs,
-            commands::run_recurring_task_now,
-            commands::save_project_task,
-            commands::delete_project_task,
-            commands::open_project_detail_window,
-            commands::run_project_task,
-            commands::get_project_task_runner_state,
-            commands::list_queued_project_tasks,
-            commands::boost_project_task,
-            commands::set_project_task_status,
-            commands::convert_project_task_to_code,
-            commands::get_project_workspace_status,
-            commands::sync_project_workspace,
             commands::list_agent_session_children,
             commands::list_opencode_session_permissions,
             commands::reply_opencode_permission,
@@ -1082,8 +958,6 @@ fn run_desktop() {
             commands::is_autostart_enabled,
             commands::enable_autostart,
             commands::disable_autostart,
-            commands::get_task_review_notification_enabled,
-            commands::set_task_review_notification_enabled,
             commands::list_route_rules,
             commands::save_route_rules,
             commands::account_routing_scores,
@@ -1219,11 +1093,6 @@ fn run_mobile() {
             mobile_commands::refresh_shared_device_session_lan,
             mobile_commands::probe_lan_peers,
             mobile_commands::list_cached_lan_probes,
-            mobile_commands::list_shared_device_projects,
-            mobile_commands::submit_task_lan,
-            mobile_commands::set_task_status_lan,
-            mobile_commands::edit_task_lan,
-            mobile_commands::delete_task_lan,
         ])
         .run(tauri::generate_context!())
         .expect("启动 Flowlet Mobile 失败");

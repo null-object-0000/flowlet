@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AGENT_PLUGINS, AGENT_SESSION_OPTIONS, AGENT_TASK_PROFILE_OPTIONS, CHANNEL_PLUGIN_IDS, agentPlugin, agentTaskSessionType } from "./registry";
+import { AGENT_PLUGINS, AGENT_SESSION_OPTIONS, CHANNEL_PLUGIN_IDS, agentPlugin } from "./registry";
 
 describe("plugin registry", () => {
   it("registers builtin channels in stable display order", () => {
@@ -15,7 +15,6 @@ describe("plugin registry", () => {
     expect(agentPlugin("codex").globalConfigAdapterId).toBe("codex");
     expect(agentPlugin("codex").sessionAdapterId).toBe("codex");
     expect(agentPlugin("codex").identityAdapterId).toBe("codex");
-    expect(agentPlugin("codex").runnerAdapterId).toBe("codex");
     expect(agentPlugin("opencode").surfaces).toEqual(["cli", "desktop"]);
     expect(agentPlugin("deepseek-harness").surfaces).toEqual(["web"]);
     expect(agentPlugin("deepseek-harness").supportsManagedConfig).toBe(true);
@@ -41,10 +40,5 @@ describe("plugin registry", () => {
       "claude-code", "opencode", "pi", "codex-desktop", "codex-cli", "deepseek-harness", "hermes",
     ]);
     expect(AGENT_SESSION_OPTIONS.find((session) => session.id === "codex-cli")?.clientId).toBe("codex");
-    expect(AGENT_TASK_PROFILE_OPTIONS.map((profile) => profile.value)).toEqual([
-      "Claude Code", "OpenCode", "Pi", "Codex", "DeepSeek Harness", "Hermes Agent",
-    ]);
-    expect(agentTaskSessionType("DeepSeek Harness")).toBe("deepseek-harness");
-    expect(agentTaskSessionType("Hermes Agent")).toBe("hermes");
   });
 });

@@ -47,8 +47,8 @@ export const en: Messages = {
     mobileTab: "Mobile companion",
     title: "Use the complete Flowlet desktop interface.",
     subtitle: "Explore how Flowlet brings model access, agent activity, request traces, and usage costs together in one local control console.",
-    mobileTitle: "Check every device from your phone—and send work back to your computer.",
-    mobileSubtitle: "Switch between the views below to explore usage, devices, sessions, and projects, including LAN-based agent workflows.",
+    mobileTitle: "Check every device from your phone.",
+    mobileSubtitle: "Switch between the views below to explore usage, devices, and sessions across multiple devices.",
   },
   value: {
     eyebrow: "Why Flowlet",
@@ -66,7 +66,7 @@ export const en: Messages = {
     subtitle: "Connect who initiated a request, which model and account handled it, how upstream responded, and what it ultimately cost.",
     localEndpoint: "Local endpoint",
     upstream: "Actual upstream",
-    centerDesc: "Unified endpoint · Account routing · Request tracing · Usage attribution · Local tasks",
+    centerDesc: "Unified endpoint · Account routing · Request tracing · Usage attribution",
     evidence: ["Agent session", "Local request", "Actual route", "Upstream result", "Tokens / Cost"],
   },
   trace: {
@@ -95,10 +95,10 @@ export const en: Messages = {
     title: "Connect existing agents and model accounts without changing how you work.",
     subtitle: "Detect local installations and inspect, back up, write, or restore global configuration. Flowlet owns the endpoint, not your tool choices.",
     agents: [
-      { name: "Claude Code", detail: "Connect · sessions · tasks" },
+      { name: "Claude Code", detail: "Connect · sessions" },
       { name: "Codex", detail: "CLI / Desktop / VS Code" },
       { name: "OpenCode", detail: "CLI / Desktop · confirmations" },
-      { name: "Pi", detail: "Connect · sessions · tasks" },
+      { name: "Pi", detail: "Connect · sessions" },
     ],
     channelsTitle: "Connect multiple model providers",
     channels: ["LongCat", "DeepSeek", "Kimi", "Qwen", "Z.AI", "OpenRouter", "Custom"],

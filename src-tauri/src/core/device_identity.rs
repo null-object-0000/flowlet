@@ -372,21 +372,6 @@ pub struct SharedAgentSession {
     pub session: SyncedAgentSession,
 }
 
-/// 共享设备项目目录：移动端读取的扁平结构（含设备归属与轻量任务）。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct SharedDeviceProject {
-    pub device_id: String,
-    pub device_display_name: String,
-    pub device_platform: String,
-    pub project_id: String,
-    pub project_name: String,
-    pub has_local_binding: bool,
-    /// 最近一次项目更新（含任务变更）。
-    pub updated_at: String,
-    pub tasks: Vec<SyncedProjectTask>,
-}
-
 /// 设备快照中携带的 Agent 安装摘要。刻意不包含可执行文件路径和安装目录。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -424,36 +409,6 @@ pub struct LanPeerDescriptor {
     pub expires_at: String,
 }
 
-/// 设备快照中携带的轻量项目任务（供移动端查看状态与提交目标）。
-/// 刻意不带描述与执行历史，避免把任务正文扩散到所有设备快照；
-/// 只携带执行轮次计数，供移动端展示「第 N 轮执行」。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncedProjectTask {
-    pub id: String,
-    pub title: String,
-    pub status: String,
-    pub priority: String,
-    /// 已开始的执行轮次数（execution_history 长度）；旧快照缺失时按 0 处理。
-    #[serde(default)]
-    pub execution_count: u32,
-    pub updated_at: String,
-}
-
-/// 设备快照中携带的轻量项目目录：移动端据此发现「哪台设备能执行哪个项目」，
-/// 并只读查看任务状态。`project_id` 是工作区项目 id（移动端用它提交任务）。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncedProject {
-    pub project_id: String,
-    pub name: String,
-    pub archived: bool,
-    pub updated_at: String,
-    /// 该设备是否已绑定本地目录（决定能否在其上执行任务）。
-    pub has_local_binding: bool,
-    pub tasks: Vec<SyncedProjectTask>,
-}
-
 /// 可安全共享到移动端的账号资源窗口。只保留展示额度所需的聚合值，
 /// 不携带上游响应、Cookie、请求头或任何凭据。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -489,6 +444,10 @@ pub struct SyncedAccountResource {
 }
 
 /// 供本地导出和未来同步传输共同使用的最小快照契约。
+///
+/// 兼容性说明：本结构不启用 `deny_unknown_fields`，因此旧版本写入、
+/// 仍带有 `projects` 字段的快照 JSON 依然可以反序列化（未知字段被忽略），
+/// 不需要额外的 `#[serde(default)]` 占位字段。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceUsageSnapshot {
@@ -516,10 +475,6 @@ pub struct DeviceUsageSnapshot {
     /// 发给其他设备。接收端导入 `device_usage_breakdowns`，供用量分析页按设备汇总。
     #[serde(default)]
     pub usage_breakdowns: Vec<DeviceUsageBreakdownRow>,
-    /// 轻量项目目录（工作区项目 id + 任务状态），供移动端发现可执行项目并提交任务。
-    /// 只读观测数据：接收端写入 `device_projects` 只读共享表，不进入本机事实表。
-    #[serde(default)]
-    pub projects: Vec<SyncedProject>,
     /// 去敏后的工作区账号资源观测。接收端按 account_id 选择 observed_at 最新值，
     /// 来源设备仅参与冲突处理，不进入常规移动端界面。
     #[serde(default)]
@@ -602,7 +557,6 @@ impl DeviceUsageSnapshot {
             agents,
             lan_peer: None,
             usage_breakdowns: Vec::new(),
-            projects: Vec::new(),
             account_resources: Vec::new(),
         }
     }
@@ -1076,6 +1030,55 @@ mod tests {
         .expect("parse legacy bundle");
         assert!(bundle.snapshot.sessions.is_empty());
         assert!(bundle.snapshot.agents.is_empty());
+    }
+
+    /// 项目/任务同步能力已整体移除，但旧版本写入的快照仍带 `projects` 字段。
+    /// 本测试固定向后兼容契约：未知字段被忽略，快照其余字段照常读取，
+    /// 重新序列化时不再输出已移除的字段。
+    #[test]
+    fn legacy_bundle_with_removed_projects_field_remains_parseable() {
+        let bundle = DeviceUsageBundle::from_bytes(
+            br#"{
+                "format":"flowlet-device-usage",
+                "version":1,
+                "snapshot":{
+                    "schemaVersion":13,
+                    "deviceId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                    "deviceCreatedAt":"2026-07-28T00:00:00Z",
+                    "displayName":"Legacy PC",
+                    "platform":"windows",
+                    "appVersion":"0.1.0",
+                    "generatedAt":"2026-07-29T00:00:00Z",
+                    "timezoneOffsetMinutes":480,
+                    "days":[],
+                    "projects":[{
+                        "projectId":"proj-1",
+                        "name":"legacy project",
+                        "archived":false,
+                        "updatedAt":"2026-07-29T00:00:00Z",
+                        "hasLocalBinding":true,
+                        "tasks":[{
+                            "id":"task-1",
+                            "title":"legacy task",
+                            "status":"draft",
+                            "priority":"p2",
+                            "executionCount":0,
+                            "updatedAt":"2026-07-29T00:00:00Z"
+                        }]
+                    }]
+                }
+            }"#,
+        )
+        .expect("parse legacy bundle with removed projects field");
+
+        assert_eq!(
+            bundle.snapshot.device_id,
+            "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        );
+        assert!(bundle.snapshot.days.is_empty());
+
+        let json = serde_json::to_string(&bundle.snapshot).unwrap();
+        assert!(!json.contains("\"projects\""));
     }
 
     #[test]

@@ -139,11 +139,11 @@ SQLite 或运行时配置快照直接修改代理状态。修改内置注册表�
 
 `core::plugin_contract` 提供跨文件契约测试：对账注册渠道、`config.json` 预设与预设工厂，
 校验模型同步、余额和控制台抓取的声明/实现一致性，验证抓取 mode 的实际配置，并确保模型目录
-官方归属指向已注册渠道、Agent 的五类编译期 Adapter 与 Surface 全部有效。新增扩展遗漏任一环节
+官方归属指向已注册渠道、Agent 的四类编译期 Adapter 与 Surface 全部有效。新增扩展遗漏任一环节
 会在 Rust 测试阶段失败，不延迟到运行时静默降级。
 
-Rust 的 `AgentPluginBundle` 是五类 Agent 实现的唯一编译期 roster：Environment、Global Config、
-Session、Identity 与 Runner 在同一条 Bundle 中组合，各能力模块只提供实现，不再各自维护 Agent
+Rust 的 `AgentPluginBundle` 是四类 Agent 实现的唯一编译期 roster：Environment、Global Config、
+Session 与 Identity 在同一条 Bundle 中组合，各能力模块只提供实现，不再各自维护 Agent
 数组。`plugin-registry.json` 负责产品声明，Bundle 负责类型化实现；两者在启动校验中严格对账，
 未知或遗漏能力不允许回退到其它 Agent。
 
@@ -166,9 +166,7 @@ Rust 环境检测入口通过编译期 `AgentEnvironmentAdapter` registry 按 `e
 
 DeepSeek Harness 是首个 `web` Surface 演练：环境 Adapter 分别报告 `~/.dsh` 数据目录、
 `127.0.0.1:3080` Web 运行状态与 PATH 中稳定的 `dsh` 启动入口。`runtime_running` 明确区分
-“已发现安装/数据目录”和“Web 正在运行”；无歧义时可从 `npx` 临时缓存只读识别包版本，但临时缓存不视为可调度安装；
-因此“Web 可用”和“Flowlet 可发起 headless 任务”可以是不同状态。Runner 只支持 DSH 当前公开的
-fresh headless 语义，resume 会明确失败，不退化成新会话。
+“已发现安装/数据目录”和“Web 正在运行”；无歧义时可从 `npx` 临时缓存只读识别包版本，但临时缓存不视为可调度安装。
 
 Rust 全局配置入口通过统一 `AgentGlobalConfigAdapter` 的 `inspect / apply / restore` 接口工作，
 各 Agent 分别由独立编译期 Adapter 模块完整承载配置路径、受管字段、
@@ -187,12 +185,12 @@ Adapter 解析其 Flowlet Provider、Client Token、当前默认 provider/model 
 `llm-pi-ai.providers.flowlet`、`agent-default-model.provider/model` 与专用凭据；恢复只还原这些
 受管路径。复杂行内 YAML 无法定点修改时明确失败，不做整文件猜测重写。DSH 运行中会热加载，
 未运行时在下次启动读取配置。
-DSH 基础接入不安装插件、扩展或 Hook，不修改其包与运行时代码；环境和原生会话读取保持只读，
-任务执行仅调用官方 headless 命令。精确会话关联是默认关闭的高级选项，只有用户显式启用时才
+DSH 基础接入不安装插件、扩展或 Hook，不修改其包与运行时代码；环境和原生会话读取保持只读。
+精确会话关联是默认关闭的高级选项，只有用户显式启用时才
 向已初始化 Profile 部署可恢复的受管 Cordis 桥。内部 Plugin Registry 只是 Flowlet 的受控能力声明。
 
-Agent 插件同时声明 `sessionAdapterId`、`identityAdapterId`、`sessionTypes` 与 `taskProfile`。
-前端会话筛选、会话名称、桌面/移动任务 Agent 选项和任务 Profile → session type 映射均由
+Agent 插件同时声明 `sessionAdapterId`、`identityAdapterId` 与 `sessionTypes`。
+前端会话筛选、会话名称和客户端归属均由
 注册表生成，不再维护页面级枚举。Rust `AgentSessionAdapter` 统一提供原生数据源监听、
 可用运行时会话类型、会话目录枚举、Timeline、最后交互和增量解析来源；Claude Code、OpenCode、
 Pi、Codex 通过编译期 Session Adapter registry 注册。Codex Adapter 显式承载 `codex-cli` 与
@@ -208,15 +206,8 @@ Codex、OpenCode 与 Pi 的文件/SQLite 定位和时间线解析进一步下沉
 `AgentIdentityAdapter` 独立承载客户端 UA 规则、受管标记头身份与 Session Header 提取；实时 HTTP
 请求和历史 Header JSON 修复均委托同一 registry，代理主流程不再按 Agent ID 分支。
 
-Agent 插件还声明 `runnerAdapterId`。Rust 任务调度通过编译期 Runner Adapter registry 统一解析
-任务 `agent_profile`、环境探测适配器、展示名、所需 Surface、resume 能力、缺失执行入口提示和异步执行函数。
-Claude Code、OpenCode、Pi、Codex 与 DeepSeek Harness 执行器分别负责各自的命令参数、输出事件和会话恢复，
-项目队列与任务状态机不感知具体 Agent。执行器位于 `agent_task_runner/adapters/`，公共子进程启动、取消轮询、输出冲刷和退出收尾
-位于 `agent_task_runner/process.rs`；父模块只保留项目执行槽、队列调度和任务状态流转。
-历史空 Profile 仍显式映射 Claude Code，未知 Profile 与未知 Runner Adapter 均明确失败，不回退执行。
-`list_agent_capabilities` 从已经对账的声明与 Bundle 生成类型化能力报告，向前端公开 Surface、会话类型、
-客户端归属、配置开关与 Runner 的 resume 合同。重复任务 UI 据此禁用不支持的会话策略，保存 command
-仍会二次校验，避免旧前端或直接调用绕过 Runner 能力边界。
+`list_agent_capabilities` 从已经对账的声明与 Bundle 生成类型化能力报告，向前端公开 Surface、
+会话类型（含 `clientId`）与配置开关。
 
 当前代码已经接入 SQLite 基础配置存储。后续架构文档不再把 SQLite 视为未来能力，而是把它作为 Channel、Account、Model、Client、虚拟模型、日志、用量、价格和快照数据的本地持久化层。
 
@@ -352,14 +343,11 @@ retry policy，并通过 `scope_key` 获取 RAII lease：同一作用域拒绝�
 持久化任务创建后把 `job_id` 关联到 lease，统一取消命令会同时写入 SQLite 并向活动任务发布
 低延迟取消信号，lease 在成功、失败或提前返回时都会自动释放。
 
-当前 Agent 数据同步、Codex 账号同步、渠道资源同步、S3 设备同步、渠道账号工作区同步、
-项目工作区同步和定时存储清理已接入该运行时。存储清理会在各清理阶段之间协作式响应取消。
+当前 Agent 数据同步、Codex 账号同步、渠道资源同步、S3 设备同步、渠道账号工作区同步
+和定时存储清理已接入该运行时。存储清理会在各清理阶段之间协作式响应取消。
 任务的业务进度、摘要和事件 schema 保持原样，前端任务页与
 现有 command 返回结构无需调整。模型目录下载作为首个 retryable definition：单次网络 attempt
 上限 30 秒，连接/读取错误、429 和 5xx 最多尝试 3 次并指数退避；JSON 校验和本地原子替换不重试。
-项目 Agent 执行与重复任务 Run 也按动态 `project-task:<project_id>` 作用域获取 JobRuntime
-lease，因此普通任务和重复任务在同一项目内统一互斥、不同项目仍可并行。领域运行表继续承载
-任务标题、Agent、会话 ID、子进程控制和看板实时状态；JobRuntime 不取代这些领域状态。
 
 ## Agent 本机环境探测
 
@@ -546,124 +534,7 @@ SQLite 当前保存本地配置、日志、用量和同步快照，核心表包�
 - `device_hourly_usage`
 - `device_agent_sessions`
 - `account_balance_snapshots`
-- `projects`
-- `project_tasks`
 - `app_meta`
-
-项目管理是桌面端本地工作台能力。第一版一个 `projects` 记录只绑定一个本机目录；
-项目会话视角不复制会话数据，而是按目录（含子目录）过滤现有 Agent 会话目录，并按
-实时 `runtime_status` 分栏。`project_tasks` 是不关联会话的纯本地任务表，状态限定为
-`draft`、`submitted`、`in_progress`、`review`、`done`，任务类型分为 `code`（代码修改）
-与 `readonly`（只读分析）；审核通道在 `review` 下允许批准（→ `done`）、退回
-（→ `submitted` 并必填原因，重新排队执行），只读分析任务还可转为代码修改任务
-（→ `submitted` 并必填代码修改要求，以 `code` 类型重新执行）。任务可基于某个已完成
-任务创建（`base_task_id` 记录基础任务 id）：执行时复用该基础任务的 Agent 会话
-（`--resume`），并在 prompt 中说明「新任务但仍在该会话中推进」，让新任务延续上个任务
-的上下文；本任务已有会话时（退回重跑）仍优先复用本任务自己的会话。删除项目只级联
-删除这些本地任务，不删除目录、Agent 原始会话或 Flowlet 请求观测记录。项目与任务 CRUD
-写入 SQLite 后立即生效，无需重启。
-
-重复任务（2026-08）与上述一次性审核任务分离：`recurring_tasks` 保存稳定定义（项目、名称、
-描述、只读/代码类型、Agent Profile、手动/每日计划、IANA 时区、启停与会话策略），
-`recurring_task_runs` 为每次手动、测试或定时触发保存独立配置快照、状态、background job、
-Agent 会话和错误。每日计划在保存时解析为 UTC `next_run_at`；Rust 常驻调度器在主窗口隐藏到
-托盘后仍每 30 秒检查一次，到期时以 `(recurring_task_id, scheduled_for)` 唯一约束创建 Run，
-避免 StrictMode、重复 tick 或重启产生双份结果。Flowlet 退出或电脑休眠时不执行；恢复后只按
-当前 `next_run_at` 补一条最近错过的运行并推进到下一天，不连续补齐所有历史周期。
-
-重复任务 Run 与普通项目任务共用 `agent_task_runner` 的项目级执行槽和 Claude Code / Codex /
-OpenCode / Pi 进程、输出解析及 background job；普通任务保持 `draft → review` 审核状态机，
-重复 Run 只更新自身 `queued/running/succeeded/failed/cancelled/interrupted`。默认每个新 Run
-建立新 Agent 会话；`continue` 策略显式延续最近一次成功 Run 的会话；应用重启恢复同一条
-`interrupted` Run 时始终尝试从原 job 恢复会话。所有任务定义修改只影响未来 Run，历史 Run
-保留运行当时的标题、描述、任务类型、Agent 和会话策略快照。相关表和计划保存后热生效，
-无需重启；只有退出 Flowlet 才会停止常驻调度。
-
-任务执行器按 `agent_profile` 分派 Claude Code、OpenCode 或 Pi。Pi 在 Windows npm 安装下
-通常通过 cmd / PowerShell shim 启动；为避免多行任务正文被命令行转义截断，Flowlet 使用 stdin
-传递完整 prompt，CLI 参数只承载权限、会话名与会话目录。Pi 正常返回后还必须在 Flowlet
-专属会话目录中找到指定 session id，并确认 JSONL 的 user message 含完整 prompt；校验失败
-按执行失败处理，不得仅凭退出码 0 进入待审核。
-
-任务执行时，Agent 可执行文件由安装探测的当前首选路径解析；项目工作目录来自本机
-`projects.directory_path` 绑定。启动任何 Agent 前必须确认该路径仍是现存文件夹。系统重装、
-盘符变化或目录迁移导致绑定失效时，应明确提示用户重新绑定项目目录，不得把 Windows
-`CreateProcess` 的无效工作目录错误误报为 Agent 可执行文件不可用。
-
-任务的“第 N 次执行”只统计 Agent 子进程及 stdout/stderr 管道均已成功创建的轮次。
-项目目录校验失败、CLI 进程创建失败等启动前错误仍写入 `background_jobs` 供排查，但不写入
-`project_tasks.execution_history`，也不更新 `last_job_id`。数据库迁移会从存量执行历史中
-移除这类误记条目并重算最近执行指针，保留原始 job 与事件日志。
-
-任务详情的会话视图按 `execution_history` 的每次执行时间窗隔离。退回重跑会复用 Claude
-Code / OpenCode / Pi 的原生 session id，而原生时间线是累积数据；前端只挂载当前轮次，
-并把该轮 `submittedAt`（旧数据回退 `startedAt`）与 `finishedAt`（旧数据缺失时使用下一轮
-`startedAt`）传给时间线 command，Rust 按 user-message 交互边界裁剪后再返回。这样每个轮次 Tab 只包含本轮内容，
-未访问轮次不读取 job / 时间线，也不会提前构造长会话 DOM。
-
-多设备同步（2026-08）把项目与任务升级为「工作区实体」：`projects.directory_path`
-改为可空（远端项目落到新设备后需先「绑定本机目录」才能执行），并新增服务端托管的
-`workspace_project_id` / `workspace_archived`；`project_tasks` 新增 `claimed_by` /
-`claimed_at`（跨设备执行归属）与 `deleted`（软删除墓碑）。同步通过 S3 工作区加密对象
-`<prefix>/flowlet/v1/workspace/projects/<workspace_project_id>.enc`（ChaCha20-Poly1305，
-复用账号工作区密钥，AAD 独立），每个项目一个对象，revision + ETag + If-Match 条件写入，
-由 `project_workspace_sync` 模块管理。合并规则为 last-writer-wins + 状态机守卫 +
-软删除墓碑：新增任务（UUID）双向合并都保留；同一任务编辑按 `updated_at` 新者胜（只有
-草稿可编辑，冲突窗口极小）；状态迁移保持既有状态机；删除任务以墓碑传播、删除优先；
-删除项目写入 `deleted` 墓碑，其他设备同步后删除各自副本。目录绑定、领取归属与最近
-执行 job 是设备本地字段，不进入工作区对象。任务保存 / 提交 / 审核 / 转换后即时推送
-该项目到工作区；启动后与设备同步共用同一 15 分钟周期拉取合并。调度器只领取
-「本机已绑定目录且未被其他设备执行 / 领取」的 `submitted` 任务。任务一旦被某台设备
-执行过（`execution_history` 非空）或正在执行（`claimed_by` 指向其他设备），就永久归属
-该设备，其他设备只能查看；基于其他设备任务的子任务（`base_task_id` 指向的父任务归属
-其他设备）同样只读。由于 `claimed_by` 是设备本地字段不跨设备同步，其他设备通过
-`execution_history` 非空（工作区对象同步）识别「该任务已被执行过」，从而禁止本机领取。
-`last_job_id` 是本机执行时写入的设备本地字段（工作区同步不携带、合并时保留本地值），
-作为「本机执行过」的强证据：即使任务因设备身份变化 / 数据库迁移导致 `claimed_by`
-与当前设备不一致，只要 `last_job_id` 非空就不判为其他设备任务，避免本机创建并执行的
-任务被误展示成只读。防止多台设备对同一任务重复执行。
-
-队列排序与置顶（2026-08）：待执行队列按「置顶 → 优先级 → 提交时间」排序——被用户
-「提高优先级」（`boost_project_task` 写入 `queue_boosted_at`）的任务排最前，置顶任务之间
-按置顶时间倒序（再次置顶可把任务提到队列第一名）；未置顶任务按优先级 p0 > p1 > p2，
-同优先级按提交时间（`updated_at`，最近一次提交 / 退回时刻）先到先执行，不再按创建时间。
-`queue_boosted_at` 是设备本地字段、不进入工作区对象，合并时保留本地值；任务被领取执行
-（`claim_task`）或中断恢复重新排队时自动清空，置顶只对「当前这一轮排队」有效。
-
-执行槽按项目隔离（2026-08）：任务执行槽以「项目」为粒度——每个项目同一时刻至多
-一个任务在跑（并行度 1），不同项目互不阻塞、可并行执行。前端调度器跳过「已有任务在
-执行的项目」的任务，从其余项目按全局优先级取队首领取；Rust 端 `AGENT_TASK_RUNNING`
-以 project_id 为 key 记录运行中任务，领取与释放原子、并发安全。为配合按项目并行，
-`save_project` 约束同一本机目录只能绑定一个项目，避免两个项目并行执行同一目录时
-Agent 会话、工作区文件被并发读写冲突。
-
-应用重启恢复（2026-08）：Flowlet 在任务执行中（`in_progress`）退出 / 重启时，按项目
-隔离的执行槽是内存态（`AGENT_TASK_RUNNING`）会随之丢失，任务会永久卡在 `in_progress`
-（调度器只领取 `submitted`）。桌面端启动时调用 `recover_interrupted_project_tasks`
-把「本机领取或未领取」的执行中任务恢复为 `submitted`（待处理）重新排队，调度器
-下个周期自动领取执行，按任务的 `agent_profile` 复用上次会话继续推进（Claude Code
-`--resume`、OpenCode `--session`、Pi `--session-id`）；恢复时在 `execution_history`
-最近一条未结束记录上打 `interrupted: true` 标记（含中断时刻 `finishedAt`），前端
-待处理列标注「上次执行中断」、执行历史展示「已中断」，与 background_jobs 的
-`interrupted`（应用已重启）先例保持一致。其他设备领取的任务永久归属对方，即使对方
-离线也不由本机恢复，避免两台设备对同一任务重复执行。
-
-移动端任务提交：设备快照（schema v12）携带轻量 `projects` 目录（工作区项目 id、
-名称、是否已绑定目录、任务标题/状态/优先级（前端已移除优先级能力，后端保留字段
-写死 P2）/执行轮次计数（供移动端展示「第 N 轮执行」），不含描述与执行历史），
-接收端导入只读 `device_projects` 表。移动端据此发现「哪台设备能执行哪个项目」，通过签名 LAN 通道
-`POST /flowlet/v1/task/submit`（新增 `task.submit` 能力）把任务默认以 `draft`（草稿待提交）
-状态创建到目标设备，与 PC 看板交互一致；移动端再通过 `POST /flowlet/v1/task/status`
-（新增 `task.status` 能力）提交（`draft → submitted`）或撤回（`submitted → draft`），
-状态机与桌面端审核通道一致，目标设备离线、版本过旧或未绑定目录时返回明确错误。
-移动端也可通过 `POST /flowlet/v1/task/edit`（新增 `task.edit` 能力）编辑草稿任务内容，
-语义与桌面端 `save_project_task` 一致：只有草稿状态任务可编辑，`title` 必填，
-描述 / 任务类型 / Agent Profile 缺省时保留目标设备数据库原值（快照不携带正文，
-避免移动端误清空），当前移动端只修改标题。
-移动端还可通过 `POST /flowlet/v1/task/delete`（新增 `task.delete` 能力）删除草稿任务，
-语义与桌面端 `delete_project_task` 一致（软删除墓碑传播），但只允许删除草稿状态任务：
-一旦提交就由桌面端调度，删除权回到执行设备，避免误删进行中 / 待审核 / 已完成的任务。
-离线排队（S3 收件箱）为后续可选增强。移动端 S3 权限保持只读，不接触工作区加密对象。
 
 安装实例身份独立保存在 SQLite 同目录的 `flowlet-device.json`。首次启动生成 UUID，
 后续启动稳定复用；配置导入、数据库替换和普通数据包不得覆盖或携带该文件，避免把
@@ -685,7 +556,7 @@ Agent 会话、工作区文件被并发读写冲突。
 时间及请求与 Token 汇总外，还携带最后一次真实用户输入以及
 该输入之后按原生顺序产生的全部助手回复、思考、工具调用、工具结果和错误事件。产生新的
 用户输入后，新快照会以新的最后交互整体覆盖该设备上一版会话数据；单条事件内容和事件数
-不做截断。快照仍不携带项目路径、渠道账号、凭据、Header 或代理请求 Body，但最后交互本身
+不做截断。快照仍不携带渠道账号、凭据、Header 或代理请求 Body，但最后交互本身
 属于敏感会话正文，远端存储必须按敏感数据管理。单个远端对象设有 64 MiB 完整快照硬限制，
 超限时拒绝整个对象，不静默裁剪会话内容。版本 1 至 3 快照继续兼容导入，缺失的最后交互按空处理。
 快照版本 7 在会话摘要中增加可选的 Agent 原生累计 Token、原生轮次与截断标记。移动端对未经过
@@ -816,10 +687,10 @@ Shell 与精简的 Tauri 启动入口。`#[cfg(desktop)]` 注册代理、托盘�
 移动端复用 `DeviceUsageBundle`、S3 适配器、SQLite 导入与聚合逻辑，不启动本地代理，也不
 扫描本机 Agent 数据。移动设备页按设备懒加载同步的 Agent 摘要，展示安装面与版本，并区分
 已接入 Flowlet、部分接入、其它网关、配置异常、近期仅被观测到和暂未接入等状态。
-移动壳层统一持有当前设备筛选，概览页与项目页在标题右侧使用同一个轻量设备菜单，跨 Tab
-切换时保持选择；底部导航固定为“概览、项目、设备、设置”，Tab 切换使用 replace 导航，不把
-每次切换压入系统返回历史。概览、项目、设备和设置四个主页面统一使用整页下拉刷新，不在标题右侧
-重复放置刷新按钮；概览选择具体设备与项目页使用指定设备刷新，概览“全部”和设备页使用全局刷新。
+移动壳层统一持有当前设备筛选，概览页与设备页在标题右侧使用同一个轻量设备菜单，跨 Tab
+切换时保持选择；底部导航固定为“概览、设备、设置”，Tab 切换使用 replace 导航，不把
+每次切换压入系统返回历史。概览、设备和设置三个主页面统一使用整页下拉刷新，不在标题右侧
+重复放置刷新按钮；概览选择具体设备时使用指定设备刷新，概览“全部”和设备页使用全局刷新。
 设备页展开单个设备不再直接展示已安装 Agent，而是展示「会话」与「Agent」两个聚合入口卡片，
 各自汇总该设备的会话与 Agent 核心信息（会话数、运行/等待数、Token；已安装 Agent 数、已接入
 Flowlet 数）。点击任一卡片进入该设备的会话或 Agent 二级页：二级页是独立路由
@@ -830,7 +701,7 @@ Flowlet 数）。点击任一卡片进入该设备的会话或 Agent 二级页�
 （如「changen-home 会话」「changen-home Agent」，设备名未就绪时回退为「会话」「Agent」）。
 整页下拉刷新包住整个页面，指示器与概览页一致地出现在内容上方的安全区空隙里，不顶到系统状态栏。
 页面根 grid（`.page`）使用 `align-content: start`，内容不足一屏时行按自然高度贴顶、不会被拉伸
-出现空隙。项目页同样支持按所选设备整页下拉刷新。
+出现空隙。
 移动会话页读取桌面设备按上述规则筛选后的会话摘要，支持按共享设备
 和运行状态筛选；最后交互随摘要存储并
 可通过类型化命令读取，但当前列表不直接展开正文，也不把远端摘要合并进手机本机的 Agent 会话
@@ -972,8 +843,8 @@ Codex 账号与用量另有独立的周期性后台同步：应用启动约 20 �
 反复拉起 app-server 进程）。Rust 在同步前先做廉价检查：既没有 `~/.codex/auth.json` 登录凭据、也没有托管
 多账号目录时直接跳过，不创建任务、不发起网络请求；存在账号时复用 `query_codex_accounts` 刷新当前账号与
 所有托管账号的用量快照，并以 `job_type = codex-account-sync` 记入 `background_jobs` /
-`background_job_events`，单个账号刷新失败只记警告事件、不中断整轮同步。任务日志页可按「Codex 账号同步」
-类型筛选，详情展示账号数量、失效账号、失败账号与总耗时；同步成功后前端失效 Codex 账号查询缓存以刷新界面。
+`background_job_events`，单个账号刷新失败只记警告事件、不中断整轮同步。任务记录同时保存账号数量、
+失效账号、失败账号与总耗时，可按 `job_type` 与状态筛选；同步成功后前端失效 Codex 账号查询缓存以刷新界面。
 同一时刻只允许一个 Codex 同步运行；其 `JobRuntime` 作用域与 Agent 数据同步相互独立。
 Codex 账号支持单账号删除（`delete_codex_account`）：按 `account_id → 目录` 确定性映射定位，
 目录名规范化不匹配时回退扫描 `snapshot.account_id`，删除后移除托管目录中的 `auth.json` /
@@ -985,7 +856,7 @@ Agent 数据同步在应用启动约 3 秒后首次检查，窗口前台每 1 �
 Rust 使用 `notify` 监听现有 OpenCode 数据库、Claude Code 项目目录和 Codex sessions 目录，文件事件只作为
 “需要重新扫描”的提示，由前端静默 8 秒后触发同一增量同步，并限制文件事件触发间隔至少 30 秒；
 定时轮询始终保留为漏事件和新目录的兜底。扫描指纹时仅短暂持有 SQLite 锁，解析 Agent 原始文件期间
-不占用数据库，确保任务日志和其他页面查询不会被长任务阻塞。
+不占用数据库，确保后台任务记录查询和其他页面查询不会被长任务阻塞。
 同步发现仍可访问数据源中的会话已经消失或归档时，不删除 Flowlet 已保存的摘要快照和
 `agent_usage_events` 历史账本，只把快照标记为“源文件已删除”；会话列表和用量统计继续使用最后一次同步值。
 源文件重新出现时会强制重新解析并恢复为可用状态。只有用户未来通过明确的删除入口主动要求遗忘时，才可同时
@@ -995,7 +866,7 @@ Codex 与 Claude Code 的 JSONL 摘要快照额外保存解析器版本、已读
 Claude usage ID 去重集合；后续仅解析追加内容，不把消息或工具正文写入 SQLite。文件缩短、游标校验失败或
 解析器版本升级时自动从头整理。单轮最多读取 16 MiB，未读完时使用 partial 指纹让下一轮继续推进。
 同一时刻只允许一个 Agent 同步运行，进程内状态由 `JobRuntime` 管理。通用任务执行信息落入 `background_jobs`，阶段事件落入
-`background_job_events`，任务日志页展示触发方式、进度、结果、警告和错误；应用启动时会把上次未结束的
+`background_job_events`，包含触发方式、进度、结果、警告和错误；应用启动时会把上次未结束的
 任务标记为 `interrupted`。任务调度属于 React 产品编排，Rust command 负责只读扫描、SQLite 一致写入和
 并发互斥；同步失败不会影响代理请求链路，配置变更也不需要重启代理。
 
@@ -1004,7 +875,7 @@ Claude usage ID 去重集合；后续仅解析追加内容，不把消息或工�
 目录扫描、指纹比较、会话解析、SQLite 写入和任务总耗时均进入任务日志。解析原始文件时不持有 Storage 连接锁，
 任务取消、列表和详情查询可以并发执行。运行中任务可请求取消，当前会话解析完成或超时后停止后续处理。
 任务详情同时记录全量/增量会话数量和实际读取的源文件字节数，增量会话会生成单独的处理事件。
-任务列表按 20 条分页并支持状态、类型筛选；用户可清理 90 天前已结束任务，应用启动也会执行相同保留策略，
+任务记录按 20 条分页并支持状态、类型筛选；`cleanup_background_jobs` 清理 90 天前已结束任务，应用启动也会执行相同保留策略，
 运行中任务不会被清理。
 
 Claude Code 会话状态优先读取 `~/.claude/sessions/<pid>.json` 的活动进程记录，并按
@@ -1120,7 +991,7 @@ Anthropic `/messages/count_tokens` 只计算上下文长度，不执行模型推
 “万 / 亿 / 万亿”，英文采用 “K / M / B / T”，默认最多保留 1 位小数；紧凑组件同时通过
 `title` 保留本地化后的精确整数。业务页面不得再分别维护 Token 或请求数的 K/M、万/亿换算。
 
-应用窗口使用 Tauri 无系统边框模式，由前端壳提供可拖动区域以及最小化、最大化/还原、关闭按钮。关闭主窗口隐藏到托盘，只有“退出 Flowlet”才停止代理并退出应用。主窗口通过 `tauri-plugin-window-state` 记住上次的尺寸、位置与最大化状态：启动时自动恢复（无历史状态时保持 `tauri.conf.json` 的 1200×720 客户区），关闭隐藏到托盘、托盘“显示/隐藏”或退出时落盘；不记忆可见性，`--hidden` 后台启动不受影响。Windows 无系统边框窗口仍包含系统用于缩放的不可见边框；`window_size` 会按当前 DPI 测量外框与客户区差值并补偿原生最小尺寸约束，保证主窗口和项目详情窗口最小时的前端客户区仍不小于 1200×720。历史状态若保存过约 1184×711 的旧客户区，启动恢复后会自动抬回新下限。
+应用窗口使用 Tauri 无系统边框模式，由前端壳提供可拖动区域以及最小化、最大化/还原、关闭按钮。关闭主窗口隐藏到托盘，只有“退出 Flowlet”才停止代理并退出应用。主窗口通过 `tauri-plugin-window-state` 记住上次的尺寸、位置与最大化状态：启动时自动恢复（无历史状态时保持 `tauri.conf.json` 的 1200×720 客户区），关闭隐藏到托盘、托盘“显示/隐藏”或退出时落盘；不记忆可见性，`--hidden` 后台启动不受影响。Windows 无系统边框窗口仍包含系统用于缩放的不可见边框；`window_size` 会按当前 DPI 测量外框与客户区差值并补偿原生最小尺寸约束，保证主窗口最小时的前端客户区仍不小于 1200×720。历史状态若保存过约 1184×711 的旧客户区，启动恢复后会自动抬回新下限。
 
 全部界面文案使用中文。
 

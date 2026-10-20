@@ -3,7 +3,6 @@ import { MobileShell } from "./MobileShell";
 import { MobileOverviewPage } from "./pages/MobileOverviewPage";
 import { MobileDevicesPage } from "./pages/MobileDevicesPage";
 import { MobileSettingsPage } from "./pages/MobileSettingsPage";
-import { MobileTasksPage } from "./pages/MobileTasksPage";
 import { MobileDeviceSessionsPage } from "./pages/MobileDeviceSessionsPage";
 import { MobileDeviceAgentsPage } from "./pages/MobileDeviceAgentsPage";
 import { MobileAccountResourcesPage } from "./pages/MobileAccountResourcesPage";
@@ -20,7 +19,6 @@ export function MobileRouter() {
         <Route element={<MobileShell />}>
           <Route index element={<MobileOverviewPage />} />
           <Route path="devices" element={<MobileDevicesPage />} />
-          <Route path="projects" element={<MobileTasksPage />} />
           <Route path="settings" element={<MobileSettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>

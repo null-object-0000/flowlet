@@ -1,6 +1,5 @@
 use super::config::{AuthStrategy, ConfigBundle, ModelPrice};
 use rusqlite::{Connection, OptionalExtension};
-use serde_json::{json, Value};
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
@@ -37,10 +36,6 @@ mod storage_config;
 mod storage_device_usage;
 #[path = "storage_maintenance.rs"]
 mod storage_maintenance;
-#[path = "storage_projects.rs"]
-mod storage_projects;
-#[path = "storage_recurring_tasks.rs"]
-mod storage_recurring_tasks;
 #[path = "storage_stats.rs"]
 mod storage_stats;
 #[path = "storage_tasks.rs"]
@@ -48,8 +43,6 @@ pub(crate) mod storage_tasks;
 #[path = "storage_usage.rs"]
 mod storage_usage;
 pub use storage_maintenance::{DatabaseCompactionResult, DatabaseMaintenanceStats};
-pub use storage_projects::{Project, ProjectTask};
-pub use storage_recurring_tasks::{RecurringTask, RecurringTaskRun};
 pub use storage_stats::{StorageUsageCategory, StorageUsageSummary};
 pub use storage_tasks::{
     AgentDataSyncResult, AgentSyncStatusReport, BackgroundJobDetail, BackgroundJobRow,
@@ -937,41 +930,6 @@ impl Storage {
                 updated_at TEXT NOT NULL
             );
 
-            CREATE TABLE IF NOT EXISTS projects (
-                id                  TEXT PRIMARY KEY,
-                name                TEXT NOT NULL,
-                directory_path      TEXT,
-                workspace_project_id TEXT,
-                workspace_archived  INTEGER NOT NULL DEFAULT 0,
-                created_at          TEXT NOT NULL,
-                updated_at          TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS project_tasks (
-                id            TEXT PRIMARY KEY,
-                project_id    TEXT NOT NULL,
-                title         TEXT NOT NULL,
-                description   TEXT NOT NULL DEFAULT '',
-                status        TEXT NOT NULL DEFAULT 'draft'
-                              CHECK (status IN ('draft', 'submitted', 'in_progress', 'review', 'done')),
-                task_type     TEXT NOT NULL DEFAULT 'code'
-                              CHECK (task_type IN ('code', 'readonly')),
-                agent_profile TEXT NOT NULL DEFAULT '',
-                priority      TEXT NOT NULL DEFAULT 'p2'
-                              CHECK (priority IN ('p0', 'p1', 'p2')),
-                base_task_id  TEXT,
-                claimed_by    TEXT,
-                claimed_at    TEXT,
-                queue_boosted_at TEXT,
-                deleted       INTEGER NOT NULL DEFAULT 0,
-                created_at    TEXT NOT NULL,
-                updated_at    TEXT NOT NULL,
-                FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_project_tasks_project_status_updated
-                ON project_tasks(project_id, status, updated_at DESC);
-
             CREATE TABLE IF NOT EXISTS known_devices (
                 device_id               TEXT PRIMARY KEY,
                 device_created_at       TEXT NOT NULL,
@@ -1047,21 +1005,6 @@ impl Storage {
                 snapshot_generated_at TEXT NOT NULL,
                 imported_at           TEXT NOT NULL,
                 PRIMARY KEY (device_id, agent_id),
-                FOREIGN KEY (device_id) REFERENCES known_devices(device_id) ON DELETE CASCADE
-            );
-
-            -- 跨设备同步来的轻量项目目录：移动端据此发现「哪台设备能执行哪个项目」
-            -- 并只读查看任务状态。`project_id` 是工作区项目 id。整表只读共享区。
-            CREATE TABLE IF NOT EXISTS device_projects (
-                device_id             TEXT NOT NULL,
-                project_id            TEXT NOT NULL,
-                project_name          TEXT NOT NULL,
-                has_local_binding     INTEGER NOT NULL DEFAULT 0,
-                tasks_json            TEXT NOT NULL DEFAULT '[]',
-                updated_at            TEXT NOT NULL DEFAULT '',
-                snapshot_generated_at TEXT NOT NULL,
-                imported_at           TEXT NOT NULL,
-                PRIMARY KEY (device_id, project_id),
                 FOREIGN KEY (device_id) REFERENCES known_devices(device_id) ON DELETE CASCADE
             );
 
@@ -1819,79 +1762,13 @@ impl Storage {
             connection.execute("ALTER TABLE request_logs DROP COLUMN stream_summary", [])?;
         }
 
-        // 项目任务表新增任务类型 / Agent Profile / 优先级（2026-08-04）。
-        // 旧库用 ADD COLUMN 补齐；status 的 CHECK 约束需要包含 review，必须重建表。
-        migrate_project_tasks_schema(&connection)?;
-        // 早期版本会把启动前校验 / CreateProcess 失败误记为执行轮次；保留 job 日志，
-        // 但从任务执行历史与最近执行指针中移除，避免占用轮次编号。
-        prune_unstarted_task_executions(&connection)?;
-        // 修复早期版本执行历史从未落库的任务（见 backfill_task_execution_history 注释）。
-        backfill_task_execution_history(&connection)?;
-        // 为已有执行历史补执行耗时（无需重建任务，从 background_jobs 回填 finishedAt / executionMs）。
-        backfill_task_execution_durations(&connection)?;
-        // 多设备同步（2026-08）：目录可空化 + 工作区归属 + 任务领取租约字段。
-        migrate_projects_workspace_schema(&connection)?;
-        migrate_recurring_tasks_schema(&connection)?;
+        // 项目管理能力已整体移除（2026-10）：删除项目、项目任务、定时任务与
+        // 跨设备共享项目表，避免旧库继续保留已无人读写的孤儿数据。
+        drop_project_management_schema(&connection)?;
 
         tracing::info!("migrate: 完成");
         Ok(())
     }
-}
-
-fn migrate_recurring_tasks_schema(connection: &Connection) -> Result<(), StorageError> {
-    connection.execute_batch(
-        r#"
-        CREATE TABLE IF NOT EXISTS recurring_tasks (
-            id TEXT PRIMARY KEY,
-            project_id TEXT NOT NULL,
-            title TEXT NOT NULL,
-            description TEXT NOT NULL DEFAULT '',
-            task_type TEXT NOT NULL CHECK (task_type IN ('code', 'readonly')),
-            agent_profile TEXT NOT NULL,
-            schedule_kind TEXT NOT NULL DEFAULT 'manual' CHECK (schedule_kind IN ('manual', 'daily')),
-            daily_time TEXT,
-            timezone TEXT NOT NULL DEFAULT 'Asia/Shanghai',
-            enabled INTEGER NOT NULL DEFAULT 0,
-            session_policy TEXT NOT NULL DEFAULT 'fresh' CHECK (session_policy IN ('fresh', 'continue')),
-            source_task_id TEXT,
-            next_run_at TEXT,
-            last_scheduled_for TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
-        );
-        CREATE INDEX IF NOT EXISTS idx_recurring_tasks_due
-            ON recurring_tasks(enabled, schedule_kind, next_run_at);
-        CREATE TABLE IF NOT EXISTS recurring_task_runs (
-            id TEXT PRIMARY KEY,
-            recurring_task_id TEXT NOT NULL,
-            project_id TEXT NOT NULL,
-            trigger_source TEXT NOT NULL CHECK (trigger_source IN ('manual', 'scheduled', 'test', 'retry')),
-            status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled', 'interrupted')),
-            scheduled_for TEXT,
-            title_snapshot TEXT NOT NULL,
-            description_snapshot TEXT NOT NULL DEFAULT '',
-            task_type_snapshot TEXT NOT NULL,
-            agent_profile_snapshot TEXT NOT NULL,
-            session_policy_snapshot TEXT NOT NULL,
-            job_id TEXT,
-            session_id TEXT,
-            error_message TEXT,
-            started_at TEXT,
-            finished_at TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            FOREIGN KEY (recurring_task_id) REFERENCES recurring_tasks(id) ON DELETE CASCADE,
-            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
-        );
-        CREATE INDEX IF NOT EXISTS idx_recurring_task_runs_task_created
-            ON recurring_task_runs(recurring_task_id, created_at DESC);
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_recurring_task_runs_scheduled_once
-            ON recurring_task_runs(recurring_task_id, scheduled_for)
-            WHERE trigger_source = 'scheduled' AND scheduled_for IS NOT NULL;
-        "#,
-    )?;
-    Ok(())
 }
 
 fn add_column_if_missing(
@@ -1927,418 +1804,47 @@ fn table_has_column(
     Ok(exists > 0)
 }
 
-/// 项目任务表结构迁移：补齐 task_type / agent_profile / priority 三列，
-/// 并保证 status 的 CHECK 含 'draft'（草稿/已提交拆分）、priority 的 CHECK 不含 'p3'（已移除 P3 档）。
-/// SQLite 修改 CHECK 需重建表；判断依据是 status CHECK 是否已含 'draft'、priority 是否仍含 'p3'。
-fn migrate_project_tasks_schema(connection: &Connection) -> Result<(), StorageError> {
-    for (column, definition) in [
-        ("task_type", "TEXT NOT NULL DEFAULT 'code'"),
-        ("agent_profile", "TEXT NOT NULL DEFAULT ''"),
-        ("priority", "TEXT NOT NULL DEFAULT 'p2'"),
-        ("base_task_id", "TEXT"),
-        ("last_job_id", "TEXT"),
-        ("rejection_reason", "TEXT"),
-        ("execution_history", "TEXT"),
-        // 队列置顶时间（RFC3339）：已提交待执行任务被用户「置顶」提到队列最前。
-        // 设备本地字段，不参与工作区同步；任务被领取执行时清空。
-        ("queue_boosted_at", "TEXT"),
-    ] {
-        add_column_if_missing(connection, "project_tasks", column, definition)?;
-    }
-
-    // status CHECK 是否已含 'draft'、priority 是否已移除 'p3' 且默认值已是 'p2'
-    //（都满足则新 schema 已生效，无需重建）。
-    let sql: String = connection.query_row(
-        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'project_tasks'",
-        [],
-        |row| row.get(0),
-    )?;
-    if !sql.contains("'draft'") || sql.contains("'p3'") || sql.contains("DEFAULT 'p1'") {
-        connection.execute_batch(
-            "BEGIN;
-             ALTER TABLE project_tasks RENAME TO project_tasks_legacy;
-             CREATE TABLE project_tasks (
-                 id            TEXT PRIMARY KEY,
-                 project_id    TEXT NOT NULL,
-                 title         TEXT NOT NULL,
-                 description   TEXT NOT NULL DEFAULT '',
-                 status        TEXT NOT NULL DEFAULT 'draft'
-                               CHECK (status IN ('draft', 'submitted', 'in_progress', 'review', 'done')),
-                 task_type     TEXT NOT NULL DEFAULT 'code'
-                               CHECK (task_type IN ('code', 'readonly')),
-                 agent_profile TEXT NOT NULL DEFAULT '',
-                 priority      TEXT NOT NULL DEFAULT 'p2'
-                               CHECK (priority IN ('p0', 'p1', 'p2')),
-                 base_task_id  TEXT,
-                 last_job_id   TEXT,
-                 rejection_reason TEXT,
-                 execution_history TEXT,
-                 claimed_by    TEXT,
-                 claimed_at    TEXT,
-                 queue_boosted_at TEXT,
-                 deleted       INTEGER NOT NULL DEFAULT 0,
-                 created_at    TEXT NOT NULL,
-                 updated_at    TEXT NOT NULL,
-                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
-             );
-             INSERT INTO project_tasks (id, project_id, title, description, status, task_type, agent_profile, priority, base_task_id, last_job_id, rejection_reason, execution_history, claimed_by, claimed_at, queue_boosted_at, deleted, created_at, updated_at)
-                 SELECT id, project_id, title, description,
-                        CASE WHEN status = 'todo' THEN 'draft' ELSE status END,
-                        COALESCE(task_type, 'code'), COALESCE(agent_profile, ''), COALESCE(priority, 'p1'), base_task_id, last_job_id, rejection_reason, execution_history, NULL, NULL, NULL, 0, created_at, updated_at
-                 FROM project_tasks_legacy;
-             DROP TABLE project_tasks_legacy;
-             CREATE INDEX IF NOT EXISTS idx_project_tasks_project_status_updated
-                 ON project_tasks(project_id, status, updated_at DESC);
-             COMMIT;",
-        )?;
-    }
-
-    Ok(())
-}
-
-/// 多设备同步迁移（2026-08）：
-/// - `projects.directory_path` 由 NOT NULL 改为可空（远端项目未绑定本机目录）；
-/// - `projects` 增加 `workspace_project_id` / `workspace_archived`（工作区归属与墓碑）；
-/// - `project_tasks` 增加 `claimed_by` / `claimed_at`（跨设备领取租约）。
-/// SQLite 修改列约束需重建表；`add_column_if_missing` 处理只加列的情况。
-fn migrate_projects_workspace_schema(connection: &Connection) -> Result<(), StorageError> {
-    // 任务表：只加列即可（新库已在建表 SQL 中声明）。
-    for (column, definition) in [
-        ("claimed_by", "TEXT"),
-        ("claimed_at", "TEXT"),
-        ("deleted", "INTEGER NOT NULL DEFAULT 0"),
-    ] {
-        add_column_if_missing(connection, "project_tasks", column, definition)?;
-    }
-
-    // 项目表：判断是否需要重建。旧库 directory_path 带 NOT NULL，或缺失工作区列。
-    let sql: Option<String> = connection
-        .query_row(
-            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'projects'",
-            [],
-            |row| row.get(0),
-        )
-        .optional()?;
-    let needs_rebuild = match sql {
-        Some(sql) => {
-            sql.contains("directory_path TEXT NOT NULL")
-                || !sql.contains("workspace_project_id")
-                || !sql.contains("workspace_archived")
-        }
-        None => false,
-    };
-    if needs_rebuild {
-        // 重建 projects 会连带改写 project_tasks 的外键引用（RENAME 会把引用更新为
-        // legacy 名）。因此必须连同 project_tasks 一起重建，保证外键最终指向新的
-        // projects 表。期间临时关闭外键强制，避免 RENAME / DROP 在级联检查上出错。
-        connection.execute_batch("PRAGMA foreign_keys = OFF;")?;
-        let result = connection.execute_batch(
-            "BEGIN;
-             ALTER TABLE project_tasks RENAME TO project_tasks_legacy;
-             ALTER TABLE projects RENAME TO projects_legacy;
-             CREATE TABLE projects (
-                 id                   TEXT PRIMARY KEY,
-                 name                 TEXT NOT NULL,
-                 directory_path       TEXT,
-                 workspace_project_id TEXT,
-                 workspace_archived   INTEGER NOT NULL DEFAULT 0,
-                 created_at           TEXT NOT NULL,
-                 updated_at           TEXT NOT NULL
-             );
-             INSERT INTO projects (id, name, directory_path, workspace_project_id, workspace_archived, created_at, updated_at)
-                 SELECT id, name, directory_path, NULL, 0, created_at, updated_at
-                 FROM projects_legacy;
-             DROP TABLE projects_legacy;
-             CREATE TABLE project_tasks (
-                 id            TEXT PRIMARY KEY,
-                 project_id    TEXT NOT NULL,
-                 title         TEXT NOT NULL,
-                 description   TEXT NOT NULL DEFAULT '',
-                 status        TEXT NOT NULL DEFAULT 'draft'
-                               CHECK (status IN ('draft', 'submitted', 'in_progress', 'review', 'done')),
-                 task_type     TEXT NOT NULL DEFAULT 'code'
-                               CHECK (task_type IN ('code', 'readonly')),
-                 agent_profile TEXT NOT NULL DEFAULT '',
-                 priority      TEXT NOT NULL DEFAULT 'p2'
-                               CHECK (priority IN ('p0', 'p1', 'p2')),
-                 base_task_id  TEXT,
-                 last_job_id   TEXT,
-                 rejection_reason TEXT,
-                 execution_history TEXT,
-                 claimed_by    TEXT,
-                 claimed_at    TEXT,
-                 queue_boosted_at TEXT,
-                 deleted       INTEGER NOT NULL DEFAULT 0,
-                 created_at    TEXT NOT NULL,
-                 updated_at    TEXT NOT NULL,
-                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
-             );
-             INSERT INTO project_tasks (id, project_id, title, description, status, task_type, agent_profile, priority, base_task_id, last_job_id, rejection_reason, execution_history, claimed_by, claimed_at, queue_boosted_at, deleted, created_at, updated_at)
-                 SELECT id, project_id, title, description, status, task_type, agent_profile, priority, base_task_id, last_job_id, rejection_reason, execution_history, claimed_by, claimed_at, queue_boosted_at, deleted, created_at, updated_at
-                 FROM project_tasks_legacy;
-             DROP TABLE project_tasks_legacy;
-             CREATE INDEX IF NOT EXISTS idx_project_tasks_project_status_updated
-                 ON project_tasks(project_id, status, updated_at DESC);
-             COMMIT;",
-        );
-        let _ = connection.execute_batch("PRAGMA foreign_keys = ON;");
-        result?;
-    }
-    // 新库缺列时兜底（与重建同一目标，幂等）。
-    for (column, definition) in [
-        ("workspace_project_id", "TEXT"),
-        ("workspace_archived", "INTEGER NOT NULL DEFAULT 0"),
-    ] {
-        add_column_if_missing(connection, "projects", column, definition)?;
-    }
-
-    Ok(())
-}
-
-/// 判断历史 job 是否在 Agent 子进程成功创建前失败。
+/// 彻底移除项目管理能力（2026-10）。
 ///
-/// 这些错误都发生在 `spawn_agent` 返回成功之前，属于启动诊断而非执行轮次。
-/// 只匹配 Flowlet 自己生成的明确错误前缀，避免误删 Agent 进程启动后的普通失败。
-fn is_unstarted_agent_job_error(error: &str) -> bool {
-    let error = error.trim();
-    error.starts_with("无法启动 ")
-        || error.starts_with("项目未绑定本机目录")
-        || error.starts_with("项目绑定的本机目录不存在或不是文件夹")
-        || error.starts_with("无法确定 Pi 原生会话目录")
-        || error.starts_with("无法生成 Pi 会话 id")
-}
-
-/// 清理旧版本误记的“未启动轮次”。background_jobs 与事件日志完整保留，只修正任务上的
-/// `execution_history` / `last_job_id` 派生索引。幂等：再次运行时已没有对应条目。
-fn prune_unstarted_task_executions(connection: &Connection) -> Result<(), StorageError> {
-    let mut task_stmt = connection.prepare(
-        "SELECT id, execution_history FROM project_tasks
-         WHERE execution_history IS NOT NULL AND trim(execution_history) != ''",
-    )?;
-    let tasks: Vec<(String, String)> = task_stmt
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-        .collect::<Result<_, _>>()?;
-    drop(task_stmt);
-
-    for (task_id, history) in tasks {
-        let Ok(entries) = serde_json::from_str::<Vec<serde_json::Value>>(&history) else {
-            continue;
-        };
-        let original_len = entries.len();
-        let mut retained = Vec::with_capacity(entries.len());
-        for entry in entries {
-            let remove = if let Some(job_id) = entry.get("jobId").and_then(Value::as_str) {
-                let error: Option<String> = connection
-                    .query_row(
-                        "SELECT error_message FROM background_jobs WHERE id = ?1",
-                        [job_id],
-                        |row| row.get(0),
-                    )
-                    .optional()?
-                    .flatten();
-                error.as_deref().is_some_and(is_unstarted_agent_job_error)
-            } else {
-                false
-            };
-            if !remove {
-                retained.push(entry);
-            }
+/// 删除项目、项目任务、定时任务与跨设备共享项目表。SQLite 在开启外键时 `DROP TABLE`
+/// 会对父表做隐式删除并可能触发级联，这里显式关闭外键后按「先子表后父表」顺序删除，
+/// 避免旧库的引用关系阻断迁移。`background_jobs` 中仅项目使用的三类执行记录、其事件
+/// 与 `app_meta` 中任务审核通知 / 项目工作区 ETag 键一并清理，不留指向已删除能力的
+/// 孤儿行。其余表（请求日志、用量、渠道账号、设备同步、Agent 会话等）不受影响。
+fn drop_project_management_schema(connection: &Connection) -> Result<(), StorageError> {
+    // 调用方不一定以开启外键打开连接，因此保存原值并在结束时恢复；恢复失败必须上报，
+    // 否则会静默把连接改成与调用前不同的状态。
+    let foreign_keys_enabled: i64 =
+        connection.query_row("PRAGMA foreign_keys", [], |row| row.get(0))?;
+    connection.execute_batch("PRAGMA foreign_keys = OFF;")?;
+    let result = connection.execute_batch(
+        r#"
+        DROP TABLE IF EXISTS project_tasks;
+        DROP TABLE IF EXISTS projects;
+        DROP TABLE IF EXISTS recurring_task_runs;
+        DROP TABLE IF EXISTS recurring_tasks;
+        DROP TABLE IF EXISTS device_projects;
+        DELETE FROM background_job_events
+            WHERE job_id IN (
+                SELECT id FROM background_jobs
+                WHERE job_type IN ('project-task-run', 'recurring-task-run', 'project-workspace-sync')
+            );
+        DELETE FROM background_jobs
+            WHERE job_type IN ('project-task-run', 'recurring-task-run', 'project-workspace-sync');
+        DELETE FROM app_meta
+            WHERE key IN ('task_review_notification_enabled', 'project_workspace_etags_v1');
+        "#,
+    );
+    if foreign_keys_enabled != 0 {
+        let restore = connection.execute_batch("PRAGMA foreign_keys = ON;");
+        if result.is_ok() {
+            restore?;
         }
-        let entries = retained;
-        if entries.len() == original_len {
-            continue;
-        }
-
-        let last_job_id = entries
-            .last()
-            .and_then(|entry| entry.get("jobId"))
-            .and_then(Value::as_str);
-        let serialized = if entries.is_empty() {
-            None
-        } else {
-            Some(
-                serde_json::to_string(&entries)
-                    .map_err(|error| StorageError::InvalidImport(error.to_string()))?,
-            )
-        };
-        connection.execute(
-            "UPDATE project_tasks SET execution_history = ?1, last_job_id = ?2 WHERE id = ?3",
-            rusqlite::params![serialized, last_job_id, task_id],
-        )?;
     }
+    result?;
     Ok(())
 }
 
-/// 任务执行历史修复（2026-08-05）：早期版本 `append_task_execution` 对 NULL 的
-/// `execution_history` 用 `row.get::<_, String>()` 读取会报 `InvalidColumnType`，
-/// 导致执行历史从未落库（只有 last_job_id 被记录）。这里对「有 last_job_id 但
-/// execution_history 为空」的任务，按 `background_jobs` 中同名的 project-task-run
-/// 记录重建历史。幂等：只补空，填充后条件不再命中；job 已清理的任务保持原样，
-/// 由前端 `lastJobId` 兜底展示最近一次。
-fn backfill_task_execution_history(connection: &Connection) -> Result<(), StorageError> {
-    let mut task_stmt = connection.prepare(
-        "SELECT id, title, last_job_id FROM project_tasks
-         WHERE last_job_id IS NOT NULL
-           AND (execution_history IS NULL OR trim(execution_history) = '')",
-    )?;
-    let tasks: Vec<(String, String, String)> = task_stmt
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
-        .collect::<Result<_, _>>()?;
-    drop(task_stmt);
-
-    for (task_id, title, current_last_job_id) in tasks {
-        let job_title = format!("任务执行：{title}");
-        let mut job_stmt = connection.prepare(
-            "SELECT id, COALESCE(started_at, created_at), finished_at, error_message FROM background_jobs
-             WHERE job_type = 'project-task-run' AND title = ?1
-             ORDER BY created_at ASC, rowid ASC",
-        )?;
-        let jobs: Vec<(String, String, Option<String>, Option<String>)> = job_stmt
-            .query_map(rusqlite::params![job_title], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<String>>(3)?,
-                ))
-            })?
-            .filter_map(|row| match row {
-                Ok(job) if !job.3.as_deref().is_some_and(is_unstarted_agent_job_error) => {
-                    Some(Ok(job))
-                }
-                Ok(_) => None,
-                Err(error) => Some(Err(error)),
-            })
-            .collect::<Result<_, _>>()?;
-        drop(job_stmt);
-        if jobs.is_empty() {
-            let last_error: Option<String> = connection
-                .query_row(
-                    "SELECT error_message FROM background_jobs WHERE id = ?1",
-                    [&current_last_job_id],
-                    |row| row.get(0),
-                )
-                .optional()?
-                .flatten();
-            if last_error
-                .as_deref()
-                .is_some_and(is_unstarted_agent_job_error)
-            {
-                connection.execute(
-                    "UPDATE project_tasks SET last_job_id = NULL WHERE id = ?1",
-                    [&task_id],
-                )?;
-            }
-            continue;
-        }
-        let last_job_id = jobs.last().map(|job| job.0.clone());
-        let entries: Vec<serde_json::Value> = jobs
-            .into_iter()
-            .map(|(job_id, started_at, finished_at, _)| {
-                // 历史任务无法恢复每轮进入待处理的时刻 → submittedAt 空、waitingMs 0；
-                // 执行耗时从 background_jobs 的真实结束时刻推算。
-                let execution_ms = finished_at
-                    .as_deref()
-                    .and_then(parse_epoch_millis)
-                    .zip(parse_epoch_millis(&started_at))
-                    .map(|(finished, started)| (finished - started).max(0));
-                serde_json::json!({
-                    "jobId": job_id,
-                    "startedAt": started_at,
-                    "submittedAt": Value::Null,
-                    "finishedAt": finished_at,
-                    "waitingMs": 0,
-                    "executionMs": execution_ms,
-                    "rejected": false,
-                    "rejectionReason": null,
-                    "rejectedAt": null,
-                })
-            })
-            .collect();
-        let serialized = serde_json::to_string(&entries)
-            .map_err(|error| StorageError::InvalidImport(error.to_string()))?;
-        connection.execute(
-            "UPDATE project_tasks SET execution_history = ?1, last_job_id = ?2 WHERE id = ?3",
-            rusqlite::params![serialized, last_job_id, task_id],
-        )?;
-    }
-    Ok(())
-}
-
-/// 执行耗时回填（2026-08-05）：为「已有 execution_history 但记录缺少执行耗时」的历史任务，
-/// 从 `background_jobs` 按 jobId 补上 `finishedAt` 与 `executionMs`。
-/// 幂等：已有 executionMs 且 finishedAt 的记录不覆盖；job 已清理 / 仍在运行（无 finished_at）
-/// 的记录保持原样，由前端实时或现有兜底逻辑处理。
-fn backfill_task_execution_durations(connection: &Connection) -> Result<(), StorageError> {
-    let mut task_stmt = connection.prepare(
-        "SELECT id, execution_history FROM project_tasks
-         WHERE execution_history IS NOT NULL AND trim(execution_history) != ''",
-    )?;
-    let tasks: Vec<(String, String)> = task_stmt
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-        .collect::<Result<_, _>>()?;
-    drop(task_stmt);
-
-    for (task_id, history) in tasks {
-        let mut entries: Vec<serde_json::Value> =
-            serde_json::from_str(&history).unwrap_or_default();
-        let mut changed = false;
-        for entry in &mut entries {
-            // 已有 executionMs 且 finishedAt → 真实值已记录，不覆盖。
-            if entry.get("executionMs").is_some()
-                && entry.get("finishedAt").and_then(Value::as_str).is_some()
-            {
-                continue;
-            }
-            let Some(job_id) = entry.get("jobId").and_then(Value::as_str) else {
-                continue;
-            };
-            let Some(started_ms) = entry
-                .get("startedAt")
-                .and_then(Value::as_str)
-                .and_then(parse_epoch_millis)
-            else {
-                continue;
-            };
-            let finished_at: Option<String> = connection
-                .query_row(
-                    "SELECT finished_at FROM background_jobs WHERE id = ?1",
-                    [job_id],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            let Some(finished_at) = finished_at else {
-                continue;
-            };
-            let Some(finished_ms) = parse_epoch_millis(&finished_at) else {
-                continue;
-            };
-            entry["finishedAt"] = json!(finished_at);
-            entry["executionMs"] = json!((finished_ms - started_ms).max(0));
-            changed = true;
-        }
-        if changed {
-            let serialized = serde_json::to_string(&entries)
-                .map_err(|error| StorageError::InvalidImport(error.to_string()))?;
-            connection.execute(
-                "UPDATE project_tasks SET execution_history = ?1 WHERE id = ?2",
-                rusqlite::params![serialized, task_id],
-            )?;
-        }
-    }
-    Ok(())
-}
-
-/// 解析时间戳为 Unix 毫秒。支持 ISO 8601（RFC3339）与 SQLite `datetime('now')`
-/// 产出的 `YYYY-MM-DD HH:MM:SS`（UTC 无时区标记）。
-fn parse_epoch_millis(value: &str) -> Option<i64> {
-    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(value) {
-        return Some(dt.timestamp_millis());
-    }
-    chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S")
-        .ok()
-        .map(|dt| dt.and_utc().timestamp_millis())
-}
 
 fn normalize_legacy_virtual_model_routes_schema(
     connection: &Connection,

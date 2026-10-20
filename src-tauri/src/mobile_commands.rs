@@ -1,6 +1,6 @@
 use super::MobileAppState;
 use crate::core::device_identity::{
-    DailyUsageTotal, HourlyUsageTotal, KnownDevice, SharedAgentSession, SharedDeviceProject,
+    DailyUsageTotal, HourlyUsageTotal, KnownDevice, SharedAgentSession,
     SyncedAccountResource, SyncedAgentProfile, SyncedAgentSession,
 };
 
@@ -45,66 +45,6 @@ pub(super) async fn list_shared_device_agents(
     })
     .await
     .map_err(|error| format!("读取共享设备 Agent 资料任务失败：{error}"))?
-}
-
-#[tauri::command]
-pub(super) async fn list_shared_device_projects(
-    state: tauri::State<'_, MobileAppState>,
-    device_id: Option<String>,
-) -> Result<Vec<SharedDeviceProject>, String> {
-    let storage = state.storage.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        storage
-            .imported_device_projects(device_id.as_deref())
-            .map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| format!("读取共享设备项目目录任务失败：{error}"))?
-}
-
-/// 移动端通过签名 LAN 通道把任务提交到指定桌面设备。
-/// 任务默认以草稿（draft）状态创建，目标设备离线、版本过旧或未绑定项目目录时返回明确错误。
-#[tauri::command]
-pub(super) async fn submit_task_lan(
-    state: tauri::State<'_, MobileAppState>,
-    device_id: String,
-    input: crate::core::lan_sync::TaskSubmitInput,
-) -> Result<crate::core::lan_sync::TaskSubmitResult, String> {
-    crate::core::lan_sync::submit_task(&state.storage, &device_id, &input).await
-}
-
-/// 移动端通过签名 LAN 通道提交 / 撤回任务（草稿 ↔ 已提交）。
-/// 与 PC 看板交互一致，任务默认草稿待提交，可手动提交、撤回；仅允许局域网直连方式变更。
-#[tauri::command]
-pub(super) async fn set_task_status_lan(
-    state: tauri::State<'_, MobileAppState>,
-    device_id: String,
-    task_id: String,
-    status: String,
-) -> Result<crate::core::lan_sync::TaskSubmitResult, String> {
-    crate::core::lan_sync::set_task_status(&state.storage, &device_id, &task_id, &status).await
-}
-
-/// 移动端通过签名 LAN 通道编辑草稿任务内容。
-/// 与 PC 看板「草稿可编辑」语义一致，只允许编辑草稿状态任务；仅允许局域网直连方式变更。
-#[tauri::command]
-pub(super) async fn edit_task_lan(
-    state: tauri::State<'_, MobileAppState>,
-    device_id: String,
-    input: crate::core::lan_sync::TaskEditInput,
-) -> Result<crate::core::lan_sync::TaskSubmitResult, String> {
-    crate::core::lan_sync::edit_task(&state.storage, &device_id, &input).await
-}
-
-/// 移动端通过签名 LAN 通道删除草稿任务。
-/// 与 PC 看板「草稿可删除」语义一致，只允许删除草稿状态任务；仅允许局域网直连方式变更。
-#[tauri::command]
-pub(super) async fn delete_task_lan(
-    state: tauri::State<'_, MobileAppState>,
-    device_id: String,
-    input: crate::core::lan_sync::TaskDeleteInput,
-) -> Result<crate::core::lan_sync::TaskSubmitResult, String> {
-    crate::core::lan_sync::delete_task(&state.storage, &device_id, &input).await
 }
 
 #[tauri::command]

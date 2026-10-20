@@ -8,8 +8,6 @@ import {
   IconPieChart2Stroked,
   IconServer,
   IconSetting,
-  IconHistory,
-  IconKanban,
 } from "@douyinfe/semi-icons";
 import { NavLink } from "react-router-dom";
 import navStyles from "./Nav.module.css";
@@ -28,7 +26,6 @@ const navGroups: Array<{
     items: [
       { to: "/", label: "运行概览", icon: <IconHome /> },
       { to: "/models", label: "模型服务", icon: <IconServer /> },
-      { to: "/projects", label: "项目管理", icon: <IconKanban /> },
     ],
   },
   {
@@ -36,7 +33,6 @@ const navGroups: Array<{
     items: [
       { to: "/logs", label: "请求日志", icon: <IconList /> },
       { to: "/sessions", label: "会话管理", icon: <IconComment /> },
-      { to: "/tasks", label: "任务日志", icon: <IconHistory /> },
     ],
   },
   {

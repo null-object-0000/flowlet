@@ -44,8 +44,8 @@ Flowlet 不以通用企业级 LLM 网关为核心定位。
 内置渠道、模型目录和 Agent 的扩展声明统一登记在仓库根目录
 `plugin-registry.json`。注册表只声明受控贡献，具体适配器仍由前端/Rust 编译期代码实现；
 渠道贡献必须声明 `adapterId`，Agent 贡献必须声明 `environmentAdapterId`、
-`globalConfigAdapterId`、`sessionAdapterId`、`identityAdapterId`、`runnerAdapterId`、
-`sessionTypes`（含 `clientId`）、`taskProfile` 与 `configCapabilities`；五类 Agent 实现必须在
+`globalConfigAdapterId`、`sessionAdapterId`、`identityAdapterId`、`sessionTypes`（含
+`clientId`）与 `configCapabilities`；四类 Agent 实现必须在
 `AgentPluginBundle` 中一次性组合，禁止各 Adapter 模块另建 Agent roster；新增适配器时必须同步
 注册表校验和对应编译期实现，禁止静默回退；
 不得通过插件清单引入任意脚本执行、动态库加载或绕过类型化边界的直接状态修改。
@@ -541,9 +541,6 @@ Flowlet 在 Provider 的 `models` 条目写入 `contextWindow: 1048576`（仅当
 条目 `maxTokens` 变成每请求自动携带的输出上限，聚合路由各上游上限不同，声明单一值会把能力
 锁死在最低值；该项随 settings.yaml 热加载，无需重启。代理以 DSH UA 为门控读取并在转发上游前
 剥离该头；静态 Provider Header、文件更新时间或最近活跃会话均不得用于猜测请求所属 session。
-headless 任务执行兼容 npx 官方启动方式：npm 缓存中只存在唯一版本时，Flowlet 直接解析包入口
-（`node <包 bin>`）执行 `dsh --profile headless`，无需全局安装；多版本共存时要求全局安装，
-确保版本确定性。
 用户开启“MCP 服务器”（`configCapabilities` 中 kind 为 `list`）后，Flowlet 在每个已初始化的
 base-bundle DSH Profile 的 `cordis.patch.yml` 部署受管 `deepseek-harness-mcp-servers` 块：块内每个
 服务器一个 `- insert:` 的 `@deepseek-ai/dsh-mcp-client` 插件实例（stdio 或 streamable-http），

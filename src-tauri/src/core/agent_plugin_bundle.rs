@@ -1,14 +1,13 @@
 //! 编译期 Agent 插件总注册表。
 //!
 //! `plugin-registry.json` 声明产品能力；本模块把每个 Agent 的 Environment、Global Config、
-//! Session、Identity 与 Runner 实现组合成一个类型化 Bundle。新增 Agent 只在这里登记一次，
+//! Session 与 Identity 实现组合成一个类型化 Bundle。新增 Agent 只在这里登记一次，
 //! 各能力模块不再分别维护 Agent roster。
 
 use super::agent_environment::adapters::AgentEnvironmentAdapter;
 use super::agent_global_config::adapters::AgentGlobalConfigAdapter;
 use super::agent_identity_adapter::AgentIdentityAdapter;
 use super::agent_session_adapter::AgentSessionAdapter;
-use super::agent_task_runner::adapters::AgentTaskRunnerAdapter;
 use serde::Serialize;
 
 pub(crate) struct AgentPluginBundle {
@@ -17,7 +16,6 @@ pub(crate) struct AgentPluginBundle {
     pub(crate) global_config: &'static dyn AgentGlobalConfigAdapter,
     pub(crate) session: &'static dyn AgentSessionAdapter,
     pub(crate) identity: &'static dyn AgentIdentityAdapter,
-    pub(crate) runner: &'static AgentTaskRunnerAdapter,
 }
 
 static BUNDLES: [AgentPluginBundle; 6] = [
@@ -27,7 +25,6 @@ static BUNDLES: [AgentPluginBundle; 6] = [
         global_config: super::agent_global_config::adapters::CLAUDE_CODE,
         session: super::agent_session_adapter::adapters::CLAUDE_CODE,
         identity: super::agent_identity_adapter::adapters::CLAUDE_CODE,
-        runner: &super::agent_task_runner::adapters::CLAUDE_CODE,
     },
     AgentPluginBundle {
         id: "opencode",
@@ -35,7 +32,6 @@ static BUNDLES: [AgentPluginBundle; 6] = [
         global_config: super::agent_global_config::adapters::OPENCODE,
         session: super::agent_session_adapter::adapters::OPENCODE,
         identity: super::agent_identity_adapter::adapters::OPENCODE,
-        runner: &super::agent_task_runner::adapters::OPENCODE,
     },
     AgentPluginBundle {
         id: "pi",
@@ -43,7 +39,6 @@ static BUNDLES: [AgentPluginBundle; 6] = [
         global_config: super::agent_global_config::adapters::PI,
         session: super::agent_session_adapter::adapters::PI,
         identity: super::agent_identity_adapter::adapters::PI,
-        runner: &super::agent_task_runner::adapters::PI,
     },
     AgentPluginBundle {
         id: "codex",
@@ -51,7 +46,6 @@ static BUNDLES: [AgentPluginBundle; 6] = [
         global_config: super::agent_global_config::adapters::CODEX,
         session: super::agent_session_adapter::adapters::CODEX,
         identity: super::agent_identity_adapter::adapters::CODEX,
-        runner: &super::agent_task_runner::adapters::CODEX,
     },
     AgentPluginBundle {
         id: "deepseek-harness",
@@ -59,7 +53,6 @@ static BUNDLES: [AgentPluginBundle; 6] = [
         global_config: super::agent_global_config::adapters::DEEPSEEK_HARNESS,
         session: super::agent_session_adapter::adapters::DEEPSEEK_HARNESS,
         identity: super::agent_identity_adapter::adapters::DEEPSEEK_HARNESS,
-        runner: &super::agent_task_runner::adapters::DEEPSEEK_HARNESS,
     },
     AgentPluginBundle {
         id: "hermes",
@@ -67,7 +60,6 @@ static BUNDLES: [AgentPluginBundle; 6] = [
         global_config: super::agent_global_config::adapters::HERMES,
         session: super::agent_session_adapter::adapters::HERMES,
         identity: super::agent_identity_adapter::adapters::HERMES,
-        runner: &super::agent_task_runner::adapters::HERMES,
     },
 ];
 
@@ -88,7 +80,6 @@ pub(crate) struct AgentCapability {
     pub name: String,
     pub surfaces: Vec<String>,
     pub session_types: Vec<AgentSessionCapability>,
-    pub task: AgentTaskCapability,
     pub config_capabilities: Vec<AgentConfigCapability>,
 }
 
@@ -98,16 +89,6 @@ pub(crate) struct AgentSessionCapability {
     pub id: String,
     pub name: String,
     pub client_id: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct AgentTaskCapability {
-    pub profile: String,
-    pub session_type: String,
-    pub required_surface: super::agent_environment::AgentSurface,
-    pub supports_resume: bool,
-    pub resume_unsupported_message: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -127,7 +108,7 @@ pub(crate) fn capabilities() -> AgentCapabilitiesReport {
         .agents()
         .iter()
         .map(|descriptor| {
-            let bundle = BUNDLES
+            BUNDLES
                 .iter()
                 .find(|bundle| bundle.id == descriptor.id)
                 .expect("plugin registry 已校验所有 Agent Adapter");
@@ -144,16 +125,6 @@ pub(crate) fn capabilities() -> AgentCapabilitiesReport {
                         client_id: session.client_id.clone(),
                     })
                     .collect(),
-                task: AgentTaskCapability {
-                    profile: bundle.runner.profile.to_string(),
-                    session_type: descriptor.task_profile.session_type.clone(),
-                    required_surface: bundle.runner.required_surface.clone(),
-                    supports_resume: bundle.runner.supports_resume,
-                    resume_unsupported_message: bundle
-                        .runner
-                        .resume_unsupported_message
-                        .to_string(),
-                },
                 config_capabilities: descriptor
                     .config_capabilities
                     .iter()
@@ -198,7 +169,6 @@ mod tests {
             assert_eq!(bundle.id, bundle.global_config.id());
             assert_eq!(bundle.id, bundle.session.id());
             assert_eq!(bundle.id, bundle.identity.id());
-            assert_eq!(bundle.id, bundle.runner.id);
         }
         assert_eq!(
             identity_adapters()
@@ -209,21 +179,28 @@ mod tests {
     }
 
     #[test]
-    fn capability_report_joins_manifest_metadata_with_runner_contracts() {
+    fn capability_report_joins_manifest_metadata_with_compiled_adapters() {
         let report = capabilities();
         let dsh = report
             .agents
             .iter()
             .find(|agent| agent.id == "deepseek-harness")
             .unwrap();
+        assert_eq!(dsh.name, "DeepSeek Harness");
         assert_eq!(dsh.surfaces, vec!["web"]);
-        assert_eq!(dsh.task.profile, "DeepSeek Harness");
         assert_eq!(
-            dsh.task.required_surface,
-            super::super::agent_environment::AgentSurface::Web
+            dsh.session_types
+                .iter()
+                .map(|session| session.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["deepseek-harness"]
         );
-        assert!(!dsh.task.supports_resume);
-        assert!(dsh.task.resume_unsupported_message.contains("resume"));
-        assert_eq!(dsh.config_capabilities[0].id, "session-extension");
+        assert_eq!(
+            dsh.config_capabilities
+                .iter()
+                .map(|capability| capability.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["session-extension", "model-specs", "mcp-servers"]
+        );
     }
 }

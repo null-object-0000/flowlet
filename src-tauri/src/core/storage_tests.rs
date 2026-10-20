@@ -3767,3 +3767,175 @@ fn prune_balance_snapshots_ignores_unparseable_timestamps() {
     assert_eq!(expired, 0);
     assert_eq!(count_snapshots(&storage, "account-a"), 1);
 }
+
+/// 项目管理能力已整体移除：旧库里的项目 / 项目任务 / 定时任务 / 跨设备共享项目表
+/// 必须在 migrate 时被删除，同时不得波及无关数据。
+#[test]
+fn migrate_drops_project_management_tables_and_keeps_unrelated_data() {
+    let path = std::env::temp_dir().join(format!(
+        "flowlet-project-removal-migration-{}.sqlite",
+        uuid::Uuid::new_v4()
+    ));
+
+    // 先建出当前 schema，再补回「旧版本才有的」项目相关表与数据，模拟升级前的老库。
+    {
+        let storage = Storage::open(&path).expect("open storage");
+        let connection = storage.connection.lock().unwrap();
+        connection
+            .execute_batch(
+                r#"
+                CREATE TABLE projects (
+                    id                   TEXT PRIMARY KEY,
+                    name                 TEXT NOT NULL,
+                    directory_path       TEXT,
+                    workspace_project_id TEXT,
+                    workspace_archived   INTEGER NOT NULL DEFAULT 0,
+                    created_at           TEXT NOT NULL,
+                    updated_at           TEXT NOT NULL
+                );
+                CREATE TABLE project_tasks (
+                    id            TEXT PRIMARY KEY,
+                    project_id    TEXT NOT NULL,
+                    title         TEXT NOT NULL,
+                    description   TEXT NOT NULL DEFAULT '',
+                    status        TEXT NOT NULL DEFAULT 'draft',
+                    created_at    TEXT NOT NULL,
+                    updated_at    TEXT NOT NULL,
+                    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+                );
+                CREATE TABLE recurring_tasks (
+                    id         TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    title      TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+                );
+                CREATE TABLE recurring_task_runs (
+                    id                TEXT PRIMARY KEY,
+                    recurring_task_id TEXT NOT NULL,
+                    project_id        TEXT NOT NULL,
+                    created_at        TEXT NOT NULL,
+                    updated_at        TEXT NOT NULL
+                );
+                CREATE TABLE device_projects (
+                    device_id     TEXT NOT NULL,
+                    project_id    TEXT NOT NULL,
+                    project_name  TEXT NOT NULL,
+                    tasks_json    TEXT NOT NULL DEFAULT '[]',
+                    imported_at   TEXT NOT NULL,
+                    PRIMARY KEY (device_id, project_id)
+                );
+
+                INSERT INTO projects (id, name, created_at, updated_at)
+                    VALUES ('project-1', '旧项目', '2026-01-01', '2026-01-01');
+                INSERT INTO project_tasks (id, project_id, title, created_at, updated_at)
+                    VALUES ('task-1', 'project-1', '旧任务', '2026-01-01', '2026-01-01');
+                INSERT INTO recurring_tasks (id, project_id, title, created_at, updated_at)
+                    VALUES ('recurring-1', 'project-1', '旧定时任务', '2026-01-01', '2026-01-01');
+                INSERT INTO recurring_task_runs (id, recurring_task_id, project_id, created_at, updated_at)
+                    VALUES ('run-1', 'recurring-1', 'project-1', '2026-01-01', '2026-01-01');
+                INSERT INTO device_projects (device_id, project_id, project_name, imported_at)
+                    VALUES ('device-1', 'project-1', '旧项目', '2026-01-01');
+
+                INSERT INTO background_jobs (id, job_type, title, trigger_source, status, created_at, updated_at)
+                    VALUES ('job-project', 'project-task-run', '旧项目任务', 'manual', 'succeeded', datetime('now'), datetime('now')),
+                           ('job-recurring', 'recurring-task-run', '旧定时任务', 'scheduled', 'succeeded', datetime('now'), datetime('now')),
+                           ('job-workspace', 'project-workspace-sync', '旧项目工作区同步', 'scheduled', 'succeeded', datetime('now'), datetime('now')),
+                           ('job-catalog', 'models-cn-sync', '模型目录同步', 'scheduled', 'succeeded', datetime('now'), datetime('now'));
+                INSERT INTO background_job_events (id, job_id, sequence, level, message, created_at)
+                    VALUES ('event-project', 'job-project', 1, 'info', '旧项目事件', datetime('now')),
+                           ('event-catalog', 'job-catalog', 1, 'info', '目录同步事件', datetime('now'));
+                INSERT INTO app_meta (key, value, updated_at)
+                    VALUES ('task_review_notification_enabled', 'true', '2026-01-01'),
+                           ('project_workspace_etags_v1', '{}', '2026-01-01'),
+                           ('keep_me', 'kept', '2026-01-01');
+                "#,
+            )
+            .expect("seed legacy project tables");
+    }
+
+    // 再次打开触发 migrate，应删除项目相关表与孤儿行。
+    let storage = Storage::open(&path).expect("migrate legacy database");
+    let connection = storage.connection.lock().unwrap();
+
+    for table in [
+        "projects",
+        "project_tasks",
+        "recurring_tasks",
+        "recurring_task_runs",
+        "device_projects",
+    ] {
+        let remaining: i64 = connection
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [table],
+                |row| row.get(0),
+            )
+            .expect("count legacy table");
+        assert_eq!(remaining, 0, "{table} 应已被 migrate 删除");
+    }
+
+    let project_jobs: i64 = connection
+        .query_row(
+            "SELECT count(*) FROM background_jobs WHERE job_type IN ('project-task-run', 'recurring-task-run', 'project-workspace-sync')",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count project jobs");
+    assert_eq!(project_jobs, 0, "仅项目使用的后台任务记录应被清理");
+
+    let catalog_jobs: i64 = connection
+        .query_row(
+            "SELECT count(*) FROM background_jobs WHERE id = 'job-catalog'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count catalog job");
+    assert_eq!(catalog_jobs, 1, "其他后台任务记录必须保留");
+
+    let catalog_events: i64 = connection
+        .query_row(
+            "SELECT count(*) FROM background_job_events WHERE job_id = 'job-catalog'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count catalog events");
+    assert_eq!(catalog_events, 1, "其他后台任务事件必须保留");
+
+    let orphan_events: i64 = connection
+        .query_row(
+            "SELECT count(*) FROM background_job_events WHERE job_id = 'job-project'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count project events");
+    assert_eq!(orphan_events, 0, "项目任务事件不应留下孤儿行");
+
+    let project_meta: i64 = connection
+        .query_row(
+            "SELECT count(*) FROM app_meta WHERE key IN ('task_review_notification_enabled', 'project_workspace_etags_v1')",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count project meta keys");
+    assert_eq!(project_meta, 0, "项目相关 app_meta 键应被清理");
+
+    let kept_meta: i64 = connection
+        .query_row(
+            "SELECT count(*) FROM app_meta WHERE key = 'keep_me'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count unrelated meta key");
+    assert_eq!(kept_meta, 1, "无关 app_meta 键必须保留");
+
+    let channel_accounts: i64 = connection
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'channel_accounts'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("count channel_accounts");
+    assert_eq!(channel_accounts, 1, "渠道账号表必须保留");
+}

@@ -15,15 +15,9 @@ import type {
   S3SyncConfigInput,
   S3SyncSettings,
   SharedAgentSession,
-  SharedDeviceProject,
   SyncedAccountResource,
   SyncedAgentSession,
   SyncedAgentProfile,
-  TaskDeleteInput,
-  TaskEditInput,
-  TaskStatusInput,
-  TaskSubmitInput,
-  TaskSubmitResult,
 } from "./types";
 import type { OpenCodePermissionDecision, OpenCodePermissionReport } from "../agent-session/types";
 
@@ -86,9 +80,6 @@ export const deviceSyncCommands = {
   probeLanPeers: (deviceId: string | null): Promise<LanPeerProbe[]> =>
     invokeCommand<LanPeerProbe[]>("probe_lan_peers", { deviceId })
       .catch(toDeviceSyncError("lan_peer_probe_failed")),
-  projects: (deviceId: string | null): Promise<SharedDeviceProject[]> =>
-    invokeCommand<SharedDeviceProject[]>("list_shared_device_projects", { deviceId })
-      .catch(toDeviceSyncError("shared_device_projects_failed")),
 };
 
 export const mobileDeviceSyncCommands = {
@@ -143,19 +134,6 @@ export const mobileDeviceSyncCommands = {
   ): Promise<void> =>
     invokeCommand<void>("reply_remote_opencode_permission", { deviceId, permissionId, decision })
       .catch(toDeviceSyncError("remote_opencode_permission_reply_failed")),
-  projects: deviceSyncCommands.projects,
-  submitTask: (deviceId: string, input: TaskSubmitInput): Promise<TaskSubmitResult> =>
-    invokeCommand<TaskSubmitResult>("submit_task_lan", { deviceId, input }, 15_000)
-      .catch(toDeviceSyncError("lan_task_submit_failed")),
-  setTaskStatus: (deviceId: string, input: TaskStatusInput): Promise<TaskSubmitResult> =>
-    invokeCommand<TaskSubmitResult>("set_task_status_lan", { deviceId, ...input }, 15_000)
-      .catch(toDeviceSyncError("lan_task_status_failed")),
-  editTask: (deviceId: string, input: TaskEditInput): Promise<TaskSubmitResult> =>
-    invokeCommand<TaskSubmitResult>("edit_task_lan", { deviceId, input }, 15_000)
-      .catch(toDeviceSyncError("lan_task_edit_failed")),
-  deleteTask: (deviceId: string, input: TaskDeleteInput): Promise<TaskSubmitResult> =>
-    invokeCommand<TaskSubmitResult>("delete_task_lan", { deviceId, input }, 15_000)
-      .catch(toDeviceSyncError("lan_task_delete_failed")),
 };
 
 function toDeviceSyncError(code: string): (error: unknown) => never {

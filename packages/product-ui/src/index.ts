@@ -5,8 +5,8 @@ export type { UsageSummaryItem } from "./mobile/UsageSummaryGridView";
 export { MobileAppFrameView } from "./mobile/MobileAppFrameView";
 export type { MobileNavItem } from "./mobile/MobileAppFrameView";
 export { default as mobilePageStyles } from "./mobile/MobilePageView.module.css";
-export { MobileCardView, MobileDeviceListView, MobilePageHeaderView, MobilePageView, MobileTaskBoardView, mobileProductViewStyles } from "./mobile/MobileProductViews";
-export type { MobileDeviceRowModel, MobileTaskRowModel, MobileTaskTabModel } from "./mobile/MobileProductViews";
+export { MobileCardView, MobileDeviceListView, MobilePageHeaderView, MobilePageView, mobileProductViewStyles } from "./mobile/MobileProductViews";
+export type { MobileDeviceRowModel } from "./mobile/MobileProductViews";
 export { DesktopAppFrameView, DesktopSidebarView } from "./desktop/DesktopAppFrameView";
 export type { DesktopNavGroup, DesktopNavItem } from "./desktop/DesktopAppFrameView";
 export { DesktopPageHeaderView, DesktopPageLayoutView } from "./desktop/DesktopPageLayoutView";
@@ -32,23 +32,18 @@ export { UsageStatisticsView } from "./desktop/UsageStatisticsView";
 export type { UsageStatisticsCellModel, UsageStatisticsConfidenceModel, UsageStatisticsDetailMetricModel, UsageStatisticsDetailModel, UsageStatisticsLabels, UsageStatisticsMetric, UsageStatisticsPeriod, UsageStatisticsStatModel } from "./desktop/UsageStatisticsView";
 export { ModelsServiceCapabilityListView, ModelsServiceDetailView, ModelsServiceInfoBannerView, ModelsServiceMetricGridView, ModelsServiceRefreshActionView, ModelsServiceRelationListView, ModelsServiceRouteListView, ModelsServiceRouteOverviewView, ModelsServiceSectionView, ModelsServiceTabContentView, ModelsServiceToolbarView, ModelsServiceView } from "./desktop/ModelsServiceView";
 export type { ModelsServiceCapabilityModel, ModelsServiceDetailTabModel, ModelsServiceFilterOption, ModelsServiceItemModel, ModelsServiceLabels, ModelsServiceMetricModel, ModelsServiceRelationModel, ModelsServiceRouteModel, ModelsServiceStatModel } from "./desktop/ModelsServiceView";
-export { ProjectsBoardTaskCardView, ProjectsBoardView } from "./desktop/ProjectsBoardView";
-export type { ProjectsBoardColumnModel, ProjectsBoardLabels, ProjectsBoardTaskCardClassNames, ProjectsBoardTaskModel } from "./desktop/ProjectsBoardView";
 export { DesktopOverviewDemoView } from "./demo/DesktopOverviewDemoView";
 export { RequestLogsDemoView } from "./demo/RequestLogsDemoView";
 export { AgentSessionsDemoView } from "./demo/AgentSessionsDemoView";
 export { UsageAnalysisDemoView } from "./demo/UsageAnalysisDemoView";
 export { UsageStatisticsDemoView } from "./demo/UsageStatisticsDemoView";
 export { ModelsServiceDemoView } from "./demo/ModelsServiceDemoView";
-export { ProjectsBoardDemoView } from "./demo/ProjectsBoardDemoView";
-export { TaskLogsDemoView } from "./demo/TaskLogsDemoView";
 export { SettingsDemoView } from "./demo/SettingsDemoView";
 export { MobileCompanionDemoView } from "./demo/MobileCompanionDemoView";
 export {
   createAgentSessionsFixture,
   createModelsServiceFixture,
   createOverviewServiceFixture,
-  createProjectsBoardFixture,
   createRequestLogsFixture,
   createUsageAnalysisFixture,
   createUsageSummaryFixture,

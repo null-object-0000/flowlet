@@ -1,0 +1,3 @@
+# Scratch space for the regression suite: fixture DSH homes, real dsh boots and
+# staged copies of the replacement module. Recreated per run.
+.tmp/

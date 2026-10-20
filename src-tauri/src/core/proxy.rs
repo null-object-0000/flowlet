@@ -1690,7 +1690,7 @@ async fn build_response(
 
         let (tx_done, rx_done) = tokio::sync::oneshot::channel::<StreamDone>();
         let res_content_encoding = proxy_http::content_encoding_value(&headers);
-        let normalize_thinking = *protocol == ProtocolType::Anthropic
+        let normalize_content_blocks = *protocol == ProtocolType::Anthropic
             && res_content_encoding
                 .as_deref()
                 .is_none_or(|value| value == "identity");
@@ -1703,7 +1703,8 @@ async fn build_response(
             Duration::from_secs(timeout_seconds),
             activity_permit,
         );
-        let stream = proxy_anthropic_compat::normalize_thinking_starts(stream, normalize_thinking);
+        let stream =
+            proxy_anthropic_compat::normalize_content_block_starts(stream, normalize_content_blocks);
 
         let usage_capture = UsageCapture {
             storage: storage.clone(),
@@ -1761,7 +1762,7 @@ async fn build_response(
         let mut response = Response::new(Body::from_stream(stream));
         *response.status_mut() = status;
         copy_response_headers(&headers, response.headers_mut());
-        if normalize_thinking {
+        if normalize_content_blocks {
             response
                 .headers_mut()
                 .remove(axum::http::header::CONTENT_LENGTH);

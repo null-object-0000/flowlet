@@ -1,4 +1,4 @@
-//! Narrow compatibility for gateways omitting the initial thinking string.
+//! Narrow compatibility for gateways omitting initial content-block fields.
 //! Applied after capture so logs always retain the actual upstream response.
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
@@ -7,12 +7,12 @@ use serde_json::Value;
 const MAX_LINE_BYTES: usize = 64 * 1024;
 
 #[derive(Default)]
-struct ThinkingStartCompat {
+struct ContentBlockStartCompat {
     line: Vec<u8>,
     oversized: bool,
 }
 
-impl ThinkingStartCompat {
+impl ContentBlockStartCompat {
     fn push(&mut self, bytes: &[u8]) -> Vec<u8> {
         let mut output = Vec::new();
         for &byte in bytes {
@@ -54,23 +54,32 @@ fn normalize_line(line: &[u8]) -> Vec<u8> {
     else {
         return line.to_vec();
     };
-    if block.get("type").and_then(Value::as_str) != Some("thinking")
-        || block.contains_key("thinking")
-    {
-        return line.to_vec();
-    }
-    block.insert("thinking".to_string(), Value::String(String::new()));
+    let (field, value) = match block.get("type").and_then(Value::as_str) {
+        Some("thinking") if !block.contains_key("thinking") => {
+            ("thinking", Value::String(String::new()))
+        }
+        Some("tool_use") if !block.contains_key("input") => {
+            ("input", Value::Object(serde_json::Map::new()))
+        }
+        _ => return line.to_vec(),
+    };
+    block.insert(field.to_string(), value);
     let mut output = b"data: ".to_vec();
     output.extend_from_slice(&serde_json::to_vec(&event).expect("JSON value serialization"));
     output
 }
 
-pub(super) fn normalize_thinking_starts(
+pub(super) fn normalize_content_block_starts(
     inner: impl Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static,
     enabled: bool,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> {
     futures_util::stream::unfold(
-        (Box::pin(inner), ThinkingStartCompat::default(), None, false),
+        (
+            Box::pin(inner),
+            ContentBlockStartCompat::default(),
+            None,
+            false,
+        ),
         move |(mut inner, mut compat, pending_error, ended)| async move {
             if let Some(error) = pending_error {
                 return Some((Err(error), (inner, compat, None, true)));
@@ -117,7 +126,7 @@ mod tests {
                 .unwrap()
                 .replace('\n', ending);
             for split in 0..=input.len() {
-                let mut compat = ThinkingStartCompat::default();
+                let mut compat = ContentBlockStartCompat::default();
                 let mut output = compat.push(&input.as_bytes()[..split]);
                 output.extend(compat.push(&input.as_bytes()[split..]));
                 assert!(compat.line.is_empty());
@@ -150,11 +159,14 @@ mod tests {
             r#"data: {"type":"content_block_start","content_block":{"type":"text","text":""}}"#,
             r#"data: {"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"你好"}}"#,
             r#"data: {"type":"content_block_start","content_block":{"type":"tool_use","id":"t","name":"read","input":{}}}"#,
+            r#"data: {"type":"content_block_start","content_block":{"type":"tool_use","id":"t","name":"read","input":{"path":"existing.txt"}}}"#,
+            r#"data: {"type":"content_block_start","content_block":{"type":"tool_use","id":"t","name":"read","input":null}}"#,
+            r#"data: {"type":"content_block_delta","delta":{"type":"input_json_delta","partial_json":"{\"command\":\"pwd\"}"}}"#,
             r#"data: {"type":"message_delta","usage":{"output_tokens":5}}"#,
             r#"data: {"type":"error","error":{"message":"failure"}}"#,
         ] {
             let input = format!("{line}\r\n\r\n");
-            let mut compat = ThinkingStartCompat::default();
+            let mut compat = ContentBlockStartCompat::default();
             let mut output = Vec::new();
             for byte in input.as_bytes() {
                 output.extend(compat.push(&[*byte]));
@@ -164,8 +176,75 @@ mod tests {
     }
 
     #[test]
+    fn repairs_real_missing_tool_input_at_every_chunk_boundary() {
+        // Actual tool-use start from session-a7802f53, with no tool arguments captured.
+        let raw = include_bytes!("../../tests/fixtures/dsh/missing-tool-input-start.sse");
+        for ending in ["\n", "\r\n", "\r"] {
+            let input = std::str::from_utf8(raw).unwrap().replace('\n', ending);
+            for split in 0..=input.len() {
+                let mut compat = ContentBlockStartCompat::default();
+                let mut output = compat.push(&input.as_bytes()[..split]);
+                output.extend(compat.push(&input.as_bytes()[split..]));
+                let text = String::from_utf8(output).unwrap();
+                let data = text
+                    .split(['\r', '\n'])
+                    .find_map(|line| line.strip_prefix("data:"))
+                    .unwrap();
+                let repaired: Value = serde_json::from_str(data).unwrap();
+                let original_data = std::str::from_utf8(raw)
+                    .unwrap()
+                    .lines()
+                    .find_map(|line| line.strip_prefix("data:"))
+                    .unwrap();
+                let mut expected: Value = serde_json::from_str(original_data).unwrap();
+                expected["content_block"]["input"] = serde_json::json!({});
+                assert_eq!(repaired, expected);
+                assert!(text.ends_with(&format!("{ending}{ending}")));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn repaired_tool_start_preserves_argument_deltas_through_completion() {
+        let raw = include_bytes!("../../tests/fixtures/dsh/missing-tool-input-start.sse");
+        // Synthetic completion: parameter text belongs to deltas, never the start placeholder.
+        let tail = concat!(
+            "data: {\"type\":\"content_block_delta\",\"index\":2,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"command\\\":\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":2,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"\\\"pwd\\\"}\"}}\n\n",
+            "data: {\"type\":\"content_block_stop\",\"index\":2}\n\n",
+            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":12}}\n\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        );
+        let input = [raw.as_slice(), tail.as_bytes()].concat();
+        let chunks: Vec<_> = input
+            .chunks(7)
+            .map(|part| Ok(Bytes::copy_from_slice(part)))
+            .collect();
+        let stream = normalize_content_block_starts(futures_util::stream::iter(chunks), true);
+        futures_util::pin_mut!(stream);
+        let mut output = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            output.extend_from_slice(&chunk.unwrap());
+        }
+        assert!(output.ends_with(tail.as_bytes()));
+        let mut arguments = String::new();
+        for line in std::str::from_utf8(&output).unwrap().lines() {
+            if let Some(data) = line.strip_prefix("data:") {
+                let event: Value = serde_json::from_str(data).unwrap();
+                if let Some(delta) = event["delta"]["partial_json"].as_str() {
+                    arguments.push_str(delta);
+                }
+            }
+        }
+        assert_eq!(
+            serde_json::from_str::<Value>(&arguments).unwrap(),
+            serde_json::json!({"command":"pwd"})
+        );
+    }
+
+    #[test]
     fn oversized_line_passes_through_and_next_event_is_repaired() {
-        let mut compat = ThinkingStartCompat::default();
+        let mut compat = ContentBlockStartCompat::default();
         let mut input = b"data: ".to_vec();
         input.extend(vec![b'x'; MAX_LINE_BYTES * 2]);
         input.extend_from_slice(b"\n\n");
@@ -191,7 +270,7 @@ mod tests {
                     "idle timeout",
                 )),
             ]);
-            let stream = normalize_thinking_starts(source, enabled);
+            let stream = normalize_content_block_starts(source, enabled);
             futures_util::pin_mut!(stream);
             assert_eq!(stream.next().await.unwrap().unwrap(), tail.as_slice());
             assert_eq!(
@@ -201,7 +280,7 @@ mod tests {
             assert!(stream.next().await.is_none());
         }
         let source = futures_util::stream::iter([Ok(Bytes::from_static(BROKEN))]);
-        let stream = normalize_thinking_starts(source, false);
+        let stream = normalize_content_block_starts(source, false);
         futures_util::pin_mut!(stream);
         assert_eq!(stream.next().await.unwrap().unwrap(), BROKEN);
         assert!(stream.next().await.is_none());

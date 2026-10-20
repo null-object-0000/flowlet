@@ -196,8 +196,9 @@ Flowlet 当前支持：
 * 不把 Anthropic 请求转换成 OpenAI 请求；
 * 不把 OpenAI 请求转换成 Anthropic 请求；
 * Anthropic 未压缩 SSE 响应的 `content_block_start` 若包含 `type: "thinking"` 的
-  内容块但缺少 `thinking` 字段，Flowlet 在响应捕获之后补 `thinking: ""`，兼容 DSH
-  等严格客户端。这是响应原样透传的受控例外：仅补缺失字段，已有值（含 null）、
+  内容块但缺少 `thinking` 字段，或 `type: "tool_use"` 的内容块缺少 `input` 字段，
+  Flowlet 在响应捕获之后分别补 `thinking: ""` 或 `input: {}`，兼容 DSH 等严格客户端。
+  这是响应原样透传的受控例外：仅补缺失字段，已有值（含 null）、
   signature、增量及其他事件不变；日志保留上游原文。压缩响应、不完整或超过 64 KiB
   的 data 行原样透传。新增/删除该行为须同步 `docs/deepseek-harness-integration.md`；
 * DeepSeek 推理上游强制 thinking 会话的 assistant 消息回传 `reasoning_content`（缺失即

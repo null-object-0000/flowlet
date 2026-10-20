@@ -1,0 +1,3 @@
+event: content_block_start
+data: {"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"call_00_xaffr4w4sh61l6hfonsazmam","name":"bash"}}
+

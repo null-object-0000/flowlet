@@ -78,7 +78,7 @@ DSH 0.1.1 使用上述 versioned credentials 文档。Flowlet 仍可读取旧预
 检测到 `version` / `refs` / `records` 任一新版字段时，只会在 `refs` 下写入受管 Token，并自动移除
 旧版 Flowlet 曾误写的同名根级键，避免 DSH 因未知顶层字段拒绝启动。
 
-### Anthropic thinking 起始块兼容（代理层）
+### Anthropic 内容起始块兼容（代理层）
 
 DSH 原生 DeepSeek Provider 指向 Flowlet `/anthropic` 时，部分中转渠道会返回
 `content_block_start` / `content_block: {"type":"thinking"}`，省略初始 `thinking`
@@ -86,10 +86,13 @@ DSH 原生 DeepSeek Provider 指向 Flowlet `/anthropic` 时，部分中转渠�
 `DeepSeek Messages expected a string field`（`MALFORMED_RESPONSE`）并断开流，
 即使上游返回 HTTP 200 且后续已有正常 `thinking_delta`。
 
-Flowlet 在 `proxy_anthropic_compat.rs` 中为这种起始块追加 `thinking: ""`。
+同一渠道还可能省略 `tool_use` 起始块的 `input` 对象，DSH 在 `startBlock` 读取
+`native.input` 时会报 `DeepSeek Messages expected a JSON object`，在首个工具调用处中断。
+Flowlet 在 `proxy_anthropic_compat.rs` 中为上述起始块分别追加 `thinking: ""` 或
+`input: {}`；工具参数仍来自后续 `input_json_delta`，不拼装、不改写增量内容。
 范围为所有客户端的 Anthropic 未压缩（无 Content-Encoding 或 identity）SSE 响应；
 不依赖模型、渠道或 UA，不做跨协议转换。仅修复完整单行 data JSON 中缺失的字段，
-已有字段值（含 null）、signature、文本/工具块、usage、错误和增量事件均原样保留。
+已有字段值（含 null 或非空 input）、signature、文本块、usage、错误和增量事件均原样保留。
 解析支持跨网络 chunk、UTF-8 分片以及 LF / CRLF / CR；每行最多缓冲 64 KiB，
 超长、无法解析、多行 JSON、不完整尾部和压缩响应原样透传。
 

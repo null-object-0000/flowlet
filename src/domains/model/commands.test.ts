@@ -16,6 +16,24 @@ import { mergeDefaultRoutes, modelCommands, reconcileAccountRoutes, routesDiffer
 afterEach(() => invokeMock.mockReset());
 
 describe("upstream resource selection", () => {
+  it("routes the Friday 1017 snapshot under the V4.1 identity while preserving its upstream ID", () => {
+    const upstreamId = "deepseek-v4.1-flash-1017";
+    const account = {
+      id: "account-friday",
+      channel_id: "custom",
+      api_key: "sk-test",
+      enabled: true,
+      base_url_override: "https://friday.example/v1",
+      exposed_models: [upstreamId],
+      synced_models: [upstreamId],
+    } as ChannelAccount;
+    const preset = { id: "custom", supported_protocols: ["openai"] } as ChannelPreset;
+    const routes = mergeDefaultRoutes([], [account], [preset]);
+    expect(routes.map((route) => [route.virtual_model_id, route.upstream_model])).toEqual([
+      ["deepseek-v4.1-flash", upstreamId],
+    ]);
+  });
+
   it("keeps independently selected raw IDs for one canonical model", () => {
     expect(resolveSelectedUpstreamModelIds(
       ["deepseek-v4-flash", "deepseek-v4-flash-0731"],

@@ -295,6 +295,14 @@ mod tests {
         // 入站归一只认目录里登记过的名字，命中的是路由实际存储的规范 ID（保留目录原始大小写）。
         assert_eq!(routing_model_id("deepseek-flash"), "deepseek-v4.1-flash");
         assert_eq!(
+            routing_model_id("deepseek-v4.1-flash-1017"),
+            "deepseek-v4.1-flash"
+        );
+        assert_eq!(
+            routing_model_id("friday/DeepSeek-V4.1-Flash-1017"),
+            "deepseek-v4.1-flash"
+        );
+        assert_eq!(
             routing_model_id("deepseek-v4.1-flash"),
             "deepseek-v4.1-flash"
         );

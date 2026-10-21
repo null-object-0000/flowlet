@@ -70,6 +70,8 @@ describe("model identity catalog", () => {
     // DeepSeek V4.1 Flash 的官方 API 模型名 deepseek-flash 归一后命中白名单规范 ID。
     expect(canonicalModelId("deepseek-flash")).toBe("deepseek-v4.1-flash");
     expect(canonicalModelId("deepseek/deepseek-flash")).toBe("deepseek-v4.1-flash");
+    expect(canonicalModelId("deepseek-v4.1-flash-1017")).toBe("deepseek-v4.1-flash");
+    expect(canonicalModelId("friday/DeepSeek-V4.1-Flash-1017")).toBe("deepseek-v4.1-flash");
     expect(canonicalModelId("stealth/ox-alpha")).toBe("ox-alpha");
     expect(canonicalModelId("nvidia/nemotron-3.5-lightning:free")).toBe("nemotron-3.5-lightning");
     expect(canonicalModelId("nvidia/nemotron-3-super-120b-a12b:free")).toBe("nemotron-3-super-120b-a12b");

@@ -728,6 +728,16 @@ pub(crate) async fn open_scrape_console(
     state: tauri::State<'_, AppState>,
     account_id: String,
 ) -> Result<(), String> {
+    ensure_scrape_console(app, state, account_id, true).await
+}
+
+/// probe 清空缓冲后自行按阶段导航；独立打开时在监听安装后加载控制台。
+async fn ensure_scrape_console(
+    app: AppHandle,
+    state: tauri::State<'_, AppState>,
+    account_id: String,
+    navigate_on_create: bool,
+) -> Result<(), String> {
     // 已存在且仍注册在 Tauri 中才复用。用户直接关闭登录窗口时，HashMap 中的
     // WebviewWindow 句柄可能短暂残留，不能把它当成可用窗口。
     {
@@ -793,6 +803,10 @@ pub(crate) async fn open_scrape_console(
             .map(|account| account.channel_id.clone())
             .ok_or("账号不存在")?
     };
+    let console_url = mode
+        .console_url
+        .parse()
+        .map_err(|error| format!("控制台 URL 解析失败: {error}"))?;
     let window = build_scrape_webview(&app, &account_id, &channel_id, &mode)?;
 
     // 窗口创建成功之后才登记抓取模式。登记失败必须立刻销毁窗口：否则会留下一个
@@ -864,7 +878,14 @@ pub(crate) async fn open_scrape_console(
             return Err("锁定抓取 webview 失败".to_string());
         }
     };
-    guard.insert(account_id, window);
+    guard.insert(account_id.clone(), window.clone());
+    drop(guard);
+    if navigate_on_create {
+        if let Err(error) = window.navigate(console_url) {
+            destroy_scrape_webview(&state, &account_id);
+            return Err(format!("加载控制台失败: {error}"));
+        }
+    }
     Ok(())
 }
 
@@ -2029,7 +2050,7 @@ pub(crate) async fn probe_scrape_login(
     }
 
     // 2. 确保 webview 存在。
-    open_scrape_console(app.clone(), state.clone(), account_id.clone()).await?;
+    ensure_scrape_console(app.clone(), state.clone(), account_id.clone(), false).await?;
 
     tracing::info!(
         account_id = %account_id,
@@ -2280,7 +2301,7 @@ pub(crate) async fn probe_scrape_login(
         if let Ok(guard) = state.scrape_pending.lock() {
             if let Some(responses) = guard.get(&account_id) {
                 for (url, body) in responses {
-                    let kind = scrape_console::classify_response_url(url);
+                    let kind = ScrapeSlotEngine::new(&mode).classify(url);
                     let snippet: String = body.chars().take(240).collect();
                     tracing::warn!(
                         account_id = %account_id,
@@ -2305,11 +2326,7 @@ pub(crate) async fn probe_scrape_login(
                 let parts: Vec<String> = responses
                     .iter()
                     .map(|(url, _)| {
-                        format!(
-                            "{}@{}",
-                            scrape_console::classify_response_url(url),
-                            url
-                        )
+                        format!("{}@{}", ScrapeSlotEngine::new(&mode).classify(url), url)
                     })
                     .collect();
                 if !parts.is_empty() {

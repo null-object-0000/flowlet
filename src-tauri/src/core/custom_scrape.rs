@@ -964,6 +964,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn friday_example_matches_only_workspace_key_lists() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../examples/custom-scrape/friday");
+        let descriptor = load_descriptor(&dir).expect("valid Friday example");
+        let mode = &descriptor.modes["paygo"];
+        let rule = &mode.slots[0];
+        let matcher = rule.match_rule.as_ref().expect("explicit API matcher");
+        for url in [
+            "https://friday.17usoft.com/api/authing/v2/workspaces/a/api-keys",
+            "https://friday.17usoft.com/api/authing/v2/workspaces/a/api-keys?limit=20",
+        ] {
+            assert!(url_matches(matcher, url), "{url}");
+        }
+        for url in [
+            mode.console_url.as_str(),
+            "https://friday.17usoft.com/_next/static/chunks/app/system/api-keys/page.js",
+            "https://friday.17usoft.com/api/authing/v2/workspaces/a/api-keys/key1",
+            "https://other.example/api/authing/v2/workspaces/a/api-keys",
+        ] {
+            assert!(!url_matches(matcher, url), "{url}");
+        }
+        assert!(slot_satisfies(&rule.satisfies, r#"{"items":[]}"#));
+        assert!(!slot_satisfies(&rule.satisfies, r#"{"error":"unauthorized"}"#));
+    }
+
+    #[test]
     fn account_name_matches_is_case_insensitive_exact_then_substring() {
         assert!(account_name_matches("friday", "Friday"));
         assert!(account_name_matches("Friday", "Friday 主账号"));

@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "channelId": "custom",
+  "accountName": "Friday",
+  "resourceModes": [
+    {
+      "resourceMode": "pay_as_you_go",
+      "modeKey": "paygo"
+    }
+  ],
+  "login": {
+    "kind": "generic"
+  },
+  "modes": {
+    "paygo": {
+      "consoleUrl": "https://friday.17usoft.com/system/api-keys",
+      "aggregate": true,
+      "requiredSlots": [
+        "usage"
+      ],
+      "slots": {
+        "usage": {
+          "match": {
+            "kind": "url_regex",
+            "pattern": "^https://friday\\.17usoft\\.com/api/authing/v2/workspaces/[^/?#]+/api-keys/?(?:[?#].*)?$"
+          },
+          "satisfies": {
+            "kind": "json_path",
+            "path": "$.items",
+            "expect": "array"
+          }
+        }
+      }
+    }
+  },
+  "summary": {
+    "plan": "Friday API 按量付费"
+  }
+}

@@ -228,11 +228,9 @@ pub fn build_scrape_webview(
     mode: &ScrapeModeRuntime,
 ) -> Result<tauri::WebviewWindow, String> {
     let label = format!("scrape-{account_id}");
-    let url = tauri::WebviewUrl::External(
-        mode.console_url
-            .parse()
-            .map_err(|e| format!("抓取控制台 URL 解析失败: {e}"))?,
-    );
+    // 监听与模式登记完成前不加载业务页面。创建后立即再次导航会中断 SSO，
+    // 留下上游的登录租约（Friday 会报“另一个页面正在登录”）。
+    let url = tauri::WebviewUrl::External("about:blank".parse().expect("valid blank document URL"));
     let channel_id_json = serde_json::to_string(channel_id)
         .map_err(|error| format!("序列化抓取渠道失败: {error}"))?;
     // initialization_script 在新 document 的页面业务脚本之前运行。配置中的拦截器
@@ -241,6 +239,7 @@ pub fn build_scrape_webview(
         r#"{}
 ;(()=>{{
   try {{
+    if (globalThis.location.href === 'about:blank') return;
     const documentId = globalThis.crypto?.randomUUID?.()
       ?? `${{Date.now()}}-${{Math.random().toString(16).slice(2)}}`;
     globalThis.__flowlet_scrape_document_id = documentId;

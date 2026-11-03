@@ -163,13 +163,13 @@ describe("mergeDefaultRoutes", () => {
     expect(routes[0]).toBe(existing[0]);
   });
 
-  it("does not infer aggregate membership for LongCat-2.0", () => {
+  it.each(["LongCat-2.0", "LongCat-2.5"])("does not infer aggregate membership for %s", (modelId) => {
     const longcatAccount = {
       ...account,
       id: "account-longcat",
       channel_id: "longcat",
-      exposed_models: ["LongCat-2.0"],
-      synced_models: ["LongCat-2.0"],
+      exposed_models: [modelId],
+      synced_models: [modelId],
     } as ChannelAccount;
     const longcatPreset = {
       id: "longcat",
@@ -179,8 +179,8 @@ describe("mergeDefaultRoutes", () => {
     const routes = mergeDefaultRoutes([], [longcatAccount], [longcatPreset]);
     expect(routes).toHaveLength(2);
     expect(routes.map((route) => [route.virtual_model_id, route.client_protocol])).toEqual([
-      ["LongCat-2.0", "openai"],
-      ["LongCat-2.0", "anthropic"],
+      [modelId, "openai"],
+      [modelId, "anthropic"],
     ]);
   });
 

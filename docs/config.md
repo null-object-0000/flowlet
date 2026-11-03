@@ -537,7 +537,7 @@ Provider 固定发这个官方名），`deepseek-v4-flash-0731` → `deepseek-v4
 
 ```jsonc
 "default_exposed_models": {
-  "longcat": ["LongCat-2.0"],
+  "longcat": ["LongCat-2.0", "LongCat-2.5"],
   "deepseek": ["deepseek-v4-flash", "deepseek-v4.1-flash", "deepseek-v4-flash-vision-exp", "deepseek-v4-pro"],
   "kimi": ["kimi-k3", "kimi-k2.7-code"],
   "qwen": ["qwen3.8-max", "qwen3.8-flash", "qwen3.7-max", "qwen3.7-plus", "qwen3.7-flash", "qwen3.6-plus", "qwen3.6-flash"],
@@ -547,6 +547,11 @@ Provider 固定发这个官方名），`deepseek-v4-flash-0731` → `deepseek-v4
 ```
 
 **结构**：`Record<channel_id, upstream_model[]>`。
+
+LongCat 同时登记 `LongCat-2.0` 与 `LongCat-2.5`，两者是独立模型身份；2.5 不作为
+2.0 或 Preview 的别名。API 模型名见 [LongCat 官方文档](https://longcat.chat/platform/docs/)。
+模型规格、输入模态与基准价格继续由 models-cn 目录提供（打包前通过
+`scripts/fetch-models-cn.mjs` 刷新），不复制旧模型的参数或价格。
 
 **行为**：
 

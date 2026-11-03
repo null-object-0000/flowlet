@@ -171,7 +171,10 @@ mod tests {
     #[test]
     fn embedded_catalog_is_valid_and_has_expected_models() {
         let catalog = model_catalog();
-        assert_eq!(catalog.supported_models().len(), 23);
+        assert_eq!(catalog.supported_models().len(), 24);
+        assert_eq!(catalog.find("LongCat-2.5").unwrap().owner_channel_id, "longcat");
+        assert_eq!(catalog.find("LongCat-2.5").unwrap().models_cn_provider_id, "longcat");
+        assert!(catalog.find("LongCat-2.5-Preview").is_none());
         assert_eq!(
             catalog.find("LongCat-2.0").unwrap().owner_channel_id,
             "longcat"
@@ -317,6 +320,7 @@ mod tests {
         );
         assert_eq!(routing_model_id("stealth/ox-alpha"), "ox-alpha");
         // 大小写变体查得到，但必须回落到目录里的规范大小写（路由存的就是 LongCat-2.0）。
+        assert_eq!(routing_model_id("meituan/LONGCAT-2.5"), "LongCat-2.5");
         assert_eq!(routing_model_id("LONGCAT-2.0"), "LongCat-2.0");
         assert_eq!(routing_model_id("LongCat-2.0"), "LongCat-2.0");
         // 未登记的模型名（含聚合模型与历史 auto）原样透传，保持各自的严格匹配语义。

@@ -762,6 +762,35 @@ mod tests {
     }
 
     #[test]
+    fn longcat_25_routes_require_synced_and_explicitly_selected_model() {
+        let json = serde_json::from_str(DEFAULT_CONFIG_JSON).unwrap();
+        let config = ChannelsConfig::from_config_json(&json).unwrap();
+        let mut account = ChannelAccount {
+            id: "longcat-account".to_string(),
+            channel_id: "longcat".to_string(),
+            api_key: "sk-test".to_string(),
+            enabled: true,
+            exposed_models: Some(vec!["LongCat-2.5".to_string()]),
+            synced_models: Some(vec!["LongCat-2.5".to_string()]),
+            ..Default::default()
+        };
+        let routes = config.merge_default_routes(&[], &[account.clone()], &config.presets);
+        assert_eq!(routes.len(), 3);
+        for protocol in [ProtocolType::OpenAi, ProtocolType::Anthropic, ProtocolType::Responses] {
+            assert!(routes.iter().any(|route| {
+                route.client_protocol == protocol
+                    && route.virtual_model_id == "LongCat-2.5"
+                    && route.upstream_model == "LongCat-2.5"
+            }));
+        }
+        account.exposed_models = Some(vec![]);
+        assert!(config.merge_default_routes(&[], &[account.clone()], &config.presets).is_empty());
+        account.exposed_models = Some(vec!["LongCat-2.5".to_string()]);
+        account.synced_models = Some(vec!["LongCat-2.0".to_string()]);
+        assert!(config.merge_default_routes(&[], &[account], &config.presets).is_empty());
+    }
+
+    #[test]
     fn account_model_routes_do_not_infer_aggregate_membership() {
         let json = serde_json::json!({
             "channels_config": {

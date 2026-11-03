@@ -10,9 +10,10 @@ import {
 
 describe("model identity catalog", () => {
   it("provides the complete supported-model whitelist without duplicates", () => {
-    expect(FLOWLET_SUPPORTED_MODELS).toHaveLength(23);
-    expect(new Set(FLOWLET_SUPPORTED_MODELS.map((model) => model.toLowerCase())).size).toBe(23);
+    expect(FLOWLET_SUPPORTED_MODELS).toHaveLength(24);
+    expect(new Set(FLOWLET_SUPPORTED_MODELS.map((model) => model.toLowerCase())).size).toBe(24);
     expect(FLOWLET_SUPPORTED_MODELS).toContain("LongCat-2.0");
+    expect(FLOWLET_SUPPORTED_MODELS).toContain("LongCat-2.5");
     expect(FLOWLET_SUPPORTED_MODELS).toContain("deepseek-v4-flash");
     expect(FLOWLET_SUPPORTED_MODELS).toContain("deepseek-v4.1-flash");
     expect(FLOWLET_SUPPORTED_MODELS).toContain("deepseek-v4-flash-vision-exp");
@@ -27,6 +28,9 @@ describe("model identity catalog", () => {
   });
 
   it("derives owner defaults and models-cn providers from the same identity", () => {
+    expect(DEFAULT_EXPOSED_MODELS_BY_CHANNEL.longcat).toEqual(["LongCat-2.0", "LongCat-2.5"]);
+    expect(officialChannelIdForModel("meituan/LONGCAT-2.5")).toBe("longcat");
+    expect(modelsCnProviderIdForModel("LongCat-2.5")).toBe("longcat");
     expect(DEFAULT_EXPOSED_MODELS_BY_CHANNEL.deepseek).toEqual([
       "deepseek-v4-flash",
       "deepseek-v4.1-flash",
@@ -76,6 +80,8 @@ describe("model identity catalog", () => {
     expect(canonicalModelId("nvidia/nemotron-3.5-lightning:free")).toBe("nemotron-3.5-lightning");
     expect(canonicalModelId("nvidia/nemotron-3-super-120b-a12b:free")).toBe("nemotron-3-super-120b-a12b");
     expect(canonicalModelId("nvidia/nemotron-3-ultra-550b-a55b:free")).toBe("nemotron-3-ultra-550b-a55b");
+    expect(canonicalModelId("meituan/LONGCAT-2.5")).toBe("LongCat-2.5");
+    expect(canonicalModelId("LongCat-2.5-Preview")).toBeNull();
     expect(canonicalModelId("unknown/model")).toBeNull();
   });
 });

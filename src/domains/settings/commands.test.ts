@@ -129,7 +129,7 @@ describe("parseUsageCostDisplayConfig", () => {
 
 describe("upstream proxy setting", () => {
   it("reads the upstream proxy config through the typed command", async () => {
-    const config = { enabled: true, url: "http://127.0.0.1:7890", no_proxy: "localhost" };
+    const config = { enabled: true, url: "http://127.0.0.1:7890" };
     invokeMock.mockResolvedValueOnce(config);
     await expect(getUpstreamProxyConfig()).resolves.toEqual(config);
     expect(invokeMock).toHaveBeenCalledWith("get_upstream_proxy_config");
@@ -137,25 +137,23 @@ describe("upstream proxy setting", () => {
 
   it("writes the upstream proxy config through the typed command", async () => {
     invokeMock.mockResolvedValueOnce(undefined);
-    const config = { enabled: true, url: " http://127.0.0.1:7890 ", no_proxy: " localhost " };
+    const config = { enabled: true, url: " http://127.0.0.1:7890 " };
     await expect(setUpstreamProxyConfig(config)).resolves.toEqual({
       enabled: true,
       url: "http://127.0.0.1:7890",
-      no_proxy: "localhost",
     });
     expect(invokeMock).toHaveBeenCalledWith("set_upstream_proxy_config", {
-      config: { enabled: true, url: "http://127.0.0.1:7890", no_proxy: "localhost" },
+      config: { enabled: true, url: "http://127.0.0.1:7890" },
     });
   });
 
   it("normalizes empty url to disabled and tolerates invalid shapes", () => {
-    expect(parseUpstreamProxyConfig({ enabled: true, url: "  ", no_proxy: "" })).toEqual({
+    expect(parseUpstreamProxyConfig({ enabled: true, url: "  " })).toEqual({
       enabled: false,
       url: "",
-      no_proxy: "",
     });
-    expect(parseUpstreamProxyConfig(null)).toEqual({ enabled: false, url: "", no_proxy: "" });
-    expect(parseUpstreamProxyConfig("nope")).toEqual({ enabled: false, url: "", no_proxy: "" });
+    expect(parseUpstreamProxyConfig(null)).toEqual({ enabled: false, url: "" });
+    expect(parseUpstreamProxyConfig("nope")).toEqual({ enabled: false, url: "" });
   });
 });
 

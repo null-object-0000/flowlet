@@ -54,11 +54,13 @@ export function useReplyOpenCodePermission(session: AgentSessionRow) {
   });
 }
 
-export function useAgentSessionNativeSummary(session: AgentSessionRow) {
+/** 读取会话的原生用量摘要。Web Host 没有本机原生会话文件，调用方必须传
+ *  `enabled = false`，避免请求桌面专属 command。 */
+export function useAgentSessionNativeSummary(session: AgentSessionRow, enabled = true) {
   return useQuery({
     queryKey: queryKeys.agentSession.nativeSummary(session.agentType, session.sessionId),
     queryFn: () => agentSessionCommands.nativeSummary(session.agentType, session.sessionId),
-    enabled: !session.nativeSummary,
+    enabled: enabled && !session.nativeSummary,
     staleTime: 5 * 60_000,
     gcTime: 10 * 60_000,
     retry: 1,

@@ -771,7 +771,9 @@ fn classify_opencode_cli_method(path: &Path) -> AgentInstallMethod {
 }
 
 fn classify_codex_cli_method(path: &Path) -> AgentInstallMethod {
-    let normalized = normalized_path_key(path);
+    // 安装器目录名的分类与文件系统路径去重分离；跨平台读取 Windows 路径时
+    // 同样按不区分大小写的安装约定识别，不改变真实路径及其去重语义。
+    let normalized = normalized_path_key(path).to_ascii_lowercase();
     if normalized.contains("/node_modules/@openai/codex/")
         || normalized.ends_with("/npm/codex.cmd")
         || normalized.ends_with("/npm/codex.ps1")
@@ -955,10 +957,10 @@ fn is_windows_store_codex_executable(path: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(windows)]
-    use super::adapters::codex::parse_chatgpt_windows_package_output;
     #[cfg(all(not(windows), not(target_os = "macos")))]
     use super::adapters::codex::chatgpt_desktop_linux_version;
+    #[cfg(windows)]
+    use super::adapters::codex::parse_chatgpt_windows_package_output;
     use super::*;
 
     #[test]
@@ -1054,11 +1056,33 @@ mod tests {
     }
 
     #[test]
+    fn codex_install_classification_handles_windows_case_and_separators() {
+        for path in [
+            r"C:\Users\test\AppData\Local\Programs\OpenAI\Codex\bin\codex.exe",
+            "C:/USERS/test/APPDATA/LOCAL/PROGRAMS/OPENAI/CODEX/BIN/CODEX.EXE",
+            r"C:\Users\test\AppData\Roaming\npm\codex.cmd",
+        ] {
+            let expected = if path.to_ascii_lowercase().ends_with("codex.cmd") {
+                AgentInstallMethod::Npm
+            } else {
+                AgentInstallMethod::Native
+            };
+            assert_eq!(
+                classify_codex_cli_method(Path::new(path)),
+                expected,
+                "{path}"
+            );
+        }
+        #[cfg(not(windows))]
+        assert_ne!(
+            normalized_path_key(Path::new("/tmp/Codex")),
+            normalized_path_key(Path::new("/tmp/codex"))
+        );
+    }
+    #[test]
     fn enumerates_nvm_and_npm_global_codex_bin_dirs() {
-        let root = std::env::temp_dir().join(format!(
-            "flowlet-codex-bin-dirs-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("flowlet-codex-bin-dirs-{}", uuid::Uuid::new_v4()));
         let nvm_bin = root
             .join(".nvm")
             .join("versions")
@@ -1078,10 +1102,8 @@ mod tests {
 
     #[test]
     fn codex_node_bin_dirs_only_includes_directories_with_node() {
-        let root = std::env::temp_dir().join(format!(
-            "flowlet-codex-node-dirs-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("flowlet-codex-node-dirs-{}", uuid::Uuid::new_v4()));
         let nvm_bin = root
             .join(".nvm")
             .join("versions")
@@ -1103,10 +1125,8 @@ mod tests {
     #[cfg(all(not(windows), not(target_os = "macos")))]
     #[test]
     fn reads_chatgpt_desktop_linux_version_file() {
-        let root = std::env::temp_dir().join(format!(
-            "flowlet-chatgpt-version-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("flowlet-chatgpt-version-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("version"), "42.3.0\n").unwrap();
         assert_eq!(
@@ -1147,14 +1167,9 @@ mod tests {
             AgentInstallMethod::Unknown
         );
         // 从 .bin 垫片向上解析到 @deepseek-ai/dsh 包目录。
-        let root = std::env::temp_dir().join(format!(
-            "flowlet-dsh-bin-resolve-{}",
-            uuid::Uuid::new_v4()
-        ));
-        let shim = root
-            .join("node_modules")
-            .join(".bin")
-            .join("dsh.cmd");
+        let root =
+            std::env::temp_dir().join(format!("flowlet-dsh-bin-resolve-{}", uuid::Uuid::new_v4()));
+        let shim = root.join("node_modules").join(".bin").join("dsh.cmd");
         let package_dir = root.join("node_modules").join("@deepseek-ai").join("dsh");
         std::fs::create_dir_all(&package_dir).unwrap();
         assert_eq!(

@@ -20,6 +20,7 @@ export type ChannelAccount = {
   resource_mode: AccountResourceMode | null;
   resource_sync_mode: AccountResourceSyncMode;
   base_url_override: string | null;
+  use_upstream_proxy?: boolean | null;
   anthropic_base_url_override: string | null;
   /** 工作区共享默认地址；本设备 override 的优先级更高。 */
   workspace_default_base_url: string | null;

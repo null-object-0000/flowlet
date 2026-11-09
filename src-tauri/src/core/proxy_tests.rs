@@ -1,3 +1,4 @@
+use super::proxy_http::FilesApiOp;
 use super::proxy_routing::rank_candidates_by_score;
 use super::*;
 use crate::core::config::{AuthStrategy, ChannelModel, RequestLogRow, UaClientRule};
@@ -35,19 +36,19 @@ fn protocol_type_from_path_identifies_openai() {
 #[test]
 fn recognizes_openai_model_detail_paths_only() {
     assert_eq!(
-        model_detail_request_id(&Method::GET, "/v1/models/flowlet-pro?locale=zh"),
-        Some("flowlet-pro".to_string())
+        model_detail_request_id(&Method::GET, "/v1/models/deepseek-v4-pro?locale=zh"),
+        Some("deepseek-v4-pro".to_string())
     );
     assert_eq!(
         model_detail_request_id(&Method::GET, "/openai/v1/models/deepseek-v4-pro"),
         Some("deepseek-v4-pro".to_string())
     );
     assert_eq!(
-        model_detail_request_id(&Method::POST, "/v1/models/flowlet-pro"),
+        model_detail_request_id(&Method::POST, "/v1/models/deepseek-v4-pro"),
         None
     );
     assert_eq!(
-        model_detail_request_id(&Method::GET, "/anthropic/v1/models/flowlet-pro"),
+        model_detail_request_id(&Method::GET, "/anthropic/v1/models/deepseek-v4-pro"),
         None
     );
 }
@@ -84,7 +85,7 @@ fn model_detail_price_selection_respects_effective_and_daily_ranges() {
 async fn model_detail_prefers_upstream_limits_and_falls_back_to_models_cn() {
     let routes = vec![RouteCandidate {
         id: "route-detail".to_string(),
-        virtual_model_id: "flowlet-pro".to_string(),
+        virtual_model_id: "deepseek-v4-pro".to_string(),
         channel_id: "deepseek".to_string(),
         account_id: "account-detail".to_string(),
         upstream_model: "deepseek-v4-pro".to_string(),
@@ -141,7 +142,7 @@ async fn model_detail_prefers_upstream_limits_and_falls_back_to_models_cn() {
     .to_string();
 
     let response = build_model_detail_response(
-        "flowlet-pro",
+        "deepseek-v4-pro",
         &routes,
         &accounts,
         &channels,
@@ -167,7 +168,7 @@ async fn model_detail_prefers_upstream_limits_and_falls_back_to_models_cn() {
 
 #[tokio::test]
 async fn model_detail_returns_openai_not_found_for_unexposed_model() {
-    let response = build_model_detail_response("flowlet-pro", &[], &[], &[], &[], None);
+    let response = build_model_detail_response("deepseek-v4-pro", &[], &[], &[], &[], None);
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
@@ -410,7 +411,7 @@ fn rewrite_model_replaces_public_model_name() {
 #[test]
 fn ensure_reasoning_content_passback_injects_empty_for_deepseek_reasoning() {
     let body = br#"{
-        "model": "flowlet-pro",
+        "model": "deepseek-v4-pro",
         "messages": [
             {"role": "system", "content": "sys"},
             {"role": "user", "content": "hi"},
@@ -432,7 +433,7 @@ fn ensure_reasoning_content_passback_injects_empty_for_deepseek_reasoning() {
     assert!(messages[1].get("reasoning_content").is_none());
     assert!(messages[4].get("reasoning_content").is_none());
     // 本变换不动 model 字段
-    assert_eq!(value["model"], "flowlet-pro");
+    assert_eq!(value["model"], "deepseek-v4-pro");
 }
 
 #[test]
@@ -440,8 +441,7 @@ fn ensure_reasoning_content_passback_skips_non_deepseek_and_other_protocols() {
     let body = br#"{"model":"m","messages":[{"role":"assistant","content":"hi"}]}"#;
     // 非 DeepSeek 模型：原样透传
     for model in ["qwen3.7-max", "LongCat-2.0", "kimi-k3", "glm-5.2"] {
-        let unchanged =
-            ensure_reasoning_content_passback(body, model, &ProtocolType::OpenAi);
+        let unchanged = ensure_reasoning_content_passback(body, model, &ProtocolType::OpenAi);
         assert_eq!(unchanged, body.to_vec(), "model {model} 不应触发补全");
     }
     // 非 OpenAI 协议：即使模型是 DeepSeek 也原样透传
@@ -449,7 +449,8 @@ fn ensure_reasoning_content_passback_skips_non_deepseek_and_other_protocols() {
         ensure_reasoning_content_passback(body, "deepseek-v4-flash", &ProtocolType::Anthropic);
     assert_eq!(unchanged, body.to_vec());
     // 所有 assistant 已带字段：原样透传
-    let complete = br#"{"model":"m","messages":[{"role":"assistant","content":"hi","reasoning_content":""}]}"#;
+    let complete =
+        br#"{"model":"m","messages":[{"role":"assistant","content":"hi","reasoning_content":""}]}"#;
     let unchanged =
         ensure_reasoning_content_passback(complete, "deepseek-v4-flash", &ProtocolType::OpenAi);
     assert_eq!(unchanged, complete.to_vec());
@@ -473,12 +474,203 @@ fn ensure_reasoning_content_passback_skips_non_deepseek_and_other_protocols() {
         "deepseek-flash",
         "deepseek-v4-pro",
     ] {
-        let rewritten =
-            ensure_reasoning_content_passback(body, variant, &ProtocolType::OpenAi);
+        let rewritten = ensure_reasoning_content_passback(body, variant, &ProtocolType::OpenAi);
         let value: serde_json::Value = serde_json::from_slice(&rewritten).unwrap();
         assert_eq!(
-            value["messages"][0]["reasoning_content"],
-            "",
+            value["messages"][0]["reasoning_content"], "",
+            "variant {variant} 应触发补全"
+        );
+    }
+}
+
+#[test]
+fn ensure_anthropic_thinking_passback_injects_empty_thinking_in_current_turn() {
+    let body = br#"{
+        "model": "deepseek-flash",
+        "thinking": {"type": "enabled"},
+        "system": "sys",
+        "messages": [
+            {"role": "user", "content": [{"type": "text", "text": "run it"}]},
+            {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "t1", "name": "bash", "input": {"command": "echo hi"}}
+            ]},
+            {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": [{"type": "text", "text": "hi"}]}
+            ]},
+            {"role": "assistant", "content": [
+                {"type": "thinking", "thinking": "already here", "signature": "sig"},
+                {"type": "tool_use", "id": "t2", "name": "bash", "input": {"command": "pwd"}}
+            ]},
+            {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "t2", "content": [{"type": "text", "text": "/tmp"}]}
+            ]},
+            {"role": "assistant", "content": [{"type": "text", "text": "done"}]}
+        ]
+    }"#;
+    let rewritten =
+        ensure_anthropic_thinking_passback(body, "deepseek-flash", &ProtocolType::Anthropic);
+    assert_ne!(rewritten, body.to_vec(), "缺失 thinking 块时应触发补全");
+    let value: serde_json::Value = serde_json::from_slice(&rewritten).unwrap();
+    let messages = value["messages"].as_array().unwrap();
+    // 当前用户轮内缺失 thinking 的 assistant 消息：空 thinking 块放在内容最前
+    assert_eq!(messages[1]["content"][0]["type"], "thinking");
+    assert_eq!(messages[1]["content"][0]["thinking"], "");
+    // 原有工具块与参数保持原样
+    assert_eq!(messages[1]["content"][1]["type"], "tool_use");
+    assert_eq!(messages[1]["content"][1]["id"], "t1");
+    assert_eq!(messages[1]["content"][1]["input"]["command"], "echo hi");
+    // 已有 thinking 块（含 signature）不被改写、不重复追加
+    assert_eq!(messages[3]["content"].as_array().unwrap().len(), 2);
+    assert_eq!(messages[3]["content"][0]["thinking"], "already here");
+    assert_eq!(messages[3]["content"][0]["signature"], "sig");
+    // 文本型 assistant 消息同样补齐，文本块保留
+    assert_eq!(messages[5]["content"][0]["type"], "thinking");
+    assert_eq!(messages[5]["content"][1]["type"], "text");
+    assert_eq!(messages[5]["content"][1]["text"], "done");
+    // 其余消息与顶层字段不变
+    assert_eq!(messages[0]["content"][0]["type"], "text");
+    assert_eq!(value["model"], "deepseek-flash");
+    assert_eq!(value["thinking"]["type"], "enabled");
+    assert_eq!(value["system"], "sys");
+}
+
+#[test]
+fn ensure_anthropic_thinking_passback_skips_completed_turns_and_existing_thinking() {
+    let body = br#"{
+        "model": "deepseek-v4.1-flash",
+        "thinking": {"type": "enabled"},
+        "messages": [
+            {"role": "user", "content": [{"type": "text", "text": "old turn"}]},
+            {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "t1", "name": "bash", "input": {}}
+            ]},
+            {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": [{"type": "text", "text": "ok"}]}
+            ]},
+            {"role": "user", "content": [{"type": "text", "text": "new turn"}]},
+            {"role": "assistant", "content": [
+                {"type": "thinking", "thinking": "", "signature": ""},
+                {"type": "tool_use", "id": "t2", "name": "bash", "input": {}}
+            ]}
+        ]
+    }"#;
+    let rewritten =
+        ensure_anthropic_thinking_passback(body, "deepseek-v4.1-flash", &ProtocolType::Anthropic);
+    // 旧轮次缺失 thinking 不改写，当前轮已带 thinking：整包原样透传
+    assert_eq!(rewritten, body.to_vec());
+
+    // 最后一条用户消息是 tool_result（无 text 块）时，工具调用链仍属于同一用户轮
+    let tool_chain = br#"{
+        "model": "deepseek-flash",
+        "thinking": {"type": "enabled"},
+        "messages": [
+            {"role": "user", "content": [
+                {"type": "text", "text": "start"},
+                {"type": "tool_result", "tool_use_id": "t0", "content": []}
+            ]},
+            {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "t1", "name": "bash", "input": {}}
+            ]}
+        ]
+    }"#;
+    let rewritten =
+        ensure_anthropic_thinking_passback(tool_chain, "deepseek-flash", &ProtocolType::Anthropic);
+    let value: serde_json::Value = serde_json::from_slice(&rewritten).unwrap();
+    assert_eq!(value["messages"][1]["content"][0]["type"], "thinking");
+    assert_eq!(value["messages"][1]["content"][0]["thinking"], "");
+    assert_eq!(value["messages"][1]["content"][1]["type"], "tool_use");
+
+    // Anthropic 允许 user 消息 content 直接用字符串，也视为用户轮起点
+    let string_user_turn = br#"{
+        "model": "deepseek-flash",
+        "thinking": {"type": "enabled"},
+        "messages": [
+            {"role": "user", "content": "old"},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "bash", "input": {}}]},
+            {"role": "user", "content": "new"}
+        ]
+    }"#;
+    let unchanged = ensure_anthropic_thinking_passback(
+        string_user_turn,
+        "deepseek-flash",
+        &ProtocolType::Anthropic,
+    );
+    assert_eq!(unchanged, string_user_turn.to_vec());
+    let string_user_current = br#"{
+        "model": "deepseek-flash",
+        "thinking": {"type": "enabled"},
+        "messages": [
+            {"role": "user", "content": "start"},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "bash", "input": {}}]}
+        ]
+    }"#;
+    let rewritten = ensure_anthropic_thinking_passback(
+        string_user_current,
+        "deepseek-flash",
+        &ProtocolType::Anthropic,
+    );
+    let value: serde_json::Value = serde_json::from_slice(&rewritten).unwrap();
+    assert_eq!(value["messages"][1]["content"][0]["type"], "thinking");
+}
+
+#[test]
+fn ensure_anthropic_thinking_passback_skips_inapplicable_requests() {
+    let body = br#"{
+        "model": "m",
+        "thinking": {"type": "enabled"},
+        "messages": [
+            {"role": "user", "content": [{"type": "text", "text": "hi"}]},
+            {"role": "assistant", "content": [{"type": "tool_use", "id": "t1", "name": "bash", "input": {}}]}
+        ]
+    }"#;
+    // 非 DeepSeek 上游模型：原样透传
+    for model in [
+        "qwen3.7-max",
+        "LongCat-2.0",
+        "kimi-k3",
+        "glm-5.2",
+        "gpt-6.1-sol",
+    ] {
+        let unchanged = ensure_anthropic_thinking_passback(body, model, &ProtocolType::Anthropic);
+        assert_eq!(unchanged, body.to_vec(), "model {model} 不应触发补全");
+    }
+    // 非 Anthropic 协议：即使模型是 DeepSeek 也原样透传
+    for protocol in [ProtocolType::OpenAi, ProtocolType::Responses] {
+        let unchanged = ensure_anthropic_thinking_passback(body, "deepseek-v4-flash", &protocol);
+        assert_eq!(unchanged, body.to_vec());
+    }
+    // thinking 未声明 / disabled：原样透传
+    let no_thinking = br#"{"model":"deepseek-flash","messages":[{"role":"assistant","content":[{"type":"tool_use","id":"t","name":"bash","input":{}}]}]}"#;
+    let unchanged =
+        ensure_anthropic_thinking_passback(no_thinking, "deepseek-flash", &ProtocolType::Anthropic);
+    assert_eq!(unchanged, no_thinking.to_vec());
+    let disabled = br#"{"model":"deepseek-flash","thinking":{"type":"disabled"},"messages":[{"role":"assistant","content":[{"type":"tool_use","id":"t","name":"bash","input":{}}]}]}"#;
+    let unchanged =
+        ensure_anthropic_thinking_passback(disabled, "deepseek-flash", &ProtocolType::Anthropic);
+    assert_eq!(unchanged, disabled.to_vec());
+    // 空 messages / 无 messages / 非法 JSON：原样透传
+    let cases: &[&[u8]] = &[
+        br#"{"model":"deepseek-flash","thinking":{"type":"enabled"},"messages":[]}"#,
+        br#"{"model":"deepseek-flash","thinking":{"type":"enabled"},"input":"text"}"#,
+        b"not json",
+    ];
+    for case in cases {
+        let unchanged =
+            ensure_anthropic_thinking_passback(case, "deepseek-flash", &ProtocolType::Anthropic);
+        assert_eq!(unchanged, *case);
+    }
+    // 变体 / 别名上游模型 ID：canonical 归一后命中
+    for variant in [
+        "deepseek-flash",
+        "deepseek-v4.1-flash",
+        "deepseek-v4.1-flash-1017",
+        "deepseek/deepseek-v4-flash",
+        "deepseek-v4-pro",
+    ] {
+        let rewritten = ensure_anthropic_thinking_passback(body, variant, &ProtocolType::Anthropic);
+        let value: serde_json::Value = serde_json::from_slice(&rewritten).unwrap();
+        assert_eq!(
+            value["messages"][1]["content"][0]["type"], "thinking",
             "variant {variant} 应触发补全"
         );
     }
@@ -1105,6 +1297,7 @@ fn enriches_final_upstream_error_metadata_without_body_rewrite() {
         method: "POST".to_string(),
         path: "/v1/chat/completions".to_string(),
         upstream_url: None,
+        upstream_proxy_used: None,
         status: Some(400),
         latency_ms: Some(1),
         is_stream: false,
@@ -1196,6 +1389,7 @@ async fn forwards_status_headers_body_and_replaces_authorization() {
                     resource_mode: None,
                     resource_sync_mode: "manual".to_string(),
                     base_url_override: None,
+                    use_upstream_proxy: None,
                     anthropic_base_url_override: None,
                     workspace_default_base_url: None,
                     workspace_default_anthropic_base_url: None,
@@ -1210,10 +1404,10 @@ async fn forwards_status_headers_body_and_replaces_authorization() {
                 }],
                 vec![RouteCandidate {
                     id: "route-1".to_string(),
-                    virtual_model_id: "auto".to_string(),
+                    virtual_model_id: "deepseek-v4-pro".to_string(),
                     channel_id: "longcat".to_string(),
                     account_id: "acc-1".to_string(),
-                    upstream_model: "gpt-test".to_string(),
+                    upstream_model: "qwen/deepseek-v4-pro-0813".to_string(),
                     client_protocol: ProtocolType::OpenAi,
                     priority: 0,
                     enabled: true,
@@ -1230,7 +1424,7 @@ async fn forwards_status_headers_body_and_replaces_authorization() {
         storage,
         upstream_timeout_seconds: 120,
         rate_limiter: RateLimiter::new(600),
-        capture: LogCaptureConfig::default(),
+        capture: Arc::new(Mutex::new(LogCaptureConfig::default())),
         bind_config: Arc::new(Mutex::new(ProxyBindConfig::default())),
         activity: ActivityTracker::new(),
         config_path: std::path::PathBuf::from("/tmp/flowlet_test_config.json"),
@@ -1243,7 +1437,7 @@ async fn forwards_status_headers_body_and_replaces_authorization() {
         .header(header::CONTENT_TYPE, "application/json")
         // 模拟客户端旧长度；代理改写 model 后必须丢弃并按最终 body 重算。
         .header(header::CONTENT_LENGTH, "1")
-        .body(Body::from(r#"{"model":"auto","messages":[]}"#))
+        .body(Body::from(r#"{"model":"deepseek-v4-pro","messages":[]}"#))
         .unwrap();
 
     let response = forward_request(state, request, ProtocolType::OpenAi)
@@ -1262,7 +1456,10 @@ async fn forwards_status_headers_body_and_replaces_authorization() {
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
-    assert_eq!(body, r#"{"model":"gpt-test","messages":[]}"#);
+    assert_eq!(
+        body,
+        r#"{"model":"qwen/deepseek-v4-pro-0813","messages":[]}"#
+    );
     assert_eq!(
         captured_auth.lock().unwrap().as_deref(),
         Some("Bearer upstream-secret")
@@ -1294,7 +1491,9 @@ async fn forwards_status_headers_body_and_replaces_authorization() {
     );
     assert_eq!(
         logs[0].req_body_b64.as_deref(),
-        Some(encode_body_base64(br#"{"model":"gpt-test","messages":[]}"#).as_str())
+        Some(
+            encode_body_base64(br#"{"model":"qwen/deepseek-v4-pro-0813","messages":[]}"#).as_str()
+        )
     );
 }
 
@@ -1325,10 +1524,10 @@ async fn deepseek_reasoning_route_injects_reasoning_content_passback() {
         vec![test_account("account", "deepseek", "key", 0)],
         vec![test_route(
             "route",
-            "flowlet-pro",
+            "deepseek-v4-flash",
             "deepseek",
             "account",
-            "deepseek-v4-flash",
+            "deepseek-v4-flash-0731",
             ProtocolType::OpenAi,
             0,
         )],
@@ -1339,11 +1538,13 @@ async fn deepseek_reasoning_route_injects_reasoning_content_passback() {
         .uri("/v1/chat/completions")
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(
-            r#"{"model":"flowlet-pro","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"prev"}]}"#,
+            r#"{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"prev"}]}"#,
         ))
         .unwrap();
 
-    let response = forward_request(state, request, ProtocolType::OpenAi).await.unwrap();
+    let response = forward_request(state, request, ProtocolType::OpenAi)
+        .await
+        .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     // 消费响应体，避免资源悬挂。
     let _ = axum::body::to_bytes(response.into_body(), usize::MAX)
@@ -1352,9 +1553,82 @@ async fn deepseek_reasoning_route_injects_reasoning_content_passback() {
 
     let captured = captured_body.lock().unwrap().clone();
     let value: serde_json::Value = serde_json::from_slice(&captured).unwrap();
-    assert_eq!(value["model"], "deepseek-v4-flash");
-    assert!(value["messages"][0].get("reasoning_content").is_none(), "user 消息不应被补字段");
-    assert_eq!(value["messages"][1]["reasoning_content"], "", "assistant 消息应补空串");
+    assert_eq!(value["model"], "deepseek-v4-flash-0731");
+    assert!(
+        value["messages"][0].get("reasoning_content").is_none(),
+        "user 消息不应被补字段"
+    );
+    assert_eq!(
+        value["messages"][1]["reasoning_content"], "",
+        "assistant 消息应补空串"
+    );
+}
+
+#[tokio::test]
+async fn anthropic_thinking_route_injects_thinking_passback() {
+    let captured_body = Arc::new(Mutex::new(Vec::<u8>::new()));
+    let captured_body_state = captured_body.clone();
+    let upstream = Router::new().route(
+        "/v1/messages",
+        post(move |body: Bytes| async move {
+            *captured_body_state.lock().unwrap() = body.to_vec();
+            (
+                StatusCode::OK,
+                [("content-type", "application/json")],
+                r#"{"type":"message","role":"assistant","model":"deepseek-flash","content":[{"type":"thinking","thinking":"","signature":""},{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}"#,
+            )
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, upstream).await.unwrap();
+    });
+
+    let channel = dual_protocol_channel("deepseek", "DeepSeek", &format!("http://{addr}"));
+    let state = build_test_state(
+        vec![channel],
+        vec![test_account("account", "deepseek", "key", 0)],
+        vec![test_route(
+            "route",
+            "deepseek-v4.1-flash",
+            "deepseek",
+            "account",
+            "deepseek-flash",
+            ProtocolType::Anthropic,
+            0,
+        )],
+    );
+
+    // 工具调用链的 assistant 消息缺少 thinking 块（模拟由中转渠道生成的历史）。
+    let request = Request::builder()
+        .method("POST")
+        .uri("/anthropic/v1/messages")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            r#"{"model":"deepseek-flash","thinking":{"type":"enabled"},"messages":[{"role":"user","content":[{"type":"text","text":"hi"}]},{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"bash","input":{}}]},{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"text","text":"ok"}]}]}]}"#,
+        ))
+        .unwrap();
+
+    let response = forward_request(state, request, ProtocolType::Anthropic)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let _ = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+
+    let captured = captured_body.lock().unwrap().clone();
+    let value: serde_json::Value = serde_json::from_slice(&captured).unwrap();
+    assert_eq!(value["model"], "deepseek-flash");
+    assert_eq!(
+        value["messages"][0]["content"][0]["type"], "text",
+        "user 消息不应被改写"
+    );
+    assert_eq!(value["messages"][1]["content"][0]["type"], "thinking");
+    assert_eq!(value["messages"][1]["content"][0]["thinking"], "");
+    assert_eq!(value["messages"][1]["content"][1]["type"], "tool_use");
+    assert_eq!(value["messages"][2]["content"][0]["type"], "tool_result");
 }
 
 #[tokio::test]
@@ -1384,7 +1658,7 @@ async fn non_deepseek_route_leaves_assistant_messages_untouched() {
         vec![test_account("account", "longcat", "key", 0)],
         vec![test_route(
             "route",
-            "flowlet-pro",
+            "LongCat-2.0",
             "longcat",
             "account",
             "LongCat-2.0",
@@ -1398,11 +1672,13 @@ async fn non_deepseek_route_leaves_assistant_messages_untouched() {
         .uri("/v1/chat/completions")
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(
-            r#"{"model":"flowlet-pro","messages":[{"role":"assistant","content":"prev"}]}"#,
+            r#"{"model":"LongCat-2.0","messages":[{"role":"assistant","content":"prev"}]}"#,
         ))
         .unwrap();
 
-    let response = forward_request(state, request, ProtocolType::OpenAi).await.unwrap();
+    let response = forward_request(state, request, ProtocolType::OpenAi)
+        .await
+        .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let _ = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
@@ -1411,13 +1687,10 @@ async fn non_deepseek_route_leaves_assistant_messages_untouched() {
     let captured = captured_body.lock().unwrap().clone();
     let value: serde_json::Value = serde_json::from_slice(&captured).unwrap();
     assert_eq!(value["model"], "LongCat-2.0");
-    assert!(value["messages"][0].get("reasoning_content").is_none(), "非 DeepSeek 路由不应补字段");
-}
-
-#[test]
-fn small_model_routing_is_disabled_for_mvp() {
-    let result = resolve_small_model("deepseek-v4-pro");
-    assert_eq!(result, "deepseek-v4-pro");
+    assert!(
+        value["messages"][0].get("reasoning_content").is_none(),
+        "非 DeepSeek 路由不应补字段"
+    );
 }
 
 #[test]
@@ -1582,6 +1855,7 @@ fn cleanup_old_logs_works() {
                 method: "POST".to_string(),
                 path: "/v1/chat/completions".to_string(),
                 upstream_url: None,
+                upstream_proxy_used: None,
                 status: Some(200),
                 latency_ms: Some(100),
                 is_stream: false,
@@ -1691,10 +1965,10 @@ async fn model_list_response_exposes_enabled_route_models() {
     let routes = vec![
         RouteCandidate {
             id: "route-1".to_string(),
-            virtual_model_id: "flowlet-pro".to_string(),
+            virtual_model_id: "LongCat-2.0".to_string(),
             channel_id: "longcat".to_string(),
             account_id: "acc-enabled".to_string(),
-            upstream_model: "gpt-test".to_string(),
+            upstream_model: "LongCat-2.0".to_string(),
             client_protocol: ProtocolType::OpenAi,
             priority: 0,
             enabled: true,
@@ -1703,10 +1977,10 @@ async fn model_list_response_exposes_enabled_route_models() {
         },
         RouteCandidate {
             id: "route-2".to_string(),
-            virtual_model_id: "hidden".to_string(),
+            virtual_model_id: "LongCat-2.5".to_string(),
             channel_id: "longcat".to_string(),
             account_id: "acc-disabled".to_string(),
-            upstream_model: "hidden-model".to_string(),
+            upstream_model: "LongCat-2.5".to_string(),
             client_protocol: ProtocolType::OpenAi,
             priority: 1,
             enabled: true,
@@ -1760,12 +2034,63 @@ async fn model_list_response_exposes_enabled_route_models() {
         .iter()
         .map(|item| item["id"].as_str().unwrap())
         .collect();
-    assert_eq!(ids, vec!["flowlet-pro"]);
+    // 只暴露有健康账号的一条路由（LongCat-2.5 的账号已禁用）。
+    assert_eq!(ids, vec!["LongCat-2.0"]);
 
-    // Flowlet Pro / Flash 为 Flowlet 统一虚拟模型，owned_by 固定为 flowlet
+    // owned_by 取承载渠道的 vendor。
     let first = &value["data"][0];
     assert_eq!(first["object"], "model");
-    assert_eq!(first["owned_by"], "flowlet");
+    assert_eq!(first["owned_by"], "longcat");
+}
+
+#[tokio::test]
+async fn model_list_never_exposes_retired_aggregate_names() {
+    // 历史聚合名即使出现在行里（身份一致也不够）也不得对外暴露。
+    let routes = vec![
+        RouteCandidate {
+            id: "retired".to_string(),
+            virtual_model_id: "flowlet-pro".to_string(),
+            channel_id: "longcat".to_string(),
+            account_id: "acc".to_string(),
+            upstream_model: "flowlet-pro".to_string(),
+            client_protocol: ProtocolType::OpenAi,
+            priority: 0,
+            enabled: true,
+            ..Default::default()
+        },
+        RouteCandidate {
+            id: "direct".to_string(),
+            virtual_model_id: "LongCat-2.0".to_string(),
+            channel_id: "longcat".to_string(),
+            account_id: "acc".to_string(),
+            upstream_model: "LongCat-2.0".to_string(),
+            client_protocol: ProtocolType::OpenAi,
+            priority: 0,
+            enabled: true,
+            ..Default::default()
+        },
+    ];
+    let accounts = vec![ChannelAccount {
+        id: "acc".to_string(),
+        channel_id: "longcat".to_string(),
+        api_key: "test-key".to_string(),
+        enabled: true,
+        ..Default::default()
+    }];
+    let channels = vec![ChannelPreset {
+        id: "longcat".to_string(),
+        vendor: "longcat".to_string(),
+        supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
+        ..Default::default()
+    }];
+
+    let response = build_model_list_response(&routes, &accounts, &channels, &ProtocolType::OpenAi);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(value["data"].as_array().unwrap().len(), 1);
+    assert_eq!(value["data"][0]["id"], "LongCat-2.0");
 }
 
 #[tokio::test]
@@ -1811,10 +2136,10 @@ async fn model_list_response_anthropic_uses_anthropic_schema() {
     let routes = vec![
         RouteCandidate {
             id: "route-a".to_string(),
-            virtual_model_id: "flowlet-pro".to_string(),
+            virtual_model_id: "deepseek-v4-flash".to_string(),
             channel_id: "anthropic".to_string(),
             account_id: "acc-anthropic".to_string(),
-            upstream_model: "claude-sonnet-4-20250514".to_string(),
+            upstream_model: "deepseek-v4-flash".to_string(),
             client_protocol: ProtocolType::Anthropic,
             priority: 0,
             enabled: true,
@@ -1823,10 +2148,10 @@ async fn model_list_response_anthropic_uses_anthropic_schema() {
         },
         RouteCandidate {
             id: "route-b".to_string(),
-            virtual_model_id: "flowlet-flash".to_string(),
+            virtual_model_id: "deepseek-v4-pro".to_string(),
             channel_id: "anthropic".to_string(),
             account_id: "acc-anthropic".to_string(),
-            upstream_model: "claude-opus-4".to_string(),
+            upstream_model: "deepseek-v4-pro".to_string(),
             client_protocol: ProtocolType::Anthropic,
             priority: 1,
             enabled: true,
@@ -1862,16 +2187,16 @@ async fn model_list_response_anthropic_uses_anthropic_schema() {
     // Anthropic 风格：没有 object=list，而是 data + has_more + first_id + last_id
     assert!(value.get("object").is_none());
     assert_eq!(value["has_more"], false);
-    // BTreeSet 按字典序排列：claude-opus-4 < claude-sonnet-4-20250514
-    assert_eq!(value["first_id"], "flowlet-pro");
-    assert_eq!(value["last_id"], "flowlet-flash");
+    // 对外模型按名字典序排列：deepseek-v4-flash < deepseek-v4-pro
+    assert_eq!(value["first_id"], "deepseek-v4-flash");
+    assert_eq!(value["last_id"], "deepseek-v4-pro");
 
     let data = value["data"].as_array().unwrap();
     assert_eq!(data.len(), 2);
     // 每个模型对象：type=model, id, display_name, created_at
     assert_eq!(data[0]["type"], "model");
-    assert_eq!(data[0]["id"], "flowlet-pro");
-    assert_eq!(data[0]["display_name"], "flowlet-pro");
+    assert_eq!(data[0]["id"], "deepseek-v4-flash");
+    assert_eq!(data[0]["display_name"], "deepseek-v4-flash");
     // 空 created_at 应被替换为 epoch 起点
     assert_eq!(data[0]["created_at"], "2025-05-14T00:00:00Z");
     // 非空 RFC 3339 应原样保留
@@ -2011,7 +2336,7 @@ async fn missing_account_returns_structured_error_and_log() {
         storage: storage.clone(),
         upstream_timeout_seconds: 30,
         rate_limiter: RateLimiter::new(600),
-        capture: LogCaptureConfig::default(),
+        capture: Arc::new(Mutex::new(LogCaptureConfig::default())),
         bind_config: Arc::new(Mutex::new(ProxyBindConfig::default())),
         activity: ActivityTracker::new(),
         config_path: db_path.with_extension("json"),
@@ -2071,7 +2396,7 @@ async fn missing_account_returns_structured_error_and_log() {
     let _ = std::fs::remove_file(db_path);
 }
 #[test]
-fn flowlet_pool_round_robins_accounts_before_next_model() {
+fn candidate_pool_round_robins_accounts_before_next_variant() {
     let account = |id: &str, channel_id: &str, priority: i64, api_key: &str| ChannelAccount {
         id: id.to_string(),
         channel_id: channel_id.to_string(),
@@ -2114,20 +2439,42 @@ fn flowlet_pool_round_robins_accounts_before_next_model() {
         account("empty", "deepseek", 2, ""),
     ];
     let routes = vec![
-        route("1", "flowlet-pro", "deepseek", "a", "deepseek-v4-pro", 0),
-        route("2", "flowlet-pro", "deepseek", "b", "deepseek-v4-pro", 0),
+        route(
+            "1",
+            "deepseek-v4-pro",
+            "deepseek",
+            "a",
+            "deepseek-v4-pro",
+            0,
+        ),
+        route(
+            "2",
+            "deepseek-v4-pro",
+            "deepseek",
+            "b",
+            "deepseek-v4-pro",
+            0,
+        ),
         route(
             "3",
-            "flowlet-pro",
+            "deepseek-v4-pro",
             "deepseek",
             "empty",
             "deepseek-v4-pro",
             0,
         ),
-        route("4", "flowlet-pro", "longcat", "c", "LongCat-2.0", 10),
+        // 同一规范模型的另一个上游变体（日期快照）是独立的 priority 池，池内不参与轮询。
+        route(
+            "4",
+            "deepseek-v4-pro",
+            "longcat",
+            "c",
+            "deepseek-v4-pro-0813",
+            10,
+        ),
         route(
             "5",
-            "flowlet-flash",
+            "deepseek-v4-flash",
             "deepseek",
             "a",
             "deepseek-v4-flash",
@@ -2139,7 +2486,7 @@ fn flowlet_pool_round_robins_accounts_before_next_model() {
         &routes,
         &[],
         &[],
-        Some("flowlet-pro"),
+        Some("deepseek-v4-pro"),
         &ProtocolType::OpenAi,
         None,
         &accounts,
@@ -2158,7 +2505,7 @@ fn flowlet_pool_round_robins_accounts_before_next_model() {
         &routes,
         &[],
         &[],
-        Some("flowlet-pro"),
+        Some("deepseek-v4-pro"),
         &ProtocolType::OpenAi,
         None,
         &accounts,
@@ -2175,11 +2522,11 @@ fn flowlet_pool_round_robins_accounts_before_next_model() {
     );
     assert!(second
         .iter()
-        .all(|route| route.virtual_model_id == "flowlet-pro"));
+        .all(|route| route.virtual_model_id == "deepseek-v4-pro"));
 }
 
 #[test]
-fn flowlet_pool_rejects_single_protocol_channels() {
+fn candidate_pool_accepts_native_protocol_and_skips_other_protocols() {
     let channels = vec![ChannelPreset {
         id: "openai-only".to_string(),
         supported_protocols: vec![ProtocolType::OpenAi],
@@ -2193,20 +2540,20 @@ fn flowlet_pool_rejects_single_protocol_channels() {
         ..Default::default()
     }];
     let routes = vec![RouteCandidate {
-        virtual_model_id: "flowlet-pro".to_string(),
+        virtual_model_id: "deepseek-v4-pro".to_string(),
         channel_id: "openai-only".to_string(),
         account_id: "account".to_string(),
-        upstream_model: "model".to_string(),
+        upstream_model: "deepseek-v4-pro".to_string(),
         client_protocol: ProtocolType::OpenAi,
         enabled: true,
         ..Default::default()
     }];
     let mut round_robin = std::collections::HashMap::new();
-    assert!(match_candidates(
+    assert!(!match_candidates(
         &routes,
         &[],
         &[],
-        Some("flowlet-pro"),
+        Some("deepseek-v4-pro"),
         &ProtocolType::OpenAi,
         None,
         &accounts,
@@ -2215,6 +2562,136 @@ fn flowlet_pool_rejects_single_protocol_channels() {
     )
     .matched
     .is_empty());
+    assert!(match_candidates(
+        &routes,
+        &[],
+        &[],
+        Some("deepseek-v4-pro"),
+        &ProtocolType::Anthropic,
+        None,
+        &accounts,
+        &channels,
+        &mut round_robin
+    )
+    .matched
+    .is_empty());
+}
+
+#[test]
+fn match_candidates_skips_routes_with_inconsistent_canonical_identity() {
+    // 历史聚合路由（一个对外名对应异构上游）与手工脏数据：规范身份不一致的行不参与路由。
+    let channels = vec![dual_protocol_channel(
+        "deepseek",
+        "DeepSeek",
+        "http://upstream",
+    )];
+    let accounts = vec![
+        test_account("a", "deepseek", "key", 0),
+        test_account("b", "deepseek", "key-b", 0),
+    ];
+    let routes = vec![
+        test_route(
+            "valid",
+            "deepseek-v4-pro",
+            "deepseek",
+            "a",
+            "deepseek-v4-pro-0813",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "legacy-aggregate",
+            "deepseek-v4-pro",
+            "deepseek",
+            "b",
+            "LongCat-2.0",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "legacy-auto",
+            "auto",
+            "deepseek",
+            "b",
+            "gpt-test",
+            ProtocolType::OpenAi,
+            0,
+        ),
+        test_route(
+            "legacy-auto-match",
+            "auto",
+            "deepseek",
+            "b",
+            "auto",
+            ProtocolType::OpenAi,
+            0,
+        ),
+    ];
+    let mut round_robin = std::collections::HashMap::new();
+    let selection = match_candidates(
+        &routes,
+        &[],
+        &[],
+        Some("deepseek-v4-pro"),
+        &ProtocolType::OpenAi,
+        None,
+        &accounts,
+        &channels,
+        &mut round_robin,
+    );
+    assert_eq!(
+        selection
+            .matched
+            .iter()
+            .map(|route| route.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["valid"]
+    );
+
+    // 「auto」是历史自定义模型名：身份一致的行仍按旧语义可被显式请求命中。
+    let auto_selection = match_candidates(
+        &routes,
+        &[],
+        &[],
+        Some("auto"),
+        &ProtocolType::OpenAi,
+        None,
+        &accounts,
+        &channels,
+        &mut round_robin,
+    );
+    assert_eq!(
+        auto_selection
+            .matched
+            .iter()
+            .map(|route| route.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["legacy-auto-match"]
+    );
+
+    // 已移除的聚合模型别名即使身份一致（例如经自定义中转渠道转发另一个 Flowlet 实例）
+    // 也不再被路由命中。
+    let retired_routes = vec![test_route(
+        "retired",
+        "flowlet-pro",
+        "deepseek",
+        "a",
+        "flowlet-pro",
+        ProtocolType::OpenAi,
+        0,
+    )];
+    let retired_selection = match_candidates(
+        &retired_routes,
+        &[],
+        &[],
+        Some("flowlet-pro"),
+        &ProtocolType::OpenAi,
+        None,
+        &accounts,
+        &channels,
+        &mut round_robin,
+    );
+    assert!(retired_selection.matched.is_empty());
 }
 
 #[test]
@@ -2298,7 +2775,11 @@ fn match_candidates_excludes_channels_without_responses_routes() {
 fn match_candidates_reports_protocol_mismatched_routes_as_skipped() {
     // 模型只在 OpenAI 协议下开放，Responses 请求没有任何匹配候选；
     // 但协议不匹配的候选必须被单独返回，供上层写入“已跳过”降级节点。
-    let channels = vec![dual_protocol_channel("deepseek", "DeepSeek", "http://upstream")];
+    let channels = vec![dual_protocol_channel(
+        "deepseek",
+        "DeepSeek",
+        "http://upstream",
+    )];
     let accounts = vec![test_account("a", "deepseek", "key", 0)];
     let routes = vec![test_route(
         "openai-route",
@@ -2341,14 +2822,12 @@ struct SpyUpstream {
 async fn spawn_spy_upstream(
     status_by_key: std::collections::HashMap<String, StatusCode>,
 ) -> (String, Arc<Mutex<Vec<String>>>) {
-    use axum::extract::State;
     let seen = Arc::new(Mutex::new(Vec::<String>::new()));
     let state = Arc::new(SpyUpstream {
         status_by_key,
         seen_keys: seen.clone(),
     });
     // 代理会把 /anthropic/v1/messages 重写成上游 /v1/messages，因此需同时注册两条路径。
-    use axum::handler::Handler;
     let handler = {
         let state = state.clone();
         move |headers: HeaderMap, body: Bytes| {
@@ -2392,7 +2871,11 @@ fn dual_protocol_channel(id: &str, name: &str, base_url: &str) -> ChannelPreset 
         id: id.to_string(),
         name: name.to_string(),
         vendor: id.to_string(),
-        supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
+        supported_protocols: vec![
+            ProtocolType::OpenAi,
+            ProtocolType::Anthropic,
+            ProtocolType::Responses,
+        ],
         openai_base_url: base_url.to_string(),
         anthropic_base_url: base_url.to_string(),
         openai_auth: AuthStrategy::Bearer,
@@ -2461,7 +2944,7 @@ fn build_test_state(
         storage,
         upstream_timeout_seconds: 120,
         rate_limiter: RateLimiter::new(600),
-        capture: LogCaptureConfig::default(),
+        capture: Arc::new(Mutex::new(LogCaptureConfig::default())),
         bind_config: Arc::new(Mutex::new(ProxyBindConfig::default())),
         activity: ActivityTracker::new(),
         config_path: std::path::PathBuf::from("/tmp/flowlet_test_config.json"),
@@ -2497,20 +2980,20 @@ async fn anthropic_thinking_compat_repairs_client_stream_but_captures_raw_upstre
     for protocol in [ProtocolType::Anthropic, ProtocolType::OpenAi] {
         // Use the same SSE bytes for both protocols to prove compatibility is gated.
         let channel = dual_protocol_channel("custom", "Custom", &addr);
-        let mut state = build_test_state(
+        let state = build_test_state(
             vec![channel],
             vec![test_account("a", "custom", "key", 0)],
             vec![test_route(
                 "r",
-                "flowlet-pro",
+                "deepseek-v4-pro",
                 "custom",
                 "a",
-                "deepseek-v4.1-flash",
+                "deepseek-v4-pro",
                 protocol.clone(),
                 0,
             )],
         );
-        state.capture.capture_res_body = true;
+        state.capture.lock().unwrap().capture_res_body = true;
         let storage = state.storage.clone();
         let path = if protocol == ProtocolType::Anthropic {
             "/anthropic/v1/messages"
@@ -2522,7 +3005,7 @@ async fn anthropic_thinking_compat_repairs_client_stream_but_captures_raw_upstre
             .uri(path)
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from(
-                r#"{"model":"flowlet-pro","stream":true,"messages":[]}"#,
+                r#"{"model":"deepseek-v4-pro","stream":true,"messages":[]}"#,
             ))
             .unwrap();
         let response = forward_request(state, request, protocol.clone())
@@ -2779,6 +3262,104 @@ async fn dropping_downstream_stream_preserves_received_partial_usage() {
 }
 
 #[tokio::test]
+async fn dropping_stream_after_openai_done_marker_marks_complete() {
+    let body = Bytes::from_static(
+        b"data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1,\"total_tokens\":4}}\n\ndata: [DONE]\n\n",
+    );
+    let upstream = futures_util::stream::unfold(Some(body), |next| async move {
+        match next {
+            Some(bytes) => Some((Ok::<Bytes, reqwest::Error>(bytes), None)),
+            None => std::future::pending().await,
+        }
+    });
+    let capture = LogCaptureConfig::default();
+    let (tx_done, rx_done) = tokio::sync::oneshot::channel();
+    let mut stream = Box::pin(capture_timed_stream(
+        upstream,
+        tx_done,
+        &capture,
+        Instant::now(),
+        None,
+        std::time::Duration::from_secs(1),
+        ActivityTracker::new().track(),
+    ));
+
+    stream.next().await.unwrap().unwrap();
+    drop(stream);
+    let done = rx_done.await.unwrap();
+    assert_eq!(done.error_message, None);
+    assert_eq!(done.route_reason, None);
+    assert_eq!(done.usage_status.as_deref(), Some("complete"));
+    assert_eq!(done.usage.unwrap().total_tokens, Some(4));
+}
+
+#[tokio::test]
+async fn dropping_stream_after_split_openai_done_marker_marks_complete() {
+    let chunks = vec![
+        Bytes::from_static(
+            b"data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1,\"total_tokens\":4}}\n\ndata: [DO",
+        ),
+        Bytes::from_static(b"NE]\n\n"),
+    ];
+    let upstream = futures_util::stream::unfold(chunks.into_iter(), |mut chunks| async move {
+        chunks
+            .next()
+            .map(|bytes| (Ok::<Bytes, reqwest::Error>(bytes), chunks))
+    });
+    let capture = LogCaptureConfig::default();
+    let (tx_done, rx_done) = tokio::sync::oneshot::channel();
+    let mut stream = Box::pin(capture_timed_stream(
+        upstream,
+        tx_done,
+        &capture,
+        Instant::now(),
+        None,
+        std::time::Duration::from_secs(1),
+        ActivityTracker::new().track(),
+    ));
+
+    stream.next().await.unwrap().unwrap();
+    stream.next().await.unwrap().unwrap();
+    drop(stream);
+    let done = rx_done.await.unwrap();
+    assert_eq!(done.error_message, None);
+    assert_eq!(done.route_reason, None);
+    assert_eq!(done.usage_status.as_deref(), Some("complete"));
+    assert_eq!(done.usage.unwrap().total_tokens, Some(4));
+}
+
+#[tokio::test]
+async fn dropping_stream_after_anthropic_message_stop_marks_complete() {
+    let body = Bytes::from_static(
+        b"event: message_delta\ndata: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":2}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+    );
+    let upstream = futures_util::stream::unfold(Some(body), |next| async move {
+        match next {
+            Some(bytes) => Some((Ok::<Bytes, reqwest::Error>(bytes), None)),
+            None => std::future::pending().await,
+        }
+    });
+    let capture = LogCaptureConfig::default();
+    let (tx_done, rx_done) = tokio::sync::oneshot::channel();
+    let mut stream = Box::pin(capture_timed_stream(
+        upstream,
+        tx_done,
+        &capture,
+        Instant::now(),
+        None,
+        std::time::Duration::from_secs(1),
+        ActivityTracker::new().track(),
+    ));
+
+    stream.next().await.unwrap().unwrap();
+    drop(stream);
+    let done = rx_done.await.unwrap();
+    assert_eq!(done.error_message, None);
+    assert_eq!(done.route_reason, None);
+    assert_eq!(done.usage_status.as_deref(), Some("complete"));
+}
+
+#[tokio::test]
 async fn streaming_response_can_outlive_channel_timeout_when_chunks_keep_arriving() {
     let upstream = Router::new().route(
         "/v1/chat/completions",
@@ -2816,7 +3397,7 @@ async fn streaming_response_can_outlive_channel_timeout_when_chunks_keep_arrivin
         vec![test_account("account", "longcat", "key", 0)],
         vec![test_route(
             "route",
-            "flowlet-pro",
+            "LongCat-2.0",
             "longcat",
             "account",
             "LongCat-2.0",
@@ -2825,7 +3406,7 @@ async fn streaming_response_can_outlive_channel_timeout_when_chunks_keep_arrivin
         )],
     );
 
-    let response = forward_request(state, chat_request("flowlet-pro"), ProtocolType::OpenAi)
+    let response = forward_request(state, chat_request("LongCat-2.0"), ProtocolType::OpenAi)
         .await
         .unwrap();
     let body = tokio::time::timeout(
@@ -2851,7 +3432,7 @@ async fn streaming_response_can_outlive_channel_timeout_when_chunks_keep_arrivin
 
 #[tokio::test]
 async fn e2e_same_model_account_fallback() {
-    // flowlet-pro / deepseek-v4-pro：账号 A(429) → 账号 B(200)
+    // deepseek-v4-pro / deepseek-v4-pro：账号 A(429) → 账号 B(200)
     let (addr, seen) = spawn_spy_upstream(status_map(&[
         ("key-a", StatusCode::TOO_MANY_REQUESTS),
         ("key-b", StatusCode::OK),
@@ -2865,7 +3446,7 @@ async fn e2e_same_model_account_fallback() {
     let routes = vec![
         test_route(
             "1",
-            "flowlet-pro",
+            "deepseek-v4-pro",
             "deepseek",
             "a",
             "deepseek-v4-pro",
@@ -2874,7 +3455,7 @@ async fn e2e_same_model_account_fallback() {
         ),
         test_route(
             "2",
-            "flowlet-pro",
+            "deepseek-v4-pro",
             "deepseek",
             "b",
             "deepseek-v4-pro",
@@ -2883,7 +3464,7 @@ async fn e2e_same_model_account_fallback() {
         ),
     ];
     let state = build_test_state(channels, accounts, routes);
-    let response = forward_request(state, chat_request("flowlet-pro"), ProtocolType::OpenAi)
+    let response = forward_request(state, chat_request("deepseek-v4-pro"), ProtocolType::OpenAi)
         .await
         .unwrap();
 
@@ -2895,8 +3476,8 @@ async fn e2e_same_model_account_fallback() {
 }
 
 #[tokio::test]
-async fn e2e_cross_model_fallback() {
-    // flowlet-pro：账号 A(429) → 账号 B(500) → 账号 C(200，来自 LongCat-2.0)
+async fn e2e_cross_variant_fallback_within_canonical_model() {
+    // deepseek-v4-pro：账号 A(429) → 账号 B(500) → 账号 C(200，同规范模型的上游变体)
     let (addr, seen) = spawn_spy_upstream(status_map(&[
         ("key-a", StatusCode::TOO_MANY_REQUESTS),
         ("key-b", StatusCode::INTERNAL_SERVER_ERROR),
@@ -2905,17 +3486,17 @@ async fn e2e_cross_model_fallback() {
     .await;
     let channels = vec![
         dual_protocol_channel("deepseek", "DeepSeek", &addr),
-        dual_protocol_channel("longcat", "LongCat", &addr),
+        dual_protocol_channel("qwen", "Qwen", &addr),
     ];
     let accounts = vec![
         test_account("a", "deepseek", "key-a", 0),
         test_account("b", "deepseek", "key-b", 1),
-        test_account("c", "longcat", "key-c", 0),
+        test_account("c", "qwen", "key-c", 0),
     ];
     let routes = vec![
         test_route(
             "1",
-            "flowlet-pro",
+            "deepseek-v4-pro",
             "deepseek",
             "a",
             "deepseek-v4-pro",
@@ -2924,25 +3505,26 @@ async fn e2e_cross_model_fallback() {
         ),
         test_route(
             "2",
-            "flowlet-pro",
+            "deepseek-v4-pro",
             "deepseek",
             "b",
             "deepseek-v4-pro",
             ProtocolType::OpenAi,
             0,
         ),
+        // 同一规范模型的日期快照变体，priority 更低 → 前两个池都失败后才尝试。
         test_route(
             "3",
-            "flowlet-pro",
-            "longcat",
+            "deepseek-v4-pro",
+            "qwen",
             "c",
-            "LongCat-2.0",
+            "qwen/deepseek-v4-pro-0813",
             ProtocolType::OpenAi,
             10,
         ),
     ];
     let state = build_test_state(channels, accounts, routes);
-    let response = forward_request(state, chat_request("flowlet-pro"), ProtocolType::OpenAi)
+    let response = forward_request(state, chat_request("deepseek-v4-pro"), ProtocolType::OpenAi)
         .await
         .unwrap();
 
@@ -2958,38 +3540,22 @@ async fn e2e_cross_model_fallback() {
 }
 
 #[tokio::test]
-async fn e2e_image_request_logs_modality_skip_before_supported_route() {
-    // glm-5.2 仅文本，OpenRouter ox-alpha 由 models.dev 声明支持图片。
-    // 图片请求不应调用第一个候选，但详情链路必须保留这个本地降级节点。
-    let (addr, seen) = spawn_spy_upstream(status_map(&[("vision-key", StatusCode::OK)])).await;
-    let channels = vec![
-        dual_protocol_channel("zhipu", "Z.AI", &addr),
-        dual_protocol_channel("openrouter", "OpenRouter", &addr),
-    ];
-    let accounts = vec![
-        test_account("text", "zhipu", "text-key", 0),
-        test_account("vision", "openrouter", "vision-key", 0),
-    ];
-    let routes = vec![
-        test_route(
-            "text-route",
-            "flowlet-pro",
-            "zhipu",
-            "text",
-            "glm-5.2",
-            ProtocolType::OpenAi,
-            0,
-        ),
-        test_route(
-            "vision-route",
-            "flowlet-pro",
-            "openrouter",
-            "vision",
-            "stealth/ox-alpha",
-            ProtocolType::OpenAi,
-            1,
-        ),
-    ];
+async fn e2e_image_request_to_text_only_model_is_rejected_before_upstream() {
+    // 固定目录样本：glm-5.2 仅文本。聚合模型移除后，一个请求只对应一个规范模型，
+    // 因此图片请求会过滤掉该模型的全部候选，返回 model_input_modality_unsupported；
+    // 但本地降级节点仍必须记录，且不得发起第三方请求。
+    let (addr, seen) = spawn_spy_upstream(status_map(&[("text-key", StatusCode::OK)])).await;
+    let channels = vec![dual_protocol_channel("zhipu", "Z.AI", &addr)];
+    let accounts = vec![test_account("text", "zhipu", "text-key", 0)];
+    let routes = vec![test_route(
+        "text-route",
+        "glm-5.2",
+        "zhipu",
+        "text",
+        "glm-5.2",
+        ProtocolType::OpenAi,
+        0,
+    )];
     let state = build_test_state(channels, accounts, routes);
     let storage = state.storage.clone();
     let request = Request::builder()
@@ -2997,17 +3563,21 @@ async fn e2e_image_request_logs_modality_skip_before_supported_route() {
         .uri("/v1/chat/completions")
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(
-            r#"{"model":"flowlet-pro","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,eA=="}}]}]}"#,
+            r#"{"model":"glm-5.2","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,eA=="}}]}]}"#,
         ))
         .unwrap();
-    let response = forward_request(state, request, ProtocolType::OpenAi)
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let _ = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    assert_eq!(*seen.lock().unwrap(), vec!["vision-key".to_string()]);
+    let models_cn = r#"{"providers":[{"id":"zhipu-cn","models":[
+        {"id":"glm-5.2","capabilities":{"inputModalities":["text"]}}
+    ]}]}"#;
+    let response = crate::core::model_input_capabilities::with_test_catalogs(
+        Some(models_cn),
+        None,
+        forward_request(state, request, ProtocolType::OpenAi),
+    )
+    .await
+    .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(seen.lock().unwrap().is_empty());
 
     let attempts = tokio::time::timeout(std::time::Duration::from_secs(1), async {
         loop {
@@ -3025,6 +3595,7 @@ async fn e2e_image_request_logs_modality_skip_before_supported_route() {
     })
     .await
     .unwrap();
+    // 跳过节点：保留候选渠道/账号/模型，但不伪造 HTTP 状态与上游报文。
     assert_eq!(attempts[0].upstream_model.as_deref(), Some("glm-5.2"));
     assert_eq!(
         attempts[0].route_reason.as_deref(),
@@ -3033,12 +3604,12 @@ async fn e2e_image_request_logs_modality_skip_before_supported_route() {
     assert_eq!(attempts[0].status, None);
     assert_eq!(attempts[0].upstream_url, None);
     assert!(!attempts[0].is_last_attempt);
+    // 终态：没有任何候选支持图片输入。
     assert_eq!(
-        attempts[1].upstream_model.as_deref(),
-        Some("stealth/ox-alpha")
+        attempts[1].route_reason.as_deref(),
+        Some("model_input_modality_unsupported")
     );
-    assert_eq!(attempts[1].route_reason.as_deref(), Some("fallback_success"));
-    assert_eq!(attempts[1].fallback_count, 1);
+    assert_eq!(attempts[1].status, Some(400));
     assert!(attempts[1].is_last_attempt);
 }
 
@@ -3110,7 +3681,7 @@ async fn e2e_unsupported_protocol_logs_skipped_route_and_terminal_error() {
 }
 
 #[tokio::test]
-async fn e2e_product_not_activated_falls_back_to_next_model() {
+async fn e2e_product_not_activated_falls_back_to_next_candidate() {
     let seen = Arc::new(Mutex::new(Vec::<String>::new()));
     let seen_by_upstream = seen.clone();
     let upstream = Router::new().route(
@@ -3125,7 +3696,7 @@ async fn e2e_product_not_activated_falls_back_to_next_model() {
                     .unwrap_or("")
                     .to_string();
                 seen.lock().unwrap().push(key.clone());
-                if key == "kimi-key" {
+                if key == "bad-key" {
                     (
                         StatusCode::BAD_REQUEST,
                         [("content-type", "application/json")],
@@ -3148,43 +3719,44 @@ async fn e2e_product_not_activated_falls_back_to_next_model() {
     });
     let base_url = format!("http://{addr}");
 
+    // 同一规范模型的多候选：第一个账号报 product_not_activated 时降级到下一个候选。
     let channels = vec![
-        dual_protocol_channel("kimi", "Kimi", &base_url),
         dual_protocol_channel("deepseek", "DeepSeek", &base_url),
+        dual_protocol_channel("qwen", "Qwen", &base_url),
     ];
     let accounts = vec![
-        test_account("kimi", "kimi", "kimi-key", 0),
-        test_account("deepseek", "deepseek", "deepseek-key", 0),
+        test_account("bad", "deepseek", "bad-key", 0),
+        test_account("good", "qwen", "good-key", 0),
     ];
     let routes = vec![
         test_route(
             "1",
-            "flowlet-pro",
-            "kimi",
-            "kimi",
-            "kimi-k3",
+            "deepseek-v4-pro",
+            "deepseek",
+            "bad",
+            "deepseek-v4-pro",
             ProtocolType::OpenAi,
             0,
         ),
         test_route(
             "2",
-            "flowlet-pro",
-            "deepseek",
-            "deepseek",
             "deepseek-v4-pro",
+            "qwen",
+            "good",
+            "qwen/deepseek-v4-pro-0813",
             ProtocolType::OpenAi,
-            1,
+            10,
         ),
     ];
     let state = build_test_state(channels, accounts, routes);
-    let response = forward_request(state, chat_request("flowlet-pro"), ProtocolType::OpenAi)
+    let response = forward_request(state, chat_request("deepseek-v4-pro"), ProtocolType::OpenAi)
         .await
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         *seen.lock().unwrap(),
-        vec!["kimi-key".to_string(), "deepseek-key".to_string()]
+        vec!["bad-key".to_string(), "good-key".to_string()]
     );
 }
 
@@ -3232,30 +3804,28 @@ async fn e2e_account_deactivated_falls_back_then_recovers() {
     });
     let base_url = format!("http://{addr}");
 
-    let channels = vec![
-        dual_protocol_channel("deepseek", "DeepSeek", &base_url),
-        dual_protocol_channel("longcat", "LongCat", &base_url),
-    ];
+    // 同一规范模型、同一渠道的两个账号：主账号被停用 → 降级到备用账号；恢复后重新探测主账号。
+    let channels = vec![dual_protocol_channel("deepseek", "DeepSeek", &base_url)];
     let accounts = vec![
-        test_account("deepseek-disabled", "deepseek", "disabled-key", 0),
-        test_account("longcat-ok", "longcat", "longcat-key", 0),
+        test_account("primary", "deepseek", "disabled-key", 0),
+        test_account("backup", "deepseek", "ok-key", 10),
     ];
     let routes = vec![
         test_route(
             "1",
-            "flowlet-pro",
+            "deepseek-v4-pro",
             "deepseek",
-            "deepseek-disabled",
+            "primary",
             "deepseek-v4-pro",
             ProtocolType::OpenAi,
             0,
         ),
         test_route(
             "2",
-            "flowlet-pro",
-            "longcat",
-            "longcat-ok",
-            "LongCat-2.0",
+            "deepseek-v4-pro",
+            "deepseek",
+            "backup",
+            "deepseek-v4-pro",
             ProtocolType::OpenAi,
             10,
         ),
@@ -3264,7 +3834,7 @@ async fn e2e_account_deactivated_falls_back_then_recovers() {
     let storage = state.storage.clone();
     let response = forward_request(
         state.clone(),
-        chat_request("flowlet-pro"),
+        chat_request("deepseek-v4-pro"),
         ProtocolType::OpenAi,
     )
     .await
@@ -3273,22 +3843,22 @@ async fn e2e_account_deactivated_falls_back_then_recovers() {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         *seen.lock().unwrap(),
-        vec!["disabled-key".to_string(), "longcat-key".to_string()]
+        vec!["disabled-key".to_string(), "ok-key".to_string()]
     );
     let stored_accounts = storage.list_channel_accounts().unwrap();
     let disabled = stored_accounts
         .iter()
-        .find(|account| account.id == "deepseek-disabled")
+        .find(|account| account.id == "primary")
         .unwrap();
     assert_eq!(
         disabled.credential_status,
         crate::core::config::ACCOUNT_CREDENTIAL_INVALID_KEY
     );
 
-    // 上游重新启用同一个 Key 后，下一次请求会重新探测 DeepSeek 并恢复账号状态。
+    // 上游重新启用同一个 Key 后，下一次请求会重新探测主账号并恢复账号状态。
     key_disabled.store(false, std::sync::atomic::Ordering::SeqCst);
     let recovered_response =
-        forward_request(state, chat_request("flowlet-pro"), ProtocolType::OpenAi)
+        forward_request(state, chat_request("deepseek-v4-pro"), ProtocolType::OpenAi)
             .await
             .unwrap();
     assert_eq!(recovered_response.status(), StatusCode::OK);
@@ -3296,106 +3866,20 @@ async fn e2e_account_deactivated_falls_back_then_recovers() {
         *seen.lock().unwrap(),
         vec![
             "disabled-key".to_string(),
-            "longcat-key".to_string(),
+            "ok-key".to_string(),
             "disabled-key".to_string(),
         ]
     );
     let recovered_accounts = storage.list_channel_accounts().unwrap();
     let recovered = recovered_accounts
         .iter()
-        .find(|account| account.id == "deepseek-disabled")
+        .find(|account| account.id == "primary")
         .unwrap();
     assert_eq!(
         recovered.credential_status,
         crate::core::config::ACCOUNT_CREDENTIAL_HEALTHY
     );
     assert!(recovered.last_error.is_none());
-}
-
-#[tokio::test]
-async fn e2e_pro_flash_strict_isolation() {
-    // flowlet-pro 所有账号失败，不应进入 flowlet-flash
-    let (addr, seen) = spawn_spy_upstream(status_map(&[
-        ("pro-key", StatusCode::INTERNAL_SERVER_ERROR),
-        ("flash-key", StatusCode::OK),
-    ]))
-    .await;
-    let channels = vec![dual_protocol_channel("deepseek", "DeepSeek", &addr)];
-    let accounts = vec![
-        test_account("pro", "deepseek", "pro-key", 0),
-        test_account("flash", "deepseek", "flash-key", 0),
-    ];
-    let routes = vec![
-        test_route(
-            "1",
-            "flowlet-pro",
-            "deepseek",
-            "pro",
-            "deepseek-v4-pro",
-            ProtocolType::OpenAi,
-            0,
-        ),
-        test_route(
-            "2",
-            "flowlet-flash",
-            "deepseek",
-            "flash",
-            "deepseek-v4-flash",
-            ProtocolType::OpenAi,
-            0,
-        ),
-    ];
-    let state = build_test_state(channels, accounts, routes);
-    let response = forward_request(state, chat_request("flowlet-pro"), ProtocolType::OpenAi)
-        .await
-        .unwrap();
-
-    // 所有 pro 候选都失败 → 最终返回 500
-    assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-    // 绝不命中 flash 账号
-    assert!(!seen.lock().unwrap().contains(&"flash-key".to_string()));
-}
-
-#[tokio::test]
-async fn e2e_flash_does_not_escalate_to_pro() {
-    // flowlet-flash 所有候选失败，不应进入 flowlet-pro
-    let (addr, seen) = spawn_spy_upstream(status_map(&[
-        ("flash-key", StatusCode::TOO_MANY_REQUESTS),
-        ("pro-key", StatusCode::OK),
-    ]))
-    .await;
-    let channels = vec![dual_protocol_channel("deepseek", "DeepSeek", &addr)];
-    let accounts = vec![
-        test_account("flash", "deepseek", "flash-key", 0),
-        test_account("pro", "deepseek", "pro-key", 0),
-    ];
-    let routes = vec![
-        test_route(
-            "1",
-            "flowlet-flash",
-            "deepseek",
-            "flash",
-            "deepseek-v4-flash",
-            ProtocolType::OpenAi,
-            0,
-        ),
-        test_route(
-            "2",
-            "flowlet-pro",
-            "deepseek",
-            "pro",
-            "deepseek-v4-pro",
-            ProtocolType::OpenAi,
-            0,
-        ),
-    ];
-    let state = build_test_state(channels, accounts, routes);
-    let response = forward_request(state, chat_request("flowlet-flash"), ProtocolType::OpenAi)
-        .await
-        .unwrap();
-
-    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
-    assert!(!seen.lock().unwrap().contains(&"pro-key".to_string()));
 }
 
 #[tokio::test]
@@ -3414,7 +3898,7 @@ async fn e2e_401_marks_invalid_key_and_excludes_from_next_request() {
     let routes = vec![
         test_route(
             "1",
-            "flowlet-pro",
+            "deepseek-v4-pro",
             "deepseek",
             "a",
             "deepseek-v4-pro",
@@ -3423,7 +3907,7 @@ async fn e2e_401_marks_invalid_key_and_excludes_from_next_request() {
         ),
         test_route(
             "2",
-            "flowlet-pro",
+            "deepseek-v4-pro",
             "deepseek",
             "b",
             "deepseek-v4-pro",
@@ -3433,7 +3917,7 @@ async fn e2e_401_marks_invalid_key_and_excludes_from_next_request() {
     ];
     let state = build_test_state(channels, accounts, routes);
     let storage = state.storage.clone();
-    let response = forward_request(state, chat_request("flowlet-pro"), ProtocolType::OpenAi)
+    let response = forward_request(state, chat_request("deepseek-v4-pro"), ProtocolType::OpenAi)
         .await
         .unwrap();
 
@@ -3463,7 +3947,7 @@ async fn e2e_401_marks_invalid_key_and_excludes_from_next_request() {
     let routes2 = vec![
         test_route(
             "1",
-            "flowlet-pro",
+            "deepseek-v4-pro",
             "deepseek",
             "a",
             "deepseek-v4-pro",
@@ -3472,7 +3956,7 @@ async fn e2e_401_marks_invalid_key_and_excludes_from_next_request() {
         ),
         test_route(
             "2",
-            "flowlet-pro",
+            "deepseek-v4-pro",
             "deepseek",
             "b",
             "deepseek-v4-pro",
@@ -3481,9 +3965,13 @@ async fn e2e_401_marks_invalid_key_and_excludes_from_next_request() {
         ),
     ];
     let state2 = build_test_state(channels2, persisted_accounts, routes2);
-    let response2 = forward_request(state2, chat_request("flowlet-pro"), ProtocolType::OpenAi)
-        .await
-        .unwrap();
+    let response2 = forward_request(
+        state2,
+        chat_request("deepseek-v4-pro"),
+        ProtocolType::OpenAi,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(response2.status(), StatusCode::OK);
     // 第二次请求只命中 B，A 因 invalid_key 被候选池排除
@@ -3492,17 +3980,17 @@ async fn e2e_401_marks_invalid_key_and_excludes_from_next_request() {
 
 #[tokio::test]
 async fn e2e_model_sort_order_is_respected() {
-    // 初始顺序 deepseek-v4-pro → LongCat-2.0；交换 priority 后 LongCat-2.0 优先
+    // 同一规范模型的两个上游变体：初始优先主变体，交换 priority 后日期快照优先。
     let accounts = vec![
         test_account("ds", "deepseek", "key-ds", 0),
-        test_account("lc", "longcat", "key-lc", 0),
+        test_account("qwen", "qwen", "key-qwen", 0),
     ];
 
-    // 初始顺序：deepseek-v4-pro(priority 0) → LongCat-2.0(priority 10)
+    // 初始顺序：deepseek-v4-pro(priority 0) → 同规范变体 deepseek-v4-pro-0813(priority 10)。
     let routes_order_a = vec![
         test_route(
             "1",
-            "flowlet-pro",
+            "deepseek-v4-pro",
             "deepseek",
             "ds",
             "deepseek-v4-pro",
@@ -3511,47 +3999,47 @@ async fn e2e_model_sort_order_is_respected() {
         ),
         test_route(
             "2",
-            "flowlet-pro",
-            "longcat",
-            "lc",
-            "LongCat-2.0",
+            "deepseek-v4-pro",
+            "qwen",
+            "qwen",
+            "qwen/deepseek-v4-pro-0813",
             ProtocolType::OpenAi,
             10,
         ),
     ];
-    // deepseek 可重试 429 从而回落 LongCat，验证 deepseek 先被尝试。
+    // deepseek 可重试 429 从而回落到变体，验证 deepseek 先被尝试。
     let (addr, seen) = spawn_spy_upstream(status_map(&[
         ("key-ds", StatusCode::TOO_MANY_REQUESTS),
-        ("key-lc", StatusCode::OK),
+        ("key-qwen", StatusCode::OK),
     ]))
     .await;
     let channels = vec![
         dual_protocol_channel("deepseek", "DeepSeek", &addr),
-        dual_protocol_channel("longcat", "LongCat", &addr),
+        dual_protocol_channel("qwen", "Qwen", &addr),
     ];
     let state = build_test_state(channels, accounts.clone(), routes_order_a);
-    forward_request(state, chat_request("flowlet-pro"), ProtocolType::OpenAi)
+    forward_request(state, chat_request("deepseek-v4-pro"), ProtocolType::OpenAi)
         .await
         .unwrap();
     assert_eq!(
         *seen.lock().unwrap(),
-        vec!["key-ds".to_string(), "key-lc".to_string()]
+        vec!["key-ds".to_string(), "key-qwen".to_string()]
     );
 
-    // 用户交换顺序：LongCat-2.0(priority 0) → deepseek-v4-pro(priority 10)。OpenAI 与 Anthropic 请求均应遵循新顺序。
+    // 用户交换顺序：变体(priority 0) → 主变体(priority 10)。OpenAI 与 Anthropic 请求均应遵循新顺序。
     let routes_order_b = vec![
         test_route(
             "1",
-            "flowlet-pro",
-            "longcat",
-            "lc",
-            "LongCat-2.0",
+            "deepseek-v4-pro",
+            "qwen",
+            "qwen",
+            "qwen/deepseek-v4-pro-0813",
             ProtocolType::OpenAi,
             0,
         ),
         test_route(
             "2",
-            "flowlet-pro",
+            "deepseek-v4-pro",
             "deepseek",
             "ds",
             "deepseek-v4-pro",
@@ -3560,36 +4048,36 @@ async fn e2e_model_sort_order_is_respected() {
         ),
     ];
     let (addr, seen) = spawn_spy_upstream(status_map(&[
-        ("key-lc", StatusCode::TOO_MANY_REQUESTS),
+        ("key-qwen", StatusCode::TOO_MANY_REQUESTS),
         ("key-ds", StatusCode::OK),
     ]))
     .await;
     let channels = vec![
         dual_protocol_channel("deepseek", "DeepSeek", &addr),
-        dual_protocol_channel("longcat", "LongCat", &addr),
+        dual_protocol_channel("qwen", "Qwen", &addr),
     ];
     let state = build_test_state(channels, accounts.clone(), routes_order_b);
-    forward_request(state, chat_request("flowlet-pro"), ProtocolType::OpenAi)
+    forward_request(state, chat_request("deepseek-v4-pro"), ProtocolType::OpenAi)
         .await
         .unwrap();
     assert_eq!(
         *seen.lock().unwrap(),
-        vec!["key-lc".to_string(), "key-ds".to_string()]
+        vec!["key-qwen".to_string(), "key-ds".to_string()]
     );
 
     let routes_order_b_anthropic = vec![
         test_route(
             "1",
-            "flowlet-pro",
-            "longcat",
-            "lc",
-            "LongCat-2.0",
+            "deepseek-v4-pro",
+            "qwen",
+            "qwen",
+            "qwen/deepseek-v4-pro-0813",
             ProtocolType::Anthropic,
             0,
         ),
         test_route(
             "2",
-            "flowlet-pro",
+            "deepseek-v4-pro",
             "deepseek",
             "ds",
             "deepseek-v4-pro",
@@ -3598,13 +4086,13 @@ async fn e2e_model_sort_order_is_respected() {
         ),
     ];
     let (addr, seen) = spawn_spy_upstream(status_map(&[
-        ("key-lc", StatusCode::TOO_MANY_REQUESTS),
+        ("key-qwen", StatusCode::TOO_MANY_REQUESTS),
         ("key-ds", StatusCode::OK),
     ]))
     .await;
     let channels = vec![
         dual_protocol_channel("deepseek", "DeepSeek", &addr),
-        dual_protocol_channel("longcat", "LongCat", &addr),
+        dual_protocol_channel("qwen", "Qwen", &addr),
     ];
     let state = build_test_state(channels, accounts, routes_order_b_anthropic);
     let anthropic_request = Request::builder()
@@ -3612,7 +4100,7 @@ async fn e2e_model_sort_order_is_respected() {
         .uri("/anthropic/v1/messages")
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(
-            r#"{"model":"flowlet-pro","max_tokens":10,"messages":[]}"#,
+            r#"{"model":"deepseek-v4-pro","max_tokens":10,"messages":[]}"#,
         ))
         .unwrap();
     let response = forward_request(state, anthropic_request, ProtocolType::Anthropic)
@@ -3620,32 +4108,22 @@ async fn e2e_model_sort_order_is_respected() {
         .unwrap();
     assert_eq!(
         *seen.lock().unwrap(),
-        vec!["key-lc".to_string(), "key-ds".to_string()]
+        vec!["key-qwen".to_string(), "key-ds".to_string()]
     );
     assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[tokio::test]
 async fn e2e_model_enable_disable_sync() {
-    // 关闭底层模型后，对应账号退出候选池，OpenAI 与 Anthropic 协议均不再使用该模型，另一档位不受影响
-    let (addr, seen) = spawn_spy_upstream(status_map(&[
-        ("key-ds", StatusCode::OK),
-        ("key-lc", StatusCode::OK),
-    ]))
-    .await;
-    let channels = vec![
-        dual_protocol_channel("deepseek", "DeepSeek", &addr),
-        dual_protocol_channel("longcat", "LongCat", &addr),
-    ];
+    // 关闭某个上游变体的路由后，OpenAI 与 Anthropic 都不再使用该变体；其他规范模型不受影响。
     let accounts = vec![
         test_account("ds", "deepseek", "key-ds", 0),
-        test_account("lc", "longcat", "key-lc", 0),
+        test_account("qwen", "qwen", "key-qwen", 0),
     ];
-    // pro 使用 deepseek-v4-pro(prio 0) + LongCat-2.0(prio 10)；flash 使用 deepseek-v4-flash(prio 0)
     let all_routes = vec![
         test_route(
             "1",
-            "flowlet-pro",
+            "deepseek-v4-pro",
             "deepseek",
             "ds",
             "deepseek-v4-pro",
@@ -3654,16 +4132,16 @@ async fn e2e_model_enable_disable_sync() {
         ),
         test_route(
             "2",
-            "flowlet-pro",
-            "longcat",
-            "lc",
-            "LongCat-2.0",
+            "deepseek-v4-pro",
+            "qwen",
+            "qwen",
+            "qwen/deepseek-v4-pro-0813",
             ProtocolType::OpenAi,
             10,
         ),
         test_route(
             "3",
-            "flowlet-pro",
+            "deepseek-v4-pro",
             "deepseek",
             "ds",
             "deepseek-v4-pro",
@@ -3672,16 +4150,16 @@ async fn e2e_model_enable_disable_sync() {
         ),
         test_route(
             "4",
-            "flowlet-pro",
-            "longcat",
-            "lc",
-            "LongCat-2.0",
+            "deepseek-v4-pro",
+            "qwen",
+            "qwen",
+            "qwen/deepseek-v4-pro-0813",
             ProtocolType::Anthropic,
             10,
         ),
         test_route(
             "5",
-            "flowlet-flash",
+            "deepseek-v4-flash",
             "deepseek",
             "ds",
             "deepseek-v4-flash",
@@ -3690,7 +4168,7 @@ async fn e2e_model_enable_disable_sync() {
         ),
         test_route(
             "6",
-            "flowlet-flash",
+            "deepseek-v4-flash",
             "deepseek",
             "ds",
             "deepseek-v4-flash",
@@ -3699,26 +4177,26 @@ async fn e2e_model_enable_disable_sync() {
         ),
     ];
 
-    // 首次请求前：deepseek 返回可重试 429，验证 pro 先尝试 deepseek 再回落 LongCat
+    // 首次请求前：deepseek 返回可重试 429，验证主变体先尝试、变体后回落。
     let (addr, seen) = spawn_spy_upstream(status_map(&[
         ("key-ds", StatusCode::TOO_MANY_REQUESTS),
-        ("key-lc", StatusCode::OK),
+        ("key-qwen", StatusCode::OK),
     ]))
     .await;
     let channels = vec![
         dual_protocol_channel("deepseek", "DeepSeek", &addr),
-        dual_protocol_channel("longcat", "LongCat", &addr),
+        dual_protocol_channel("qwen", "Qwen", &addr),
     ];
     let state = build_test_state(channels, accounts.clone(), all_routes.clone());
-    forward_request(state, chat_request("flowlet-pro"), ProtocolType::OpenAi)
+    forward_request(state, chat_request("deepseek-v4-pro"), ProtocolType::OpenAi)
         .await
         .unwrap();
     assert_eq!(
         *seen.lock().unwrap(),
-        vec!["key-ds".to_string(), "key-lc".to_string()]
+        vec!["key-ds".to_string(), "key-qwen".to_string()]
     );
 
-    // 关闭 deepseek-v4-pro 底层模型（channel=deepseek, upstream=deepseek-v4-pro 的所有路由 enabled=false）
+    // 关闭 deepseek 渠道上 deepseek-v4-pro 的所有协议路由。
     let disabled_routes: Vec<RouteCandidate> = all_routes
         .iter()
         .cloned()
@@ -3730,72 +4208,72 @@ async fn e2e_model_enable_disable_sync() {
         })
         .collect();
 
-    // 关闭后 pro 的 OpenAI 请求只能走 LongCat-2.0
+    // 关闭后 OpenAI 请求只能走变体。
     let (addr, seen) = spawn_spy_upstream(status_map(&[
         ("key-ds", StatusCode::OK),
-        ("key-lc", StatusCode::OK),
+        ("key-qwen", StatusCode::OK),
     ]))
     .await;
     let channels = vec![
         dual_protocol_channel("deepseek", "DeepSeek", &addr),
-        dual_protocol_channel("longcat", "LongCat", &addr),
+        dual_protocol_channel("qwen", "Qwen", &addr),
     ];
-    let state = build_test_state(channels, accounts.clone(), disabled_routes.clone());
-    forward_request(state, chat_request("flowlet-pro"), ProtocolType::OpenAi)
+    let state = build_test_state(channels.clone(), accounts.clone(), disabled_routes.clone());
+    forward_request(state, chat_request("deepseek-v4-pro"), ProtocolType::OpenAi)
         .await
         .unwrap();
-    assert_eq!(*seen.lock().unwrap(), vec!["key-lc".to_string()]);
-    // 关闭后 pro 的 Anthropic 请求也只能走 LongCat-2.0（协议同步）
-    let (addr, seen) = spawn_spy_upstream(status_map(&[
-        ("key-ds", StatusCode::OK),
-        ("key-lc", StatusCode::OK),
-    ]))
-    .await;
-    let channels = vec![
-        dual_protocol_channel("deepseek", "DeepSeek", &addr),
-        dual_protocol_channel("longcat", "LongCat", &addr),
-    ];
-    let state = build_test_state(channels, accounts.clone(), disabled_routes.clone());
+    assert_eq!(*seen.lock().unwrap(), vec!["key-qwen".to_string()]);
+
+    // 关闭后 Anthropic 请求同样只能走变体。
+    let state = build_test_state(channels.clone(), accounts.clone(), disabled_routes.clone());
     let anthropic_request = Request::builder()
         .method("POST")
         .uri("/anthropic/v1/messages")
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(
-            r#"{"model":"flowlet-pro","max_tokens":10,"messages":[]}"#,
+            r#"{"model":"deepseek-v4-pro","max_tokens":10,"messages":[]}"#,
         ))
         .unwrap();
     forward_request(state, anthropic_request, ProtocolType::Anthropic)
         .await
         .unwrap();
-    assert_eq!(*seen.lock().unwrap(), vec!["key-lc".to_string()]);
+    // 同一 spy 已记录上一次 OpenAI 请求，本次 Anthropic 请求同样只命中变体账号。
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec!["key-qwen".to_string(), "key-qwen".to_string()]
+    );
 
-    // flash 档位不受影响：仍使用 deepseek-v4-flash 账号（key-ds）
+    // deepseek-v4-flash 是另一个规范模型，不受影响，仍使用主账号。
     let (addr, seen) = spawn_spy_upstream(status_map(&[
         ("key-ds", StatusCode::OK),
-        ("key-lc", StatusCode::OK),
+        ("key-qwen", StatusCode::OK),
     ]))
     .await;
     let channels = vec![
         dual_protocol_channel("deepseek", "DeepSeek", &addr),
-        dual_protocol_channel("longcat", "LongCat", &addr),
+        dual_protocol_channel("qwen", "Qwen", &addr),
     ];
     let state = build_test_state(channels, accounts, disabled_routes);
-    forward_request(state, chat_request("flowlet-flash"), ProtocolType::OpenAi)
-        .await
-        .unwrap();
+    forward_request(
+        state,
+        chat_request("deepseek-v4-flash"),
+        ProtocolType::OpenAi,
+    )
+    .await
+    .unwrap();
     assert_eq!(*seen.lock().unwrap(), vec!["key-ds".to_string()]);
 }
 
 #[tokio::test]
 async fn e2e_dual_protocol_model_list_consistency() {
-    // OpenAI /models 与 Anthropic /models 均只暴露 flowlet-pro / flowlet-flash，顺序一致
+    // OpenAI /models 与 Anthropic /models 暴露同一组规范模型，顺序一致（按名字典序）。
     let (addr, _) = spawn_spy_upstream(std::collections::HashMap::new()).await;
     let channels = vec![dual_protocol_channel("deepseek", "DeepSeek", &addr)];
     let accounts = vec![test_account("a", "deepseek", "key-a", 0)];
     let routes = vec![
         test_route(
             "1",
-            "flowlet-pro",
+            "deepseek-v4-pro",
             "deepseek",
             "a",
             "deepseek-v4-pro",
@@ -3804,7 +4282,7 @@ async fn e2e_dual_protocol_model_list_consistency() {
         ),
         test_route(
             "2",
-            "flowlet-flash",
+            "deepseek-v4-flash",
             "deepseek",
             "a",
             "deepseek-v4-flash",
@@ -3813,7 +4291,7 @@ async fn e2e_dual_protocol_model_list_consistency() {
         ),
         test_route(
             "3",
-            "flowlet-pro",
+            "deepseek-v4-pro",
             "deepseek",
             "a",
             "deepseek-v4-pro",
@@ -3822,7 +4300,7 @@ async fn e2e_dual_protocol_model_list_consistency() {
         ),
         test_route(
             "4",
-            "flowlet-flash",
+            "deepseek-v4-flash",
             "deepseek",
             "a",
             "deepseek-v4-flash",
@@ -3876,23 +4354,21 @@ async fn e2e_dual_protocol_model_list_consistency() {
         .iter()
         .map(|m| m["id"].as_str().unwrap())
         .collect();
-    assert_eq!(openai_ids, vec!["flowlet-pro", "flowlet-flash"]);
-    assert_eq!(anthropic_ids, vec!["flowlet-pro", "flowlet-flash"]);
+    assert_eq!(openai_ids, vec!["deepseek-v4-flash", "deepseek-v4-pro"]);
+    assert_eq!(anthropic_ids, vec!["deepseek-v4-flash", "deepseek-v4-pro"]);
 }
 
-// ─── 模型开放与直接模型路由测试（需求十六） ─────────────────────────────────
-
-// test 1: 默认全部开放 — /models 同时返回聚合模型与直接底层模型
+// test 1: /models 只返回规范化后的开放模型
 #[tokio::test]
 async fn e2e_models_exposes_direct_models_by_default() {
     let (addr, _) = spawn_spy_upstream(std::collections::HashMap::new()).await;
     let channels = vec![dual_protocol_channel("deepseek", "DeepSeek", &addr)];
     let accounts = vec![test_account("a", "deepseek", "key-a", 0)];
-    // 聚合路由 + 直接路由（virtual_model_id === upstream_model）
+    // 直接路由：virtual_model_id === upstream_model；同一规范模型的多个变体只暴露一次。
     let routes = vec![
         test_route(
             "1",
-            "flowlet-pro",
+            "deepseek-v4-pro",
             "deepseek",
             "a",
             "deepseek-v4-pro",
@@ -3901,7 +4377,7 @@ async fn e2e_models_exposes_direct_models_by_default() {
         ),
         test_route(
             "2",
-            "flowlet-flash",
+            "deepseek-v4-flash",
             "deepseek",
             "a",
             "deepseek-v4-flash",
@@ -3910,51 +4386,15 @@ async fn e2e_models_exposes_direct_models_by_default() {
         ),
         test_route(
             "3",
-            "flowlet-pro",
+            "deepseek-v4-pro",
             "deepseek",
             "a",
-            "deepseek-v4-pro",
-            ProtocolType::Anthropic,
-            0,
+            "deepseek-v4-pro-0813",
+            ProtocolType::OpenAi,
+            10,
         ),
         test_route(
             "4",
-            "flowlet-flash",
-            "deepseek",
-            "a",
-            "deepseek-v4-flash",
-            ProtocolType::Anthropic,
-            0,
-        ),
-        test_route(
-            "5",
-            "deepseek-v4-pro",
-            "deepseek",
-            "a",
-            "deepseek-v4-pro",
-            ProtocolType::OpenAi,
-            0,
-        ),
-        test_route(
-            "6",
-            "deepseek-v4-flash",
-            "deepseek",
-            "a",
-            "deepseek-v4-flash",
-            ProtocolType::OpenAi,
-            0,
-        ),
-        test_route(
-            "7",
-            "deepseek-v4-pro",
-            "deepseek",
-            "a",
-            "deepseek-v4-pro",
-            ProtocolType::Anthropic,
-            0,
-        ),
-        test_route(
-            "8",
             "deepseek-v4-flash",
             "deepseek",
             "a",
@@ -3986,36 +4426,30 @@ async fn e2e_models_exposes_direct_models_by_default() {
         .iter()
         .map(|m| m["id"].as_str().unwrap())
         .collect();
-    assert_eq!(
-        ids,
-        vec![
-            "flowlet-pro",
-            "flowlet-flash",
-            "deepseek-v4-flash",
-            "deepseek-v4-pro"
-        ]
-    );
+    assert_eq!(ids, vec!["deepseek-v4-flash", "deepseek-v4-pro"]);
 
-    // owned_by：聚合模型为 flowlet，直接模型为渠道 vendor
+    // owned_by 取承载渠道的 vendor。
     let owned_by: Vec<&str> = value["data"]
         .as_array()
         .unwrap()
         .iter()
         .map(|m| m["owned_by"].as_str().unwrap())
         .collect();
-    assert_eq!(owned_by, vec!["flowlet", "flowlet", "deepseek", "deepseek"]);
+    assert_eq!(owned_by, vec!["deepseek", "deepseek"]);
 }
 
-// test 2: 仅 Flowlet 模式 — 直接路由全部 disabled 后 /models 只返回聚合模型
+// flowlet_only 曝光模式随聚合模型一并移除，不再有「只返回聚合模型」的列表分支。
+
+// test 3: 关闭直接路由后不再对外暴露该模型
 #[tokio::test]
-async fn e2e_models_flowlet_only_hides_direct_models() {
+async fn e2e_models_hides_disabled_direct_routes() {
     let (addr, _) = spawn_spy_upstream(std::collections::HashMap::new()).await;
     let channels = vec![dual_protocol_channel("deepseek", "DeepSeek", &addr)];
     let accounts = vec![test_account("a", "deepseek", "key-a", 0)];
     let routes = vec![
         test_route(
             "1",
-            "flowlet-pro",
+            "deepseek-v4-pro",
             "deepseek",
             "a",
             "deepseek-v4-pro",
@@ -4024,106 +4458,6 @@ async fn e2e_models_flowlet_only_hides_direct_models() {
         ),
         test_route(
             "2",
-            "flowlet-flash",
-            "deepseek",
-            "a",
-            "deepseek-v4-flash",
-            ProtocolType::OpenAi,
-            0,
-        ),
-        // 直接路由全部关闭（模拟 flowlet_only 模式）
-        test_route(
-            "5",
-            "deepseek-v4-pro",
-            "deepseek",
-            "a",
-            "deepseek-v4-pro",
-            ProtocolType::OpenAi,
-            0,
-        ),
-        test_route(
-            "6",
-            "deepseek-v4-flash",
-            "deepseek",
-            "a",
-            "deepseek-v4-flash",
-            ProtocolType::OpenAi,
-            0,
-        ),
-    ];
-    let disabled_routes: Vec<RouteCandidate> = routes
-        .into_iter()
-        .map(|mut r| {
-            if r.virtual_model_id == "deepseek-v4-pro" || r.virtual_model_id == "deepseek-v4-flash"
-            {
-                r.enabled = false;
-            }
-            r
-        })
-        .collect();
-    let state = build_test_state(channels, accounts, disabled_routes);
-
-    let response = forward_request(
-        state,
-        Request::builder()
-            .method("GET")
-            .uri("/v1/models")
-            .body(Body::empty())
-            .unwrap(),
-        ProtocolType::OpenAi,
-    )
-    .await
-    .unwrap();
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
-        .await
-        .unwrap();
-    let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    let ids: Vec<&str> = value["data"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|m| m["id"].as_str().unwrap())
-        .collect();
-    assert_eq!(ids, vec!["flowlet-pro", "flowlet-flash"]);
-}
-
-// test 3: 自定义模式 — 仅返回用户开启的直接模型
-#[tokio::test]
-async fn e2e_models_custom_mode_respects_per_model_toggle() {
-    let (addr, _) = spawn_spy_upstream(std::collections::HashMap::new()).await;
-    let channels = vec![dual_protocol_channel("deepseek", "DeepSeek", &addr)];
-    let accounts = vec![test_account("a", "deepseek", "key-a", 0)];
-    let routes = vec![
-        test_route(
-            "1",
-            "flowlet-pro",
-            "deepseek",
-            "a",
-            "deepseek-v4-pro",
-            ProtocolType::OpenAi,
-            0,
-        ),
-        test_route(
-            "2",
-            "flowlet-flash",
-            "deepseek",
-            "a",
-            "deepseek-v4-flash",
-            ProtocolType::OpenAi,
-            0,
-        ),
-        // deepseek-v4-pro 开启，deepseek-v4-flash 关闭
-        test_route(
-            "5",
-            "deepseek-v4-pro",
-            "deepseek",
-            "a",
-            "deepseek-v4-pro",
-            ProtocolType::OpenAi,
-            0,
-        ),
-        test_route(
-            "6",
             "deepseek-v4-flash",
             "deepseek",
             "a",
@@ -4164,10 +4498,9 @@ async fn e2e_models_custom_mode_respects_per_model_toggle() {
         .iter()
         .map(|m| m["id"].as_str().unwrap())
         .collect();
-    assert_eq!(ids, vec!["flowlet-pro", "flowlet-flash", "deepseek-v4-pro"]);
+    assert_eq!(ids, vec!["deepseek-v4-pro"]);
 }
 
-// test 4: 直接模型账号轮询（A → B → A）
 #[tokio::test]
 async fn e2e_direct_model_account_round_robin() {
     let (addr, seen) = spawn_spy_upstream(status_map(&[
@@ -4311,6 +4644,7 @@ async fn e2e_direct_model_no_cross_model_fallback() {
 }
 
 // test 8: invalid_key 账号的唯一直接模型不出现在 /models
+// test 8: invalid_key 账号的唯一直接模型不出现在 /models
 #[tokio::test]
 async fn e2e_models_excludes_invalid_key_direct_model() {
     let (addr, _) = spawn_spy_upstream(std::collections::HashMap::new()).await;
@@ -4320,9 +4654,10 @@ async fn e2e_models_excludes_invalid_key_direct_model() {
     invalid_account.credential_status = "invalid_key".to_string();
     let accounts = vec![healthy_account, invalid_account];
     let routes = vec![
+        // deepseek-v4-pro 同时有健康账号与 invalid 账号
         test_route(
             "1",
-            "flowlet-pro",
+            "deepseek-v4-pro",
             "deepseek",
             "ok",
             "deepseek-v4-pro",
@@ -4331,25 +4666,6 @@ async fn e2e_models_excludes_invalid_key_direct_model() {
         ),
         test_route(
             "2",
-            "flowlet-flash",
-            "deepseek",
-            "ok",
-            "deepseek-v4-flash",
-            ProtocolType::OpenAi,
-            0,
-        ),
-        // deepseek-v4-pro 同时有健康账号与 invalid 账号
-        test_route(
-            "3",
-            "deepseek-v4-pro",
-            "deepseek",
-            "ok",
-            "deepseek-v4-pro",
-            ProtocolType::OpenAi,
-            0,
-        ),
-        test_route(
-            "4",
             "deepseek-v4-pro",
             "deepseek",
             "bad",
@@ -4359,7 +4675,7 @@ async fn e2e_models_excludes_invalid_key_direct_model() {
         ),
         // deepseek-v4-flash 仅有 invalid 账号 → 不应出现
         test_route(
-            "5",
+            "3",
             "deepseek-v4-flash",
             "deepseek",
             "bad",
@@ -4391,13 +4707,9 @@ async fn e2e_models_excludes_invalid_key_direct_model() {
         .map(|m| m["id"].as_str().unwrap())
         .collect();
     // deepseek-v4-flash 仅有 invalid 账号，不出现；deepseek-v4-pro 有健康账号，出现
-    assert!(ids.contains(&"flowlet-pro"));
-    assert!(ids.contains(&"flowlet-flash"));
-    assert!(ids.contains(&"deepseek-v4-pro"));
-    assert!(!ids.contains(&"deepseek-v4-flash"));
+    assert_eq!(ids, vec!["deepseek-v4-pro"]);
 }
 
-// test 9: 修改 API Key 后立即恢复（不重启代理）
 #[tokio::test]
 async fn e2e_recovers_after_api_key_change() {
     // 第一轮：账号 A 401 → 标记 invalid_key
@@ -4539,7 +4851,8 @@ fn e2e_new_account_default_credential_status() {
     assert_eq!(account.credential_status, "healthy");
 }
 
-// test 12: 双协议 /models 一致（聚合 + 直接模型集合与顺序一致）
+// test 12: 双协议 /models 一致（同一组规范模型、同一顺序）
+// test 12: 双协议 /models 一致（同一组规范模型、同一顺序）
 #[tokio::test]
 async fn e2e_dual_protocol_models_list_consistent_with_direct() {
     let (addr, _) = spawn_spy_upstream(std::collections::HashMap::new()).await;
@@ -4548,7 +4861,7 @@ async fn e2e_dual_protocol_models_list_consistent_with_direct() {
     let routes = vec![
         test_route(
             "1",
-            "flowlet-pro",
+            "deepseek-v4-pro",
             "deepseek",
             "a",
             "deepseek-v4-pro",
@@ -4557,7 +4870,7 @@ async fn e2e_dual_protocol_models_list_consistent_with_direct() {
         ),
         test_route(
             "2",
-            "flowlet-flash",
+            "deepseek-v4-flash",
             "deepseek",
             "a",
             "deepseek-v4-flash",
@@ -4566,7 +4879,7 @@ async fn e2e_dual_protocol_models_list_consistent_with_direct() {
         ),
         test_route(
             "3",
-            "flowlet-pro",
+            "deepseek-v4-pro",
             "deepseek",
             "a",
             "deepseek-v4-pro",
@@ -4575,42 +4888,6 @@ async fn e2e_dual_protocol_models_list_consistent_with_direct() {
         ),
         test_route(
             "4",
-            "flowlet-flash",
-            "deepseek",
-            "a",
-            "deepseek-v4-flash",
-            ProtocolType::Anthropic,
-            0,
-        ),
-        test_route(
-            "5",
-            "deepseek-v4-pro",
-            "deepseek",
-            "a",
-            "deepseek-v4-pro",
-            ProtocolType::OpenAi,
-            0,
-        ),
-        test_route(
-            "6",
-            "deepseek-v4-flash",
-            "deepseek",
-            "a",
-            "deepseek-v4-flash",
-            ProtocolType::OpenAi,
-            0,
-        ),
-        test_route(
-            "7",
-            "deepseek-v4-pro",
-            "deepseek",
-            "a",
-            "deepseek-v4-pro",
-            ProtocolType::Anthropic,
-            0,
-        ),
-        test_route(
-            "8",
             "deepseek-v4-flash",
             "deepseek",
             "a",
@@ -4643,7 +4920,6 @@ async fn e2e_dual_protocol_models_list_consistent_with_direct() {
     )
     .await
     .unwrap();
-
     let openai_body = axum::body::to_bytes(openai.into_body(), usize::MAX)
         .await
         .unwrap();
@@ -4652,7 +4928,6 @@ async fn e2e_dual_protocol_models_list_consistent_with_direct() {
         .unwrap();
     let openai_value: serde_json::Value = serde_json::from_slice(&openai_body).unwrap();
     let anthropic_value: serde_json::Value = serde_json::from_slice(&anthropic_body).unwrap();
-
     let openai_ids: Vec<&str> = openai_value["data"]
         .as_array()
         .unwrap()
@@ -4665,95 +4940,8 @@ async fn e2e_dual_protocol_models_list_consistent_with_direct() {
         .iter()
         .map(|m| m["id"].as_str().unwrap())
         .collect();
-    assert_eq!(
-        openai_ids,
-        vec![
-            "flowlet-pro",
-            "flowlet-flash",
-            "deepseek-v4-flash",
-            "deepseek-v4-pro"
-        ]
-    );
-    assert_eq!(
-        anthropic_ids,
-        vec![
-            "flowlet-pro",
-            "flowlet-flash",
-            "deepseek-v4-flash",
-            "deepseek-v4-pro"
-        ]
-    );
-    // 不暴露账号名称
-    assert!(!openai_body.to_vec().windows(4).any(|w| w == b"acc-"));
-}
-
-// ─── 入站模型名归一（别名 / 官方 API 名 / 大小写 / 厂商前缀）──────────────────
-//
-// 客户端可能用厂商官方 API 名或目录登记的别名请求对外模型（DSH 原生 DeepSeek Provider
-// 固定发 deepseek-flash）。对外身份是规范 ID，因此代理在匹配前按 model-catalog.json
-// 归一；日志仍分别保留客户端原始名（public_model）与规范 ID（virtual_model）。
-
-/// 记录上游收到的请求体，供断言转发前的 model 改写。
-async fn spawn_body_capturing_upstream() -> (String, Arc<Mutex<Vec<u8>>>) {
-    let captured = Arc::new(Mutex::new(Vec::<u8>::new()));
-    let captured_state = captured.clone();
-    let upstream = Router::new()
-        .route(
-            "/v1/chat/completions",
-            post({
-                let captured = captured_state.clone();
-                move |body: Bytes| {
-                    let captured = captured.clone();
-                    async move {
-                        *captured.lock().unwrap() = body.to_vec();
-                        (
-                            StatusCode::OK,
-                            [("content-type", "application/json")],
-                            r#"{"choices":[]}"#,
-                        )
-                    }
-                }
-            }),
-        )
-        .route(
-            "/v1/messages",
-            post(move |body: Bytes| {
-                let captured = captured_state.clone();
-                async move {
-                    *captured.lock().unwrap() = body.to_vec();
-                    (
-                        StatusCode::OK,
-                        [("content-type", "application/json")],
-                        r#"{"type":"message","content":[]}"#,
-                    )
-                }
-            }),
-        );
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        axum::serve(listener, upstream).await.unwrap();
-    });
-    (format!("http://{addr}"), captured)
-}
-
-async fn wait_for_request_logs(storage: &Storage, expected: usize) -> Vec<RequestLogRow> {
-    tokio::time::timeout(std::time::Duration::from_secs(1), async {
-        loop {
-            let final_rows = storage.list_request_logs().unwrap();
-            if let Some(final_row) = final_rows.first() {
-                let rows = storage
-                    .list_request_logs_by_request_id(&final_row.request_id)
-                    .unwrap();
-                if rows.len() == expected {
-                    break rows;
-                }
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap()
+    assert_eq!(openai_ids, anthropic_ids);
+    assert_eq!(openai_ids, vec!["deepseek-v4-flash", "deepseek-v4-pro"]);
 }
 
 #[tokio::test]
@@ -5158,7 +5346,6 @@ async fn spawn_files_upstream(
             )
         }
     };
-    use axum::handler::Handler;
     let upstream = Router::new()
         .route("/v1/files", post(handler.clone()).get(handler.clone()))
         .route(
@@ -5522,4 +5709,311 @@ fn files_account_prefers_a_deterministic_account() {
         &accounts,
     )
     .is_none());
+}
+
+#[tokio::test]
+async fn openai_api_forwards_direct_models_with_native_protocols() {
+    let app = Router::new().fallback(
+        |uri: Uri, headers: axum::http::HeaderMap, body: axum::Json<serde_json::Value>| async move {
+            let expected_path = if body.0.get("input").is_some() {
+                "/v1/responses"
+            } else {
+                "/v1/chat/completions"
+            };
+            assert_eq!(uri.path(), expected_path);
+            assert_eq!(headers["authorization"], "Bearer project-key");
+            assert_eq!(body.0["model"], "gpt-6.1-sol");
+            assert_eq!(body.0["metadata"]["keep"], "unchanged");
+            (
+                StatusCode::OK,
+                [("content-type", "application/json")],
+                r#"{"id":"mock-response","usage":{"input_tokens":2,"output_tokens":1}}"#,
+            )
+        },
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let mut channel = ChannelPreset::openai_api();
+    channel.openai_base_url = format!("http://{addr}/v1");
+    for protocol in [ProtocolType::OpenAi, ProtocolType::Responses] {
+        // 入站别名 / 大小写变体都归一到规范模型 gpt-6.1-sol。
+        for model in ["openai/GPT-6.1-SOL", "gpt-6.1-sol"] {
+            let routes = vec![test_route(
+                "direct",
+                "gpt-6.1-sol",
+                "openai-api",
+                "account",
+                "gpt-6.1-sol",
+                protocol.clone(),
+                0,
+            )];
+            let state = build_test_state(
+                vec![channel.clone()],
+                vec![test_account("account", "openai-api", "project-key", 0)],
+                routes,
+            );
+            let mut payload = serde_json::json!({"model":model,"metadata":{"keep":"unchanged"}});
+            let path = if protocol == ProtocolType::Responses {
+                payload["input"] = serde_json::json!("hello");
+                payload["store"] = serde_json::json!(false);
+                "/v1/responses"
+            } else {
+                payload["messages"] = serde_json::json!([{"role":"user","content":"hello"}]);
+                "/v1/chat/completions"
+            };
+            let request = Request::builder()
+                .method("POST")
+                .uri(path)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(payload.to_string()))
+                .unwrap();
+            let response = forward_request(state, request, protocol.clone())
+                .await
+                .unwrap();
+            let status = response.status();
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            assert_eq!(
+                status,
+                StatusCode::OK,
+                "{protocol:?} {model}: {}",
+                String::from_utf8_lossy(&body)
+            );
+            assert!(std::str::from_utf8(&body)
+                .unwrap()
+                .contains("mock-response"));
+        }
+    }
+    server.abort();
+}
+
+#[tokio::test]
+async fn openai_api_models_list_respects_protocol_and_disabled_account() {
+    let mut account = test_account("account", "openai-api", "project-key", 0);
+    let channel = ChannelPreset::openai_api();
+    let routes = vec![test_route(
+        "direct",
+        "gpt-6.1-sol",
+        "openai-api",
+        "account",
+        "gpt-6.1-sol",
+        ProtocolType::OpenAi,
+        0,
+    )];
+    for (protocol, count) in [(ProtocolType::OpenAi, 1), (ProtocolType::Anthropic, 0)] {
+        let response =
+            build_model_list_response(&routes, &[account.clone()], &[channel.clone()], &protocol);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["data"].as_array().unwrap().len(), count);
+    }
+    let response = build_model_list_response(
+        &routes,
+        &[account.clone()],
+        &[channel.clone()],
+        &ProtocolType::OpenAi,
+    );
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(value["data"][0]["id"], "gpt-6.1-sol");
+    account.enabled = false;
+    let response =
+        build_model_list_response(&routes, &[account], &[channel], &ProtocolType::OpenAi);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(value["data"].as_array().unwrap().is_empty());
+}
+
+#[path = "proxy_tests/upstream_proxy_tests.rs"]
+mod upstream_proxy_tests;
+
+#[tokio::test]
+async fn vibetoken_forwards_direct_models_with_native_protocols() {
+    let app = Router::new().fallback(
+        |uri: Uri, headers: axum::http::HeaderMap, body: axum::Json<serde_json::Value>| async move {
+            let expected_path = if body.0.get("input").is_some() {
+                "/v1/responses"
+            } else {
+                "/v1/chat/completions"
+            };
+            assert_eq!(uri.path(), expected_path);
+            assert_eq!(headers["authorization"], "Bearer project-key");
+            assert_eq!(body.0["model"], "deepseek/deepseek-v4-pro");
+            assert_eq!(body.0["metadata"]["keep"], "unchanged");
+            (
+                StatusCode::OK,
+                [("content-type", "application/json")],
+                r#"{"id":"mock-response","usage":{"input_tokens":2,"output_tokens":1}}"#,
+            )
+        },
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let mut channel = ChannelPreset::vibetoken();
+    channel.openai_base_url = format!("http://{addr}/v1");
+    for protocol in [ProtocolType::OpenAi, ProtocolType::Responses] {
+        // 入站规范名 / 大小写变体都归一到同一规范模型，上游保留渠道前缀写法。
+        for model in ["deepseek/DEEPSEEK-V4-PRO", "deepseek-v4-pro"] {
+            let routes = vec![test_route(
+                "direct",
+                "deepseek-v4-pro",
+                "vibetoken",
+                "account",
+                "deepseek/deepseek-v4-pro",
+                protocol.clone(),
+                0,
+            )];
+            let state = build_test_state(
+                vec![channel.clone()],
+                vec![test_account("account", "vibetoken", "project-key", 0)],
+                routes,
+            );
+            let mut payload = serde_json::json!({"model":model,"metadata":{"keep":"unchanged"}});
+            let path = if protocol == ProtocolType::Responses {
+                payload["input"] = serde_json::json!("hello");
+                payload["store"] = serde_json::json!(false);
+                "/v1/responses"
+            } else {
+                payload["messages"] = serde_json::json!([{"role":"user","content":"hello"}]);
+                "/v1/chat/completions"
+            };
+            let request = Request::builder()
+                .method("POST")
+                .uri(path)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(payload.to_string()))
+                .unwrap();
+            let response = forward_request(state, request, protocol.clone())
+                .await
+                .unwrap();
+            let status = response.status();
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            assert_eq!(
+                status,
+                StatusCode::OK,
+                "{protocol:?} {model}: {}",
+                String::from_utf8_lossy(&body)
+            );
+            assert!(std::str::from_utf8(&body)
+                .unwrap()
+                .contains("mock-response"));
+        }
+    }
+    server.abort();
+}
+
+// ─── 入站模型名归一（别名 / 官方 API 名 / 大小写 / 厂商前缀）──────────────────
+//
+// 客户端可能用厂商官方 API 名或目录登记的别名请求对外模型（DSH 原生 DeepSeek Provider
+// 固定发 deepseek-flash）。对外身份是规范 ID，因此代理在匹配前按 model-catalog.json
+// 归一；日志仍分别保留客户端原始名（public_model）与规范 ID（virtual_model）。
+
+/// 记录上游收到的请求体，供断言转发前的 model 改写。
+async fn spawn_body_capturing_upstream() -> (String, Arc<Mutex<Vec<u8>>>) {
+    let captured = Arc::new(Mutex::new(Vec::<u8>::new()));
+    let captured_state = captured.clone();
+    let upstream = Router::new()
+        .route(
+            "/v1/chat/completions",
+            post({
+                let captured = captured_state.clone();
+                move |body: Bytes| {
+                    let captured = captured.clone();
+                    async move {
+                        *captured.lock().unwrap() = body.to_vec();
+                        (
+                            StatusCode::OK,
+                            [("content-type", "application/json")],
+                            r#"{"choices":[]}"#,
+                        )
+                    }
+                }
+            }),
+        )
+        .route(
+            "/v1/messages",
+            post(move |body: Bytes| {
+                let captured = captured_state.clone();
+                async move {
+                    *captured.lock().unwrap() = body.to_vec();
+                    (
+                        StatusCode::OK,
+                        [("content-type", "application/json")],
+                        r#"{"type":"message","content":[]}"#,
+                    )
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(listener, upstream).await.unwrap();
+    });
+    (format!("http://{addr}"), captured)
+}
+
+async fn wait_for_request_logs(storage: &Storage, expected: usize) -> Vec<RequestLogRow> {
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        loop {
+            let final_rows = storage.list_request_logs().unwrap();
+            if let Some(final_row) = final_rows.first() {
+                let rows = storage
+                    .list_request_logs_by_request_id(&final_row.request_id)
+                    .unwrap();
+                if rows.len() == expected {
+                    break rows;
+                }
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn vibetoken_models_list_respects_protocol_and_disabled_account() {
+    let mut account = test_account("account", "vibetoken", "project-key", 0);
+    let channel = ChannelPreset::vibetoken();
+    let routes = vec![test_route(
+        "direct",
+        "deepseek-v4-pro",
+        "vibetoken",
+        "account",
+        "deepseek/deepseek-v4-pro",
+        ProtocolType::OpenAi,
+        0,
+    )];
+    for (protocol, count) in [
+        (ProtocolType::OpenAi, 1),
+        (ProtocolType::Responses, 0),
+        (ProtocolType::Anthropic, 0),
+    ] {
+        let response =
+            build_model_list_response(&routes, &[account.clone()], &[channel.clone()], &protocol);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(value["data"].as_array().unwrap().len(), count);
+    }
+    account.enabled = false;
+    let response =
+        build_model_list_response(&routes, &[account], &[channel], &ProtocolType::OpenAi);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(value["data"].as_array().unwrap().is_empty());
 }

@@ -8,7 +8,7 @@ Flowlet 是一个面向 AI Agent、桌面优先、本地运行的使用与成本
 
 旧 Provider 原型阶段曾通过破坏式重构确立 Channel / Account / Model 正式数据模型。当前 SQLite 数据已经成为演进基线，后续功能必须提供增量迁移，不得再以早期原型策略重建或丢弃现有数据。
 
-它让 Claude Code、Cursor、Cline、Open WebUI、Cherry Studio、Continue 等 AI 工具统一接入一个本地入口，并在不做协议转换、不改写响应内容的前提下，实现开箱即用渠道配置、虚拟模型路由、请求日志和 Token 成本分析。长期还将通过本地 Agent Adapter、导入和手动记录，把未经过代理的官方账号使用纳入统一成本账本。
+它让 Claude Code、Cursor、Cline、Open WebUI、Cherry Studio、Continue 等 AI 工具统一接入一个本地入口，并在不做协议转换、不改写响应内容的前提下，实现开箱即用渠道配置、直接模型与多候选路由、请求日志和 Token 成本分析。长期还将通过本地 Agent Adapter、导入和手动记录，把未经过代理的官方账号使用纳入统一成本账本。
 
 Flowlet 不是 LiteLLM Desktop、New API Desktop，也不是 Helicone / Portkey 这类服务端 AI Gateway。它的核心定位是：
 
@@ -368,52 +368,34 @@ Flowlet 需要把 Anthropic-compatible 请求透明转发到 Anthropic-compatibl
 
 ---
 
-### 5.7 虚拟模型
+### 5.7 直接模型与多候选路由
 
-Flowlet 支持对外暴露虚拟模型，例如：
-
-```text
-auto
-cheap-auto
-coding-auto
-fast-auto
-long-context-auto
-reasoning-auto
-```
-
-客户端请求时可以使用：
+Flowlet 对外只暴露**规范模型 ID**，不再提供聚合模型或 `auto` 之类的虚拟模型别名。客户端请求时直接使用规范模型 ID，也可以使用 `model-catalog.json` 中登记的厂商官方 API 名或别名：
 
 ```json
 {
-  "model": "auto",
+  "model": "deepseek-v4-pro",
   "messages": []
 }
 ```
 
-Flowlet 在请求侧将虚拟模型映射到实际 Provider 和真实模型，例如：
+同一规范模型可以由多个渠道账号、多个上游变体承载，形成候选池：代理按 `virtual_model_routes` 的 priority、渠道与上游变体分组，同一「priority + 渠道 + 上游变体」池内按账号轮询，失败后降级到下一组。对外模型名与上游模型名分离：`virtual_model_id` 保存规范模型 ID，`upstream_model` 保存上游真实模型 ID，只有发往上游前才替换。
 
-```text
-auto -> 阿里云百炼 qwen-plus
-auto -> DeepSeek deepseek-chat
-auto -> OpenRouter 某个备用模型
-```
-
-响应返回时，Flowlet 不会把上游响应中的模型名改回 `auto`，而是保持上游原始响应。
+响应返回时，Flowlet 保持上游原始响应，不把模型名改回请求名。
 
 ---
 
 ### 5.8 免费额度优先和失败降级
 
-Flowlet 可以将多个 Provider / Model 配置为一个虚拟模型的候选路线。
+Flowlet 可以将多个 Provider / Model 配置为同一规范模型的候选路线。
 
 例如：
 
 ```text
-free-auto
-  1. 阿里云百炼某个免费额度模型
-  2. 火山方舟某个免费额度模型
-  3. DeepSeek 低价模型
-  4. OpenRouter 备用模型
+deepseek-v4-pro
+  1. DeepSeek 官方账号（优先）
+  2. 千问 Token Plan 承载的 DeepSeek 账号
+  3. 自定义中转账号（同规范模型）
 ```
 
 当上游返回以下情况时，可以尝试降级：
@@ -452,9 +434,10 @@ Flowlet 提供请求日志列表，用户可以查看：
 ```text
 请求时间
 客户端来源
-Provider
-虚拟模型
-实际模型
+渠道
+请求模型（客户端原始名）
+规范模型
+上游模型
 请求路径
 状态码
 耗时
@@ -477,9 +460,9 @@ Flowlet 基于请求日志离线分析 Token 和成本。
 ```text
 按日期
 按客户端
-按 Provider
+按渠道
 按模型
-按虚拟模型
+按规范模型
 按请求状态
 ```
 
@@ -488,8 +471,8 @@ Flowlet 基于请求日志离线分析 Token 和成本。
 ```text
 今天总共花了多少钱
 Claude Code 花了多少钱
-auto 实际路由到了哪些模型
-哪个 Provider 最便宜
+某个规范模型由哪些渠道账号承载
+哪个渠道最便宜
 哪个模型失败率最高
 哪个客户端请求最多
 ```
@@ -565,6 +548,12 @@ OpenCode 直接展示原生 cost；Codex 在能够确认唯一模型时，仅根
 每台设备会在正常同步快照中自动附带最近 90 天的原生模型用量维度，因此其他已升级设备在下一轮同步后
 也能按来源设备查看相同的 Token 与预估费用；该过程复用既有原生事件账本，不要求手动修复历史数据。
 
+Web Host（Docker / headless 部署）的「会话管理」复用同一套请求观测聚合与筛选、分页口径，
+只展示经过该实例代理的会话：会话 ID、客户端、请求数、成功/失败数、Token、预估费用与最近活动
+时间都来自本实例 SQLite 的请求日志。它不扫描服务器本机的 Agent 会话文件，因此不展示原生用量、
+原生时间线，也不提供 OpenCode 实时权限确认；这些能力仍只在桌面端可用。Web 会话详情保留
+「查看请求日志」入口，方便继续排查真实代理请求。
+
 ---
 
 ## 6. 产品形态
@@ -591,7 +580,7 @@ Linux
 渠道模板选择
 渠道账号管理
 Client Token 管理
-虚拟模型管理
+开放模型管理
 请求日志查看
 用量和成本看板
 设置页本地数据修复与阶段进度
@@ -790,13 +779,13 @@ stream chunks
 
 ### 12.1 第一阶段：顺序路由
 
-虚拟模型按配置顺序选择候选模型：
+同一规范模型的候选路由按 priority 顺序选择：
 
 ```text
-auto
-  1. Provider A / Model A
-  2. Provider B / Model B
-  3. Provider C / Model C
+deepseek-v4-pro
+  1. 渠道 A / 账号 A（upstream_model = deepseek-v4-pro）
+  2. 渠道 B / 账号 B（upstream_model = deepseek-v4-pro-0813）
+  3. 渠道 C / 账号 C（upstream_model = deepseek-v4-pro）
 ```
 
 失败后按顺序尝试下一个候选。
@@ -842,12 +831,12 @@ prompt 长度
   "task_type": "coding",
   "complexity": "medium",
   "priority": "cost",
-  "suggested_route": "coding-cheap",
+  "suggested_model": "deepseek-v4-flash",
   "confidence": 0.82
 }
 ```
 
-Flowlet 再根据路由结果选择具体 Provider 和 Model。
+Flowlet 再根据路由结果选择该规范模型的候选账号与上游变体。
 
 ---
 
@@ -946,6 +935,10 @@ created_at
 updated_at
 ```
 
+> 表名保留。聚合模型移除后，该表只承载规范模型身份记录，`id` / `name` 即规范模型 ID，
+> 不再表示 `auto` 之类的对外别名；升级迁移会删除表中残留的 `flowlet-pro` / `flowlet-flash`
+> 历史行。
+
 ---
 
 ### 13.6 virtual_model_routes
@@ -967,6 +960,12 @@ enabled
 created_at
 updated_at
 ```
+
+> `virtual_model_id` 字段名保留，语义为**规范模型 ID**：必须满足
+> `canonical_model_key(virtual_model_id) == canonical_model_key(upstream_model)`；不满足的行
+> 视为无效，不参与路由、不对外暴露。同一规范模型的多账号/多变体形成候选池，按「priority +
+> 渠道 + 上游变体」分组、池内轮询，池间按 `priority` 降级。旧版本 `flowlet-pro` / `flowlet-flash`
+> 路由会在升级迁移时改写为直接模型路由（去重、保留相对顺序）。
 
 ---
 
@@ -1089,7 +1088,7 @@ updated_at
 可以本地统一管理所有请求
 可以知道每个工具用了多少钱
 可以快速切换不同 Provider
-可以用 auto 模型自动选择候选模型
+可以由同一规范模型的多个账号候选自动降级
 可以优先使用免费额度和低价模型
 可以保留原始响应，不担心代理改坏协议
 ```
@@ -1112,7 +1111,7 @@ updated_at
 
 阶段路线统一维护在 [`roadmap.md`](./roadmap.md)（Milestone 0–8 与当前优先级）；统一 AI 成本账本的阶段范围与验收标准见 [`ai-cost-ledger.md`](./ai-cost-ledger.md)。
 
-本节原有的七阶段计划（Desktop MVP 稳定化 → 渠道模板 → Anthropic-compatible 与 Claude Code → 渠道能力与同步框架 → 统一成本账本 → 额度感知 auto 路由 → Docker / Web Console）已被上述两份文档取代，不再在此维护。
+本节原有的七阶段计划（Desktop MVP 稳定化 → 渠道模板 → Anthropic-compatible 与 Claude Code → 渠道能力与同步框架 → 统一成本账本 → 额度感知路由 → Docker / Web Console）已被上述两份文档取代，不再在此维护。
 
 ---
 

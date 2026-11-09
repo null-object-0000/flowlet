@@ -19,6 +19,11 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-2563eb?style=flat-square" alt="MIT License" /></a>
 </p>
 
+## Docker 部署
+
+已支持独立服务与浏览器管理界面。准备 `.env` 中的管理凭据和对外地址后，运行 `docker compose up -d --build`；默认 Web 端口 `20134`、模型入口端口 `20135`。
+完整步骤、数据卷与功能范围见 [Docker 部署文档](docs/docker.md)。
+
 ## 为什么使用 Flowlet
 
 - **告别反复改配置**：Claude Code、OpenCode、Pi 和 Codex 共用一个本地入口，切换渠道或账号不再逐个修改 Agent。
@@ -36,8 +41,8 @@ Flowlet 可以检测本机安装，并为以下 Agent 写入和恢复全局配�
 
 ### 统一管理模型与账号
 
-从上游拉取真实模型列表，明确选择需要开放的模型；为同一模型配置多个账号，并通过
-`flowlet-pro` / `flowlet-flash` 给 Agent 提供稳定的聚合模型入口。
+从上游拉取真实模型列表，明确选择需要开放的模型；为同一模型配置多个账号，让 Agent
+直接选择该规范模型即可获得多账号候选与失败降级，不再经过聚合别名。
 
 ### 看清请求、会话与用量
 
@@ -54,7 +59,7 @@ Release 同时提供实验性 Android 移动辅助端，可通过自有 S3 与�
 
 1. 从 [GitHub Releases](https://github.com/null-object-0000/flowlet/releases) 下载桌面端或 Android 移动辅助端；
 2. 添加一个渠道账号，拉取并选择需要开放的模型；
-3. 在概览页选择你的 Agent，一键接入 Flowlet；
+3. 在概览页选择你的 Agent，在接入抽屉中选定默认模型后一键接入 Flowlet；
 4. 回到 Agent 正常工作，在 Flowlet 中查看请求、会话和用量。
 
 > [!NOTE]

@@ -53,27 +53,22 @@ invalid          settings.json 不是合法 JSON，或顶层 / env 结构无效
   "env": {
     "ANTHROPIC_BASE_URL": "http://127.0.0.1:18640/anthropic",
     "ANTHROPIC_AUTH_TOKEN": "<Flowlet Client Token>",
-    "ANTHROPIC_MODEL": "flowlet-pro",
-    "ANTHROPIC_DEFAULT_FABLE_MODEL": "flowlet-pro",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "flowlet-pro",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "flowlet-pro",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "flowlet-flash",
-    "ANTHROPIC_SMALL_FAST_MODEL": "flowlet-flash",
-    "CLAUDE_CODE_SUBAGENT_MODEL": "flowlet-flash"
+    "ANTHROPIC_MODEL": "<主模型，如 deepseek-v4-pro>",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL": "<主模型，如 deepseek-v4-pro>",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "<主模型，如 deepseek-v4-pro>",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "<主模型，如 deepseek-v4-pro>",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "<快速模型，如 deepseek-v4-flash>",
+    "ANTHROPIC_SMALL_FAST_MODEL": "<快速模型，如 deepseek-v4-flash>",
+    "CLAUDE_CODE_SUBAGENT_MODEL": "<快速模型，如 deepseek-v4-flash>"
   }
 }
 ```
 
-模型别名必须完整映射：Claude Code 的主会话、模型切换和后台功能可能分别使用 Opus、Sonnet 和 Haiku。Flowlet 将 Opus / Sonnet 映射到 `flowlet-pro`，将 Haiku 和子 Agent 映射到 `flowlet-flash`。
+模型别名必须完整映射：Claude Code 的主会话、模型切换和后台功能可能分别使用 Opus、Sonnet 和 Haiku。Flowlet 把用户在接入抽屉中显式选择的主模型写入 `ANTHROPIC_MODEL`、`ANTHROPIC_DEFAULT_FABLE_MODEL`、`ANTHROPIC_DEFAULT_OPUS_MODEL` 和 `ANTHROPIC_DEFAULT_SONNET_MODEL`，把快速模型写入 `ANTHROPIC_DEFAULT_HAIKU_MODEL`、`ANTHROPIC_SMALL_FAST_MODEL` 和 `CLAUDE_CODE_SUBAGENT_MODEL`。
 
-Claude Code 接入抽屉为两个聚合模型分别提供 1M 长上下文开关：
+主模型与快速模型都必须是当前 Anthropic 协议下已开放的**规范模型 ID**；快速模型缺省等于主模型。Flowlet 不再提供聚合模型，也不支持 `[1m]` 长上下文后缀：原先按聚合模型全部启用路由判断 1M 能力的两个开关与 `longContext` 参数已删除，上下文窗口由所选单一模型自身能力决定。
 
-- `flowlet-pro` 开关控制 `ANTHROPIC_MODEL`、`ANTHROPIC_DEFAULT_FABLE_MODEL`、`ANTHROPIC_DEFAULT_OPUS_MODEL` 和 `ANTHROPIC_DEFAULT_SONNET_MODEL`；
-- `flowlet-flash` 开关控制 `ANTHROPIC_DEFAULT_HAIKU_MODEL`、`ANTHROPIC_SMALL_FAST_MODEL` 和 `CLAUDE_CODE_SUBAGENT_MODEL`。
-
-开启后，对应组的模型名附加 `[1m]`（如 `flowlet-flash[1m]`）。两个开关相互独立，因为两个聚合模型的已启用路由和最低上下文能力可能不同。只有对应聚合模型的所有已启用路由均支持 1M 时才应开启。Claude Code 会在发送请求前剥离该后缀，Flowlet 代理也会防御性剥离。旧版调用参数 `longContext` 仍兼容：未提供两个独立参数时，它会同时控制两组模型。
-
-`ANTHROPIC_SMALL_FAST_MODEL` 是 Claude Code 的遗留小模型变量。它在会话标题生成等后台任务中仍优先于 `ANTHROPIC_DEFAULT_HAIKU_MODEL` 生效，因此必须一并写入 `flowlet-flash`。如果 settings.json 中残留用户手动配置的 `ANTHROPIC_SMALL_FAST_MODEL`（例如指向某个直接模型），接入状态会被判定为 `partial`，重新写入后即可收敛；其原值进入备份并可恢复。
+`ANTHROPIC_SMALL_FAST_MODEL` 是 Claude Code 的遗留小模型变量。它在会话标题生成等后台任务中仍优先于 `ANTHROPIC_DEFAULT_HAIKU_MODEL` 生效，因此必须一并写入所选快速模型。如果 settings.json 中残留用户手动配置的 `ANTHROPIC_SMALL_FAST_MODEL`（例如指向其它模型），接入状态会被判定为 `partial`，重新写入后即可收敛；其原值进入备份并可恢复。
 
 为避免用户级配置继续绕过 Flowlet，应用时移除以下冲突字段：
 

@@ -1,6 +1,9 @@
 import styles from "./ChannelBrandLogoView.module.css";
 
 export function ChannelBrandLogoView({ channelId, name }: { channelId: string; name: string }) {
+  if (channelId === "antigravity") {
+    return <span className={`${styles.logo} ${styles.antigravity}`} aria-hidden="true"><i /></span>;
+  }
   if (channelId === "flowlet") {
     return <span className={`${styles.logo} ${styles.flowlet}`} aria-hidden="true"><img src="/flowlet-logo.png" alt="" /></span>;
   }
@@ -19,10 +22,13 @@ export function ChannelBrandLogoView({ channelId, name }: { channelId: string; n
   if (channelId === "zhipu") {
     return <span className={`${styles.logo} ${styles.zhipu}`} aria-hidden="true"><img src="/icons/lobe/zhipu-color.svg" alt="" /></span>;
   }
+  if (channelId === "vibetoken") {
+    return <span className={`${styles.logo} ${styles.vibetoken}`} aria-hidden="true"><i /></span>;
+  }
   if (channelId === "openrouter") {
     return <span className={`${styles.logo} ${styles.openrouter}`} aria-hidden="true"><i /></span>;
   }
-  if (channelId === "chatgpt") {
+  if (channelId === "chatgpt" || channelId === "openai-api") {
     return <span className={`${styles.logo} ${styles.chatgpt}`} aria-hidden="true"><i /></span>;
   }
   return <span className={`${styles.logo} ${styles.fallback}`} aria-hidden="true">{name.trim().charAt(0).toUpperCase() || "?"}</span>;

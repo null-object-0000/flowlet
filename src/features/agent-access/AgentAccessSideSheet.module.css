@@ -435,6 +435,11 @@
   white-space: nowrap;
 }
 
+.modelSelect {
+  width: min(260px, 100%);
+  min-width: 0;
+}
+
 .advancedSection {
   margin-top: 14px;
   overflow: hidden;

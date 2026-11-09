@@ -30,6 +30,8 @@ vi.mock("../../features/request-logs/useRequestLogs", () => ({
 
 import { RequestLogsPage } from "./RequestLogsPage";
 
+/** `flowlet-pro` 是已移除的旧聚合对外模型名，保留为历史日志样例：
+ *  历史日志中的原值必须按原样展示，不做名字映射。 */
 const row: RequestLogRow = {
   id: "log-1", request_id: "request-123456789", client_id: "claude-code", client_name: "Claude Code",
   channel_id: "longcat", channel_name: "LongCat", account_id: "account-1", account_name: "主账号",
@@ -159,7 +161,7 @@ describe("RequestLogsPage", () => {
       is_last_attempt: false,
     };
     mocks.useDetail.mockReturnValue({
-      data: [skipped, { ...row, route_reason: "fallback_success", fallback_count: 1, attempt_seq: 1 }],
+      data: [skipped, { ...row, route_reason: "fallback_success", fallback_count: 1, attempt_seq: 1, upstream_proxy_used: true }],
       isLoading: false,
       isError: false,
       isSuccess: true,
@@ -173,6 +175,7 @@ describe("RequestLogsPage", () => {
     expect(screen.getByText("未请求上游")).toBeInTheDocument();
     expect(screen.getByText("flowlet-pro → glm-5.2 · 不支持图像输入，已跳过")).toBeInTheDocument();
     expect(screen.getByText("flowlet-pro → LongCat-2.0 · 回退成功")).toBeInTheDocument();
+    expect(screen.getByText("经代理")).toBeInTheDocument();
     expect(screen.getAllByText("成功").length).toBeGreaterThanOrEqual(1);
 
     await user.click(screen.getByText("flowlet-pro → glm-5.2 · 不支持图像输入，已跳过").closest("button")!);

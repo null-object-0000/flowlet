@@ -19,5 +19,8 @@ Vendored files:
 - `opencode.svg`
 - `openai.svg`
 - `codex.svg`
+- `antigravity.svg`
 - `pi.svg`
 - `hermesagent.svg`
+
+`openai.svg` is shared by Codex subscription observation and the ChatGPT API (`openai-api`) channel.

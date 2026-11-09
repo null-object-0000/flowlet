@@ -1,6 +1,6 @@
 use super::proxy_status;
-use crate::AppState;
 use crate::core::upstream_proxy::UpstreamProxyConfig;
+use crate::AppState;
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_autostart::ManagerExt;
 
@@ -126,7 +126,10 @@ pub(crate) fn set_upstream_proxy_config(
     let stored = serde_json::to_string(&config).map_err(|error| error.to_string())?;
     state
         .storage
-        .set_app_meta(crate::core::upstream_proxy::UPSTREAM_PROXY_META_KEY, &stored)
+        .set_app_meta(
+            crate::core::upstream_proxy::UPSTREAM_PROXY_META_KEY,
+            &stored,
+        )
         .map_err(|error| error.to_string())?;
 
     // 2. 尽力同步到 config.json，保留手改文件入口与可读性；失败不阻断保存。

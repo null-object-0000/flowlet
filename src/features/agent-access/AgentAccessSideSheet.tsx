@@ -5,7 +5,7 @@ import styles from "./AgentAccessSideSheet.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import { DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
-import { ConfigRow, StatusRow, globalConfigTag } from "./globalConfigPresentation";
+import { ConfigRow, ModelSelectorRow, StatusRow, globalConfigTag } from "./globalConfigPresentation";
 import { cliInstalledVersion, isNewerVersion } from "../../domains/agent/versions";
 import type {
   AgentEnvironmentReport,
@@ -16,6 +16,11 @@ import type {
 } from "../../domains/agent/types";
 import { agentPlugin, type AgentPluginId } from "../../domains/pluginRegistry";
 import { agentAccessAdapter, type AgentConfigControl } from "./agentAccessAdapters";
+import { computeAvailableModels } from "./availableModels";
+import { useAccounts, useChannelPresets } from "../channel-accounts";
+import { useRouteCandidates } from "../exposed-models/useModels";
+import { useLocalModelsCnCatalog } from "../../domains/modelCatalog/query";
+import { parseCatalogJson } from "../../domains/modelCatalog/resolver";
 import { McpServersPanel } from "./McpServersPanel";
 
 const { Text, Title } = Typography;
@@ -90,14 +95,34 @@ export function AgentAccessSideSheet({
   const endpoint = `${baseUrl}${meta.endpointSuffix}`;
   const token = clientToken || "<Client Token>";
   const displayedToken = clientToken ? MASKED_TOKEN : token;
-  const adapterContext = useMemo(() => ({ endpoint, token, displayedToken, globalConfig, t }), [displayedToken, endpoint, globalConfig, t, token]);
+  // 可用模型池：启用路由 + 健康账号 + 渠道支持该路由协议，由抽屉统一计算后传给 Adapter。
+  const routes = useRouteCandidates();
+  const accounts = useAccounts();
+  const channels = useChannelPresets();
+  const modelsCnCatalog = useLocalModelsCnCatalog();
+  const availableModels = useMemo(
+    () => computeAvailableModels(routes.data, accounts.data, channels.data),
+    [routes.data, accounts.data, channels.data],
+  );
+  const modelCatalog = useMemo(
+    () => (modelsCnCatalog.data ? parseCatalogJson(modelsCnCatalog.data) : null),
+    [modelsCnCatalog.data],
+  );
+  const modelsLoading = routes.isLoading || accounts.isLoading || channels.isLoading;
+  const adapterContext = useMemo(
+    () => ({ endpoint, token, displayedToken, globalConfig, availableModels, modelCatalog, t }),
+    [availableModels, displayedToken, endpoint, globalConfig, modelCatalog, t, token],
+  );
   const manualSnippets = useMemo(
     () => adapter.manualSnippets(adapterContext),
     [adapter, adapterContext],
   );
   const configStatuses = adapter.configStatuses(adapterContext);
   const configControls = adapter.configControls(adapterContext);
-  const modelSelector = adapter.modelSelector?.(adapterContext);
+  const modelSelectors = adapter.modelSelectors(adapterContext);
+  const hasFastSelector = modelSelectors.some((selector) => selector.id === "fast");
+  /** 没有当前协议下可用的开放模型时，禁用一键接入并提示先开放模型。 */
+  const hasAvailableModels = modelSelectors.some((selector) => selector.options.length > 0);
   // 稳定引用：避免每次渲染生成新数组导致 MCP 面板草稿被意外重置。
   const mcpServers = useMemo(() => globalConfig?.mcp_servers ?? [], [globalConfig]);
 
@@ -310,24 +335,26 @@ export function AgentAccessSideSheet({
                 ) : null}
                 {globalConfig.base_url ? <StatusRow label="Base URL" value={globalConfig.base_url} /> : null}
                 <StatusRow label="Client Token" value={t(globalConfig.auth_token_configured ? "已配置（内容已隐藏）" : "未配置")} />
-                {modelSelector ? (
-                  <div className={styles.statusRow}>
-                    <Text type="tertiary" size="small">{t("主模型")}</Text>
-                    <Select
-                      size="small"
-                      value={modelSelector.value}
-                      optionList={modelSelector.options}
-                      zIndex={APP_OVERLAY_Z_INDEX.sideSheet + 1}
-                      disabled={globalConfigBusy || globalConfig.state === "invalid" || !clientToken}
-                      onChange={(value) => void onApplyGlobalConfig(modelSelector.applyOptions(String(value)))}
-                    />
-                  </div>
-                ) : (
-                  <StatusRow label={t("主模型")} value={globalConfig.primary_model || "-"} />
+                {modelSelectors.map((selector) => (
+                  <ModelSelectorRow
+                    key={selector.id}
+                    label={selector.label}
+                    value={selector.value}
+                    options={selector.options}
+                    disabled={globalConfigBusy || globalConfig.state === "invalid" || !clientToken || selector.options.length === 0}
+                    onChange={(value) => void onApplyGlobalConfig(selector.applyOptions(value))}
+                  />
+                ))}
+                {hasAvailableModels ? null : (
+                  <Text className={styles.configNotice} type="warning">
+                    {modelsLoading
+                      ? t("正在读取可用模型…")
+                      : t("当前没有可用的开放模型，请先在模型服务页开放模型。")}
+                  </Text>
                 )}
                 {configStatuses.map((status) => <StatusRow key={status.label} label={status.label} value={status.value} />)}
-                {meta.showsFastModel ? <StatusRow label={t("快速模型")} value={globalConfig.fast_model || "-"} /> : null}
-                {meta.showsSubagentModel ? <StatusRow label={t("子 Agent 模型")} value={globalConfig.subagent_model || "-"} /> : null}
+                {meta.showsFastModel && !hasFastSelector && globalConfig.fast_model ? <StatusRow label={t("快速模型")} value={globalConfig.fast_model} /> : null}
+                {meta.showsSubagentModel && globalConfig.subagent_model ? <StatusRow label={t("子 Agent 模型")} value={globalConfig.subagent_model} /> : null}
                 <AgentConfigControls
                   controls={configControls}
                   agentName={meta.name}
@@ -353,7 +380,7 @@ export function AgentAccessSideSheet({
                     type="primary"
                     theme="solid"
                     loading={globalConfigBusy}
-                    disabled={globalConfig.state === "invalid" || !clientToken}
+                    disabled={globalConfig.state === "invalid" || !clientToken || !hasAvailableModels}
                     onClick={() => void onApplyGlobalConfig(adapter.applyOptions(adapterContext))}
                   >
                     {t(globalConfig.state === "flowlet" ? "重新写入 Flowlet 配置" : globalConfig.state === "other_gateway" ? "覆盖并接入 Flowlet" : "全局接入 Flowlet")}

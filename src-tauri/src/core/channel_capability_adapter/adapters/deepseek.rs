@@ -33,16 +33,17 @@ async fn query_balance(account: &ChannelAccount, config: &ChannelsConfig) -> Bal
     if account.api_key.trim().is_empty() {
         return balance_error("API Key 未配置");
     }
-    let client = match crate::core::upstream_proxy::apply_to(reqwest::Client::builder())
-        .and_then(|builder| {
-            builder
-                .timeout(std::time::Duration::from_secs(15))
-                .build()
-                .map_err(|error| error.to_string())
-        }) {
-        Ok(client) => client,
-        Err(error) => return balance_error(format!("创建 HTTP 客户端失败: {error}")),
-    };
+    let client =
+        match crate::core::upstream_proxy::apply_to_account(reqwest::Client::builder(), account)
+            .and_then(|builder| {
+                builder
+                    .timeout(std::time::Duration::from_secs(15))
+                    .build()
+                    .map_err(|error| error.to_string())
+            }) {
+            Ok(client) => client,
+            Err(error) => return balance_error(format!("创建 HTTP 客户端失败: {error}")),
+        };
     let response = match client
         .get(config.balance_endpoint())
         .header(
@@ -105,6 +106,7 @@ pub(super) const ADAPTER: ChannelCapabilityAdapter = ChannelCapabilityAdapter {
     model_sync: sync,
     balance_query: Some(balance),
     strips_openai_v1_path: false,
+    uses_upstream_proxy_for_models: false,
     console_scrape: ConsoleScrapeAdapter::None,
     login_page: LoginPageAdapter::None,
     scrape_response: None,

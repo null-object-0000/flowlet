@@ -2,6 +2,7 @@
   "schemaVersion": 4,
   "plugins": [
     { "id": "flowlet.models.builtin", "kind": "model-catalog", "source": "model-catalog.json" },
+    { "id": "flowlet.channel.openai-api", "kind": "channel", "channelId": "openai-api", "adapterId": "openai-api" },
     { "id": "flowlet.channel.longcat", "kind": "channel", "channelId": "longcat", "adapterId": "longcat" },
     { "id": "flowlet.channel.deepseek", "kind": "channel", "channelId": "deepseek", "adapterId": "deepseek" },
     { "id": "flowlet.channel.kimi", "kind": "channel", "channelId": "kimi", "adapterId": "kimi" },
@@ -9,6 +10,7 @@
     { "id": "flowlet.channel.custom", "kind": "channel", "channelId": "custom", "adapterId": "custom" },
     { "id": "flowlet.channel.zhipu", "kind": "channel", "channelId": "zhipu", "adapterId": "zhipu" },
     { "id": "flowlet.channel.openrouter", "kind": "channel", "channelId": "openrouter", "adapterId": "openrouter" },
+    { "id": "flowlet.channel.vibetoken", "kind": "channel", "channelId": "vibetoken", "adapterId": "vibetoken" },
     {
       "id": "flowlet.agent.claude-code",
       "kind": "agent",
@@ -20,10 +22,7 @@
         "sessionAdapterId": "claude-code",
         "identityAdapterId": "claude-code",
         "sessionTypes": [{ "id": "claude-code", "name": "Claude Code", "clientId": "claude-code" }],
-        "configCapabilities": [
-          { "id": "primary-long-context", "name": "主模型 1M 长上下文", "kind": "boolean", "defaultEnabled": false, "requiresRestart": true },
-          { "id": "fast-long-context", "name": "快速模型 1M 长上下文", "kind": "boolean", "defaultEnabled": false, "requiresRestart": true }
-        ],
+        "configCapabilities": [],
         "endpointSuffix": "/anthropic",
         "npmPackage": "@anthropic-ai/claude-code",
         "surfaces": ["cli"],
@@ -53,9 +52,7 @@
         "sessionAdapterId": "opencode",
         "identityAdapterId": "opencode",
         "sessionTypes": [{ "id": "opencode", "name": "OpenCode", "clientId": "opencode" }],
-        "configCapabilities": [
-          { "id": "model-specs", "name": "输入模态声明", "kind": "boolean", "defaultEnabled": false, "requiresRestart": true }
-        ],
+        "configCapabilities": [],
         "endpointSuffix": "/v1",
         "npmPackage": "opencode-ai",
         "surfaces": ["cli", "desktop"],
@@ -85,8 +82,7 @@
         "identityAdapterId": "pi",
         "sessionTypes": [{ "id": "pi", "name": "Pi", "clientId": "pi" }],
         "configCapabilities": [
-          { "id": "session-extension", "name": "精确会话关联", "kind": "boolean", "defaultEnabled": false, "requiresRestart": true },
-          { "id": "model-specs", "name": "输入模态声明", "kind": "boolean", "defaultEnabled": false, "requiresRestart": false }
+          { "id": "session-extension", "name": "精确会话关联", "kind": "boolean", "defaultEnabled": false, "requiresRestart": true }
         ],
         "endpointSuffix": "/v1",
         "npmPackage": "@earendil-works/pi-coding-agent",
@@ -150,7 +146,6 @@
         "sessionTypes": [{ "id": "deepseek-harness", "name": "DeepSeek Harness", "clientId": "deepseek-harness" }],
         "configCapabilities": [
           { "id": "session-extension", "name": "精确会话关联", "kind": "boolean", "defaultEnabled": false, "requiresRestart": true },
-          { "id": "model-specs", "name": "模型规格声明", "kind": "boolean", "defaultEnabled": false, "requiresRestart": false },
           { "id": "mcp-servers", "name": "MCP 服务器", "kind": "list", "defaultEnabled": false, "requiresRestart": false }
         ],
         "endpointSuffix": "/v1",

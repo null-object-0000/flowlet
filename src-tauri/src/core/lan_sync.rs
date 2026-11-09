@@ -904,7 +904,7 @@ pub async fn probe_lan_peers(storage: &Storage, device_id: Option<&str>) -> Vec<
             });
             continue;
         }
-        tasks.push(tauri::async_runtime::spawn(async move {
+        tasks.push(tokio::task::spawn(async move {
             probe_peer(&descriptor, &id).await
         }));
     }
@@ -952,7 +952,7 @@ pub async fn refresh_known_peers(
     }
     let refreshed_devices = bundles.len();
     let import_storage = storage.clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         for bundle in bundles {
             let snapshot = bundle.snapshot;
             import_storage

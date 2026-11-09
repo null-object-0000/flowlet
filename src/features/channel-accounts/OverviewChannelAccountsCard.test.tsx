@@ -50,6 +50,15 @@ const channels = [
 ] as ChannelPreset[];
 
 describe("OverviewChannelAccountsCard", () => {
+  it("only offers API-key channels in the server host", () => {
+    render(<OverviewChannelAccountsCard accounts={[]} channels={channels} snapshots={[]}
+      desktopCapabilities={false} onCreate={vi.fn()} onEdit={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "添加 DeepSeek" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "ChatGPT 授权登录" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "添加 Antigravity" })).not.toBeInTheDocument();
+    expect(screen.getByText("API Key 保存在当前 Flowlet 服务，保存前可以先测试连接。")).toBeInTheDocument();
+  });
+
   it("renders provider choices inside the empty card", async () => {
     const user = userEvent.setup();
     const onCreate = vi.fn();
@@ -71,6 +80,9 @@ describe("OverviewChannelAccountsCard", () => {
     expect(screen.getByRole("button", { name: "添加 Qwen" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "添加 Z.AI" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "添加 OpenRouter" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "添加 VibeToken" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "添加 VibeToken" }));
+    expect(onCreate).toHaveBeenCalledWith("vibetoken");
     expect(screen.queryByText("管理账号")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "添加 Qwen" }));

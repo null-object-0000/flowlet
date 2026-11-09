@@ -39,6 +39,7 @@ export type RequestLogRow = {
   method: string;
   path: string;
   upstream_url: string | null;
+  upstream_proxy_used?: boolean | null;
   status: number | null;
   latency_ms: number | null;
   is_stream: boolean;

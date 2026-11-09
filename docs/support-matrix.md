@@ -136,7 +136,7 @@ Flowlet 当前总共支持 23 个规范化模型。这个列表是全局白名�
 | OpenRouter | `nemotron-3-super-120b-a12b` | — 上游文档未确认支持 |
 | OpenRouter | `nemotron-3-ultra-550b-a55b` | — 上游文档未确认支持 |
 
-`flowlet-pro` 与 `flowlet-flash` 没有固定档位对应关系；用户可把上述任意已有渠道模型加入任一聚合模型。
+以上 23 个规范模型 ID 即 Flowlet 的完整白名单。Flowlet 不再提供聚合模型或虚拟模型别名：Agent 接入时直接选择其中一个规范模型，同一规范模型的多账号/多变体形成候选池。
 
 ### 4.1 模型身份与承载渠道
 
@@ -168,13 +168,15 @@ Flowlet 不做模型级拦截。
 
 ### 4.2 对外模型名
 
-- 直接模型请求先用 `model-catalog.json` 把入站模型名归一到规范模型 ID，再匹配
+- 入站模型名先用 `model-catalog.json` 归一到规范模型 ID，再匹配
   `virtual_model_id`：登记别名（`deepseek-flash` → `deepseek-v4.1-flash`）、厂商官方 API 名、
   `vendor/` 前缀写法与大小写变体都归一；未登记的名字仍返回 `model_not_exposed`；
-- 聚合模型使用 `flowlet-pro` 和 `flowlet-flash`（不走目录归一，保持严格匹配）；
+- 持久化路由行只接受规范模型 ID：`virtual_model_id` 必须与 `upstream_model` 归一后属于同一规范模型，非规范身份的路由行被忽略，不参与路由也不对外暴露；高级规则的显式模型映射可跨规范模型；
 - 真正发送上游前才把模型名替换成 `upstream_model`；
 - `/models` 只暴露当前协议下存在可用候选的模型，且只暴露规范模型 ID——接受别名但不对外
-  宣传别名。
+  宣传别名；
+- 历史聚合名 `flowlet-pro` / `flowlet-flash` 不再作为对外模型：入站请求按未开放模型返回
+  `model_not_exposed`。
 
 ## 5. Agent 支持
 
@@ -184,9 +186,9 @@ Flowlet 不做模型级拦截。
 
 | Agent | 安装探测 | 一键写入/恢复 | 接入协议 | 请求归属 | 原生会话与时间线 | 其他能力 |
 |-------|----------|---------------|----------|----------|------------------|----------|
-| Claude Code | ✅ CLI、多安装候选、版本 | ✅ | Anthropic Messages | ✅ User-Agent；官方 Session Header | ✅ | 主模型/快速模型/子 Agent 映射，可选 `[1m]` 长上下文 |
-| OpenCode | ✅ CLI + Desktop | ✅ | OpenAI Chat Completions | ✅ User-Agent 与原生 Session Header | ✅ | CLI/Desktop 共用 Provider 和凭据配置；可选按路由声明 `modalities` |
-| Pi | ✅ CLI | ✅ | OpenAI Chat Completions | ✅ `x-flowlet-client: pi` | ✅ | 可选声明模型 `input`；可部署原生扩展注入 `x-flowlet-session` |
+| Claude Code | ✅ CLI、多安装候选、版本 | ✅ | Anthropic Messages | ✅ User-Agent；官方 Session Header | ✅ | 主模型/快速模型/子 Agent 映射（接入时显式选择默认模型，不再支持 `[1m]` 长上下文） |
+| OpenCode | ✅ CLI + Desktop | ✅ | OpenAI Chat Completions | ✅ User-Agent 与原生 Session Header | ✅ | CLI/Desktop 共用 Provider 和凭据配置；主/快速模型显式选择，不写 `modalities` |
+| Pi | ✅ CLI | ✅ | OpenAI Chat Completions | ✅ `x-flowlet-client: pi` | ✅ | 可部署原生扩展注入 `x-flowlet-session`；不写模型 `input` 声明 |
 | Codex | ✅ Desktop + CLI | ✅ | Responses（一键写入 `~/.codex/config.toml` + `auth.json`，覆盖 CLI / Desktop / VS Code 插件） | ✅ User-Agent（`codex_cli_rs/`） | ✅，Desktop 与 CLI 分开识别 | 账号发现/授权/套餐用量/credits 查询与单账号删除（承载于渠道账号卡片伪账号行的详情抽屉；删除只移除 Flowlet 本地凭据与观测快照，不影响 Codex 端登录态） |
 | DeepSeek Harness | ✅ Web + Harness 目录 + 启动入口 | ✅，安全合并官方 YAML；Cordis 精确会话桥为显式可选高级能力（原生 Provider 路径不需要它） | OpenAI Chat Completions（原生 DeepSeek Provider 走 Anthropic Messages；`deepseek-flash` 等原生名按目录归一到规范 ID） | ✅ 官方 User-Agent | ✅，DSH v0–v4 原生会话；受管桥注入 `x-flowlet-session` 或直读原生 `x-deepseek-harness-session-id` 精确合并代理请求 | `dsh --profile headless` fresh task；暂不支持 resume |
 | Hermes Agent | ✅ CLI、版本 | ✅，写入 `~/.hermes/config.yaml` 的 `model:` 段与 `${HERMES_CUSTOM_…_API_KEY}` 引用，密钥写入 `~/.hermes/.env`，注入 `x-flowlet-client: hermes` | OpenAI Chat Completions（`provider: "custom"`） | ✅ `x-flowlet-client: hermes`（复用 OpenAI Python SDK 通用 UA，无法靠 UA 区分） | ✅，`~/.hermes/state.db` SQLite 会话与消息（默认 + 各命名 Profile） | `hermes chat --oneshot --yolo` fresh task；可选「精确会话关联」受管插件；暂不支持 resume |
@@ -199,8 +201,13 @@ Codex 账号的新增/重新授权通过独立 Codex CLI 的 `codex app-server` 
 
 - 检查当前配置是否指向 Flowlet；
 - 修改前备份 Flowlet 管理的字段；
-- 写入本地 Base URL、Client Token 和模型映射；
+- 写入本地 Base URL、Client Token 和用户在接入抽屉中显式选择的默认模型；
 - 恢复时保留用户后来新增的非 Flowlet 字段。
+
+默认模型必须从当前 Agent 协议下已开放的**规范模型 ID** 中选择：Claude Code 可分别选择
+主模型与快速模型（快速模型缺省等于主模型），其余 Agent 选择一个主模型。未选择时由 Rust
+按模型 id 字典序取第一个可用模型；没有可用模型时禁用一键接入并提示先在模型服务页开放模型。
+Flowlet 不再提供聚合模型或虚拟模型别名，也不会把这类名字写入客户端配置。
 
 DeepSeek Harness 的一键写入直接安全合并 `$DSH_HOME/settings.yaml` 与
 `$DSH_HOME/.credentials.yaml`：Flowlet 复用 DSH 的相邻文件锁协议，并使用原子替换和跨文件
@@ -210,16 +217,16 @@ DeepSeek Harness 的一键写入直接安全合并 `$DSH_HOME/settings.yaml` 与
 基础接入不要求 DSH Profile 已初始化，也不会安装插件。只有用户显式开启“精确会话关联”后，
 Flowlet 才部署受管 Cordis 桥；启用或关闭后需重启正在运行的 DSH，且可随时关闭或完整恢复。
 
-OpenCode 与 Pi 的“输入模态声明”默认关闭。开启后，Flowlet 根据 `flowlet-pro` / `flowlet-flash`
-当前启用路由的模型目录能力写入客户端官方字段：OpenCode 使用
-`modalities: { input: ["text", "image"], output: ["text"] }`，Pi 使用
-`input: ["text", "image"]`；没有图片候选的聚合模型只声明 `text`。OpenCode 需重启以刷新模型
-能力缓存；Pi 在打开模型选择器时重读 `models.json`。
+OpenCode 与 Pi 的“输入模态声明”已随聚合模型移除：Flowlet 不再写入 OpenCode 的
+`modalities` 或 Pi 的模型 `input`。接入抽屉只要求显式选择默认模型；客户端能力由所选单一
+模型自身的目录规格决定，图片请求进入代理后仍按模型目录能力过滤候选。DSH 的
+`contextWindow` 声明与 Claude Code 的 `[1m]` 长上下文同样已删除；高级配置区只保留
+会话扩展与 MCP 服务器。
 
 Codex 全系（Codex CLI、ChatGPT 桌面端、VS Code Codex 插件）共享同一份
 `~/.codex/config.toml` 与 `auth.json`，Flowlet 一键写入一次即覆盖三端：受管
 `[model_providers.flowlet]`（`wire_api = "responses"`、Base URL 指向本地代理、
-`requires_openai_auth = true`）、顶层 `model = "flowlet-pro"` 与
+`requires_openai_auth = true`）、顶层 `model = "<接入抽屉中选择的主模型>"` 与
 `disable_response_storage = true`（强制无状态，避免 `store`/`previous_response_id`
 破坏多账号路由），Client Token 写入 `auth.json` 的 `OPENAI_API_KEY`。写入前备份
 受管字段，恢复时还原此前的登录方式与配置（保留用户其它 provider 与注释）。
@@ -227,7 +234,7 @@ Codex 全系（Codex CLI、ChatGPT 桌面端、VS Code Codex 插件）共享同�
 
 Hermes Agent 的一键写入修改 `~/.hermes/config.yaml` 的 `model:` 段：写入
 `provider: "custom"`、`base_url` 指向本地代理，`default` 为用户在接入抽屉中选择的默认
-模型（`flowlet-pro` / `flowlet-flash`，默认 `flowlet-pro`），并写入
+模型（接入抽屉中显式选择的规范模型；未选择时按模型 id 字典序取第一个可用），并写入
 `api_key: ${HERMES_CUSTOM_<host:port>_API_KEY}` 引用（官方“Custom endpoint”约定，
 `custom_endpoint_key_env`），真实密钥落到 `~/.hermes/.env` 的同名变量；同时在
 `default_headers` 注入 `x-flowlet-client: hermes` 用于客户端归属。逐键 patch 保留
@@ -289,7 +296,7 @@ Cline、Continue、Open WebUI、Gemini CLI 等目前没有完整的一等安装�
 
 - 新增或删除渠道模板；
 - 渠道新增协议、余额、资源或 Responses 能力；
-- 修改 `FLOWLET_SUPPORTED_MODELS` 或聚合模型管理逻辑；
+- 修改 `FLOWLET_SUPPORTED_MODELS` 或路由模型身份规则；
 - 新增 Agent 接入卡片、全局配置写入或原生会话解析；
 - Flowlet 正式支持新的客户端协议；
 - “上游已支持”升级为“Flowlet 已正式支持”。

@@ -3,6 +3,19 @@ use super::config::{AuthStrategy, ChannelAccount, ChannelModel, ChannelPreset, P
 use super::presets::ModelSyncResult;
 use reqwest::Client;
 use serde::Deserialize;
+use std::error::Error;
+
+fn request_error_detail(error: reqwest::Error) -> String {
+    let error = error.without_url();
+    let mut detail = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        detail.push_str(": ");
+        detail.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    detail
+}
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct OpenAiModelsResponse {
@@ -36,6 +49,10 @@ struct OpenAiModelMetadata {
     name: Option<String>,
     #[serde(default)]
     context_length: Option<i64>,
+    #[serde(default)]
+    max_output_tokens: Option<i64>,
+    #[serde(default)]
+    max_completion_tokens: Option<i64>,
     #[serde(default)]
     pricing: Option<serde_json::Value>,
     #[serde(default)]
@@ -74,7 +91,7 @@ pub async fn test_channel_connection(
         return Err("API Key 未配置".to_string());
     }
 
-    let client = crate::core::upstream_proxy::apply_to(Client::builder())
+    let client = crate::core::upstream_proxy::apply_to_account(Client::builder(), account)
         .and_then(|builder| {
             builder
                 .timeout(std::time::Duration::from_secs(10))
@@ -109,15 +126,16 @@ pub async fn test_channel_connection(
     {
         Ok(response) => response,
         Err(error) => {
+            let detail = request_error_detail(error);
             tracing::warn!(
                 channel_id = %account.channel_id,
                 method = "GET",
                 url = %url,
                 elapsed_ms = started_at.elapsed().as_millis() as u64,
-                error = %error,
+                error = %detail,
                 "test_connection: 上游请求失败"
             );
-            return Err(format!("GET {url} 请求失败: {error}"));
+            return Err(format!("GET {url} 请求失败: {detail}"));
         }
     };
 
@@ -191,7 +209,7 @@ pub async fn sync_deepseek_models(
         };
     }
 
-    let client = match crate::core::upstream_proxy::apply_to(Client::builder())
+    let client = match crate::core::upstream_proxy::apply_to_account(Client::builder(), account)
         .and_then(|builder| {
             builder
                 .timeout(std::time::Duration::from_secs(15))
@@ -315,7 +333,7 @@ pub async fn sync_openai_compatible_models(
         };
     };
     let url = models_url.unwrap_or_else(|| openai_models_url(base_url));
-    let client = match crate::core::upstream_proxy::apply_to(Client::builder())
+    let client = match crate::core::upstream_proxy::apply_to_account(Client::builder(), account)
         .and_then(|builder| {
             builder
                 .timeout(std::time::Duration::from_secs(
@@ -346,10 +364,11 @@ pub async fn sync_openai_compatible_models(
     let response = match request.send().await {
         Ok(response) => response,
         Err(error) => {
+            let detail = request_error_detail(error);
             return ModelSyncResult {
                 models_synced: 0,
                 models: Vec::new(),
-                errors: vec![format!("GET {url} 请求失败: {error}")],
+                errors: vec![format!("GET {url} 请求失败: {detail}")],
             };
         }
     };
@@ -401,7 +420,12 @@ pub async fn sync_openai_compatible_models(
                         context_window: metadata.and_then(|value| value.context_length),
                         max_output_tokens: metadata
                             .and_then(|value| value.top_provider.as_ref())
-                            .and_then(|value| value.max_completion_tokens),
+                            .and_then(|value| value.max_completion_tokens)
+                            .or_else(|| {
+                                metadata.and_then(|value| {
+                                    value.max_output_tokens.or(value.max_completion_tokens)
+                                })
+                            }),
                         pricing: metadata.and_then(|value| value.pricing.clone()),
                         supports_stream: true,
                         enabled: true,
@@ -440,7 +464,7 @@ pub async fn sync_qwen_models(
         };
     }
 
-    let client = match crate::core::upstream_proxy::apply_to(Client::builder())
+    let client = match crate::core::upstream_proxy::apply_to_account(Client::builder(), account)
         .and_then(|builder| {
             builder
                 .timeout(std::time::Duration::from_secs(15))

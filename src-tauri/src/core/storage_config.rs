@@ -334,8 +334,8 @@ impl Storage {
                     remark, resource_mode, resource_sync_mode, base_url_override,
                     anthropic_base_url_override, last_used_at, last_error,
                     credential_status, synced_models, models_synced_at, exposed_models,
-                    created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
+                    created_at, updated_at, use_upstream_proxy
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
                 "#,
                 params![
                     account.id,
@@ -358,6 +358,7 @@ impl Storage {
                     exposed_models_json,
                     account.created_at,
                     account.updated_at,
+                    account.use_upstream_proxy,
                 ],
             )?;
             if let Some(workspace_account_id) = account
@@ -406,7 +407,7 @@ impl Storage {
                     ca.remark, ca.resource_mode, ca.resource_sync_mode, ca.base_url_override, ca.anthropic_base_url_override,
                     defaults.openai_base_url, defaults.anthropic_base_url,
                     ca.last_used_at, ca.last_error, ca.credential_status, ca.synced_models, ca.models_synced_at, ca.exposed_models,
-                    ca.created_at, ca.updated_at
+                    ca.created_at, ca.updated_at, ca.use_upstream_proxy
              FROM channel_accounts ca
              LEFT JOIN channel_account_workspace_links links ON links.local_account_id = ca.id
              LEFT JOIN channel_account_workspace_defaults defaults ON defaults.workspace_account_id = links.workspace_account_id
@@ -445,6 +446,7 @@ impl Storage {
                 exposed_models,
                 created_at: row.get(21)?,
                 updated_at: row.get(22)?,
+                use_upstream_proxy: row.get(23)?,
             })
         })?;
         let mut accounts = Vec::new();

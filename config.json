@@ -65,8 +65,7 @@
   "network": {
     "upstream_proxy": {
       "enabled": false,
-      "url": "",
-      "no_proxy": ""
+      "url": ""
     }
   },
   "channels_config": {
@@ -269,9 +268,63 @@
           "balance": "https://openrouter.ai/api/v1/key",
           "credits": "https://openrouter.ai/api/v1/credits"
         }
+      },
+      {
+        "id": "vibetoken",
+        "name": "VibeToken",
+        "vendor": "vibetoken",
+        "platform_url": "https://vibetoken.cn/api-key",
+        "supported_protocols": [
+          "openai",
+          "responses"
+        ],
+        "openai_base_url": "https://vibetoken.cn/v1",
+        "anthropic_base_url": "",
+        "openai_auth": "bearer",
+        "anthropic_auth": "bearer",
+        "default_model": "",
+        "small_model": null,
+        "supports_model_list": true,
+        "supports_model_detail": false,
+        "supports_price_sync": false,
+        "supports_balance_query": true,
+        "supports_quota_query": false,
+        "supports_usage_query": false,
+        "supports_scrape_balance": false,
+        "endpoints": {
+          "models": "https://vibetoken.cn/v1/models",
+          "balance": "https://vibetoken.cn/api/v1/billing/balance"
+        }
+      },
+      {
+        "id": "openai-api",
+        "name": "ChatGPT API",
+        "vendor": "openai",
+        "platform_url": "https://platform.openai.com/api-keys",
+        "supported_protocols": [
+          "openai",
+          "responses"
+        ],
+        "openai_base_url": "https://api.openai.com/v1",
+        "anthropic_base_url": "",
+        "openai_auth": "bearer",
+        "anthropic_auth": "bearer",
+        "default_model": "gpt-6.1-sol",
+        "small_model": "gpt-6-luna",
+        "supports_model_list": true,
+        "supports_model_detail": false,
+        "supports_price_sync": false,
+        "supports_balance_query": false,
+        "supports_quota_query": false,
+        "supports_usage_query": false,
+        "supports_scrape_balance": false,
+        "endpoints": {
+          "models": "https://api.openai.com/v1/models"
+        }
       }
     ],
     "default_exposed_models": {
+      "openai-api": ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"],
       "longcat": ["LongCat-2.0", "LongCat-2.5"],
       "deepseek": ["deepseek-v4-flash", "deepseek-v4.1-flash", "deepseek-v4-flash-vision-exp", "deepseek-v4-pro"],
       "kimi": ["kimi-k3", "kimi-k2.7-code"],

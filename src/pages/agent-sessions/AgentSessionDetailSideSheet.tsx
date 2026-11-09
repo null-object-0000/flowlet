@@ -22,6 +22,7 @@ export function AgentSessionDetailSideSheet({
   onViewRequestLogs,
   onRefreshOverview,
   remote = false,
+  hostMode = "desktop",
 }: {
   session: AgentSessionRow;
   onClose: () => void;
@@ -29,15 +30,19 @@ export function AgentSessionDetailSideSheet({
   onRefreshOverview?: () => Promise<unknown> | void;
   /** 远端设备会话：只读同步快照，本地没有原生文件、请求日志与实时权限控制。 */
   remote?: boolean;
+  /** `web`：Docker / Web Host 的只读观测视图，没有本机原生会话与实时权限控制。 */
+  hostMode?: "desktop" | "web";
 }) {
   const { language, t } = useAppPreferences();
+  // Web Host 只有请求观测：不读取服务器本机的 Agent 原生会话，也不能控制本机进程。
+  const flowletOnly = hostMode === "web";
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | undefined>(undefined);
   // 抽屉内 5 秒自动刷新整份会话数据（不再按 Tab 拆分）。
   const refreshControl = useRefreshControl({ intervalMs: SESSION_AUTO_REFRESH_MS });
   const title = sessionDisplayTitle(session);
   const children = useAgentSessionChildren(session, !remote);
-  const nativeSummary = useAgentSessionNativeSummary(session);
-  const openCodePermissions = useOpenCodeSessionPermissions(session, !remote);
+  const nativeSummary = useAgentSessionNativeSummary(session, !flowletOnly);
+  const openCodePermissions = useOpenCodeSessionPermissions(session, !remote && !flowletOnly);
   const nativeUsage = session.nativeSummary ?? nativeSummary.data;
   const overviewMetrics = overviewSessionMetrics(session, nativeUsage);
   /** 刷新整份会话数据（静默版，不带动按钮 loading）。手动刷新与自动刷新共用；
@@ -76,7 +81,7 @@ export function AgentSessionDetailSideSheet({
       visible
       motion={false}
       width={DETAIL_SHEET_WIDTH}
-      title={<SessionHeader session={session} language={language} remote={remote} />}
+      title={<SessionHeader session={session} language={language} remote={remote} flowletOnly={flowletOnly} />}
       onCancel={onClose}
       footer={null}
       bodyStyle={{
@@ -107,6 +112,8 @@ export function AgentSessionDetailSideSheet({
             <OverviewStats metrics={overviewMetrics} language={language} />
             {remote ? (
               <RemoteSnapshotNotice session={session} />
+            ) : flowletOnly ? (
+              <FlowletOnlyNotice />
             ) : session.agentType === "opencode" ? (
               <OpenCodeApprovalSection session={session} permissions={openCodePermissions} />
             ) : null}
@@ -155,14 +162,16 @@ export function AgentSessionDetailSideSheet({
               </div>
             </DetailSection>
 
-            <NativeUsageSection
-              agentType={session.agentType}
-              data={nativeUsage}
-              loading={nativeSummary.isLoading}
-              error={nativeSummary.isError ? nativeSummary.error.message : null}
-              language={language}
-              onRetry={() => void nativeSummary.refetch()}
-            />
+            {flowletOnly ? null : (
+              <NativeUsageSection
+                agentType={session.agentType}
+                data={nativeUsage}
+                loading={nativeSummary.isLoading}
+                error={nativeSummary.isError ? nativeSummary.error.message : null}
+                language={language}
+                onRetry={() => void nativeSummary.refetch()}
+              />
+            )}
 
             {children.data && children.data.length > 0 ? (
               <ChildSessionsSection
@@ -479,7 +488,7 @@ function runtimeLabel(status: AgentSessionRow["runtimeStatus"], t: (key: string,
   return t("状态未知");
 }
 
-function SessionHeader({ session, language, remote = false }: { session: AgentSessionRow; language: "zh-CN" | "en-US"; remote?: boolean }) {
+function SessionHeader({ session, language, remote = false, flowletOnly = false }: { session: AgentSessionRow; language: "zh-CN" | "en-US"; remote?: boolean; flowletOnly?: boolean }) {
   const { t } = useAppPreferences();
   const title = sessionDisplayTitle(session);
   return (
@@ -489,12 +498,25 @@ function SessionHeader({ session, language, remote = false }: { session: AgentSe
         <strong className={styles.sessionTitle} title={title}>{title}</strong>
       </div>
       <div className={styles.meta}>
-        <span className={styles.state} data-state={session.runtimeStatus}><i />{runtimeLabel(session.runtimeStatus, t)}</span>
+        {/* Web Host 只有请求观测，没有本机原生运行态，不展示会误导的「状态未知」。 */}
+        {flowletOnly ? null : <span className={styles.state} data-state={session.runtimeStatus}><i />{runtimeLabel(session.runtimeStatus, t)}</span>}
         {remote ? <Tag size="small" color="blue">{t("远端设备")}</Tag> : null}
+        {flowletOnly ? <Tag size="small" color="blue">{t("仅 Flowlet 观测")}</Tag> : null}
         {!session.flowletObserved && session.nativeSummary?.sourceAvailable === false ? <Tag size="small" color="grey">{t("源文件已删除")}</Tag> : null}
         {remote ? <span>{t("来自 {device}", { device: session.remoteDeviceName ?? session.remoteDeviceId ?? "—" })}</span> : null}
         <span>{t("最近活跃：{time}", { time: formatFullTimestamp(session.activityAt, language) })}</span>
       </div>
+    </div>
+  );
+}
+
+/** Web Host 观测会话说明：解释为什么没有原生用量与实时权限。 */
+function FlowletOnlyNotice() {
+  const { t } = useAppPreferences();
+  return (
+    <div className={styles.remoteNotice}>
+      <strong>{t("仅 Flowlet 请求观测")}</strong>
+      <span>{t("Web 版从本实例的请求日志聚合会话，不读取服务器本机的 Agent 原生会话文件，因此不展示原生用量、原生时间线与实时权限确认。")}</span>
     </div>
   );
 }

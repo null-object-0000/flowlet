@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { AppError } from "../../shared/errors/AppError";
+import { isWebHost } from "../web/mode";
 
 /**
  * Default timeout (ms) for a single Tauri command invoke. The invoke itself
@@ -53,7 +54,9 @@ export function invokeCommand<TResult>(
 ): Promise<TResult> {
   let timer: ReturnType<typeof setTimeout> | undefined;
 
-  const call = invoke<TResult>(command, args).then(
+  const call = (isWebHost
+    ? import("../web/client").then(({ invokeWebCommand }) => invokeWebCommand<TResult>(command, args))
+    : invoke<TResult>(command, args)).then(
     (value) => value,
     (err: unknown) => {
       throw normalizeInvokeFailure(command, err);

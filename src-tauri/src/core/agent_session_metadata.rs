@@ -1919,10 +1919,8 @@ mod tests {
     fn hermes_listing_exposes_source_and_profile_columns() {
         use rusqlite::{params, Connection};
 
-        let directory = std::env::temp_dir().join(format!(
-            "flowlet-hermes-list-{}",
-            Uuid::new_v4()
-        ));
+        let directory =
+            std::env::temp_dir().join(format!("flowlet-hermes-list-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&directory).unwrap();
         let db_path = directory.join("state.db");
         let connection = Connection::open(&db_path).unwrap();

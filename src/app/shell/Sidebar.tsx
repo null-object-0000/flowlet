@@ -44,8 +44,11 @@ const navGroups: Array<{
   },
 ];
 
-export function Sidebar() {
+export function Sidebar({ availableRoutes }: { availableRoutes?: readonly string[] } = {}) {
   const { t } = useAppPreferences();
+  const groups = navGroups.map((group) => ({
+    ...group, items: group.items.filter((item) => !availableRoutes || availableRoutes.includes(item.to)),
+  })).filter((group) => group.items.length > 0);
   return (
     <div className={styles.inner}>
       <div className={styles.brand}>
@@ -57,7 +60,7 @@ export function Sidebar() {
       </div>
 
       <nav className={styles.nav} aria-label={t("主导航")}>
-        {navGroups.map((group) => (
+        {groups.map((group) => (
           <div key={group.label} className={styles.navGroup}>
             <div className={styles.navLabel}>{t(group.label)}</div>
             {group.items.map((item) => (
@@ -67,7 +70,7 @@ export function Sidebar() {
                 end={item.to === "/"}
                 className={({ isActive }) => (isActive ? navStyles.active : navStyles.link)}
               >
-                <span className={navStyles.icon}>{item.icon}</span>
+                <span className={navStyles.icon} aria-hidden="true">{item.icon}</span>
                 {t(item.label)}
                 {item.tag ? <span className={navStyles.tag}>{item.tag}</span> : null}
               </NavLink>
@@ -77,7 +80,7 @@ export function Sidebar() {
       </nav>
       <div className={styles.footer}>
         <NavLink to="/settings" className={({ isActive }) => (isActive ? navStyles.active : navStyles.link)}>
-          <span className={navStyles.icon}><IconSetting /></span>
+          <span className={navStyles.icon} aria-hidden="true"><IconSetting /></span>
           {t("应用设置")}
         </NavLink>
       </div>

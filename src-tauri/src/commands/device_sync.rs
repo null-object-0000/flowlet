@@ -28,32 +28,7 @@ pub(crate) async fn list_known_devices(
         .map_err(|_| "读取当前设备身份失败".to_string())?
         .clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let current_days = storage
-            .daily_usage_totals()
-            .map_err(|error| error.to_string())?;
-        let mut devices = storage
-            .imported_known_devices()
-            .map_err(|error| error.to_string())?;
-        devices.retain(|device| device.device_id != identity.device_id);
-        devices.insert(
-            0,
-            KnownDevice {
-                device_id: identity.device_id,
-                device_created_at: identity.created_at,
-                display_name: identity.display_name,
-                platform: identity.platform,
-                app_version: env!("CARGO_PKG_VERSION").to_string(),
-                is_current: true,
-                timezone_offset_minutes: chrono::Local::now().offset().local_minus_utc() / 60,
-                first_usage_date: current_days.first().map(|day| day.date.clone()),
-                last_usage_date: current_days.last().map(|day| day.date.clone()),
-                day_count: current_days.len() as i64,
-                request_count: current_days.iter().map(|day| day.request_count).sum(),
-                known_tokens: current_days.iter().map(|day| day.known_tokens).sum(),
-                last_seen_at: chrono::Utc::now().to_rfc3339(),
-            },
-        );
-        Ok(devices)
+        crate::core::device_usage::known_devices(&storage, &identity)
     })
     .await
     .map_err(|error| format!("读取设备目录任务失败：{error}"))?
@@ -86,26 +61,7 @@ pub(crate) async fn device_daily_usage(
         .device_id
         .clone();
     tauri::async_runtime::spawn_blocking(move || {
-        if device_id.as_deref() == Some(current_device_id.as_str()) {
-            // 本设备：代理 + Agent 原生合并口径。
-            return storage
-                .local_daily_usage_totals_with_native()
-                .map_err(|error| error.to_string());
-        }
-        if let Some(device_id) = device_id.as_deref() {
-            return storage
-                .imported_daily_usage(Some(device_id))
-                .map_err(|error| error.to_string());
-        }
-        let current = storage
-            .local_daily_usage_totals_with_native()
-            .map_err(|error| error.to_string())?;
-        let imported = storage
-            .imported_daily_usage(None)
-            .map_err(|error| error.to_string())?;
-        Ok(crate::core::device_identity::merge_daily_usage_totals(
-            current.into_iter().chain(imported),
-        ))
+        crate::core::device_usage::daily_usage(&storage, &current_device_id, device_id.as_deref())
     })
     .await
     .map_err(|error| format!("读取设备每日用量任务失败：{error}"))?
@@ -124,26 +80,7 @@ pub(crate) async fn device_hourly_usage(
         .device_id
         .clone();
     tauri::async_runtime::spawn_blocking(move || {
-        if device_id.as_deref() == Some(current_device_id.as_str()) {
-            // 本设备：代理 + Agent 原生合并口径。
-            return storage
-                .local_hourly_usage_totals_with_native()
-                .map_err(|error| error.to_string());
-        }
-        if let Some(device_id) = device_id.as_deref() {
-            return storage
-                .imported_hourly_usage(Some(device_id))
-                .map_err(|error| error.to_string());
-        }
-        let current = storage
-            .local_hourly_usage_totals_with_native()
-            .map_err(|error| error.to_string())?;
-        let imported = storage
-            .imported_hourly_usage(None)
-            .map_err(|error| error.to_string())?;
-        Ok(crate::core::device_identity::merge_hourly_usage_totals(
-            current.into_iter().chain(imported),
-        ))
+        crate::core::device_usage::hourly_usage(&storage, &current_device_id, device_id.as_deref())
     })
     .await
     .map_err(|error| format!("读取设备小时用量任务失败：{error}"))?

@@ -150,28 +150,20 @@ export type AgentGlobalConfigReport = {
   base_url?: string | null;
   auth_token_configured: boolean;
   api_key_configured: boolean;
+  /** 当前受管配置中回读的主模型（规范模型 ID）。 */
   primary_model?: string | null;
+  /** 当前受管配置中回读的快速模型；Claude Code 用于快速/子 Agent 组，OpenCode 对应 small_model。 */
   fast_model?: string | null;
   subagent_model?: string | null;
   /** 仅 Codex：config.toml 中 `model_catalog_json` 的当前值。 */
   model_catalog_path?: string | null;
   /** 仅 Codex：`model_catalog_json` 指向 Flowlet 生成的模型目录且文件在位。 */
   model_catalog_configured?: boolean;
-  /** 仅 Claude Code：主模型组是否已写入 `[1m]` 长上下文后缀。 */
-  primary_long_context?: boolean;
-  /** 仅 Claude Code：快速模型与子 Agent 模型组是否已写入 `[1m]` 后缀。 */
-  fast_long_context?: boolean;
-  /** @deprecated 兼容旧版；仅当两个模型组都开启 1M 时为 true。 */
-  long_context?: boolean;
   backup_available: boolean;
   external_environment_overrides: string[];
   error?: string | null;
   /** Pi / DeepSeek Harness：可选的 Flowlet 会话扩展是否在位。 */
   session_extension?: boolean;
-  /** 支持模型能力声明的 Agent：受管模型条目是否已声明聚合模型规格。 */
-  model_specs?: boolean;
-  /** 从当前受管配置解析出的 flowlet-pro / flowlet-flash 输入模态。 */
-  model_input_modalities?: Record<string, string[]>;
   /** 仅 DeepSeek Harness：从各 base Profile 受管块回读的 MCP 服务器列表。 */
   mcp_servers?: McpServerSpec[];
   /** 仅 OpenCode：用于发现 CLI/Desktop 进程内权限事件的全局插件是否在位。 */
@@ -180,20 +172,14 @@ export type AgentGlobalConfigReport = {
 
 /** 一键写入 Agent 全局配置的可选参数；某 Agent 不支持的选项会被忽略。 */
 export type AgentGlobalConfigOptions = {
-  /** @deprecated 兼容旧版；未提供独立选项时同时控制两个模型组。 */
-  longContext?: boolean;
-  /** 仅 Claude Code：主模型环境变量附加 `[1m]` 后缀。 */
-  primaryLongContext?: boolean;
-  /** 仅 Claude Code：快速模型和子 Agent 模型环境变量附加 `[1m]` 后缀。 */
-  fastLongContext?: boolean;
-  /** Pi / DeepSeek Harness：是否安装可选会话扩展。安装后可按会话归并请求。 */
+  /** Pi / DeepSeek Harness / Hermes：是否安装可选会话扩展。安装后可按会话归并请求。 */
   sessionExtension?: boolean;
-  /** 是否按 Agent 官方格式声明聚合模型规格与输入模态。 */
-  modelSpecs?: boolean;
   /** 仅 DeepSeek Harness：受管 MCP 服务器列表；空数组移除全部受管 MCP 块。 */
   mcpServers?: McpServerSpec[];
-  /** 仅 Hermes Agent：默认模型（`flowlet-pro` / `flowlet-flash`）。 */
+  /** 用户显式选择的默认主模型（规范模型 ID）。缺省时由 Rust 按当前可用模型取第一个。 */
   primaryModel?: string;
+  /** 仅 Claude Code：快速/子 Agent 组模型；缺省等于 primaryModel。 */
+  fastModel?: string;
 };
 
 /** Agent 最新版本查询结果（来自 npm registry，仅提示用，不执行升级）。 */

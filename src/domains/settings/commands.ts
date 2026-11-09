@@ -1,4 +1,5 @@
 import { invokeCommand, toAppError } from "../../platform/tauri/client";
+import { isWebHost } from "../../platform/web/mode";
 import type { LogCaptureConfig, UpstreamProxyConfig, UsageCostDisplayConfig } from "./types";
 import type { DatabaseCompactionResult, ModelPriceCurrencyEntry, ModelPriceInfo, ModelPriceTierInfo, StorageUsageSummary } from "./types";
 
@@ -25,8 +26,15 @@ export const DEFAULT_USAGE_COST_DISPLAY_CONFIG: UsageCostDisplayConfig = {
   exchange_rate_note: "",
 };
 
+/** Web Host stores this config in SQLite `app_meta` instead of config.json. */
+const USAGE_COST_DISPLAY_META_KEY = "usage_cost_display_config";
+
 export async function getUsageCostDisplayConfig(): Promise<UsageCostDisplayConfig> {
   try {
+    if (isWebHost) {
+      const raw = await invokeCommand<string | null>("read_app_meta", { key: USAGE_COST_DISPLAY_META_KEY });
+      return parseUsageCostDisplayMeta(raw);
+    }
     const raw = await invokeCommand<string>("read_config");
     return parseUsageCostDisplayConfig(raw);
   } catch (error) {
@@ -37,6 +45,13 @@ export async function getUsageCostDisplayConfig(): Promise<UsageCostDisplayConfi
 export async function setUsageCostDisplayConfig(config: UsageCostDisplayConfig): Promise<UsageCostDisplayConfig> {
   const normalized = normalizeUsageCostDisplayConfig(config);
   try {
+    if (isWebHost) {
+      await invokeCommand<void>("write_app_meta", {
+        key: USAGE_COST_DISPLAY_META_KEY,
+        value: JSON.stringify(normalized),
+      });
+      return normalized;
+    }
     const raw = await invokeCommand<string>("read_config");
     const parsed = JSON.parse(raw) as unknown;
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
@@ -50,6 +65,19 @@ export async function setUsageCostDisplayConfig(config: UsageCostDisplayConfig):
   }
 }
 
+/** Parse the `usage_cost_display_config` app_meta payload used by Web Host.
+ *  Missing, empty, malformed or non-object JSON falls back to defaults. */
+export function parseUsageCostDisplayMeta(raw: string | null | undefined): UsageCostDisplayConfig {
+  if (raw == null || raw === "") return { ...DEFAULT_USAGE_COST_DISPLAY_CONFIG };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { ...DEFAULT_USAGE_COST_DISPLAY_CONFIG };
+  }
+  return normalizeUsageCostDisplayConfig(parsed);
+}
+
 export function parseUsageCostDisplayConfig(rawConfigJson: string): UsageCostDisplayConfig {
   let parsed: unknown;
   try {
@@ -61,16 +89,16 @@ export function parseUsageCostDisplayConfig(rawConfigJson: string): UsageCostDis
   if (typeof usageCost !== "object" || usageCost === null || Array.isArray(usageCost)) {
     return { ...DEFAULT_USAGE_COST_DISPLAY_CONFIG };
   }
-  const value = usageCost as Record<string, unknown>;
-  return normalizeUsageCostDisplayConfig({
-    currency_conversion_enabled: value.currency_conversion_enabled === true,
-    display_currency: value.display_currency === "USD" ? "USD" : "CNY",
-    usd_to_cny_rate: value.usd_to_cny_rate,
-    exchange_rate_note: typeof value.exchange_rate_note === "string" ? value.exchange_rate_note : "",
-  });
+  return normalizeUsageCostDisplayConfig(usageCost);
 }
 
-function normalizeUsageCostDisplayConfig(config: Omit<UsageCostDisplayConfig, "usd_to_cny_rate"> & { usd_to_cny_rate: unknown }): UsageCostDisplayConfig {
+/** Normalize any JSON value into a `UsageCostDisplayConfig`. Shared by the
+ *  desktop config.json parser and the Web Host app_meta reader/writer so both
+ *  transports enforce identical validation rules. */
+export function normalizeUsageCostDisplayConfig(value: unknown): UsageCostDisplayConfig {
+  const config = typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
   const rate = typeof config.usd_to_cny_rate === "number" && Number.isFinite(config.usd_to_cny_rate)
     && config.usd_to_cny_rate > 0
     ? config.usd_to_cny_rate
@@ -79,14 +107,13 @@ function normalizeUsageCostDisplayConfig(config: Omit<UsageCostDisplayConfig, "u
     currency_conversion_enabled: config.currency_conversion_enabled === true,
     display_currency: config.display_currency === "USD" ? "USD" : "CNY",
     usd_to_cny_rate: rate,
-    exchange_rate_note: config.exchange_rate_note.trim(),
+    exchange_rate_note: typeof config.exchange_rate_note === "string" ? config.exchange_rate_note.trim() : "",
   };
 }
 
 export const DEFAULT_UPSTREAM_PROXY_CONFIG: UpstreamProxyConfig = {
   enabled: false,
   url: "",
-  no_proxy: "",
 };
 
 export async function getUpstreamProxyConfig(): Promise<UpstreamProxyConfig> {
@@ -118,7 +145,6 @@ export function parseUpstreamProxyConfig(raw: unknown): UpstreamProxyConfig {
   return normalizeUpstreamProxyConfig({
     enabled: value.enabled === true,
     url: typeof value.url === "string" ? value.url : "",
-    no_proxy: typeof value.no_proxy === "string" ? value.no_proxy : "",
   });
 }
 
@@ -126,11 +152,9 @@ function normalizeUpstreamProxyConfig(
   config: UpstreamProxyConfig | undefined,
 ): UpstreamProxyConfig {
   const url = typeof config?.url === "string" ? config.url.trim() : "";
-  const noProxy = typeof config?.no_proxy === "string" ? config.no_proxy.trim() : "";
   return {
     enabled: config?.enabled === true && url.length > 0,
     url,
-    no_proxy: noProxy,
   };
 }
 

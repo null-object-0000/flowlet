@@ -103,9 +103,7 @@ fn channel_resource(
             quota_windows = details.windows;
         }
     }
-    if account.channel_id == "qwen"
-        && account.resource_mode.as_deref() == Some("pay_as_you_go")
-    {
+    if account.channel_id == "qwen" && account.resource_mode.as_deref() == Some("pay_as_you_go") {
         if let Some(details) = snapshot
             .raw_scraped_json
             .as_deref()
@@ -241,11 +239,9 @@ fn parse_zhipu_paygo_details(raw: &str) -> Option<ZhipuPaygoDetails> {
     let bundle: Value = serde_json::from_str(raw).ok()?;
     // 到达这里说明 account_report 槽位已通过成功信封校验并被收进 bundle；
     // 余额可能为空或非数字（extractor 已兜底为 null），但账号仍是 API 按量付费。
-    bundle
-        .get("account_report")
-        .map(|_| ZhipuPaygoDetails {
-            plan: Some("API 按量付费".to_string()),
-        })
+    bundle.get("account_report").map(|_| ZhipuPaygoDetails {
+        plan: Some("API 按量付费".to_string()),
+    })
 }
 
 fn parse_qwen_freetier_details(raw: &str) -> Option<QwenFreetierDetails> {
@@ -458,7 +454,11 @@ mod tests {
         })
         .to_string();
         let details = parse_qwen_details(&raw).expect("qwen details");
-        let labels: Vec<&str> = details.windows.iter().map(|window| window.label.as_str()).collect();
+        let labels: Vec<&str> = details
+            .windows
+            .iter()
+            .map(|window| window.label.as_str())
+            .collect();
         assert_eq!(labels, vec!["7 天", "每月"]);
     }
 
@@ -511,7 +511,10 @@ mod tests {
         }).to_string();
         let details = parse_qwen_details(&expired).expect("expired details");
         assert_eq!(details.plan.as_deref(), Some("Token Plan 已过期"));
-        assert_eq!(details.expires_at.as_deref(), Some("2026-01-01T00:00:00+00:00"));
+        assert_eq!(
+            details.expires_at.as_deref(),
+            Some("2026-01-01T00:00:00+00:00")
+        );
         assert!(details.windows.is_empty());
 
         // 未订阅（接口返回空对象）：plan 标注未订阅，无窗口。
@@ -519,7 +522,8 @@ mod tests {
             "subscription": {"data":{"DataV2":{"data":{"data":{}}}}},
             "quota_config": {"data":{"DataV2":{"data":{"data":{"standard":{"weekly":10000}}}}}},
             "usage": {"data":{"DataV2":{"data":{"data":{"per1WeekPercentage":0.2}}}}}
-        }).to_string();
+        })
+        .to_string();
         let details = parse_qwen_details(&missing).expect("missing details");
         assert_eq!(details.plan.as_deref(), Some("Token Plan 未订阅"));
         assert!(details.windows.is_empty());

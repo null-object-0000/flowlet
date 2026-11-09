@@ -1,9 +1,6 @@
 use super::super::*;
 use super::AgentGlobalConfigAdapter;
 
-pub(in crate::core::agent_global_config) const PRIMARY_MODEL: &str = "flowlet-pro";
-pub(in crate::core::agent_global_config) const FAST_MODEL: &str = "flowlet-flash";
-const LONG_CONTEXT_SUFFIX: &str = "[1m]";
 const ACTIVE_BACKUP_FILE: &str = "claude-code-global-config-backup.json";
 const MANAGED_FIELDS: &[&str] = &[
     "ANTHROPIC_BASE_URL",
@@ -80,15 +77,13 @@ impl AgentGlobalConfigAdapter for ClaudeCodeAdapter {
         client_token: &str,
         options: Option<&AgentGlobalConfigOptions>,
     ) -> Result<AgentGlobalConfigReport, String> {
-        let (primary_long_context, fast_long_context) = options
-            .map(AgentGlobalConfigOptions::claude_long_context)
-            .unwrap_or((false, false));
+        let (primary_model, fast_model) = resolve_model_choices(options)?;
         apply_claude_code(
             &claude_settings_path()?,
             expected_base_url,
             client_token,
-            primary_long_context,
-            fast_long_context,
+            &primary_model,
+            &fast_model,
         )
     }
 
@@ -124,15 +119,10 @@ pub(in crate::core::agent_global_config) fn inspect_claude_code(
             subagent_model: None,
             model_catalog_path: None,
             model_catalog_configured: false,
-            primary_long_context: false,
-            fast_long_context: false,
-            long_context: false,
             backup_available,
             external_environment_overrides,
             error: None,
             session_extension: false,
-            model_specs: false,
-            model_input_modalities: BTreeMap::new(),
             opencode_permission_bridge: false,
             mcp_servers: Vec::new(),
         });
@@ -155,15 +145,10 @@ pub(in crate::core::agent_global_config) fn inspect_claude_code(
                 subagent_model: None,
                 model_catalog_path: None,
                 model_catalog_configured: false,
-                primary_long_context: false,
-                fast_long_context: false,
-                long_context: false,
                 backup_available,
                 external_environment_overrides,
                 error: Some(error),
                 session_extension: false,
-                model_specs: false,
-                model_input_modalities: BTreeMap::new(),
                 opencode_permission_bridge: false,
                 mcp_servers: Vec::new(),
             });
@@ -178,16 +163,14 @@ pub(in crate::core::agent_global_config) fn inspect_claude_code(
     )
 }
 
-fn has_long_context_suffix(value: &str) -> bool {
-    value.to_ascii_lowercase().ends_with(LONG_CONTEXT_SUFFIX)
-}
-
-fn strip_long_context_suffix(value: &str) -> &str {
-    if has_long_context_suffix(value) {
-        &value[..value.len() - LONG_CONTEXT_SUFFIX.len()]
-    } else {
-        value
-    }
+/// 判断一组受管环境变量是否都存在且指向同一个模型值。
+fn alias_group_matches(names: &[&str], string_value: &impl Fn(&str) -> Option<String>) -> bool {
+    // 每个变量都必须存在（缺 FABLE/OPUS 等别名视为未收敛），且值完全一致。
+    let mut values = names.iter().map(|name| string_value(name));
+    let Some(Some(first)) = values.next() else {
+        return false;
+    };
+    values.all(|value| value.as_deref() == Some(first.as_str()))
 }
 
 fn report_from_settings(
@@ -214,37 +197,28 @@ fn report_from_settings(
     let primary_model = string_value("ANTHROPIC_MODEL");
     let fast_model = string_value("ANTHROPIC_DEFAULT_HAIKU_MODEL");
     let subagent_model = string_value("CLAUDE_CODE_SUBAGENT_MODEL");
-    let primary_long_context = primary_model
-        .as_deref()
-        .is_some_and(has_long_context_suffix);
-    // 每个模型组允许独立携带 `[1m]`，但同组变量必须保持一致，避免 Claude Code
-    // 在主会话、模型切换、后台任务和子 Agent 之间使用不同的上下文预算。
-    let primary_aliases_match = [
-        "ANTHROPIC_MODEL",
-        "ANTHROPIC_DEFAULT_FABLE_MODEL",
-        "ANTHROPIC_DEFAULT_OPUS_MODEL",
-        "ANTHROPIC_DEFAULT_SONNET_MODEL",
-    ]
-    .iter()
-    .all(|name| {
-        string_value(name).as_deref().is_some_and(|value| {
-            strip_long_context_suffix(value) == PRIMARY_MODEL
-                && has_long_context_suffix(value) == primary_long_context
-        })
-    });
-    let fast_long_context = fast_model.as_deref().is_some_and(has_long_context_suffix);
-    let fast_aliases_match = [
-        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-        "ANTHROPIC_SMALL_FAST_MODEL",
-        "CLAUDE_CODE_SUBAGENT_MODEL",
-    ]
-    .iter()
-    .all(|name| {
-        string_value(name).as_deref().is_some_and(|value| {
-            strip_long_context_suffix(value) == FAST_MODEL
-                && has_long_context_suffix(value) == fast_long_context
-        })
-    });
+    // 聚合模型移除后不再有 `[1m]` 长上下文后缀：inspect 只校验同一模型组内的
+    // 各别名指向同一个模型。默认模型由用户在接入抽屉中显式选择，值本身无需是
+    // 某个固定常量，因此这里比较的是「组内一致」而非「等于内置模型名」。
+    let primary_known = primary_model.as_deref().is_some_and(is_known_catalog_model);
+    let fast_known = fast_model.as_deref().is_some_and(is_known_catalog_model);
+    let primary_aliases_match = alias_group_matches(
+        &[
+            "ANTHROPIC_MODEL",
+            "ANTHROPIC_DEFAULT_FABLE_MODEL",
+            "ANTHROPIC_DEFAULT_OPUS_MODEL",
+            "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        ],
+        &string_value,
+    );
+    let fast_aliases_match = alias_group_matches(
+        &[
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+            "ANTHROPIC_SMALL_FAST_MODEL",
+            "CLAUDE_CODE_SUBAGENT_MODEL",
+        ],
+        &string_value,
+    );
     let cloud_conflict = [
         "CLAUDE_CODE_USE_BEDROCK",
         "CLAUDE_CODE_USE_VERTEX",
@@ -264,6 +238,8 @@ fn report_from_settings(
         && !cloud_conflict
         && primary_aliases_match
         && fast_aliases_match
+        && primary_known
+        && fast_known
     {
         AgentGlobalConfigState::Flowlet
     } else if base_url
@@ -291,15 +267,10 @@ fn report_from_settings(
         subagent_model,
         model_catalog_path: None,
         model_catalog_configured: false,
-        primary_long_context,
-        fast_long_context,
-        long_context: primary_long_context && fast_long_context,
         backup_available,
         external_environment_overrides,
         error: None,
         session_extension: false,
-        model_specs: false,
-        model_input_modalities: BTreeMap::new(),
         opencode_permission_bridge: false,
         mcp_servers: Vec::new(),
     })
@@ -309,8 +280,8 @@ pub(in crate::core::agent_global_config) fn apply_claude_code(
     settings_path: &Path,
     expected_base_url: &str,
     client_token: &str,
-    primary_long_context: bool,
-    fast_long_context: bool,
+    primary_model: &str,
+    fast_model: &str,
 ) -> Result<AgentGlobalConfigReport, String> {
     if client_token.trim().is_empty() {
         return Err("Flowlet 默认 Client Token 未配置，无法写入 Claude Code".to_string());
@@ -367,28 +338,18 @@ pub(in crate::core::agent_global_config) fn apply_claude_code(
     ] {
         env.remove(name);
     }
-    // 主模型和快速模型分别控制 `[1m]`。Claude Code 据此为主会话、后台任务和
-    // 子 Agent 使用对应的上下文预算，并在发送请求前剥离后缀。
-    let primary_value = if primary_long_context {
-        format!("{PRIMARY_MODEL}{LONG_CONTEXT_SUFFIX}")
-    } else {
-        PRIMARY_MODEL.to_string()
-    };
-    let fast_value = if fast_long_context {
-        format!("{FAST_MODEL}{LONG_CONTEXT_SUFFIX}")
-    } else {
-        FAST_MODEL.to_string()
-    };
+    // 主模型组（主会话 / Fable / Opus / Sonnet 别名）与快速模型组（Haiku /
+    // SMALL_FAST / 子 Agent）分别写入用户选择的规范模型 ID。
     for (name, value) in [
         ("ANTHROPIC_BASE_URL", expected_base_url),
         ("ANTHROPIC_AUTH_TOKEN", client_token.trim()),
-        ("ANTHROPIC_MODEL", primary_value.as_str()),
-        ("ANTHROPIC_DEFAULT_FABLE_MODEL", primary_value.as_str()),
-        ("ANTHROPIC_DEFAULT_OPUS_MODEL", primary_value.as_str()),
-        ("ANTHROPIC_DEFAULT_SONNET_MODEL", primary_value.as_str()),
-        ("ANTHROPIC_DEFAULT_HAIKU_MODEL", fast_value.as_str()),
-        ("ANTHROPIC_SMALL_FAST_MODEL", fast_value.as_str()),
-        ("CLAUDE_CODE_SUBAGENT_MODEL", fast_value.as_str()),
+        ("ANTHROPIC_MODEL", primary_model),
+        ("ANTHROPIC_DEFAULT_FABLE_MODEL", primary_model),
+        ("ANTHROPIC_DEFAULT_OPUS_MODEL", primary_model),
+        ("ANTHROPIC_DEFAULT_SONNET_MODEL", primary_model),
+        ("ANTHROPIC_DEFAULT_HAIKU_MODEL", fast_model),
+        ("ANTHROPIC_SMALL_FAST_MODEL", fast_model),
+        ("CLAUDE_CODE_SUBAGENT_MODEL", fast_model),
     ] {
         env.insert(name.to_string(), Value::String(value.to_string()));
     }

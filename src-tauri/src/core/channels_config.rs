@@ -353,6 +353,18 @@ impl ChannelsConfig {
         })
     }
 
+    /// VibeToken billing lives outside the OpenAI /v1 prefix.
+    pub fn vibetoken_balance_endpoint(&self) -> String {
+        self.endpoint_or("vibetoken", "balance", |c| {
+            format!(
+                "{}/api/v1/billing/balance",
+                c.openai_base_url
+                    .trim_end_matches('/')
+                    .trim_end_matches("/v1")
+            )
+        })
+    }
+
     /// 获取 OpenRouter 账户 Credits 端点（官方 `GET /api/v1/credits`）。
     /// 该接口必须使用 Management Key；普通模型调用 Key 会返回 403。
     pub fn openrouter_credits_endpoint(&self) -> String {
@@ -568,8 +580,8 @@ impl ChannelsConfig {
                 // 智谱 models 端点在 /api/paas/v4 下，不以 /v1 结尾；模板已显式
                 // endpoints.models 覆盖，这里兜底保证外部配置缺失覆盖时仍正确。
                 format!("{}/models", c.openai_base_url.trim_end_matches('/'))
-            } else if c.id == "openrouter" {
-                // OpenRouter openai_base_url 以 /api/v1 结尾，直接拼 /models；
+            } else if matches!(c.id.as_str(), "openrouter" | "vibetoken") {
+                // OpenRouter / VibeToken 的 Base URL 以 /v1 结尾，直接拼 /models；
                 // 模板已显式 endpoints.models 覆盖，这里兜底防止外部配置缺失覆盖。
                 format!("{}/models", c.openai_base_url.trim_end_matches('/'))
             } else {
@@ -658,7 +670,10 @@ mod tests {
                 _ => {}
             }
         }
-        assert_eq!(checked, 4, "内置配置里的控制台抓取注入脚本数量发生变化，请同步检查");
+        assert_eq!(
+            checked, 4,
+            "内置配置里的控制台抓取注入脚本数量发生变化，请同步检查"
+        );
     }
 
     /// 内置 `config.json` 必须带上 `usage_retention` 段，否则新装用户的数据库会
@@ -776,7 +791,11 @@ mod tests {
         };
         let routes = config.merge_default_routes(&[], &[account.clone()], &config.presets);
         assert_eq!(routes.len(), 3);
-        for protocol in [ProtocolType::OpenAi, ProtocolType::Anthropic, ProtocolType::Responses] {
+        for protocol in [
+            ProtocolType::OpenAi,
+            ProtocolType::Anthropic,
+            ProtocolType::Responses,
+        ] {
             assert!(routes.iter().any(|route| {
                 route.client_protocol == protocol
                     && route.virtual_model_id == "LongCat-2.5"
@@ -784,10 +803,14 @@ mod tests {
             }));
         }
         account.exposed_models = Some(vec![]);
-        assert!(config.merge_default_routes(&[], &[account.clone()], &config.presets).is_empty());
+        assert!(config
+            .merge_default_routes(&[], &[account.clone()], &config.presets)
+            .is_empty());
         account.exposed_models = Some(vec!["LongCat-2.5".to_string()]);
         account.synced_models = Some(vec!["LongCat-2.0".to_string()]);
-        assert!(config.merge_default_routes(&[], &[account], &config.presets).is_empty());
+        assert!(config
+            .merge_default_routes(&[], &[account], &config.presets)
+            .is_empty());
     }
 
     #[test]
@@ -1039,7 +1062,10 @@ mod tests {
     fn official_channel_id_resolves_zhipu_glm() {
         assert_eq!(official_channel_id_for_model("glm-5.3"), Some("zhipu"));
         assert_eq!(official_channel_id_for_model("GLM-5.3"), Some("zhipu"));
-        assert_eq!(official_channel_id_for_model("glm-5.3-flash"), Some("zhipu"));
+        assert_eq!(
+            official_channel_id_for_model("glm-5.3-flash"),
+            Some("zhipu")
+        );
         assert_eq!(official_channel_id_for_model("glm-5.2"), Some("zhipu"));
         assert_eq!(official_channel_id_for_model("GLM-5.2"), Some("zhipu"));
         assert_eq!(official_channel_id_for_model("glm-4.7"), Some("zhipu"));
@@ -1374,7 +1400,12 @@ mod tests {
         let supported: std::collections::HashSet<String> =
             config.supported_models().into_iter().collect();
         // 即使传入配置只声明部分 Qwen 模型，内置目录仍提供完整白名单。
-        for expected in ["qwen3.7-max", "qwen3.6-flash", "qwen3.8-max", "qwen3.8-flash"] {
+        for expected in [
+            "qwen3.7-max",
+            "qwen3.6-flash",
+            "qwen3.8-max",
+            "qwen3.8-flash",
+        ] {
             assert!(supported.contains(expected), "缺少支持的模型: {expected}");
         }
         // 目录校验保证规范模型 ID 唯一。
@@ -1408,7 +1439,13 @@ mod tests {
         let config = ChannelsConfig::from_config_json(&json).unwrap();
         let supported: std::collections::HashSet<String> =
             config.supported_models().into_iter().collect();
-        for expected in ["glm-5.3", "glm-5.3-flash", "glm-5.2", "glm-4.7", "glm-4.5-air"] {
+        for expected in [
+            "glm-5.3",
+            "glm-5.3-flash",
+            "glm-5.2",
+            "glm-4.7",
+            "glm-4.5-air",
+        ] {
             assert!(supported.contains(expected), "缺少支持的模型: {expected}");
         }
         // 智谱 models 端点不以 /v1 结尾，显式 endpoints 覆盖优先。

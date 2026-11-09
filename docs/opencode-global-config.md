@@ -17,8 +17,8 @@ Windows 下 `~` 对应 `%USERPROFILE%`。
 
 ```jsonc
 {
-  "model": "flowlet/flowlet-pro",
-  "small_model": "flowlet/flowlet-flash",
+  "model": "flowlet/deepseek-v4-pro",
+  "small_model": "flowlet/deepseek-v4-flash",
   "provider": {
     "flowlet": {
       "name": "Flowlet",
@@ -27,13 +27,11 @@ Windows 下 `~` 对应 `%USERPROFILE%`。
         "baseURL": "http://127.0.0.1:18640/v1"
       },
       "models": {
-        "flowlet-pro": {
-          "name": "flowlet-pro",
-          "modalities": { "input": ["text", "image"], "output": ["text"] }
+        "deepseek-v4-pro": {
+          "name": "deepseek-v4-pro"
         },
-        "flowlet-flash": {
-          "name": "flowlet-flash",
-          "modalities": { "input": ["text"], "output": ["text"] }
+        "deepseek-v4-flash": {
+          "name": "deepseek-v4-flash"
         }
       }
     }
@@ -54,8 +52,9 @@ Windows 下 `~` 对应 `%USERPROFILE%`。
 
 状态接口只返回凭据是否存在，不返回 Token 内容。
 
-`modalities` 仅在用户开启“输入模态声明”时写入；上例表示当前 `flowlet-pro` 存在图片候选、
-`flowlet-flash` 仅有文本候选。能力来自 Flowlet 本地模型目录与当前启用路由，不由前端猜测。
+上例中的主模型与快速模型来自接入抽屉中的显式选择，必须是当前协议下已开放的规范模型 ID；
+快速模型缺省等于主模型。聚合模型移除后，Flowlet 不再写入 `modalities` 等输入模态声明：
+客户端能力由所选单一模型自身的目录规格决定，图片请求的候选过滤仍由代理按模型能力执行。
 
 ## 合并、备份与恢复
 

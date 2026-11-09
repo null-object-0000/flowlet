@@ -1,6 +1,12 @@
 {
   "schemaVersion": 1,
   "models": [
+    {"id": "gpt-6.1-sol", "ownerChannelId": "openai-api", "officialOwnerName": "OpenAI", "modelsCnProviderId": "openai", "aliases": []},
+    {"id": "gpt-6.1-terra", "ownerChannelId": "openai-api", "officialOwnerName": "OpenAI", "modelsCnProviderId": "openai", "aliases": []},
+    {"id": "gpt-6-astra", "ownerChannelId": "openai-api", "officialOwnerName": "OpenAI", "modelsCnProviderId": "openai", "aliases": []},
+    {"id": "gpt-6-sol", "ownerChannelId": "openai-api", "officialOwnerName": "OpenAI", "modelsCnProviderId": "openai", "aliases": []},
+    {"id": "gpt-6-luna", "ownerChannelId": "openai-api", "officialOwnerName": "OpenAI", "modelsCnProviderId": "openai", "aliases": []},
+
     { "id": "LongCat-2.0", "ownerChannelId": "longcat", "modelsCnProviderId": "longcat", "aliases": [] },
     { "id": "LongCat-2.5", "ownerChannelId": "longcat", "modelsCnProviderId": "longcat", "aliases": [] },
     { "id": "deepseek-v4-flash", "ownerChannelId": "deepseek", "modelsCnProviderId": "deepseek", "aliases": ["deepseek-v4-flash-0731"] },

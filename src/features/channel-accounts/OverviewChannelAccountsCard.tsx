@@ -1,3 +1,5 @@
+import type { AntigravityAccountReport } from "../../domains/agent/antigravity";
+import { AntigravityAccountRow } from "./AntigravityAccountView";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Badge, Button, Dropdown, Switch, Tag, Tooltip, Typography } from "@douyinfe/semi-ui-19";
@@ -34,15 +36,19 @@ type Props = {
   channels: ChannelPreset[];
   snapshots: AccountBalanceSnapshot[];
   codexAccounts?: CodexAccountReport[];
+  antigravityAccounts?: AntigravityAccountReport[];
+  antigravityError?: boolean;
+  onOpenAntigravity?: (accountId: string | null) => void;
   onCreate: (channelId: string) => void;
   onEdit: (accountId: string) => void;
   onToggle?: (accountId: string, enabled: boolean) => void;
   onDelete?: (accountId: string) => void;
   onOpenCodexAgent?: (accountId: string) => void;
   busy?: boolean;
+  desktopCapabilities?: boolean;
 };
 
-export function OverviewChannelAccountsCard({ accounts, channels, snapshots, codexAccounts, onCreate, onEdit, onToggle = () => undefined, onDelete = () => undefined, onOpenCodexAgent, busy = false }: Props) {
+export function OverviewChannelAccountsCard({ accounts, channels, snapshots, codexAccounts, antigravityAccounts = [], antigravityError = false, onOpenAntigravity, onCreate, onEdit, onToggle = () => undefined, onDelete = () => undefined, onOpenCodexAgent, busy = false, desktopCapabilities = true }: Props) {
   const { language, t } = useAppPreferences();
   const [showDisabledAccounts, setShowDisabledAccounts] = useState(false);
   const customScrapeChannelsQuery = useQuery({
@@ -74,10 +80,12 @@ export function OverviewChannelAccountsCard({ accounts, channels, snapshots, cod
     ? allAccounts
     : allAccounts.filter((account) => isChatGptAccount(account) || account.enabled);
 
+  const hasObservationAccounts = antigravityAccounts.length > 0;
+
   return (
     <OverviewModuleCard
       title={<span className={styles.cardTitle}>{t("渠道账号")} <em>{t("已启用 {enabled} / 共 {total} 个账号", { enabled: enabledCount, total: accounts.length })}</em></span>}
-      headerExtra={allAccounts.length > 0 ? (
+      headerExtra={(allAccounts.length > 0 || onOpenAntigravity) ? (
         <div className={styles.headerActions}>
           {hasDisabledAccounts ? (
             <div className={styles.disabledFilter}>
@@ -94,7 +102,7 @@ export function OverviewChannelAccountsCard({ accounts, channels, snapshots, cod
         </div>
       ) : undefined}
     >
-      {allAccounts.length > 0 ? visibleAccounts.length > 0 ? <OverviewListView>
+      {allAccounts.length > 0 || hasObservationAccounts ? visibleAccounts.length > 0 || hasObservationAccounts ? <OverviewListView>
         {visibleAccounts.map((account) => {
           const snapshot = snapshotByAccount.get(account.id);
           const isCodex = isChatGptAccount(account);
@@ -175,6 +183,9 @@ export function OverviewChannelAccountsCard({ accounts, channels, snapshots, cod
             />
           );
         })}
+        {antigravityAccounts.map((report) => <AntigravityAccountRow key={`antigravity-${report.account_id}`} account={report}
+          stale={antigravityError || Date.now() - Date.parse(report.updated_at) > 240_000}
+          onOpen={() => onOpenAntigravity?.(report.account_id)} />)}
       </OverviewListView> : (
         <div className={styles.filteredEmpty}>
           <strong>{t("暂无启用账号")}</strong>
@@ -184,10 +195,10 @@ export function OverviewChannelAccountsCard({ accounts, channels, snapshots, cod
         <div className={styles.emptyState}>
           <div className={styles.emptyCopy}>
             <strong>{t("选择一个渠道添加首个账号")}</strong>
-            <span>{t("API Key 仅保存在本机，保存前可以先测试连接。")}</span>
+            <span>{t(desktopCapabilities ? "API Key 仅保存在本机，保存前可以先测试连接。" : "API Key 保存在当前 Flowlet 服务，保存前可以先测试连接。")}</span>
           </div>
           <div className={styles.channelOptions}>
-            {EMPTY_CHANNEL_OPTIONS.map((channel) => (
+            {EMPTY_CHANNEL_OPTIONS.filter(channel => desktopCapabilities || !["chatgpt", "antigravity"].includes(channel.id)).map((channel) => (
               <button
                 key={channel.id}
                 type="button"
@@ -225,12 +236,15 @@ function AccountLogo({ channelId, name, syncStatus, tooltip }: { channelId: stri
 }
 
 const EMPTY_CHANNEL_OPTIONS = [
+  { id: "openai-api", name: "ChatGPT API", actionLabel: "添加 ChatGPT API" },
   { id: "longcat", name: "LongCat", actionLabel: "添加 LongCat" },
   { id: "deepseek", name: "DeepSeek", actionLabel: "添加 DeepSeek" },
   { id: "kimi", name: "Kimi", actionLabel: "添加 Kimi" },
   { id: "qwen", name: "Qwen", actionLabel: "添加 Qwen" },
   { id: "zhipu", name: "Z.AI", actionLabel: "添加 Z.AI" },
   { id: "openrouter", name: "OpenRouter", actionLabel: "添加 OpenRouter" },
+  { id: "vibetoken", name: "VibeToken", actionLabel: "添加 VibeToken" },
+  { id: "antigravity", name: "Antigravity", actionLabel: "添加 Antigravity" },
   { id: CHATGPT_CHANNEL_ID, name: "ChatGPT", actionLabel: "ChatGPT 授权登录" },
 ];
 

@@ -1,3 +1,9 @@
+# 构建提速说明（详见 docs/migration/build-perf.md）：
+# 这里刻意不配置 linker。本机 rustc 1.97.1 在 x86_64-unknown-linux-gnu 上默认已使用
+# 自带的 rust-lld（strace 证实 cc -> collect2 -> rust-lld -flavor gnu），无需额外的
+# mold/lld 配置；且本机无 sudo、系统无 mold/lld，无法安装。改构建耗时请优先看
+# src-tauri/Cargo.toml 的 [profile.dev]（debug 分级）而不是这里。
+
 [source.crates-io]
 replace-with = "rsproxy-sparse"
 

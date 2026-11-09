@@ -14,3 +14,9 @@
 .chatgpt { color: var(--flowlet-color-text); border: 1px solid var(--flowlet-color-border); background: var(--flowlet-color-surface-muted); }
 .chatgpt i { width: 21px; height: 21px; -webkit-mask: url("/icons/lobe/openai.svg") center / contain no-repeat; mask: url("/icons/lobe/openai.svg") center / contain no-repeat; }
 .fallback { color: var(--flowlet-color-text-secondary); background: #eef1f5; font-size: 13px; font-weight: 700; }
+
+.vibetoken { color: var(--flowlet-color-text); border: 1px solid var(--flowlet-color-border); background: var(--flowlet-color-surface); }
+.vibetoken i { width: 22px; height: 22px; background: currentColor; -webkit-mask: url("/icons/providers/vibetoken.svg") center / contain no-repeat; mask: url("/icons/providers/vibetoken.svg") center / contain no-repeat; }
+
+.antigravity { color: var(--flowlet-color-text); border: 1px solid var(--flowlet-color-border); background: var(--flowlet-color-surface-muted); }
+.antigravity i { width: 22px; height: 22px; background: currentColor; -webkit-mask: url("/icons/lobe/antigravity.svg") center / contain no-repeat; mask: url("/icons/lobe/antigravity.svg") center / contain no-repeat; }

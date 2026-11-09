@@ -4,7 +4,8 @@ import { backgroundTaskCommands } from "../../domains/background-task/commands";
 import { queryKeys } from "../../shared/query-keys";
 import { AGENT_SYNC_SCHEDULE_EVENT, getNextAgentSyncAt } from "./AgentDataAutoSync";
 
-export function useAgentSyncStatus() { return useQuery({ queryKey: queryKeys.backgroundTask.agentSyncStatus(), queryFn: backgroundTaskCommands.agentSyncStatus, refetchInterval: 15_000 }); }
+/** Agent 数据同步状态。Web Host 没有该后台任务，调用方可传 `enabled = false`。 */
+export function useAgentSyncStatus(enabled = true) { return useQuery({ queryKey: queryKeys.backgroundTask.agentSyncStatus(), queryFn: backgroundTaskCommands.agentSyncStatus, enabled, refetchInterval: enabled ? 15_000 : false }); }
 export function useAgentSyncSchedule() {
   const [nextAt, setNextAt] = useState<number | null>(getNextAgentSyncAt);
   useEffect(() => {

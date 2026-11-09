@@ -14,7 +14,7 @@
   -> SQLite 渠道预设迁移
   -> 账号创建、测试、保存
   -> 模型与余额同步
-  -> 默认开放模型和 Flowlet 档位路由
+  -> 默认开放模型和直接模型路由
   -> OpenAI / Anthropic / Responses 代理请求
   -> UI、图标、日志和回归测试
 ```
@@ -48,7 +48,10 @@
 | 余额端点 | — | `GET /user/balance` | `GET /v1/users/me/balance` | — | — | 普通 Key：`GET /api/v1/key`；Management Key：`GET /api/v1/credits` | — |
 | 自动余额 | 否 | 是 | 是 | 否 | 否 | 是 | 否 |
 | 资源模式 | Token 资源包 UI | 否 | 否 | API 按量付费 + Token Plan 订阅双模式（两种模式均由官方控制台自动同步：按量付费抓福利页余额与免费额度，Token Plan 抓订阅套餐端点） | API 按量付费（官方控制台自动同步余额与额度包） | 手动维护（按量付费） | 手动维护 |
-| 默认 Flowlet 档位 | `LongCat-2.0 → pro + flash` | `v4-pro → pro`、`v4-flash → flash` | `kimi-k3 → pro`、`kimi-k2.7-code → pro` | `qwen3.8-max → pro`、`qwen3.8-flash → flash`、`qwen3.7-max → pro`、`qwen3.7-flash → flash`、`qwen3.6-flash → flash`；Token Plan 账号为 `qwen3.8-max → pro`、`qwen3.6-flash → flash` | `glm-5.3 → pro`、`glm-5.3-flash → flash`、`glm-5.2 → pro`、`glm-4.7 → pro`、`glm-4.5-air → flash` | 天然支持全部白名单模型（`/models` 返回全部主流模型，用户显式勾选） | 无 |
+
+聚合模型 `flowlet-pro` / `flowlet-flash` 与对应档位映射已移除：新渠道不需要把渠道模型登记到任何
+聚合档位，只需按 `default_exposed_models` 登记默认开放模型；路由按规范模型身份生成，同一规范
+模型的多个上游变体自然形成候选池。
 
 这些差异应由能力字段和小型渠道适配函数表达，不要把 LongCat、DeepSeek 或 Kimi 的特殊响应结构扩散到通用代理代码。
 
@@ -117,6 +120,38 @@ Token Plan 模式时自动写入覆盖。两种资源模式均由官方控制台
 不开放为可路由模型（白名单约束不变）。存量 Qwen 按量付费账号启动时统一迁移为
 `resource_sync_mode = "auto"`（此前仅有手动维护，无自动数据可丢）。
 
+### ChatGPT API（OpenAI）
+
+渠道 ID `openai-api`，展示名 ChatGPT API，使用官方项目 API Key。支持
+`https://api.openai.com/v1/chat/completions` 和 `/v1/responses`，模型列表为
+`GET /v1/models`，均使用 Bearer 鉴权；不声明 Anthropic 或 API Key 余额/配额查询能力。
+与 `chatgpt` 订阅观测伪账号分离，复用已固化且保留许可证的 OpenAI SVG。
+账号高级设置可选择直连或使用全局代理地址。新账号默认直连。升级时，已通过全局代理转发模型的账号迁移为使用代理，其他账号迁移为直连。显式选择代理时，模型转发、模型拉取、
+连接测试和 API 余额查询共用此设置，不受旧账号的全局开关影响。
+
+实际选中显式代理的模型请求在 `reqwest::Error::is_connect()` 建连失败后，允许等待
+150 ms 用同一个客户端和可克隆请求再连接一次。两次建连共用响应头超时预算和同一出口。
+上游 HTTP 状态、发送请求后的断连、响应读取失败及 SSE 中断均不触发重连。
+ChatGPT API 的最终网络错误日志及重连告警记录底层原因链，用于区分连接、隧道与 TLS
+故障；旧日志只有通用错误文本，不能据此倒推出某次故障的具体网络根因。
+
+
+余额仅支持手动维护，账号编辑页提供官方账单页链接。该渠道不创建浏览器采集窗口，
+不保存或使用控制台登录状态，不自动同步余额、赠送额度或到期时间。
+
+2026-10-30 核实的官方来源：
+- [订阅 API 额度与领取条件](https://developers.openai.com/api/docs/guides/chatgpt-api-credits)
+- [GPT-6.1 Sol](https://developers.openai.com/api/docs/models/gpt-6.1-sol)
+- [GPT-6.1 Terra](https://developers.openai.com/api/docs/models/gpt-6.1-terra)
+- [GPT-6 Astra](https://developers.openai.com/api/docs/models/gpt-6-astra)
+- [GPT-6 Sol](https://developers.openai.com/api/docs/models/gpt-6-sol)
+- [GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna)
+
+这五个模型登记在全局目录，规格和价格取本地 models.dev 的 OpenAI 目录。
+实际可用性仍取决于用户项目 `/models` 的返回及显式选择。Responses 仅沿用 Flowlet
+的无状态边界；工具调用的协议约束、额度领取与升级行为见 `docs/config.md`。
+测试仅使用本地 mock，不调用付费推理。
+
 ## 3. 配置与默认值
 
 ### 3.1 修改 `config.json`
@@ -180,7 +215,7 @@ Flowlet 运行时的渠道预设会进入 SQLite。新增或修改渠道时至�
 
 - `src-tauri/src/core/storage_config.rs`
   - `ensure_missing_presets`
-  - `sync_preset_protocol_config`
+  - `sync_preset_maintained_config`
   - 渠道能力字段的其他定向迁移
 - `src-tauri/src/lib.rs`
   - `build_app_state`
@@ -282,16 +317,18 @@ AccountEditorDrawer
 - 每个真实支持的协议都生成对应路由；
 - 全局第一个渠道账号生成的新路由默认开启；此后新增的任何官方或自定义渠道账号，
   路由仍自动创建但默认关闭，必须由用户手动开启；
-- 直接模型使用 `virtual_model_id == upstream_model`（入站模型名先按 `model-catalog.json`
-  归一到规范 ID 再匹配，别名写入 `upstream_model`、规范 ID 写入 `virtual_model_id`）；
-- 账号保存只补齐直连路由，不自动加入 `flowlet-pro` 或 `flowlet-flash`；
-- 用户可在模型服务页把任意已有渠道模型显式加入任一聚合模型；
+- 路由 `virtual_model_id` 写入规范模型 ID，`upstream_model` 保留上游原始 ID（入站模型名先按
+  `model-catalog.json` 归一到规范 ID 再匹配）；
+- 账号保存只补齐直连路由；持久化路由行只接受规范模型身份，`virtual_model_id` 与
+  `upstream_model` 归一后必须属于同一规范模型（高级规则的显式映射例外）；
+- 旧版本 `flowlet-pro` / `flowlet-flash` 路由会在升级迁移时改写为对应直接模型路由
+  （去重、保留相对顺序），不需要手工重建；
 - 已存在路由不被重复创建；
 - 用户关闭的路由不会因账号编辑或模型同步被重新开启；
 - 保存单账号不应无条件重写全部路由；
 - 自定义 Base URL 时，官方余额和模型同步是否应跳过必须明确。
 
-渠道模型加入 Flowlet 聚合模型后，还必须验证 `proxy_routing.rs` 和 `proxy_http.rs` 中的协议、账号健康状态和 `/models` 过滤条件。
+渠道模型生成直接路由后，还必须验证 `proxy_routing.rs` 和 `proxy_http.rs` 中的规范模型身份校验、协议、账号健康状态和 `/models` 过滤条件。
 
 ## 7. 前端接入
 
@@ -335,14 +372,14 @@ AccountEditorDrawer
 
 - `core::plugin_contract` 统一契约测试通过，确认注册表、预设、Capability Adapter、能力声明、
   scrape mode、默认模型与模型目录互相一致；
-- `config.json` 能解析渠道、端点、价格、默认模型和档位；
+- `config.json` 能解析渠道、端点、价格、默认模型与模型目录；
 - 全新 SQLite 能追加渠道；
 - 已有 SQLite 能迁移新增协议或端点；
 - 模型响应解析成功、空列表和错误响应；
 - 余额响应成功、业务错误和 HTTP 错误；
 - command 能分发到新渠道；
 - OpenAI 与 Anthropic `/models` 只暴露真实可用模型；
-- 直接模型和 Flowlet 聚合模型能够匹配健康账号；
+- 直接模型能按规范模型身份匹配健康账号；
 - 不支持的协议不会建立或命中路由。
 
 上游相关测试应使用本地 mock server，不能依赖真实 API Key 或产生费用。
@@ -352,7 +389,7 @@ AccountEditorDrawer
 - 渠道出现在选择器中；
 - 创建和编辑账号保留正确渠道；
 - 能力字段控制正确的资源 UI；
-- 默认直接路由和聚合路由生成正确，且只有全局第一个账号的新路由默认开启；
+- 默认直接路由生成正确，且只有全局第一个账号的新路由默认开启；
 - 重复合并保留用户的 `enabled` 和优先级；
 - 品牌图标和概览入口正常。
 
@@ -372,15 +409,14 @@ cargo test <相关测试名>
 再使用不含生产密钥的本地数据验证：
 
 1. 全新数据库启动；
-2. 从旧版本数据库升级；
+2. 从旧版本数据库升级（验证旧 `flowlet-pro` / `flowlet-flash` 路由改写为直接模型路由、去重与顺序）；
 3. 新增账号并测试连接；
 4. 保存后模型与余额同步；
 5. `/v1/models`；
 6. `/anthropic/v1/models`（渠道支持时）；
-7. 直接模型请求；
-8. `flowlet-pro` / `flowlet-flash` 请求；
-9. 禁用账号、禁用路由和无效 Key；
-10. 请求日志中的最终上游 URL、模型和鉴权改写。
+7. 规范模型 ID 请求与已登记别名请求；
+8. 禁用账号、禁用路由和无效 Key；
+9. 请求日志中的最终上游 URL、模型和鉴权改写。
 
 不得在没有用户授权时调用可能产生费用的真实模型接口。模型列表、余额等只读接口也应避免在自动化测试中依赖公网。
 
@@ -412,3 +448,28 @@ cargo test <相关测试名>
 - 哪些字段热更新、哪些需要重启；
 - 哪些检查实际通过；
 - 哪些检查因环境或外部条件未完成。
+
+
+## VibeToken 聚合渠道（2026-11-05）
+
+渠道 `vibetoken` 不作为模型官方归属。OpenAI Base URL 为 `https://vibetoken.cn/v1`，
+支持 Chat Completions 与无状态 Responses，均为 Bearer 鉴权；未声明 Anthropic。
+`GET /v1/models` 返回全量目录与 `vendor/<官方名>` 原始 ID，复用目录归一、全局白名单、
+用户显式选择及 synced_models 校验，不配置默认开放模型。快照资源保留独立上游 ID。
+模型同步读取 context_length、顶层 max_output_tokens / max_completion_tokens，不硬编码规格。
+`pricing` 保留原始数据（单位为每百万 Token），不套用 OpenRouter 的每 Token 价格算法。
+
+余额通过 `GET /api/v1/billing/balance` 自动同步，使用 `available`（已扣除 held），币种 CNY；
+数值为零仍视为成功同步，缺少 available 或错误响应不得伪造零余额。账号级 Base URL 覆盖时，
+沿用现有规则禁用官方余额查询。控制台为 `https://vibetoken.cn/api-key`。
+编译期 Capability Adapter 与插件注册表同步登记，旧外部配置与 SQLite 启动时幂等补齐预设，
+保留账号、Key、地址覆盖及路由启停/优先级。无数据库结构变更，更新应用并重启后可用。
+
+官方静态图标包 `@lobehub/icons-static-svg@1.102.0` 未包含 VibeToken，使用官网
+`https://vibetoken.cn/favicon.svg` 的原始像素 T 标志，固化为
+`public/icons/providers/vibetoken.svg`（官网镜像资源同步）；以 CSS mask 跟随 Flowlet 主题，
+不依赖运行时 CDN。来源日期、快照 SHA-256 与上游权利说明见同目录 README.md。
+
+来源：[快速开始](https://docs.vibetoken.cn/zh)、[模型 API](https://docs.vibetoken.cn/zh/api-reference/models)、
+[Responses](https://docs.vibetoken.cn/zh/api-reference/responses)、[计费](https://docs.vibetoken.cn/zh/api-reference/billing)。
+已用用户提供的 Key 只读验证模型与余额端点，未调用付费推理；Key 不进入仓库或 fixture。

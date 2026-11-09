@@ -2,13 +2,78 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { OverviewAgentAccessCard } from "./OverviewAgentAccessCard";
 
+// These tests verify configuration/runtime actions, not Semi's detached toast roots.
+// Async action completion must not create a portal after jsdom has been disposed.
+vi.mock("@douyinfe/semi-ui-19", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@douyinfe/semi-ui-19")>();
+  return { ...actual, Toast: { ...actual.Toast, success: vi.fn(), error: vi.fn() } };
+});
+
 const refetch = vi.fn();
 const mutateAsync = vi.fn();
 const runtimeMutateAsync = vi.fn();
 const agentMocks = vi.hoisted(() => ({
   codexEnvironment: null as unknown,
   deepseekRuntimeRunning: true,
+  routes: [] as unknown[],
 }));
+
+// 接入抽屉自行读取可用模型池与本地模型目录；这些查询由概览页/应用层提供，
+// 组件测试只验证抽屉的模型选择与写入编排，因此直接 mock 数据源。
+vi.mock("../exposed-models/useModels", () => ({
+  useRouteCandidates: () => ({ data: agentMocks.routes, isLoading: false, isError: false, error: null }),
+}));
+vi.mock("../channel-accounts", () => ({
+  useAccounts: () => ({
+    data: [
+      { id: "a1", channel_id: "deepseek", enabled: true, api_key: "sk-deepseek", credential_status: "healthy" },
+      { id: "a2", channel_id: "openai-api", enabled: true, api_key: "sk-openai", credential_status: "healthy" },
+    ],
+    isLoading: false,
+    isError: false,
+    error: null,
+  }),
+  useChannelPresets: () => ({
+    data: [
+      { id: "deepseek", supported_protocols: ["openai", "anthropic"] },
+      { id: "openai-api", supported_protocols: ["openai", "responses"] },
+    ],
+    isLoading: false,
+    isError: false,
+    error: null,
+  }),
+}));
+vi.mock("../../domains/modelCatalog/query", () => ({
+  useLocalModelsCnCatalog: () => ({ data: null, isLoading: false, isError: false, error: null, refetch: vi.fn() }),
+}));
+
+function route(
+  id: string,
+  virtualModel: string,
+  channelId: string,
+  accountId: string,
+  protocol: "openai" | "anthropic" | "responses",
+) {
+  return {
+    id,
+    virtual_model_id: virtualModel,
+    upstream_model: virtualModel,
+    channel_id: channelId,
+    account_id: accountId,
+    client_protocol: protocol,
+    priority: 0,
+    enabled: true,
+    created_at: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-01-01T00:00:00.000Z",
+  };
+}
+
+const AVAILABLE_ROUTES = [
+  route("pro-openai", "deepseek-v4-pro", "deepseek", "a1", "openai"),
+  route("pro-anthropic", "deepseek-v4-pro", "deepseek", "a1", "anthropic"),
+  route("flash-openai", "deepseek-v4-flash", "deepseek", "a1", "openai"),
+  route("sol-responses", "gpt-6-sol", "openai-api", "a2", "responses"),
+];
 
 vi.mock("./useAgentEnvironment", () => ({
   useAgentEnvironments: vi.fn(() => new Map([
@@ -19,7 +84,7 @@ vi.mock("./useAgentEnvironment", () => ({
     ["deepseek-harness", { data: { agent_id: "deepseek-harness", agent_name: "DeepSeek Harness", installed: true, runtime_running: agentMocks.deepseekRuntimeRunning, runtime_managed: agentMocks.deepseekRuntimeRunning, runtime_command: "npx @deepseek-ai/dsh web --no-open", primary: { surface: "web", executable_path: "C:\\Users\\test\\AppData\\Local\\npm-cache\\_npx\\hash\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js", install_dir: "C:\\Users\\test\\AppData\\Local\\npm-cache\\_npx\\hash\\node_modules\\@deepseek-ai\\dsh", install_method: "npx", version: "0.1.0-rc.6", available_on_path: false, runner_executable: "C:\\Users\\test\\AppData\\Local\\npm-cache\\_npx\\hash\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js" }, installations: [{ surface: "web", executable_path: "C:\\Users\\test\\AppData\\Local\\npm-cache\\_npx\\hash\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js", install_dir: "C:\\Users\\test\\AppData\\Local\\npm-cache\\_npx\\hash\\node_modules\\@deepseek-ai\\dsh", install_method: "npx", version: "0.1.0-rc.6", available_on_path: false, runner_executable: "C:\\Users\\test\\AppData\\Local\\npm-cache\\_npx\\hash\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js" }] }, error: null, isError: false, isFetching: false, isLoading: false, refetch }],
   ])),
   useAgentGlobalConfig: (agentId: string | null) => ({
-    query: { data: agentId ? { agent_id: agentId, settings_path: agentId === "claude-code" ? "C:\\Users\\test\\.claude\\settings.json" : agentId === "opencode" ? "C:\\Users\\test\\.config\\opencode\\opencode.jsonc" : agentId === "pi" ? "C:\\Users\\test\\.pi\\agent\\models.json" : agentId === "deepseek-harness" ? "C:\\Users\\test\\.dsh\\settings.yaml" : "C:\\Users\\test\\.codex\\config.toml", credentials_path: agentId === "pi" ? "C:\\Users\\test\\.pi\\agent\\auth.json" : agentId === "opencode" ? "C:\\Users\\test\\.local\\share\\opencode\\auth.json" : agentId === "codex" ? "C:\\Users\\test\\.codex\\auth.json" : agentId === "deepseek-harness" ? "C:\\Users\\test\\.dsh\\.credentials.yaml" : null, settings_exists: true, state: "flowlet", base_url: agentId === "claude-code" ? "http://127.0.0.1:18640/anthropic" : "http://127.0.0.1:18640/v1", auth_token_configured: true, api_key_configured: agentId !== "claude-code", primary_model: agentId === "opencode" ? "flowlet/flowlet-pro" : "flowlet-pro", fast_model: agentId === "claude-code" ? "flowlet-flash" : agentId === "opencode" ? "flowlet/flowlet-flash" : null, subagent_model: agentId === "claude-code" ? "flowlet-flash" : null, model_catalog_path: agentId === "codex" ? "~/.codex/model-catalog.flowlet.json" : null, model_catalog_configured: agentId === "codex", opencode_permission_bridge: agentId === "opencode", backup_available: true, external_environment_overrides: [] } : undefined, error: null, isLoading: false, refetch },
+    query: { data: agentId ? { agent_id: agentId, settings_path: agentId === "claude-code" ? "C:\\Users\\test\\.claude\\settings.json" : agentId === "opencode" ? "C:\\Users\\test\\.config\\opencode\\opencode.jsonc" : agentId === "pi" ? "C:\\Users\\test\\.pi\\agent\\models.json" : agentId === "deepseek-harness" ? "C:\\Users\\test\\.dsh\\settings.yaml" : "C:\\Users\\test\\.codex\\config.toml", credentials_path: agentId === "pi" ? "C:\\Users\\test\\.pi\\agent\\auth.json" : agentId === "opencode" ? "C:\\Users\\test\\.local\\share\\opencode\\auth.json" : agentId === "codex" ? "C:\\Users\\test\\.codex\\auth.json" : agentId === "deepseek-harness" ? "C:\\Users\\test\\.dsh\\.credentials.yaml" : null, settings_exists: true, state: "flowlet", base_url: agentId === "claude-code" ? "http://127.0.0.1:18640/anthropic" : "http://127.0.0.1:18640/v1", auth_token_configured: true, api_key_configured: agentId !== "claude-code", primary_model: agentId === "claude-code" ? "deepseek-v4-pro" : agentId === "opencode" ? "flowlet/deepseek-v4-pro" : agentId === "pi" ? "deepseek-v4-flash" : agentId === "codex" ? "gpt-6-sol" : agentId === "deepseek-harness" ? "deepseek-v4-pro" : "deepseek-v4-flash", fast_model: agentId === "claude-code" ? "deepseek-v4-pro" : null, subagent_model: agentId === "claude-code" ? "deepseek-v4-pro" : null, model_catalog_path: agentId === "codex" ? "~/.codex/model-catalog.flowlet.json" : null, model_catalog_configured: agentId === "codex", opencode_permission_bridge: agentId === "opencode", backup_available: true, external_environment_overrides: [] } : undefined, error: null, isLoading: false, refetch },
     apply: { isPending: false, mutateAsync },
     restore: { isPending: false, mutateAsync },
   }),
@@ -54,6 +119,7 @@ describe("OverviewAgentAccessCard", () => {
     runtimeMutateAsync.mockClear();
     agentMocks.codexEnvironment = null;
     agentMocks.deepseekRuntimeRunning = true;
+    agentMocks.routes = AVAILABLE_ROUTES;
   });
   it("shows detected versions for the supported Agent surfaces", () => {
     render(<OverviewAgentAccessCard baseUrl="http://127.0.0.1:18640" clientToken="token" />);
@@ -92,28 +158,32 @@ describe("OverviewAgentAccessCard", () => {
     expect(screen.queryByRole("button", { name: "查看 Client Token" })).not.toBeInTheDocument();
   });
 
-  it("controls Claude Code 1M context independently for pro and flash models", () => {
+  it("lets Claude Code pick primary and fast models from anthropic models", () => {
     render(<OverviewAgentAccessCard baseUrl="http://127.0.0.1:18640" clientToken="token" />);
 
     fireEvent.click(screen.getByRole("button", { name: "配置 Claude Code" }));
-    // 可选能力统一收纳在折叠的「高级配置」区，需先展开。
-    fireEvent.click(screen.getByRole("button", { name: "高级配置（可选能力）" }));
-    const primarySwitch = screen.getByRole("switch", { name: "flowlet-pro 1M 长上下文" });
-    const fastSwitch = screen.getByRole("switch", { name: "flowlet-flash 1M 长上下文" });
-    expect(primarySwitch).not.toBeChecked();
-    expect(fastSwitch).not.toBeChecked();
+    // 两个选择器：主模型与快速模型，选项只取 anthropic 协议下已开放模型。
+    expect(screen.getByText("主模型")).toBeInTheDocument();
+    expect(screen.getByText("快速模型")).toBeInTheDocument();
+    expect(screen.getAllByText("deepseek-v4-pro").length).toBeGreaterThanOrEqual(2);
+    // 1M 长上下文等派生开关已移除。
+    expect(screen.queryByRole("button", { name: "高级配置（可选能力）" })).not.toBeInTheDocument();
 
-    fireEvent.click(primarySwitch);
+    fireEvent.click(screen.getByRole("button", { name: "重新写入 Flowlet 配置" }));
     expect(mutateAsync).toHaveBeenLastCalledWith({
-      primaryLongContext: true,
-      fastLongContext: false,
+      primaryModel: "deepseek-v4-pro",
+      fastModel: "deepseek-v4-pro",
     });
+  });
 
-    fireEvent.click(fastSwitch);
-    expect(mutateAsync).toHaveBeenLastCalledWith({
-      primaryLongContext: false,
-      fastLongContext: true,
-    });
+  it("disables one-click access when no model is open for the agent protocol", () => {
+    agentMocks.routes = [];
+    render(<OverviewAgentAccessCard baseUrl="http://127.0.0.1:18640" clientToken="token" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "配置 Codex" }));
+    expect(screen.getByText("当前没有可用的开放模型，请先在模型服务页开放模型。")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "重新写入 Flowlet 配置" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "恢复接入前配置" })).toBeEnabled();
   });
 
   it("opens the standard Codex agent sheet with CLI and Desktop surfaces", () => {
@@ -136,9 +206,12 @@ describe("OverviewAgentAccessCard", () => {
     expect(screen.getByText("config.toml 配置片段")).toBeInTheDocument();
     expect(screen.getByText("auth.json 凭据片段")).toBeInTheDocument();
     expect(screen.getByText("模型目录片段（保存为 ~/.codex/model-catalog.flowlet.json）")).toBeInTheDocument();
-    // config.toml 片段应包含 Responses 协议与模型目录配置（文本在 code 块内被拆分，用正则模糊匹配）。
+    // config.toml 片段应包含 Responses 协议、所选模型与模型目录配置（文本在 code 块内被拆分，用正则模糊匹配）。
+    expect(screen.getByText(/model\s*=\s*"gpt-6-sol"/, { selector: "code" })).toBeInTheDocument();
     expect(screen.getByText(/wire_api\s*=\s*"responses"/, { selector: "code" })).toBeInTheDocument();
     expect(screen.getByText(/model_catalog_json\s*=\s*"~\/.codex\/model-catalog.flowlet.json"/, { selector: "code" })).toBeInTheDocument();
+    // 模型目录片段按所选模型动态生成（不再来自已删除的 codex-models.json 静态快照）。
+    expect(screen.getByText(/"slug":\s*"gpt-6-sol"/, { selector: "code" })).toBeInTheDocument();
     // 全局配置区展示模型目录状态。
     expect(screen.getByText("模型目录")).toBeInTheDocument();
     expect(screen.getByText("已配置")).toBeInTheDocument();
@@ -166,8 +239,8 @@ describe("OverviewAgentAccessCard", () => {
     expect(screen.getByText("OpenCode CLI 与 Desktop 共用此全局配置")).toBeInTheDocument();
     expect(screen.getByText("C:\\Users\\test\\.config\\opencode\\opencode.jsonc")).toBeInTheDocument();
     expect(screen.getByText("C:\\Users\\test\\.local\\share\\opencode\\auth.json")).toBeInTheDocument();
-    expect(screen.getByText("flowlet/flowlet-pro")).toBeInTheDocument();
-    expect(screen.getByText("flowlet/flowlet-flash")).toBeInTheDocument();
+    // 主模型选择器回读配置值：`flowlet/<model>` 归一后仍命中选项里的规范模型 ID。
+    expect(screen.getByText("deepseek-v4-pro")).toBeInTheDocument();
     const permissionPluginRow = screen.getByText("权限插件").closest("div");
     expect(permissionPluginRow).not.toBeNull();
     expect(within(permissionPluginRow!).getByText("已安装")).toBeInTheDocument();
@@ -187,9 +260,11 @@ describe("OverviewAgentAccessCard", () => {
     expect(screen.getByText("C:\\Users\\test\\.pi\\agent\\models.json")).toBeInTheDocument();
     expect(screen.getByText("C:\\Users\\test\\.pi\\agent\\auth.json")).toBeInTheDocument();
     expect(screen.getByText("已接入 Flowlet")).toBeInTheDocument();
-    expect(screen.getAllByText("flowlet-pro").length).toBeGreaterThan(0);
+    // 主模型选择器回读配置中的模型，写回时显式携带所选规范模型 ID。
+    expect(within(screen.getByText("主模型").closest("div")!).getByText("deepseek-v4-flash")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "重新写入 Flowlet 配置" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "恢复接入前配置" })).toBeEnabled();
+    screen.getByRole("button", { name: "重新写入 Flowlet 配置" }).click();
+    expect(mutateAsync).toHaveBeenLastCalledWith({ primaryModel: "deepseek-v4-flash", sessionExtension: false });
     expect(screen.getByText("models.json Provider 片段")).toBeInTheDocument();
     expect(screen.getByText("settings.json 默认模型片段")).toBeInTheDocument();
   });
@@ -207,25 +282,18 @@ describe("OverviewAgentAccessCard", () => {
     expect(screen.getByRole("button", { name: "停止服务" })).toBeEnabled();
     fireEvent.click(screen.getByRole("button", { name: "停止服务" }));
     expect(runtimeMutateAsync).toHaveBeenCalledTimes(1);
-    // 两项增强能力只在高级配置中展示，避免与全局配置状态重复。
+    // 模型规格声明开关已删除，高级配置只剩会话关联一项。
     expect(screen.getByText("均未启用")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "高级配置（可选能力）" }));
     const sessionSwitch = screen.getByRole("switch", { name: "精确会话关联" });
     expect(sessionSwitch).not.toBeChecked();
     fireEvent.click(sessionSwitch);
     expect(mutateAsync).toHaveBeenLastCalledWith({
+      primaryModel: "deepseek-v4-pro",
       sessionExtension: true,
-      modelSpecs: false,
       mcpServers: [],
     });
-    const specsSwitch = screen.getByRole("switch", { name: "聚合模型规格" });
-    expect(specsSwitch).not.toBeChecked();
-    fireEvent.click(specsSwitch);
-    expect(mutateAsync).toHaveBeenLastCalledWith({
-      sessionExtension: false,
-      modelSpecs: true,
-      mcpServers: [],
-    });
+    expect(screen.queryByRole("switch", { name: "聚合模型规格" })).not.toBeInTheDocument();
     expect(screen.queryByRole("switch", { name: "交互确认桥" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "重新写入 Flowlet 配置" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "恢复接入前配置" })).toBeEnabled();
@@ -247,8 +315,8 @@ describe("OverviewAgentAccessCard", () => {
     expect(screen.getByText("chrome")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "写回 Flowlet" }));
     expect(mutateAsync).toHaveBeenLastCalledWith({
+      primaryModel: "deepseek-v4-pro",
       sessionExtension: false,
-      modelSpecs: false,
       mcpServers: [
         {
           id: "chrome",

@@ -27,11 +27,13 @@ export const accountCommands = {
     channel_id: string;
     api_key: string;
     base_url_override?: string | null;
+    use_upstream_proxy?: boolean | null;
   }): Promise<void> =>
     invokeCommand<void>("test_connection", {
       channelId: input.channel_id,
       apiKey: input.api_key,
       baseUrlOverride: input.base_url_override ?? null,
+      ...(input.use_upstream_proxy == null ? {} : { useUpstreamProxy: input.use_upstream_proxy }),
     }).catch(toAppErr("account_test_failed")),
 
   /** 用连接参数拉取渠道上游的模型列表（底层 /models）。与 testConnection 一样接收
@@ -41,6 +43,7 @@ export const accountCommands = {
     channel_id: string;
     api_key: string;
     base_url_override?: string | null;
+    use_upstream_proxy?: boolean | null;
   }): Promise<ModelSyncResult> =>
     invokeCommand<ModelSyncResult>(
       "fetch_channel_models",
@@ -48,6 +51,7 @@ export const accountCommands = {
         channelId: input.channel_id,
         apiKey: input.api_key,
         baseUrlOverride: input.base_url_override ?? null,
+        ...(input.use_upstream_proxy == null ? {} : { useUpstreamProxy: input.use_upstream_proxy }),
       },
     )
       .then((r) => ({ models_synced: r.models_synced, models: r.models, errors: r.errors }))

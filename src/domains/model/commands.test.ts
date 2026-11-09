@@ -163,7 +163,7 @@ describe("mergeDefaultRoutes", () => {
     expect(routes[0]).toBe(existing[0]);
   });
 
-  it.each(["LongCat-2.0", "LongCat-2.5"])("does not infer aggregate membership for %s", (modelId) => {
+  it.each(["LongCat-2.0", "LongCat-2.5"])("creates only direct routes for %s", (modelId) => {
     const longcatAccount = {
       ...account,
       id: "account-longcat",
@@ -450,7 +450,7 @@ describe("alias variant mapping (deepseek-v4-flash-0731 → deepseek-v4-flash)",
   });
 });
 
-describe("OpenRouter aggregate channel (vendor/model IDs)", () => {
+describe("OpenRouter aggregator channel (vendor/model IDs)", () => {
   const openrouterPreset = {
     id: "openrouter",
     vendor: "openrouter",
@@ -592,7 +592,7 @@ describe("reconcileAccountRoutes", () => {
       route("deepseek-v4-pro", "openai", { enabled: false, priority: 7 }),
     ];
     const next = reconcileAccountRoutes(existing, [account], [preset]);
-    // flash 路由被删除；pro 已有路由保留（含启停/优先级）；pro 的 anthropic 与 flowlet 聚合路由补齐。
+    // flash 路由被删除；pro 已有路由保留（含启停/优先级）；pro 的 anthropic 直接路由补齐。
     expect(next.some((item) => item.upstream_model === "deepseek-v4-flash")).toBe(false);
     const kept = next.find((item) => item.id === "route-deepseek-v4-pro-openai");
     expect(kept?.enabled).toBe(false);
@@ -803,5 +803,25 @@ describe("routesDiffer", () => {
     const a = [base];
     const b = [{ ...base, enabled: false, priority: 9 }];
     expect(routesDiffer(a, b)).toBe(false);
+  });
+});
+
+
+describe("VibeToken aggregation", () => {
+  it("keeps selected upstream IDs and limits routes to supported, synced resources", () => {
+    const rawIds = ["deepseek/deepseek-v4-pro", "deepseek/deepseek-v4-pro-0813", "moonshotai/kimi-k3", "zai/glm-5.3", "qwen/qwen3.5-27b"];
+    const account = { id: "vibe-account", channel_id: "vibetoken", api_key: "test-key", enabled: true, exposed_models: [...rawIds, "deepseek/deepseek-v4-flash"], synced_models: rawIds } as ChannelAccount;
+    const preset = { id: "vibetoken", supported_protocols: ["openai", "responses"], default_model: "" } as ChannelPreset;
+    const routes = mergeDefaultRoutes([], [account], [preset]);
+    expect(routes).toHaveLength(8);
+    expect(new Set(routes.map((r) => r.client_protocol))).toEqual(new Set(["openai", "responses"]));
+    expect(routes.filter((r) => r.virtual_model_id === "deepseek-v4-pro").map((r) => r.upstream_model)).toEqual([
+      "deepseek/deepseek-v4-pro", "deepseek/deepseek-v4-pro-0813", "deepseek/deepseek-v4-pro", "deepseek/deepseek-v4-pro-0813",
+    ]);
+    expect(routes.some((r) => r.upstream_model === "qwen/qwen3.5-27b" || r.virtual_model_id === "deepseek-v4-flash")).toBe(false);
+    expect(mergeDefaultRoutes([], [{ ...account, exposed_models: [] }], [preset])).toEqual([]);
+    const existing = { ...routes[0], enabled: false, priority: 17 };
+    const reconciled = reconcileAccountRoutes([existing], [account], [preset]);
+    expect(reconciled.find((r) => r.id === existing.id)).toMatchObject({ enabled: false, priority: 17 });
   });
 });

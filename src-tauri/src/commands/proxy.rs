@@ -50,6 +50,7 @@ pub(crate) async fn test_connection(
     channel_id: String,
     api_key: String,
     base_url_override: Option<String>,
+    use_upstream_proxy: Option<bool>,
 ) -> Result<(), String> {
     // 直接传入连接参数，这样新建账号（尚未保存）也能测试。
     // 仅做上游鉴权校验，不读写已保存的账号列表。
@@ -61,6 +62,7 @@ pub(crate) async fn test_connection(
         enabled: true,
         priority: 0,
         base_url_override,
+        use_upstream_proxy,
         ..Default::default()
     };
     let channels_config = state

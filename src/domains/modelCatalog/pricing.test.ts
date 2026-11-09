@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  aggregateCapabilitiesIntersection,
-  aggregateMaxPrice,
-  aggregateMaxStandardPrice,
-  aggregateMinLimits,
   buildPricingStrategyRows,
   effectiveWindowPricesAt,
   estimateCost,
@@ -21,7 +17,7 @@ import {
   selectOfficialPrice,
   weekdayRunGroups,
 } from "./pricing";
-import type { ModelsCnModel, ModelsCnPrice, ModelsCnProvider, ResolvedModel, ResolvedPrice } from "./types";
+import type { ModelsCnModel, ModelsCnPrice, ModelsCnProvider } from "./types";
 import type { PricingStrategyRow } from "./pricing";
 
 function makeResolvedPrice(overrides: Partial<Parameters<typeof resolvePrice>[0]> = {}) {
@@ -493,179 +489,6 @@ describe("findModelInCatalog", () => {
       providers: [makeProvider({ id: "qwen-cn", models: [makeModel({ id: "deepseek-flash" })] })],
     };
     expect(findModelInCatalog(catalog, "deepseek", "deepseek-v4.1-flash")).toBeNull();
-  });
-});
-
-/** 构造一个最简 ResolvedModel，便于聚合测试只关注目标字段。 */
-function makeResolved(overrides: Partial<ResolvedModel> = {}): ResolvedModel {
-  return {
-    providerId: "p",
-    providerName: "P",
-    modelId: "m",
-    modelName: "M",
-    description: null,
-    tokenizer: null,
-    specificationSource: "models-cn",
-    limits: { contextTokens: null, maxOutputTokens: null },
-    capabilities: { thinking: false, toolCalls: false, jsonOutput: false, inputModalities: [], outputModalities: [] },
-    aliases: [],
-    officialPrice: null,
-    allPrices: [],
-    supplementedFromModelsDev: false,
-    modelsDevReferenceUrl: null,
-    ...overrides,
-  };
-}
-
-function makeAggPrice(overrides: Partial<ResolvedPrice> = {}): ResolvedPrice {
-  return {
-    market: "china",
-    currency: "CNY",
-    unit: "1M_tokens",
-    rateType: "promotional",
-    dailyTimeRange: null,
-    effectiveFrom: null,
-    effectiveTo: null,
-    inputUncached: 2,
-    inputCached: 0.04,
-    inputCacheWrite: null,
-    inputCacheHit: null,
-    output: 8,
-    sourceUrl: "https://example.com",
-    retrievedAt: null,
-    ...overrides,
-  };
-}
-
-describe("aggregateMinLimits", () => {
-  it("returns the minimum of each limit across sub-models", () => {
-    const subs = [
-      makeResolved({ limits: { contextTokens: 100_000, maxOutputTokens: 8_000 } }),
-      makeResolved({ limits: { contextTokens: 50_000, maxOutputTokens: 16_000 } }),
-      makeResolved({ limits: { contextTokens: 200_000, maxOutputTokens: 4_000 } }),
-    ];
-    expect(aggregateMinLimits(subs)).toEqual({ contextTokens: 50_000, maxOutputTokens: 4_000 });
-  });
-
-  it("ignores null limits when computing min", () => {
-    const subs = [
-      makeResolved({ limits: { contextTokens: 100_000, maxOutputTokens: null } }),
-      makeResolved({ limits: { contextTokens: null, maxOutputTokens: 8_000 } }),
-    ];
-    expect(aggregateMinLimits(subs)).toEqual({ contextTokens: 100_000, maxOutputTokens: 8_000 });
-  });
-});
-
-describe("aggregateCapabilitiesIntersection", () => {
-  it("returns true only when every sub-model supports the capability", () => {
-    const subs = [
-      makeResolved({ capabilities: { thinking: true, toolCalls: true, jsonOutput: true, inputModalities: ["text", "image", "video"], outputModalities: ["text", "image"] } }),
-      makeResolved({ capabilities: { thinking: true, toolCalls: false, jsonOutput: true, inputModalities: ["text", "image"], outputModalities: ["text"] } }),
-    ];
-    expect(aggregateCapabilitiesIntersection(subs)).toEqual({
-      thinking: true,
-      toolCalls: false,
-      jsonOutput: true,
-      inputModalities: ["text", "image"],
-      outputModalities: ["text"],
-    });
-  });
-
-  it("returns all-false for empty sub-models", () => {
-    expect(aggregateCapabilitiesIntersection([])).toEqual({
-      thinking: false,
-      toolCalls: false,
-      jsonOutput: false,
-      inputModalities: [],
-      outputModalities: [],
-    });
-  });
-});
-
-describe("aggregateMaxPrice", () => {
-  it("returns the max of each price component across sub-models", () => {
-    const subs = [
-      makeResolved({ officialPrice: makeAggPrice({ inputUncached: 2, output: 8, inputCached: 0.04 }) }),
-      makeResolved({ officialPrice: makeAggPrice({ inputUncached: 5, output: 20, inputCached: 0.1 }) }),
-    ];
-    const result = aggregateMaxPrice(subs);
-    expect(result?.inputUncached).toBe(5);
-    expect(result?.output).toBe(20);
-    expect(result?.inputCached).toBe(0.1);
-  });
-
-  it("returns null when currencies differ", () => {
-    const subs = [
-      makeResolved({ officialPrice: makeAggPrice({ currency: "CNY" }) }),
-      makeResolved({ officialPrice: makeAggPrice({ currency: "USD" }) }),
-    ];
-    expect(aggregateMaxPrice(subs)).toBeNull();
-  });
-
-  it("drops cacheHit when any sub-model lacks it", () => {
-    const subs = [
-      makeResolved({ officialPrice: makeAggPrice({ inputCached: 0.04 }) }),
-      makeResolved({ officialPrice: makeAggPrice({ inputCached: null }) }),
-    ];
-    expect(aggregateMaxPrice(subs)?.inputCached).toBeNull();
-  });
-});
-
-describe("aggregateMaxStandardPrice", () => {
-  it("returns null when no sub-model has a standard price", () => {
-    const subs = [
-      makeResolved({ allPrices: [{ market: "china", currency: "CNY", unit: "1M_tokens", rateType: "promotional", input: { standard: 2 }, output: 8, sourceUrl: "u" }] }),
-    ];
-    expect(aggregateMaxStandardPrice(subs)).toBeNull();
-  });
-
-  it("picks the max from standard prices across sub-models", () => {
-    const subs = [
-      makeResolved({ allPrices: [{ market: "china", currency: "CNY", unit: "1M_tokens", rateType: "standard", input: { standard: 5, cacheHit: 0.1 }, output: 20, sourceUrl: "u" }] }),
-      makeResolved({ allPrices: [{ market: "china", currency: "CNY", unit: "1M_tokens", rateType: "standard", input: { standard: 10, cacheHit: 0.5 }, output: 50, sourceUrl: "u" }] }),
-    ];
-    const result = aggregateMaxStandardPrice(subs);
-    expect(result?.inputUncached).toBe(10);
-    expect(result?.output).toBe(50);
-    expect(result?.inputCached).toBe(0.5);
-  });
-
-  it("uses only the standard price active at the requested time", () => {
-    const subs = [
-      makeResolved({
-        allPrices: [
-          {
-            market: "china",
-            currency: "CNY",
-            unit: "1M_tokens",
-            rateType: "standard",
-            input: { standard: 1 },
-            output: 2,
-            effectiveTo: "2026-08-17T00:00:00+08:00",
-            sourceUrl: "u",
-          },
-          {
-            market: "china",
-            currency: "CNY",
-            unit: "1M_tokens",
-            rateType: "standard",
-            input: { standard: 3 },
-            output: 9,
-            effectiveFrom: "2026-08-17T00:00:00+08:00",
-            dailyTimeRange: {
-              label: "高峰时段",
-              timeZone: "Asia/Shanghai",
-              intervals: [{ start: "09:00", end: "12:00" }],
-            },
-            sourceUrl: "u",
-          },
-        ],
-      }),
-    ];
-
-    expect(aggregateMaxStandardPrice(subs, new Date("2026-08-16T15:59:59Z"))?.output).toBe(2);
-    expect(aggregateMaxStandardPrice(subs, new Date("2026-08-17T01:00:00Z"))?.output).toBe(9);
-    expect(aggregateMaxStandardPrice(subs, new Date("2026-08-17T04:00:00Z"))).toBeNull();
   });
 });
 

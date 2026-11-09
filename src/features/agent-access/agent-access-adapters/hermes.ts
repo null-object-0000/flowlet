@@ -1,4 +1,8 @@
-import type { AgentAccessAdapter } from "../agentAccessAdapters";
+import type { AgentAccessAdapter, AgentModelProtocol } from "../agentAccessAdapters";
+import { manualModelValue, modelOptions, modelSelectionOptions, selectedModelValue } from "./shared";
+
+/** Hermes 使用 OpenAI-compatible 端点；可用模型只取 openai 协议。 */
+const HERMES_PROTOCOLS: AgentModelProtocol[] = ["openai"];
 
 // 复刻 Hermes `custom_endpoint_key_env(identity)`：从 Base URL 提取 host:port，归一为
 // `[A-Z0-9]+`（其余字符折叠为单个 `_`、去首尾 `_`），生成 `HERMES_CUSTOM_<slug>_API_KEY`。
@@ -21,18 +25,6 @@ function hermesCustomKeyEnv(baseUrl: string): string {
   return slug ? `HERMES_CUSTOM_${slug}_API_KEY` : "HERMES_CUSTOM_API_KEY";
 }
 
-const HERMES_MODELS = [
-  { label: "flowlet-pro", value: "flowlet-pro" },
-  { label: "flowlet-flash", value: "flowlet-flash" },
-] as const;
-
-function currentModel(value: string | null | undefined): string {
-  const normalized = value?.trim();
-  return normalized && HERMES_MODELS.some((model) => model.value === normalized)
-    ? normalized
-    : "flowlet-pro";
-}
-
 // Hermes Agent（Nous Research）的全局配置在 `~/.hermes/config.yaml` 的 `model:` 段：
 // `provider: "custom"` + `base_url` 描述 OpenAI 兼容端点，`default` 是主模型，
 // `api_key` 是 `${HERMES_CUSTOM_<host:port>_API_KEY}` 引用（真实密钥在 `~/.hermes/.env`），
@@ -41,34 +33,49 @@ export const hermesAdapter: AgentAccessAdapter = {
   id: "hermes",
   installationName: () => "Hermes Agent CLI",
   configStatuses: () => [],
-  configControls: ({ globalConfig, t }) => [{
-    id: "session-extension",
-    label: t("精确会话关联"),
-    descriptions: [
-      t("Hermes 复用 OpenAI Python SDK，原生请求不携带会话标识；开启后 Flowlet 部署受管插件，为发往本地代理的请求注入会话头，使请求能按会话归并。"),
-      t("插件写入 ~/.hermes/plugins/flowlet-session-bridge/ 并在 plugins.enabled 注册；启用或关闭后需重启 Hermes（gateway 需 hermes gateway restart）。"),
-    ],
-    checked: globalConfig?.session_extension ?? false,
-    requiresRestart: true,
-    applyOptions: (checked) => ({ primaryModel: currentModel(globalConfig?.primary_model), sessionExtension: checked }),
-  }],
-  applyOptions: ({ globalConfig }) => ({
-    primaryModel: currentModel(globalConfig?.primary_model),
-    sessionExtension: globalConfig?.session_extension ?? false,
+  configControls: (context) => {
+    const primaryModel = selectedModelValue(modelOptions(context, HERMES_PROTOCOLS), context.globalConfig?.primary_model);
+    return [{
+      id: "session-extension",
+      label: context.t("精确会话关联"),
+      descriptions: [
+        context.t("Hermes 复用 OpenAI Python SDK，原生请求不携带会话标识；开启后 Flowlet 部署受管插件，为发往本地代理的请求注入会话头，使请求能按会话归并。"),
+        context.t("插件写入 ~/.hermes/plugins/flowlet-session-bridge/ 并在 plugins.enabled 注册；启用或关闭后需重启 Hermes（gateway 需 hermes gateway restart）。"),
+      ],
+      checked: context.globalConfig?.session_extension ?? false,
+      requiresRestart: true,
+      applyOptions: (checked) => ({
+        ...modelSelectionOptions(primaryModel),
+        sessionExtension: checked,
+      }),
+    }];
+  },
+  applyOptions: (context) => ({
+    ...modelSelectionOptions(selectedModelValue(modelOptions(context, HERMES_PROTOCOLS), context.globalConfig?.primary_model)),
+    sessionExtension: context.globalConfig?.session_extension ?? false,
   }),
-  modelSelector: ({ globalConfig }) => ({
-    value: currentModel(globalConfig?.primary_model),
-    options: HERMES_MODELS.map((model) => ({ label: model.label, value: model.value })),
-    applyOptions: (value) => ({ primaryModel: value, sessionExtension: globalConfig?.session_extension ?? false }),
-  }),
-  manualSnippets: ({ endpoint, token, displayedToken, globalConfig, t }) => {
-    const envKey = hermesCustomKeyEnv(endpoint);
-    const model = currentModel(globalConfig?.primary_model);
+  modelSelectors: (context) => {
+    const options = modelOptions(context, HERMES_PROTOCOLS);
+    return [{
+      id: "primary",
+      label: context.t("主模型"),
+      value: selectedModelValue(options, context.globalConfig?.primary_model),
+      options,
+      applyOptions: (value) => ({
+        ...modelSelectionOptions(value),
+        sessionExtension: context.globalConfig?.session_extension ?? false,
+      }),
+    }];
+  },
+  manualSnippets: (context) => {
+    const options = modelOptions(context, HERMES_PROTOCOLS);
+    const model = manualModelValue(options, context.globalConfig?.primary_model);
+    const envKey = hermesCustomKeyEnv(context.endpoint);
     const config = [
       "model:",
       '  provider: "custom"',
       `  default: "${model}"`,
-      `  base_url: "${endpoint}"`,
+      `  base_url: "${context.endpoint}"`,
       `  api_key: "\${${envKey}}"`,
       "  default_headers:",
       '    x-flowlet-client: "hermes"',
@@ -82,17 +89,17 @@ export const hermesAdapter: AgentAccessAdapter = {
     ].join("\n");
     return [
       {
-        label: t("config.yaml 配置片段"),
+        label: context.t("config.yaml 配置片段"),
         displayValue: config,
         copyValue: config,
       },
       {
-        label: t("~/.hermes/.env 凭据片段"),
-        displayValue: env(displayedToken),
-        copyValue: env(token),
+        label: context.t("~/.hermes/.env 凭据片段"),
+        displayValue: env(context.displayedToken),
+        copyValue: env(context.token),
       },
       {
-        label: t("精确会话关联说明"),
+        label: context.t("精确会话关联说明"),
         displayValue: bridgeNote,
         copyValue: bridgeNote,
       },

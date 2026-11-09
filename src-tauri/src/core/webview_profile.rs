@@ -349,10 +349,8 @@ mod tests {
     /// 也不碰 `main-webview` 或无关目录。
     #[test]
     fn reclaims_only_orphan_scrape_profiles() {
-        let root = std::env::temp_dir().join(format!(
-            "flowlet-webview-orphan-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("flowlet-webview-orphan-{}", uuid::Uuid::new_v4()));
         let live = root.join("scrape-webview-account-live");
         let orphan = root.join("scrape-webview-account-orphan");
         let main = root.join("main-webview");
@@ -360,8 +358,11 @@ mod tests {
         for dir in [&live, &orphan, &main, &unrelated] {
             std::fs::create_dir_all(dir.join("EBWebView").join("Default")).expect("create dir");
         }
-        std::fs::write(live.join("EBWebView").join("Default").join("Cookies"), b"live-login")
-            .expect("write live cookies");
+        std::fs::write(
+            live.join("EBWebView").join("Default").join("Cookies"),
+            b"live-login",
+        )
+        .expect("write live cookies");
         std::fs::write(
             orphan.join("EBWebView").join("Default").join("Cookies"),
             b"orphan-login",

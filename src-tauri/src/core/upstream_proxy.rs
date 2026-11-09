@@ -5,9 +5,11 @@
 //! 继承 shell 里 export 的 `HTTPS_PROXY`）。这里提供一份进程内全局配置，供各
 //! 处的 reqwest client 在构建时读取并注入代理。
 //!
-//! 边界：只作用于 Flowlet 自己发起的元数据/能力请求；本地代理的上游模型转发
-//! （`proxy.rs` 的 `Client`）不经过本配置，继续直连各渠道上游。
+//! 边界：元数据/能力请求使用本配置；模型转发仅在渠道 Adapter 显式声明时
+//! 使用本配置（当前仅 ChatGPT API）。其他渠道保留原有 HTTP Client 行为。
 
+use super::config::ChannelAccount;
+use hyper_util::client::proxy::matcher::Matcher;
 use jsonc_parser::cst::{CstInputValue, CstRootNode};
 use jsonc_parser::ParseOptions;
 use serde::{Deserialize, Serialize};
@@ -24,15 +26,12 @@ pub const UPSTREAM_PROXY_META_KEY: &str = "upstream_proxy_config";
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct UpstreamProxyConfig {
-    /// 是否启用上游代理。`false` 时所有请求直连。
+    /// 全局请求是否使用上游代理；账号可单独选择。
     #[serde(default)]
     pub enabled: bool,
     /// 代理地址，如 `http://127.0.0.1:7890`。仅支持 http/https。
     #[serde(default)]
     pub url: String,
-    /// 逗号分隔的直连白名单（host 或 host:port），命中的目标不走代理。可为空。
-    #[serde(default)]
-    pub no_proxy: String,
 }
 
 impl Default for UpstreamProxyConfig {
@@ -40,7 +39,6 @@ impl Default for UpstreamProxyConfig {
         Self {
             enabled: false,
             url: String::new(),
-            no_proxy: String::new(),
         }
     }
 }
@@ -48,7 +46,6 @@ impl Default for UpstreamProxyConfig {
 impl UpstreamProxyConfig {
     pub fn normalized(mut self) -> Self {
         self.url = self.url.trim().to_string();
-        self.no_proxy = self.no_proxy.trim().to_string();
         if self.url.is_empty() {
             self.enabled = false;
         }
@@ -92,8 +89,26 @@ pub fn set(config: UpstreamProxyConfig) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(test)]
+tokio::task_local! {
+    static TEST_CONFIG: UpstreamProxyConfig;
+}
+
+#[cfg(test)]
+pub(crate) async fn with_test_config<F: std::future::Future>(
+    config: UpstreamProxyConfig,
+    future: F,
+) -> F::Output {
+    TEST_CONFIG.scope(config, future).await
+}
+
 /// 读取当前进程内全局上游代理配置。
 pub fn current() -> UpstreamProxyConfig {
+    #[cfg(test)]
+    if let Ok(config) = TEST_CONFIG.try_with(Clone::clone) {
+        return config;
+    }
+
     store()
         .lock()
         .map(|guard| guard.clone())
@@ -121,15 +136,8 @@ pub fn merge_into_config_json(
             .object_value_or_set(),
     };
     let proxy_value = CstInputValue::Object(vec![
-        (
-            "enabled".to_string(),
-            CstInputValue::Bool(config.enabled),
-        ),
+        ("enabled".to_string(), CstInputValue::Bool(config.enabled)),
         ("url".to_string(), CstInputValue::String(config.url.clone())),
-        (
-            "no_proxy".to_string(),
-            CstInputValue::String(config.no_proxy.clone()),
-        ),
     ]);
     match network_object.get("upstream_proxy") {
         Some(property) => property.set_value(proxy_value),
@@ -175,11 +183,6 @@ pub fn from_config_json(value: &serde_json::Value) -> UpstreamProxyConfig {
             .and_then(|value| value.as_str())
             .unwrap_or("")
             .to_string(),
-        no_proxy: object
-            .get("no_proxy")
-            .and_then(|value| value.as_str())
-            .unwrap_or("")
-            .to_string(),
     }
     .normalized()
 }
@@ -195,13 +198,147 @@ pub fn apply_config(
     // 防御性校验：只接受 http/https，非法协议（如 socks5）直接拒绝，
     // 避免构建出 reqwest 在请求时才失败的 socks 代理。
     config.validate()?;
-    let proxy = reqwest::Proxy::all(&config.url)
+    let proxy = explicit_proxy(config)
         .map_err(|error| format!("上游代理地址无效（{}）：{error}", config.url))?;
-    let proxy = match reqwest::NoProxy::from_string(&config.no_proxy) {
-        Some(no_proxy) => proxy.no_proxy(Some(no_proxy)),
-        None => proxy,
-    };
     Ok(builder.proxy(proxy))
+}
+
+fn account_proxy_config(account: &ChannelAccount, legacy_uses_proxy: bool) -> UpstreamProxyConfig {
+    let mut config = current();
+    config.enabled = account
+        .use_upstream_proxy
+        .unwrap_or(config.is_active() && legacy_uses_proxy);
+    config
+}
+
+pub(crate) fn apply_to_account(
+    builder: reqwest::ClientBuilder,
+    account: &ChannelAccount,
+) -> Result<reqwest::ClientBuilder, String> {
+    let config = account_proxy_config(account, true);
+    if account.use_upstream_proxy.is_none() {
+        return apply_config(builder, &config);
+    }
+    config.validate()?;
+    apply_config(builder.no_proxy(), &config)
+}
+
+fn explicit_proxy(config: &UpstreamProxyConfig) -> Result<reqwest::Proxy, reqwest::Error> {
+    reqwest::Proxy::all(&config.url)
+}
+
+/// 保持模型转发的连接池、keepalive 与连接超时策略一致。
+pub(crate) fn model_client_builder() -> reqwest::ClientBuilder {
+    use std::time::Duration;
+    reqwest::Client::builder()
+        .pool_idle_timeout(Duration::from_secs(60))
+        .tcp_keepalive(Duration::from_secs(30))
+        .connect_timeout(Duration::from_secs(10))
+}
+
+type ModelClientCache = Option<(UpstreamProxyConfig, reqwest::Client)>;
+
+fn proxy_used(matcher: &Matcher, url: &str) -> Option<bool> {
+    let uri = url.parse().ok()?;
+    Some(matcher.intercept(&uri).is_some())
+}
+
+pub(crate) fn system_proxy_used(url: &str) -> Option<bool> {
+    static MATCHER: OnceLock<Matcher> = OnceLock::new();
+    proxy_used(MATCHER.get_or_init(Matcher::from_system), url)
+}
+
+/// 每个候选在发起请求前读取最新设置；同配置复用连接池，修改地址或开关后
+/// 下一次请求立即切换。已在途的请求继续持有原 Client，不因设置保存被中断。
+/// 代理连接失败必须作为原候选的网络错误处理，不能偷偷重试直连。
+pub(crate) fn model_forwarding_client(
+    account: &ChannelAccount,
+    original: &reqwest::Client,
+    url: &str,
+) -> Result<(reqwest::Client, Option<bool>, bool), String> {
+    let legacy_uses_proxy = super::channel_capability_adapter::channel_adapter(&account.channel_id)
+        .is_some_and(|adapter| adapter.uses_upstream_proxy_for_models);
+    let config = account_proxy_config(account, legacy_uses_proxy);
+    if account.use_upstream_proxy == Some(false) {
+        static DIRECT: OnceLock<Result<reqwest::Client, String>> = OnceLock::new();
+        let client = DIRECT
+            .get_or_init(|| {
+                model_client_builder()
+                    .no_proxy()
+                    .build()
+                    .map_err(|err| err.to_string())
+            })
+            .clone()?;
+        return Ok((client, Some(false), false));
+    }
+    if !config.enabled {
+        return Ok((original.clone(), system_proxy_used(url), false));
+    }
+    config.validate()?;
+    static CACHE: OnceLock<Mutex<ModelClientCache>> = OnceLock::new();
+    let mut cache = CACHE
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some((cached_config, client)) = cache.as_ref() {
+        if cached_config == &config {
+            return Ok((client.clone(), Some(true), true));
+        }
+    }
+    let client = model_client_builder()
+        .no_proxy()
+        .proxy(explicit_proxy(&config).map_err(|error| error.to_string())?)
+        .build()
+        .map_err(|error| error.to_string())?;
+    *cache = Some((config, client.clone()));
+    Ok((client, Some(true), true))
+}
+
+/// Retry only connector failures, before an upstream HTTP request could be sent.
+/// The existing outer timeout includes both attempts and this short backoff.
+pub(crate) async fn execute_model_request(
+    channel_id: &str,
+    client: &reqwest::Client,
+    request: reqwest::Request,
+    retry_proxy_connect: bool,
+) -> Result<reqwest::Response, reqwest::Error> {
+    let retry = retry_proxy_connect.then(|| request.try_clone()).flatten();
+    match client.execute(request).await {
+        Err(error) if error.is_connect() && retry.is_some() => {
+            tracing::warn!(channel_id, error = %model_network_error(channel_id, &error),
+                "Upstream connection failed before HTTP send; retrying once through the same client");
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+            client
+                .execute(retry.expect("retry request checked above"))
+                .await
+        }
+        result => result,
+    }
+}
+
+/// Retain OpenAI's connector cause chain without changing other channels' logs.
+pub(crate) fn model_network_error(channel_id: &str, error: &reqwest::Error) -> String {
+    use std::error::Error;
+    let mut detail = error.to_string();
+    if super::channel_capability_adapter::channel_adapter(channel_id)
+        .is_some_and(|adapter| adapter.uses_upstream_proxy_for_models)
+    {
+        detail.push_str(if error.is_connect() {
+            " [connect]"
+        } else {
+            " [after_connect]"
+        });
+        let mut source = error.source();
+        for _ in 0..6 {
+            let Some(cause) = source else {
+                break;
+            };
+            detail.push_str(": ");
+            detail.extend(cause.to_string().chars().take(256));
+            source = cause.source();
+        }
+    }
+    detail
 }
 
 /// 把当前进程内上游代理配置应用到 reqwest `ClientBuilder`。
@@ -227,7 +364,6 @@ pub fn command_env_overrides(config: &UpstreamProxyConfig) -> Vec<(String, Strin
         return Vec::new();
     }
     let url = config.url.trim().to_string();
-    let no_proxy = config.no_proxy.trim().to_string();
     let mut entries = Vec::with_capacity(8);
     for key in [
         "HTTPS_PROXY",
@@ -240,7 +376,7 @@ pub fn command_env_overrides(config: &UpstreamProxyConfig) -> Vec<(String, Strin
         entries.push((key.to_string(), url.clone()));
     }
     for key in ["NO_PROXY", "no_proxy"] {
-        entries.push((key.to_string(), no_proxy.clone()));
+        entries.push((key.to_string(), String::new()));
     }
     entries
 }
@@ -250,7 +386,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_network_upstream_proxy_from_config_json() {
+    fn parses_network_upstream_proxy_with_legacy_fields() {
         let config = from_config_json(&serde_json::json!({
             "network": {
                 "upstream_proxy": {
@@ -262,7 +398,6 @@ mod tests {
         }));
         assert!(config.enabled);
         assert_eq!(config.url, "http://127.0.0.1:7890");
-        assert_eq!(config.no_proxy, "localhost,127.0.0.1");
     }
 
     #[test]
@@ -278,7 +413,6 @@ mod tests {
         let config = UpstreamProxyConfig {
             enabled: true,
             url: "  ".to_string(),
-            no_proxy: String::new(),
         }
         .normalized();
         assert!(!config.enabled);
@@ -290,14 +424,12 @@ mod tests {
         let valid = UpstreamProxyConfig {
             enabled: true,
             url: "http://127.0.0.1:7890".to_string(),
-            no_proxy: String::new(),
         };
         assert!(valid.validate().is_ok());
 
         let socks = UpstreamProxyConfig {
             enabled: true,
             url: "socks5://127.0.0.1:7890".to_string(),
-            no_proxy: String::new(),
         };
         assert!(socks.validate().unwrap_err().contains("仅支持 http/https"));
     }
@@ -309,17 +441,13 @@ mod tests {
             &UpstreamProxyConfig {
                 enabled: true,
                 url: "http://127.0.0.1:7890".to_string(),
-                no_proxy: String::new(),
             },
         )
         .expect("apply proxy");
         assert!(builder.build().is_ok());
 
-        let builder = apply_config(
-            reqwest::Client::builder(),
-            &UpstreamProxyConfig::default(),
-        )
-        .expect("no proxy");
+        let builder = apply_config(reqwest::Client::builder(), &UpstreamProxyConfig::default())
+            .expect("no proxy");
         assert!(builder.build().is_ok());
     }
 
@@ -330,7 +458,6 @@ mod tests {
             &UpstreamProxyConfig {
                 enabled: true,
                 url: "socks5://127.0.0.1:7890".to_string(),
-                no_proxy: String::new(),
             },
         )
         .expect_err("socks must be rejected");
@@ -349,7 +476,6 @@ mod tests {
             &UpstreamProxyConfig {
                 enabled: true,
                 url: "http://127.0.0.1:7890".to_string(),
-                no_proxy: "localhost".to_string(),
             },
         )
         .expect("merge");
@@ -357,8 +483,11 @@ mod tests {
         assert_eq!(value["bind"]["port"], 18640);
         assert_eq!(value["usage_cost"]["currency_conversion_enabled"], false);
         assert_eq!(value["network"]["upstream_proxy"]["enabled"], true);
-        assert_eq!(value["network"]["upstream_proxy"]["url"], "http://127.0.0.1:7890");
-        assert_eq!(value["network"]["upstream_proxy"]["no_proxy"], "localhost");
+        assert_eq!(
+            value["network"]["upstream_proxy"]["url"],
+            "http://127.0.0.1:7890"
+        );
+        assert!(value["network"]["upstream_proxy"].get("no_proxy").is_none());
 
         // 再次覆盖写入应更新而非产生重复键。
         let merged_again = merge_into_config_json(
@@ -366,13 +495,15 @@ mod tests {
             &UpstreamProxyConfig {
                 enabled: false,
                 url: "http://127.0.0.1:7891".to_string(),
-                no_proxy: String::new(),
             },
         )
         .expect("re-merge");
         let value: serde_json::Value = serde_json::from_str(&merged_again).expect("valid json");
         assert_eq!(value["network"]["upstream_proxy"]["enabled"], false);
-        assert_eq!(value["network"]["upstream_proxy"]["url"], "http://127.0.0.1:7891");
+        assert_eq!(
+            value["network"]["upstream_proxy"]["url"],
+            "http://127.0.0.1:7891"
+        );
         assert_eq!(value["bind"]["port"], 18640);
     }
 
@@ -381,7 +512,6 @@ mod tests {
         let overrides = command_env_overrides(&UpstreamProxyConfig {
             enabled: true,
             url: "http://127.0.0.1:7890".to_string(),
-            no_proxy: "localhost".to_string(),
         });
         let map: std::collections::HashMap<&str, &str> = overrides
             .iter()
@@ -390,7 +520,7 @@ mod tests {
         assert_eq!(map.get("HTTPS_PROXY"), Some(&"http://127.0.0.1:7890"));
         assert_eq!(map.get("HTTP_PROXY"), Some(&"http://127.0.0.1:7890"));
         assert_eq!(map.get("ALL_PROXY"), Some(&"http://127.0.0.1:7890"));
-        assert_eq!(map.get("NO_PROXY"), Some(&"localhost"));
+        assert_eq!(map.get("NO_PROXY"), Some(&""));
 
         assert!(command_env_overrides(&UpstreamProxyConfig::default()).is_empty());
     }

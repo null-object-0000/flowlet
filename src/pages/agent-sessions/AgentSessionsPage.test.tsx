@@ -120,6 +120,7 @@ const {
   sessionListRefetchMock,
   childrenRefetchMock,
   nativeSummaryRefetchMock,
+  nativeSummaryHookMock,
 } = vi.hoisted(() => ({
   permissionReplyMock: vi.fn(() => Promise.resolve()),
   sessionListRefetchMock: vi.fn<() => Promise<{ data: { rows: AgentSessionRow[] } }>>(
@@ -127,6 +128,29 @@ const {
   ),
   childrenRefetchMock: vi.fn(() => Promise.resolve()),
   nativeSummaryRefetchMock: vi.fn(() => Promise.resolve()),
+  // 记录调用参数：Web Host 必须用 enabled=false 关闭桌面专属的原生会话查询。
+  nativeSummaryHookMock: vi.fn((_session: unknown, _enabled: unknown) => ({
+    data: {
+      sourceAvailable: true,
+      truncated: false,
+      turnCount: 2,
+      models: ["native-model"],
+      usage: {
+        inputTokens: 100000,
+        cachedInputTokens: 20000,
+        cacheWriteInputTokens: 5000,
+        outputTokens: 10000,
+        reasoningTokens: 0,
+        totalTokens: 135000,
+        cost: 0.123456,
+        costCurrency: "USD",
+      },
+    },
+    isLoading: false,
+    isError: false,
+    error: null,
+    refetch: nativeSummaryRefetchMock,
+  })),
 }));
 
 vi.mock("../../features/agent-sessions/useAgentSessions", () => ({
@@ -155,28 +179,7 @@ vi.mock("../../features/agent-sessions/useAgentSessions", () => ({
     isPending: false,
     variables: undefined,
   }),
-  useAgentSessionNativeSummary: () => ({
-    data: {
-      sourceAvailable: true,
-      truncated: false,
-      turnCount: 2,
-      models: ["native-model"],
-      usage: {
-        inputTokens: 100000,
-        cachedInputTokens: 20000,
-        cacheWriteInputTokens: 5000,
-        outputTokens: 10000,
-        reasoningTokens: 0,
-        totalTokens: 135000,
-        cost: 0.123456,
-        costCurrency: "USD",
-      },
-    },
-    isLoading: false,
-    isError: false,
-    error: null,
-    refetch: nativeSummaryRefetchMock,
-  }),
+  useAgentSessionNativeSummary: (session: AgentSessionRow, enabled?: boolean) => nativeSummaryHookMock(session, enabled),
   useAgentSessionClients: () => ({ data: [], isLoading: false }),
 }));
 
@@ -192,6 +195,7 @@ describe("AgentSessionsPage", () => {
       sessionListRefetchMock,
       childrenRefetchMock,
       nativeSummaryRefetchMock,
+      nativeSummaryHookMock,
     ].forEach((mock) => mock.mockClear());
   });
 
@@ -464,6 +468,55 @@ describe("AgentSessionsPage", () => {
     expect(within(drawer).getByText(/来自 办公室电脑/)).toBeInTheDocument();
     expect(within(drawer).getByText("概览")).toBeInTheDocument();
     expect(within(drawer).getByText("会话信息")).toBeInTheDocument();
+  });
+});
+
+describe("AgentSessionsPage web host", () => {
+  beforeEach(() => {
+    listedSessions = [{
+      ...session,
+      runtimeStatus: "unknown",
+      title: null,
+      projectPath: null,
+      nativeSummary: null,
+    }];
+    nativeSummaryHookMock.mockClear();
+  });
+
+  it("shows observed sessions without desktop-only sync or runtime filters", () => {
+    render(<MemoryRouter><AgentSessionsPage hostMode="web" /></MemoryRouter>);
+
+    // 观测会话没有本机运行态：状态列明确展示「已观测」，不再逐行渲染「无法判断」。
+    expect(screen.getByText("已观测")).toBeInTheDocument();
+    // Web Host 没有 Agent 数据同步与原生运行态，不展示桌面专属控件。
+    expect(screen.queryByRole("button", { name: /同步数据/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("运行状态")).not.toBeInTheDocument();
+    expect(screen.queryByText("全部状态")).not.toBeInTheDocument();
+    // 原生会话查询必须显式关闭，避免请求桌面专属 command。
+    expect(nativeSummaryHookMock).toHaveBeenCalled();
+    expect(nativeSummaryHookMock.mock.calls.every((call) => call[1] === false)).toBe(true);
+  });
+
+  it("keeps request statistics and request-log navigation in the observed detail sheet", () => {
+    render(
+      <MemoryRouter>
+        <AgentSessionDetailSideSheet
+          hostMode="web"
+          session={session}
+          onClose={vi.fn()}
+          onViewRequestLogs={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+
+    const drawer = screen.getByRole("dialog");
+    expect(within(drawer).getByText("仅 Flowlet 请求观测")).toBeInTheDocument();
+    expect(within(drawer).getByText("Flowlet 请求统计")).toBeInTheDocument();
+    // 没有本机原生会话文件与进程内权限，不渲染对应区块。
+    expect(within(drawer).queryByText("Agent 原生用量")).not.toBeInTheDocument();
+    expect(within(drawer).queryByText("OpenCode 等待确认")).not.toBeInTheDocument();
+    // 观测会话仍可跳转到本实例的请求日志。
+    expect(within(drawer).getByRole("button", { name: "查看会话 ses_native_test 的请求日志明细" })).toBeInTheDocument();
   });
 });
 

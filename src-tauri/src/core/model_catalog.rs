@@ -152,8 +152,8 @@ pub(crate) fn official_channel_id_for_model(model_id: &str) -> Option<&'static s
 /// 客户端可能用厂商官方 API 名、目录登记的别名、大小写变体或带厂商前缀的写法请求
 /// 对外模型（如 DSH 原生 DeepSeek Provider 固定发 `deepseek-flash`），而路由的
 /// `virtual_model_id` 由 `merge_default_routes` 统一存规范 ID。这里只做「目录内归一」，
-/// 不引入第二份别名表；未登记的名字（含聚合模型 `flowlet-pro` / `flowlet-flash` 与
-/// 历史 `auto`）原样透传，保持它们原有的严格匹配语义。
+/// 不引入第二份别名表；未登记的名字（含历史 `auto`、已移除的聚合模型别名
+/// `flowlet-pro` / `flowlet-flash`）原样透传，保持它们原有的严格匹配语义。
 ///
 /// 不能用 `canonical_model_key` 代替：它会小写化，`LongCat-2.0` 这类规范 ID 会对不上
 /// 路由里存的 `virtual_model_id`。`find` 只在查表键上小写，返回的仍是目录里的原始 `id`。
@@ -171,29 +171,47 @@ mod tests {
     #[test]
     fn embedded_catalog_is_valid_and_has_expected_models() {
         let catalog = model_catalog();
-        assert_eq!(catalog.supported_models().len(), 24);
-        assert_eq!(catalog.find("LongCat-2.5").unwrap().owner_channel_id, "longcat");
-        assert_eq!(catalog.find("LongCat-2.5").unwrap().models_cn_provider_id, "longcat");
+        assert_eq!(catalog.supported_models().len(), 29);
+        assert_eq!(
+            catalog.find("LongCat-2.5").unwrap().owner_channel_id,
+            "longcat"
+        );
+        assert_eq!(
+            catalog.find("LongCat-2.5").unwrap().models_cn_provider_id,
+            "longcat"
+        );
         assert!(catalog.find("LongCat-2.5-Preview").is_none());
         assert_eq!(
             catalog.find("LongCat-2.0").unwrap().owner_channel_id,
             "longcat"
         );
         assert_eq!(
-            catalog.find("deepseek-v4-flash-vision-exp").unwrap().owner_channel_id,
+            catalog
+                .find("deepseek-v4-flash-vision-exp")
+                .unwrap()
+                .owner_channel_id,
             "deepseek"
         );
         assert_eq!(
-            catalog.find("deepseek-v4.1-flash").unwrap().owner_channel_id,
+            catalog
+                .find("deepseek-v4.1-flash")
+                .unwrap()
+                .owner_channel_id,
             "deepseek"
         );
         assert_eq!(
             catalog.find("deepseek-flash").unwrap().id,
             "deepseek-v4.1-flash"
         );
-        assert_eq!(catalog.find("qwen3.8-flash").unwrap().owner_channel_id, "qwen");
+        assert_eq!(
+            catalog.find("qwen3.8-flash").unwrap().owner_channel_id,
+            "qwen"
+        );
         assert_eq!(catalog.find("GLM-5.3").unwrap().owner_channel_id, "zhipu");
-        assert_eq!(catalog.find("GLM-5.3-FLASH").unwrap().owner_channel_id, "zhipu");
+        assert_eq!(
+            catalog.find("GLM-5.3-FLASH").unwrap().owner_channel_id,
+            "zhipu"
+        );
         assert_eq!(catalog.find("GLM-5.2").unwrap().owner_channel_id, "zhipu");
         assert_eq!(
             catalog.find("stealth/ox-alpha").unwrap().owner_channel_id,
@@ -263,7 +281,7 @@ mod tests {
     }
 
     #[test]
-    fn aliases_and_aggregate_prefixes_resolve_to_the_same_identity() {
+    fn vendor_prefixed_aliases_resolve_to_the_same_identity() {
         let catalog = model_catalog();
         let direct = catalog.find("deepseek-v4-flash").unwrap();
         let alias = catalog.find("deepseek/deepseek-v4-flash-0731").unwrap();
@@ -287,10 +305,7 @@ mod tests {
         let official = catalog.find("deepseek-flash").unwrap();
         assert_eq!(flash_41.id, official.id);
         assert_eq!(official.models_cn_provider_id, "deepseek");
-        assert_eq!(
-            canonical_model_key("deepseek-flash"),
-            "deepseek-v4.1-flash"
-        );
+        assert_eq!(canonical_model_key("deepseek-flash"), "deepseek-v4.1-flash");
     }
 
     #[test]
@@ -323,7 +338,7 @@ mod tests {
         assert_eq!(routing_model_id("meituan/LONGCAT-2.5"), "LongCat-2.5");
         assert_eq!(routing_model_id("LONGCAT-2.0"), "LongCat-2.0");
         assert_eq!(routing_model_id("LongCat-2.0"), "LongCat-2.0");
-        // 未登记的模型名（含聚合模型与历史 auto）原样透传，保持各自的严格匹配语义。
+        // 未登记的模型名（含历史 auto 与已移除的聚合模型别名）原样透传，保持各自的严格匹配语义。
         assert_eq!(routing_model_id("flowlet-pro"), "flowlet-pro");
         assert_eq!(routing_model_id("flowlet-flash"), "flowlet-flash");
         assert_eq!(routing_model_id("auto"), "auto");

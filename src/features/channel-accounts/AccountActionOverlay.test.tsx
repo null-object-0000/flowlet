@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render as renderView, screen, within } from "@testing-library/react";
+import { fireEvent, render as renderView, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -72,10 +72,25 @@ describe("AccountActionOverlay", () => {
     expect(apiKeyInput).toHaveAttribute("type", "text");
     await user.click(screen.getByRole("button", { name: "测试连接" }));
     expect(await screen.findByText("连接成功，API Key 有效")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /高级设置/ }));
+    await user.click(screen.getByText("直连", { exact: true }));
+    expect(screen.getByRole("option", { name: /直连$/ })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /沿用旧版规则$/ })).not.toBeInTheDocument();
+    // 自动滚动/动画环境下 userEvent 可能点不到 portal 里的 option；用 fireEvent 稳定触发 onChange。
+    fireEvent.click(screen.getByRole("option", { name: /使用全局代理地址$/ }));
+    // Semi Select 的 onChange 异步提交；等触发器回显新值后再保存，
+    // 否则并行跑整套测试时可能在 state 更新前点击保存而丢掉 use_upstream_proxy。
+    await waitFor(
+      () => {
+        const triggers = Array.from(document.querySelectorAll(".semi-select-selection-text"));
+        expect(triggers.some((element) => element.textContent === "使用全局代理地址")).toBe(true);
+      },
+      { timeout: 8000 },
+    );
     await user.click(screen.getByRole("button", { name: "保存修改" }));
 
     expect(onSaveAccounts).toHaveBeenCalledWith([
-      expect.objectContaining({ id: account.id, api_key: "secret-key" }),
+      expect.objectContaining({ id: account.id, api_key: "secret-key", use_upstream_proxy: true }),
     ]);
   });
 
@@ -541,6 +556,40 @@ describe("AccountActionOverlay", () => {
     expect(onAuthorizeChatGpt).toHaveBeenCalledTimes(1);
   });
 
+  it("shows the Antigravity authorization panel instead of the API-key form for a antigravity create", async () => {
+    const user = userEvent.setup();
+    const onAuthorizeAntigravity = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <AccountActionOverlay
+        request={{ kind: "create", channelId: "antigravity" }}
+        accounts={[]}
+        snapshots={[]}
+        presets={[]}
+        busy={false}
+        onClose={vi.fn()}
+        onSaveAccounts={vi.fn().mockResolvedValue(undefined)}
+        onTestConnection={vi.fn().mockResolvedValue(undefined)}
+        onSaveBalanceSnapshot={vi.fn().mockResolvedValue(undefined)}
+        onSyncBalance={vi.fn().mockResolvedValue(undefined)}
+        onScrape={vi.fn().mockResolvedValue(undefined)}
+        onAuthorizeAntigravity={onAuthorizeAntigravity}
+      />,
+    );
+
+    expect(await screen.findByText("Antigravity 账号授权")).toBeInTheDocument();
+    await user.click(screen.getByRole("combobox"));
+    expect(await screen.findByText("Antigravity 账号授权")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("button", { name: "授权登录" })).toBeEnabled();
+    // 非表单创建：没有 API Key 输入，也没有保存按钮。
+    expect(screen.queryByPlaceholderText("请输入渠道 API Key")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "保存账号" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "授权登录" }));
+    expect(onAuthorizeAntigravity).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps the saved resource mode and Token Plan endpoints immutable while editing", async () => {
     const user = userEvent.setup();
     const onSaveAccounts = vi.fn<(accounts: ChannelAccount[]) => Promise<void>>().mockResolvedValue();
@@ -624,3 +673,25 @@ describe("AccountActionOverlay", () => {
 function qwenResponse(data: Record<string, unknown>) {
   return { data: { DataV2: { data: { data } } } };
 }
+
+it("creates a ChatGPT API account using a project key independently of subscription OAuth", async () => {
+  const user = userEvent.setup();
+  const onSaveAccounts = vi.fn().mockResolvedValue(undefined);
+  render(<AccountActionOverlay
+    request={{ kind: "create", channelId: "openai-api" }} accounts={[]} snapshots={[]}
+    presets={[{ ...preset, id: "openai-api", name: "ChatGPT API", vendor: "openai",
+      openai_base_url: "https://api.openai.com/v1", supported_protocols: ["openai", "responses"],
+      supports_model_list: true, supports_scrape_balance: false, platform_url: "https://platform.openai.com/api-keys" }]}
+    busy={false} onClose={vi.fn()} onSaveAccounts={onSaveAccounts}
+    onTestConnection={vi.fn().mockResolvedValue(undefined)} onSaveBalanceSnapshot={vi.fn().mockResolvedValue(undefined)}
+    onSyncBalance={vi.fn().mockResolvedValue(undefined)} onScrape={vi.fn().mockResolvedValue(undefined)}
+  />);
+  expect(await screen.findByLabelText("API Key")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "授权登录" })).not.toBeInTheDocument();
+  expect(screen.getByLabelText("货币")).toHaveValue("USD");
+  expect(screen.queryByRole("button", { name: "立即刷新" })).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "查看 API 额度" })).toHaveAttribute("href", "https://platform.openai.com/settings/organization/billing/overview");
+  await user.type(screen.getByLabelText("API Key"), "sk-project-test");
+  await user.click(screen.getByRole("button", { name: "保存账号" }));
+  expect(onSaveAccounts).toHaveBeenCalledWith([expect.objectContaining({ channel_id: "openai-api", api_key: "sk-project-test", exposed_models: null, resource_sync_mode: "manual" })]);
+});

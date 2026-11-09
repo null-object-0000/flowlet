@@ -11,8 +11,10 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 | 场景 | 实际路径 |
 |------|----------|
 | 桌面应用（便携版 / 安装版） | `flowlet.exe` 同级目录下的 `config.json` |
-| headless 模式 | 当前工作目录下的 `config.json` |
+| headless / Docker 模式 | `FLOWLET_CONFIG_PATH` 指定路径；默认数据库同目录的 `config.json`（Docker 为 `/data/config.json`） |
 | 前端开发（`bun run dev`） | 项目根目录 `config.json` |
+
+独立服务的环境变量、端口和数据卷详见 [Docker 部署](docker.md)。
 
 ### 资源声明
 
@@ -70,7 +72,7 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 | `bind` | `object` | 是 | 本地代理监听的 host/port |
 | `usage_cost` | `object` | 否 | 费用统一展示币种与手工维护的固定汇率；仅影响展示，不改写原始费用 |
 | `network` | `object` | 否 | Flowlet 自身对外请求的上游代理等网络配置 |
-| `channels_config` | `object` | 是 | 渠道模板、价格、默认开放模型、档位 |
+| `channels_config` | `object` | 是 | 渠道模板、价格、默认开放模型 |
 
 ### 2.1 `usage_cost` — 费用展示与固定汇率
 
@@ -100,8 +102,7 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 "network": {
   "upstream_proxy": {
     "enabled": false,          // 是否启用显式上游代理
-    "url": "",                 // 代理地址，仅支持 http/https
-    "no_proxy": ""             // 逗号分隔的直连白名单（可选）
+    "url": ""                  // 代理地址，仅支持 http/https
   }
 }
 ```
@@ -110,19 +111,14 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 |------|------|--------|------|
 | `enabled` | `bool` | `false` | 是否启用上游代理；`url` 为空时强制视为 `false` |
 | `url` | `string` | `""` | 代理地址，例如 `http://127.0.0.1:7890`。仅支持 `http` / `https`，不支持 socks 代理 |
-| `no_proxy` | `string` | `""` | 逗号分隔的直连白名单（host 或 host:port）。命中的目标不走代理；留空表示全部走代理 |
 
 **行为**：
 
-- 作用于 **Flowlet 自身发起的对外 HTTP 请求**：Codex 官方用量
-  （`https://chatgpt.com/backend-api/wham/usage`）、渠道模型同步/余额查询、
-  Agent 版本检查、远程数据拉取（`storage_tasks`）。
-- 也作用于 **Codex 登录的 OAuth token exchange**：该步骤在 Flowlet 启动的
-  Codex CLI `app-server` 子进程内完成，启动子进程时会把配置注入其
-  `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY` 环境变量。浏览器里的
-  登录页（`auth.openai.com`）仍走系统浏览器的代理设置，不受此配置控制。
-- **不作用于**本地代理的上游模型转发（`proxy.rs` 的 `Client` 仍直连各渠道
-  上游），也不作用于局域网设备直连（`lan_sync`）。
+- 全局开关作用于 Codex 官方用量、Agent 版本检查和远程数据拉取等全局请求。
+  Codex CLI 子进程的 OAuth token exchange 通过代理环境变量使用同一配置。
+- 渠道账号在高级设置单独选择直连或使用全局代理地址。此选择适用于模型转发、
+  模型列表、连接测试和 API 余额查询。代理地址或账号设置保存后，下一次尝试生效。
+- 代理失败时可降级到其他候选，同一候选保持所选出口。
 - 桌面进程不会继承 shell 里 export 的 `HTTPS_PROXY` 等环境变量，因此需要在
   这里显式配置；未启用时 Flowlet 走直连。
 - 配置进程内热更新：设置页保存后立即生效（`set_upstream_proxy_config` 同时
@@ -221,14 +217,16 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 **行为**：
 
 - 缺失任何字段时使用上述默认值。
-- 修改后立即生效（热读），无需重启代理。
+- 修改后立即生效（热读），无需重启代理。设置页（桌面与 Web / Docker）保存的捕获配置写入
+  SQLite `app_meta` 的 `log_capture_config`，优先级高于 `config.json`；手改文件仅在下一次
+  进程启动时读取。定时存储清理也按同一份配置执行。
 - Body 在版本化 `.flcap` 压缩帧中以 base64 表示原始字节，文件位于 SQLite 同目录的
   `request-captures/`；SQLite 只保存随机读取所需的相对路径、offset、长度和校验和。
 - 新请求的 `req_body_b64` / `res_body_b64` SQLite 列保持 `NULL`；旧数据库中尚未迁移的
   Body 仍可由详情与数据修复链路兼容读取。
 - UI 不再二次脱敏，展示和复制的内容与 SQLite 捕获内容一致。
 - 清理仅针对输入、输出 Token 均已完成计算的记录，确保未完成计算的记录仍可重解析。
-- 应用启动 15 分钟后执行第一次清理，之后每 15 分钟执行一次；任务在后台线程运行，并写入任务日志。每轮先把最多 200 条旧 SQLite Body 搬迁到捕获文件，文件引用提交成功后才清空旧列；随后执行过期和超限清理。完成后，已启用增量回收的数据库最多向文件系统归还 64 MB 空闲页，避免长时间锁库。
+- 桌面 Host 与 Web / Docker Host 都在应用启动 15 分钟后执行第一次清理，之后每 15 分钟执行一次；任务在后台线程运行，并写入任务日志。每轮先把最多 200 条旧 SQLite Body 搬迁到捕获文件，文件引用提交成功后才清空旧列；随后执行过期和超限清理。完成后，已启用增量回收的数据库最多向文件系统归还 64 MB 空闲页，避免长时间锁库。
 - 过期清理与体积上限清理都会记录请求、响应 Body 各自的清理时间与原因，详情页可区分“未捕获”“数据过期被清理”和“因空间上限被清理”。
 - 体积上限是软限制：只清理至少一小时前的 Body，最近一小时的数据始终保留；若近期数据本身超过上限，则允许暂时超限，优先保证最新请求可排查。
 - 文件 Body 清理通过重写仍有有效记录的 segment 完成：SQLite 引用事务提交后才删除旧
@@ -260,7 +258,8 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 - 缺失整个 `usage_retention` 段或其中任一字段时使用上述默认值，旧配置可继续启动。
 - 修改后在下一次定时清理时生效（热读 `config.json`），无需重启。
 - 与 `log_capture` 的 Body 清理共用同一个定时任务（启动后 15 分钟第一次，之后每
-  15 分钟一次，任务类型仍是 `body-cleanup`），在任务日志里显示为「存储清理」。
+  15 分钟一次，任务类型仍是 `body-cleanup`），在任务日志里显示为「存储清理」；桌面 Host
+  与 Web / Docker Host 均运行该任务。
 - 为什么需要它：`account_balance_snapshots` 是**派生**数据——界面只读每个账号最近
   若干条（`LIMIT 10`），历史行仅用于事后排查；而渠道资源自动同步每 5 分钟就会为每个
   账号插入一行，且每行都带完整 `raw_scraped_json`。2026-09-19 事故现场的
@@ -395,6 +394,41 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 Bearer，Anthropic-compatible 使用 `x-api-key`。模型只能从标准 OpenAI `/models`
 拉取，并统一受全局白名单约束；不提供手工添加、余额、额度、价格或控制台抓取能力。
 
+`openai-api`（ChatGPT API）是使用 OpenAI 项目 API Key 的官方渠道，vendor 为
+`openai`，OpenAI Base URL 为 `https://api.openai.com/v1`，支持 `openai` 与
+`responses`（仅无状态透传），不支持 Anthropic。模型列表为 `GET /v1/models`，
+Bearer 鉴权；账号级 Base URL 覆盖同时用于测试连接、模型同步和代理。
+默认主模型 `gpt-6.1-sol`，小模型 `gpt-6-luna`；模型白名单还包括
+`gpt-6.1-terra`、`gpt-6-astra`、`gpt-6-sol`。仍须拉取模型列表并显式勾选，
+只为列表实际返回的选中模型生成直连路由；同一规范模型的多账号/多变体形成候选池，
+按请求协议与渠道声明匹配，不再要求渠道同时支持 OpenAI 和 Anthropic，
+Anthropic 请求不会落到 ChatGPT API。
+规格、图片能力与 USD 基准价读取本地 `models-dev.json` 的 `openai` provider，
+沿用 `openai-api` 价格命名空间；超过 272K 输入的价格分层由目录数据决定。
+
+该渠道与 `chatgpt` Codex 订阅观测伪账号独立，不读取 OAuth 凭据。领取订阅赠送 API
+额度后，使用绑定组织的项目 Key；余额仅支持手动维护，账号编辑器同时提供官方账单页入口。
+账号高级设置可选择直连或使用全局代理地址。新账号默认直连。升级时，已通过全局代理转发模型的账号迁移为使用代理，其他账号迁移为直连。显式选择代理时，模型转发、模型拉取、
+连接测试和 API 余额查询共用此设置，不受旧账号的全局开关影响。
+
+实际选中显式代理的模型请求在 `reqwest::Error::is_connect()` 建连失败后，允许等待
+150 ms 用同一个客户端和可克隆请求再连接一次。两次建连共用响应头超时预算和同一出口。
+上游 HTTP 状态、发送请求后的断连、响应读取失败及 SSE 中断均不触发重连。
+ChatGPT API 的最终网络错误日志及重连告警记录底层原因链，用于区分连接、隧道与 TLS
+故障；旧日志只有通用错误文本，不能据此倒推出某次故障的具体网络根因。
+
+官方权益说明：https://developers.openai.com/api/docs/guides/chatgpt-api-credits 。
+其中明确排除通过 API Key 使用 Codex，Flowlet 不承诺这类用量可抵扣赠送额度。
+ChatGPT API 不使用浏览器采集余额；赠送额度和到期时间请在官方账单页查看。
+
+工具调用优先使用 Responses；GPT-6.1 Sol / Terra 的 Chat Completions 不支持工具调用，
+GPT-6 Sol / Luna 仅在 `reasoning_effort=none` 时支持。Flowlet 不改写这些字段。
+
+升级无需表结构迁移：旧外部配置由 `merge_builtin_config` 补齐新渠道及默认模型，
+SQLite 由 `ensure_missing_presets` 追加、`sync_preset_maintained_config` 同步协议与地址，
+保留已有账号、凭据与路由开关/优先级。新版本首次需重启应用加载内置贡献；
+之后保存账号与路由按现有运行时配置刷新机制生效，无需重启代理。
+
 `openrouter` 是聚合渠道：OpenAI-compatible 端点为 `https://openrouter.ai/api/v1`，
 Anthropic 兼容端点（Anthropic Skin）为 `https://openrouter.ai/api`，均使用 Bearer
 鉴权；**Responses 协议**（`"responses"`）从 OpenAI Base URL 派生为
@@ -425,9 +459,10 @@ Key 一样包含在端到端加密的账号目录中。
 别名 + `vendor/` 前缀 + 大小写查表，未登记的名字原样透传）。因此客户端可以直接用厂商
 官方 API 名或别名请求：`deepseek-flash` → `deepseek-v4.1-flash`（DSH 原生 DeepSeek
 Provider 固定发这个官方名），`deepseek-v4-flash-0731` → `deepseek-v4-flash`。
-归一后命中该规范模型已启用的路由，`/models` 仍只暴露规范模型 ID；`flowlet-pro` /
-`flowlet-flash` 与历史 `auto` 不在目录里，保持原有的严格匹配。日期快照变体与规范名
-共享同一候选池，客户端指定具体变体不保证由该变体自身的上游资源承载。请求日志里
+归一后命中该规范模型已启用的路由，`/models` 仍只暴露规范模型 ID；目录里未登记的名字
+（包括历史 `auto` 等旧名称）保持原样、按严格匹配处理，不存在聚合别名。历史聚合名
+`flowlet-pro` / `flowlet-flash` 不会命中任何路由，按未开放模型返回 `model_not_exposed`。
+日期快照变体与规范名共享同一候选池，客户端指定具体变体不保证由该变体自身的上游资源承载。请求日志里
 `public_model` 保留客户端原始名，`virtual_model` 记录归一后的规范 ID。
 
 **Responses 协议端点解析**：
@@ -529,7 +564,7 @@ Provider 固定发这个官方名），`deepseek-v4-flash-0731` → `deepseek-v4
   「高峰仅周一至周五、周末全天空闲」等按星期区分的分时价格。目录同步后立即热更新，
   跨峰谷时段无需重启。升级到支持分时价格的版本时会一次性按请求时间重算历史预估费用。
 - 用于离线成本估算（`estimated_cost`），不进入主请求链路。
-- `channel_id = "openai-api"` 是标准 OpenAI API 公开价格的保留命名空间，用于计算 Codex 原生会话的 API 等价价值；数据来自 `models-dev.json` 的 `openai` provider，结果保留价格表原币种，不做汇率转换。
+- `channel_id = "openai-api"` 是标准 OpenAI API 公开价格的保留命名空间，用于 ChatGPT API 渠道计价和计算 Codex 原生会话的 API 等价价值；数据来自 `models-dev.json` 的 `openai` provider，结果保留价格表原币种，不做汇率转换。
 - 不生成或使用 `codex-native`、套餐 credits 等派生价格；旧配置中残留的 `channel_id = "codex-native"` 会被运行时价格表忽略。Codex 套餐周额度没有公开的绝对 credits 容量，Flowlet 不作换算。
 - Codex 原生预估只在会话能够确定唯一模型且对应价格表存在精确模型匹配时生成；无法确认模型或无公开价格的模型保持未计价，不做推测。API 等价价值采用标准基础 API 价格，不叠加无法从原生记录可靠确认的长上下文、Priority processing 或 Fast mode 等乘数。
 
@@ -579,7 +614,7 @@ LongCat 同时登记 `LongCat-2.0` 与 `LongCat-2.5`，两者是独立模型身�
 - `channel_accounts.synced_models` / `models_synced_at` 保存最近一次 `/models` 结果，
   既作为编辑器候选池缓存，也作为已配置账号生成路由时的来源校验；未在
   `synced_models` 中的模型不会生成或保留路由。
-- 保存账号时前端按 `exposed_models` 对账路由：删除取消勾选模型关联的直连与聚合路由、补齐新勾选模型的直连路由，
+- 保存账号时前端按 `exposed_models` 对账路由：删除取消勾选模型关联的直连路由、补齐新勾选模型的直连路由，
   保留用户已有的启停状态、优先级和时间戳。
 - 自动补齐路由时，只有全局最早创建的渠道账号的新路由默认开启；后续新增的任何官方
   或自定义渠道账号，其新路由默认关闭并等待用户手动开启。已有路由的启停状态不追溯修改。
@@ -596,8 +631,13 @@ LongCat 同时登记 `LongCat-2.0` 与 `LongCat-2.5`，两者是独立模型身�
   独占资源需在 `model-catalog.json` 中以 `ownerChannelId: "openrouter"` 登记，并由共享目录
   自动派生对应的 `DEFAULT_EXPOSED_MODELS_BY_CHANNEL.openrouter`。
 
-`flowlet-pro` 与 `flowlet-flash` 的候选关系不属于 `config.json`。用户在模型服务页从已有
-渠道模型中显式添加；添加时复用该渠道模型已经存在的协议路由，保存后立即热更新。
+**升级迁移（旧聚合路由）**：升级时 `Storage::migrate` 执行一次性、幂等的迁移，把
+`virtual_model_id IN ('flowlet-pro','flowlet-flash')` 的旧路由按 `upstream_model` 归一到对应
+规范模型 ID，并按 `(virtual_model_id, channel_id, account_id, upstream_model, client_protocol)`
+去重（保留 priority 最小者，并列取 `created_at` 更早、再取 `id`；`enabled` 取任一为 1），
+再对受迁移影响的分组按 `(virtual_model_id, client_protocol)` 重排 priority 为 `0..n`；无法归一的
+旧行保留原样但不再参与路由。同一迁移还会删除 `virtual_models` 表中残留的 `flowlet-pro` /
+`flowlet-flash` 行。该迁移不改变表结构，也不删除用户路由。
 
 ---
 
@@ -674,23 +714,39 @@ LongCat、DeepSeek、Kimi 对照、SQLite 升级迁移、模型/余额同步、�
 
 ---
 
-## 10. `codex-models.json` — Codex 模型目录
+## 10. Codex 模型目录（按所选模型动态生成）
 
-`codex-models.json` 是 Flowlet 的 **Codex 模型目录数据源**，位于项目根目录（与 `config.json` 同级）。
+Codex 使用 Flowlet 开放的**自定义规范模型**，不在 Codex 内置模型目录中，必须通过
+`~/.codex/config.toml` 的 `model_catalog_json` 指向一个声明模型元数据（上下文窗口、推理档位）
+的 JSON 文件，否则 Codex 无法正确识别。官方参照：DeepSeek 与千问 AI 平台的 Codex 接入文档
+均要求该文件。仓库根目录不再维护静态 `codex-models.json` 快照；目录在每次一键接入时按所选
+主模型从 `models-cn.json` 动态生成，仅包含一条模型条目。
 
-Codex 使用自定义模型（`flowlet-pro` / `flowlet-flash`）时，必须通过 `~/.codex/config.toml` 的
-`model_catalog_json` 指向一个声明模型元数据（上下文窗口、推理档位）的 JSON 文件，否则 Codex
-无法正确识别这些模型。官方参照：DeepSeek 与千问 AI 平台的 Codex 接入文档均要求该文件。
+### 生成规则
 
-### 文件内容
+一键接入把**用户在接入抽屉中显式选择的主模型**写入 `model_catalog_json` 指向的单条目目录：
+
+- `slug`：所选主模型的规范模型 ID（与 `config.toml` 的 `model` 一致）；
+- `display_name`：取 `models-cn.json` 中该模型的 `name`，缺失时回退模型 ID；`description` 为
+  `Flowlet 本地代理转发的 <model>`；
+- `context_window` / `max_context_window`：取 `models-cn.json` 中该模型的 `limits.contextTokens`；
+- `input_modalities`：始终包含 `text`；`capabilities.inputModalities` 含 `image` 时追加 `image`；
+- `supported_reasoning_levels` / `default_reasoning_level`：`capabilities.thinking = true` 时给出
+  `low` / `medium` / `high` / `xhigh` 且默认 `high`；否则给出 `low` / `medium` / `high` 且默认 `medium`；
+- `supports_reasoning_summaries`：跟随 `capabilities.thinking`（支持推理时为 `true`，否则 `false`）；
+- 其余必填字段沿用固定常量；查不到模型时使用保守条目（`context_window: 128000`、
+  `input_modalities: ["text"]`、推理档位按「不支持推理」回退）并告警。
+
+以下为按所选主模型 `deepseek-v4-pro`（目录 `contextTokens: 1000000`、输入 `["text"]`、
+`capabilities.thinking: true`）动态生成的**实际输出示例**；不同模型的字段值不同：
 
 ```json
 {
   "models": [
     {
-      "slug": "flowlet-pro",
-      "display_name": "Flowlet Pro",
-      "description": "Flowlet aggregated coding model routed to available accounts.",
+      "slug": "deepseek-v4-pro",
+      "display_name": "DeepSeek-V4-Pro-0813",
+      "description": "Flowlet 本地代理转发的 deepseek-v4-pro",
       "default_reasoning_level": "high",
       "supported_reasoning_levels": [
         { "effort": "low", "description": "Fast responses with lighter reasoning" },
@@ -703,7 +759,7 @@ Codex 使用自定义模型（`flowlet-pro` / `flowlet-flash`）时，必须通�
       "supported_in_api": true,
       "priority": 1,
       "base_instructions": "",
-      "supports_reasoning_summaries": false,
+      "supports_reasoning_summaries": true,
       "default_reasoning_summary": "none",
       "support_verbosity": false,
       "default_verbosity": null,
@@ -712,8 +768,8 @@ Codex 使用自定义模型（`flowlet-pro` / `flowlet-flash`）时，必须通�
       "truncation_policy": { "mode": "tokens", "limit": 10000 },
       "supports_parallel_tool_calls": true,
       "supports_image_detail_original": false,
-      "context_window": 1048576,
-      "max_context_window": 1048576,
+      "context_window": 1000000,
+      "max_context_window": 1000000,
       "auto_compact_token_limit": null,
       "effective_context_window_percent": 95,
       "experimental_supported_tools": [],
@@ -735,17 +791,20 @@ failed to parse model_catalog_json path `...` as JSON: missing field `shell_type
 
 必填/关键字段：
 
-- `slug` / `display_name` / `description`：模型标识与展示名；
-- `default_reasoning_level` / `supported_reasoning_levels`：默认推理档位与可选档位；
+- `slug` / `display_name` / `description`：模型标识与展示名（`display_name` 取 models-cn 的
+  `name`，缺失时回退 `slug`；`description` 为 `Flowlet 本地代理转发的 <model>`）；
+- `default_reasoning_level` / `supported_reasoning_levels`：默认推理档位与可选档位（按所选模型
+  的 `capabilities.thinking` 生成，规则见上文）；
 - `shell_type`：shell 工具类型，Flowlet 取值 `shell_command`（启用 shell 工具；`disabled` 会禁用）；
 - `visibility`：`list`（出现在模型选择器）或 `hide`；
 - `supported_in_api` / `priority`：是否可用于 API 与模型选择器排序（数值越小越靠前）；
-- `base_instructions`：发送给上游的系统提示词，Flowlet 聚合模型取空串；
+- `base_instructions`：发送给上游的系统提示词，Flowlet 动态目录取空串；
 - `supports_reasoning_summaries` / `support_verbosity` / `default_verbosity`：0.137.0 起为必填/可空
-  字段，Flowlet 置 `false` / `false` / `null`；
+  字段；`supports_reasoning_summaries` 跟随所选模型的 `capabilities.thinking`，
+  `support_verbosity` 置 `false`，`default_verbosity` 置 `null`；
 - `truncation_policy`：工具输出截断策略，`{ "mode": "tokens", "limit": 10000 }` 与官方内置模型一致；
-- `context_window` / `max_context_window` / `effective_context_window_percent`：上下文窗口声明与
-  可用输入比例（默认 95）；
+- `context_window` / `max_context_window` / `effective_context_window_percent`：按所选模型生成的
+  上下文窗口声明与可用输入比例（默认 95）；
 - `experimental_supported_tools`：实验性工具列表，空数组；
 - `availability_nux` / `upgrade` / `auto_compact_token_limit`：可空字段，Flowlet 置 `null`。
 
@@ -754,19 +813,17 @@ failed to parse model_catalog_json path `...` as JSON: missing field `shell_type
 `minimal_client_version: "0.144.0"` 面向 Codex ≥ 0.144；Flowlet 目录面向 0.137.0 及以后，
 统一用 `xhigh` 表达最高推理档位，且不声明 `minimal_client_version`。
 
-`context_window` 与 `supported_reasoning_levels` 是 Flowlet 对外声明值：实际可用上下文与推理档位
-取决于当前路由模型，仅当路由模型支持时才完整生效。调整后需**重新执行 Codex 一键接入**并重启
-Codex（`model_catalog_json` 仅在 Codex 启动时读取一次）。
+动态目录的 `slug` 与 `model` 必须指向同一个规范模型；**切换主模型后需重新执行 Codex 一键接入
+并重启 Codex**（`model_catalog_json` 仅在 Codex 启动时读取一次）。
 
-`src-tauri/src/core/codex_model_catalog.rs` 的回归测试会校验每个模型的必填字段与推理档位合法值，
-防止再次出现缺字段导致 Codex 无法启动。
+`src-tauri/src/core/codex_model_catalog.rs` 的回归测试会校验生成条目的必填字段、所选模型取值
+来源与推理档位合法值，防止再次出现缺字段导致 Codex 无法启动。
 
 ### 加载方式
 
-- **编译时内置**：`src-tauri/src/core/codex_model_catalog.rs` 通过 `include_str!` 把仓库根目录
-  `codex-models.json` 编译进二进制；`apply_codex` 写入 `~/.codex/config.toml` 的
-  `model_catalog_json = "~/.codex/model-catalog.flowlet.json"`，并把本文件内容原样写入
-  `~/.codex/model-catalog.flowlet.json`。
+- **运行时生成**：`apply_codex` 按所选主模型从 `models-cn.json` 生成单条目目录，写入
+  `~/.codex/config.toml` 的 `model_catalog_json = "~/.codex/model-catalog.flowlet.json"`，并把
+  生成内容写入 `~/.codex/model-catalog.flowlet.json`；不再使用 `include_str!` 静态快照。
 - **命名空间**：生成文件名带 `flowlet` 前缀，避免覆盖 DeepSeek（`~/.codex/models.json`）或
   千问（`~/.codex/model-catalog.local.json`）等其他厂商的模型目录文件。
 - **备份与恢复**：写入前会备份 `~/.codex/model-catalog.flowlet.json` 的原有内容与
@@ -776,8 +833,20 @@ Codex（`model_catalog_json` 仅在 Codex 启动时读取一次）。
 
 | 位置 | 作用 |
 |------|------|
-| `codex-models.json`（仓库根目录） | 唯一数据源：Rust `include_str!` 内置 + 写入 `~/.codex/model-catalog.flowlet.json` |
-| `src/features/agent-access/AgentAccessSideSheet.tsx` 中的 `CODEX_MODEL_CATALOG_JSON` | 前端手动配置片段的展示与复制 |
+| `src-tauri/models-cn.json` | 动态目录的数据源：`limits.contextTokens`、`capabilities.inputModalities`、`capabilities.thinking` |
+| `src/features/agent-access/agent-access-adapters/codex.ts` 的手动配置片段 | 必须与动态生成规则一致，按当前所选主模型展示与复制 |
 
-修改 `codex-models.json` 时，务必同步更新 `CODEX_MODEL_CATALOG_JSON`，否则手动片段与一键写入
-内容不一致。
+修改模型目录或 Codex 目录生成规则时，务必同步前端手动片段；否则复制内容与一键写入会不一致。
+
+### VibeToken 渠道预设
+
+新增聚合渠道 `vibetoken`：`openai_base_url = https://vibetoken.cn/v1`，
+`supported_protocols = ["openai", "responses"]`，鉴权为 Bearer，无 Anthropic 端点。
+`endpoints.models = https://vibetoken.cn/v1/models`；
+`endpoints.balance = https://vibetoken.cn/api/v1/billing/balance`，自动余额采用人民币 `available`，
+已扣除预留金额 `held`。模型返回的价格保留原始每百万 Token 单位，不自动转换成渠道价格表。
+`default_model` 为空，不登记 default_exposed_models / 模型官方归属，所有开放模型由用户从实际
+拉取结果中选择，并按全局白名单筛选。模型同步支持顶层输出上限字段。
+新渠道需更新应用并重启，启动自动合并旧外部配置并迁移 SQLite 预设，不改变数据结构、账号与路由状态。
+端点覆盖继续沿用现有配置读写机制；账号级模型地址覆盖即时用于下一次拉取/请求，且禁用官方余额同步。
+协议边界与官方来源见 [渠道接入指南](./channel-integration.md#vibetoken-聚合渠道2026-11-05)。

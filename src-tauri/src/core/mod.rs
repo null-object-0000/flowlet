@@ -1,17 +1,21 @@
+pub mod account_balance;
 pub mod account_resource_sync;
 pub mod account_workspace_sync;
 pub mod agent_environment;
 pub mod agent_global_config;
-pub(crate) mod agent_runtime;
 pub(crate) mod agent_identity_adapter;
 pub(crate) mod agent_plugin_bundle;
+pub(crate) mod agent_runtime;
 pub(crate) mod agent_session_adapter;
 pub(crate) mod agent_session_identity;
 pub mod agent_session_metadata;
 pub(crate) mod agent_session_sources;
 pub mod agent_session_timeline;
+#[cfg(feature = "desktop")]
 pub mod agent_source_watcher;
 pub mod agent_version;
+pub mod antigravity_account;
+pub mod antigravity_oauth;
 pub(crate) mod channel_capability_adapter;
 pub mod channels_config;
 pub mod codex_account;
@@ -21,6 +25,8 @@ pub mod cost_ledger_source_probe;
 pub mod custom_scrape;
 pub mod device_identity;
 pub mod device_sync;
+pub mod device_usage;
+pub mod host_scheduler;
 pub mod job_runtime;
 pub mod lan_sync;
 pub mod logging;
@@ -38,18 +44,21 @@ pub mod presets;
 pub mod proxy;
 pub mod rate_limiter;
 pub mod runtime_config;
+#[cfg(feature = "desktop")]
 pub mod scrape_console;
-#[cfg(desktop)]
 pub mod services;
 pub mod storage;
 pub mod sync;
 pub mod upstream_proxy;
 pub mod usage;
 pub mod web;
+#[cfg(feature = "desktop")]
 pub mod webview_profile;
 #[cfg(windows)]
 pub(crate) mod win_process_job;
+#[cfg(feature = "desktop")]
 pub(crate) mod window_size;
+#[cfg(feature = "desktop")]
 pub(crate) mod window_visibility;
 
 // Re-export commonly used types for headless binary

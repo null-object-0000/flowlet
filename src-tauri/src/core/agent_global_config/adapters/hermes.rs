@@ -4,7 +4,6 @@ use super::AgentGlobalConfigAdapter;
 
 const HERMES_BACKUP_FILE: &str = "hermes-global-config-backup.json";
 const HERMES_PROVIDER: &str = "custom";
-const HERMES_PRIMARY_MODEL: &str = "flowlet-pro";
 const HERMES_CLIENT_MARKER: &str = "hermes";
 const HERMES_CLIENT_HEADER: &str = "x-flowlet-client";
 /// 受管会话桥插件名（`~/.hermes/plugins/<name>/`，同时是 `plugins.enabled` 的条目）。
@@ -35,12 +34,13 @@ impl AgentGlobalConfigAdapter for HermesAdapter {
         client_token: &str,
         options: Option<&AgentGlobalConfigOptions>,
     ) -> Result<AgentGlobalConfigReport, String> {
+        let (primary_model, _fast_model) = resolve_model_choices(options)?;
         apply_hermes(
             &hermes_config_path()?,
             &hermes_env_path()?,
             expected_base_url,
             client_token,
-            resolve_primary_model(options),
+            &primary_model,
             options.and_then(|options| options.session_extension),
         )
     }
@@ -52,19 +52,6 @@ impl AgentGlobalConfigAdapter for HermesAdapter {
             expected_base_url,
         )
     }
-}
-
-/// Hermes Agent 支持用户选择默认模型：仅接受 Flowlet 两个聚合模型
-/// `flowlet-pro` / `flowlet-flash`，其余值回退到默认主模型。
-pub(in crate::core::agent_global_config) fn resolve_primary_model(
-    options: Option<&AgentGlobalConfigOptions>,
-) -> String {
-    options
-        .and_then(|options| options.primary_model.as_deref())
-        .map(str::trim)
-        .filter(|model| matches!(*model, HERMES_PRIMARY_MODEL | "flowlet-flash"))
-        .unwrap_or(HERMES_PRIMARY_MODEL)
-        .to_string()
 }
 
 // Hermes Agent（Nous Research）的全局配置位于 `~/.hermes/config.yaml`，`model:` 段
@@ -172,7 +159,6 @@ fn session_bridge_installed(config_path: &Path) -> bool {
         .any(|name| name == HERMES_SESSION_BRIDGE_NAME)
 }
 
-
 /// 从本地代理 base_url（如 `http://127.0.0.1:18640/v1`）提取 Hermes 自定义端点
 /// 身份 `host:port`（`127.0.0.1:18640`），与官方 CLI setup 流程一致。
 fn hermes_host_port(base_url: &str) -> String {
@@ -269,9 +255,11 @@ fn strip_model_sentinel(text: &str) -> String {
         Ok(value) => value,
         Err(_) => return text.to_string(),
     };
-    let model_needs_strip = parsed
-        .get("model")
-        .is_some_and(|value| value.as_mapping().map_or(true, |mapping| mapping.is_empty()));
+    let model_needs_strip = parsed.get("model").is_some_and(|value| {
+        value
+            .as_mapping()
+            .map_or(true, |mapping| mapping.is_empty())
+    });
     if !model_needs_strip {
         return text.to_string();
     }
@@ -355,15 +343,10 @@ pub(in crate::core::agent_global_config) fn inspect_hermes(
         subagent_model: None,
         model_catalog_path: None,
         model_catalog_configured: false,
-        primary_long_context: false,
-        fast_long_context: false,
-        long_context: false,
         backup_available,
         external_environment_overrides: Vec::new(),
         error,
         session_extension: bridge_installed,
-        model_specs: false,
-        model_input_modalities: BTreeMap::new(),
         mcp_servers: Vec::new(),
         opencode_permission_bridge: false,
     };
@@ -412,9 +395,7 @@ pub(in crate::core::agent_global_config) fn inspect_hermes(
     let base_url_matches =
         base_url.as_deref().map(normalize_url).as_deref() == Some(expected_base_url.as_str());
     let state = if provider == Some(HERMES_PROVIDER)
-        && primary_model
-            .as_deref()
-            .is_some_and(|model| matches!(model, HERMES_PRIMARY_MODEL | "flowlet-flash"))
+        && primary_model.as_deref().is_some_and(is_known_catalog_model)
         && base_url_matches
         && api_key_is_env_ref
         && env_token.is_some()
@@ -427,9 +408,6 @@ pub(in crate::core::agent_global_config) fn inspect_hermes(
     {
         AgentGlobalConfigState::OtherGateway
     } else if client_header == Some(HERMES_CLIENT_MARKER)
-        || primary_model
-            .as_deref()
-            .is_some_and(|model| model.starts_with("flowlet"))
         || provider == Some(HERMES_PROVIDER)
         || api_key_is_env_ref
     {
@@ -451,7 +429,7 @@ pub(in crate::core::agent_global_config) fn apply_hermes(
     env_path: &Path,
     expected_base_url: &str,
     client_token: &str,
-    primary_model: String,
+    primary_model: &str,
     session_extension: Option<bool>,
 ) -> Result<AgentGlobalConfigReport, String> {
     if client_token.trim().is_empty() {
@@ -514,7 +492,7 @@ pub(in crate::core::agent_global_config) fn apply_hermes(
         (
             vec!["model"],
             "default",
-            Some(Value::String(primary_model.clone())),
+            Some(Value::String(primary_model.to_string())),
         ),
         (
             vec!["model"],
@@ -545,7 +523,11 @@ pub(in crate::core::agent_global_config) fn apply_hermes(
     if session_extension.is_some() {
         let enabled = read_plugins_enabled(&original_root);
         let enabled = match session_extension {
-            Some(true) if !enabled.iter().any(|name| name == HERMES_SESSION_BRIDGE_NAME) => {
+            Some(true)
+                if !enabled
+                    .iter()
+                    .any(|name| name == HERMES_SESSION_BRIDGE_NAME) =>
+            {
                 let mut next = enabled;
                 next.push(HERMES_SESSION_BRIDGE_NAME.to_string());
                 next
@@ -570,26 +552,39 @@ pub(in crate::core::agent_global_config) fn apply_hermes(
     // 会话桥插件文件：启用写受管版本；关闭时删除与受管版本一致的文件；选项缺失不动。
     match session_extension {
         Some(true) => {
-            writes.push((bridge_dir.join("plugin.yaml"), Some(text_file_bytes(HERMES_SESSION_BRIDGE_MANIFEST))));
-            writes.push((bridge_dir.join("__init__.py"), Some(text_file_bytes(HERMES_SESSION_BRIDGE_SOURCE))));
+            writes.push((
+                bridge_dir.join("plugin.yaml"),
+                Some(text_file_bytes(HERMES_SESSION_BRIDGE_MANIFEST)),
+            ));
+            writes.push((
+                bridge_dir.join("__init__.py"),
+                Some(text_file_bytes(HERMES_SESSION_BRIDGE_SOURCE)),
+            ));
         }
         Some(false) => {
-            if managed_text_file_matches(&bridge_dir.join("plugin.yaml"), HERMES_SESSION_BRIDGE_MANIFEST) {
+            if managed_text_file_matches(
+                &bridge_dir.join("plugin.yaml"),
+                HERMES_SESSION_BRIDGE_MANIFEST,
+            ) {
                 writes.push((bridge_dir.join("plugin.yaml"), None));
             }
-            if managed_text_file_matches(&bridge_dir.join("__init__.py"), HERMES_SESSION_BRIDGE_SOURCE) {
+            if managed_text_file_matches(
+                &bridge_dir.join("__init__.py"),
+                HERMES_SESSION_BRIDGE_SOURCE,
+            ) {
                 writes.push((bridge_dir.join("__init__.py"), None));
             }
         }
         None => {}
     }
-    write_files_transactionally("Hermes config.yaml、.env 与会话桥插件", &writes)
-        .map_err(|failure| {
+    write_files_transactionally("Hermes config.yaml、.env 与会话桥插件", &writes).map_err(
+        |failure| {
             if backup_created && failure.rolled_back {
                 let _ = std::fs::remove_file(&backup);
             }
             failure.message
-        })?;
+        },
+    )?;
     inspect_hermes(config_path, env_path, expected_base_url)
 }
 
@@ -668,11 +663,7 @@ pub(in crate::core::agent_global_config) fn restore_hermes(
 
     let restored_empty = text.trim().is_empty()
         || serde_yaml::from_str::<serde_yaml::Value>(&text)
-            .map(|value| {
-                value
-                    .as_mapping()
-                    .is_some_and(|mapping| mapping.is_empty())
-            })
+            .map(|value| value.as_mapping().is_some_and(|mapping| mapping.is_empty()))
             .unwrap_or(false);
     let content = if !backup.config_existed && restored_empty {
         None
@@ -689,7 +680,13 @@ pub(in crate::core::agent_global_config) fn restore_hermes(
     write_files_transactionally("Hermes config.yaml、.env 与会话桥插件", &writes)
         .map_err(|failure| failure.message)?;
     // 接入前插件目录不存在且已清空时，顺手删除空目录。
-    if !backup.bridge_dir_existed && bridge_dir.is_dir() && bridge_dir.read_dir().map(|mut entries| entries.next().is_none()).unwrap_or(false) {
+    if !backup.bridge_dir_existed
+        && bridge_dir.is_dir()
+        && bridge_dir
+            .read_dir()
+            .map(|mut entries| entries.next().is_none())
+            .unwrap_or(false)
+    {
         let _ = std::fs::remove_dir(&bridge_dir);
     }
     std::fs::remove_file(&backup_path)

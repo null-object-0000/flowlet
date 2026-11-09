@@ -41,7 +41,9 @@ impl ManagedProcessJob {
     /// `process_handle` 来自 `Child::raw_handle()`（`RawHandle` 与 `HANDLE`
     /// 同为 `*mut c_void` 别名）。绑定失败只影响“异常退出兜底”，不应阻断
     /// 正常启停流程，因此返回 `Result` 由调用方决定是否降级。
-    pub(crate) fn bind(process_handle: windows_sys::Win32::Foundation::HANDLE) -> Result<Self, String> {
+    pub(crate) fn bind(
+        process_handle: windows_sys::Win32::Foundation::HANDLE,
+    ) -> Result<Self, String> {
         use windows_sys::Win32::Foundation::CloseHandle;
         use windows_sys::Win32::System::JobObjects::{
             AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,

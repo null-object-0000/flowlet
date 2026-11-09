@@ -1,9 +1,9 @@
 /** 将 Flowlet 的 channel_id + upstream_model 映射到 models-cn  provider + model，
  *  并解析为 ResolvedModel。纯逻辑，便于测试。*/
 
-import type { ModelsCnCatalog, ModelsDevCatalog, ModelsDevModel, ResolvedModel } from "./types";
-import { findModelInCatalog, resolveModel } from "./pricing";
-import { canonicalModelId, modelsCnProviderIdForModel } from "./identity";
+import type { ModelsCnCatalog, ModelsDevCatalog, ModelsDevModel, ModelsCnPrice, ResolvedModel } from "./types";
+import { findModelInCatalog, resolveModel, selectOfficialPrice } from "./pricing";
+import { canonicalModelId, modelsCnProviderIdForModel, officialChannelIdForModel } from "./identity";
 
 /** 解析本地存储的 JSON 字符串为 ModelsCnCatalog。解析失败返回 null。 */
 export function parseCatalogJson(json: string): ModelsCnCatalog | null {
@@ -26,9 +26,28 @@ function normalizeValues(values: string[] | undefined): string[] {
   return [...new Set((values ?? []).map((value) => value.trim().toLowerCase()).filter(Boolean))];
 }
 
-function resolvedFromModelsDev(providerName: string, model: ModelsDevModel): ResolvedModel {
+function resolvedFromModelsDev(providerName: string, model: ModelsDevModel, providerId = "openrouter"): ResolvedModel {
+  const prices: ModelsCnPrice[] = [];
+  if (providerId === "openai" && model.cost?.input != null && model.cost.output != null) {
+    const cost = model.cost;
+    const tiers = (cost.tiers ?? []).filter((entry) => entry.tier?.type === "context" && entry.tier.size != null);
+    const base: ModelsCnPrice = {
+      market: "international", currency: "USD", unit: "1M_tokens", rateType: "standard",
+      input: { standard: cost.input!, cacheHit: cost.cache_read, explicitCacheCreation: cost.cache_write },
+      output: cost.output!, sourceUrl: "https://developers.openai.com/api/docs/pricing",
+      ...(tiers.length ? { inputTokenRange: { label: `≤ ${tiers[0].tier!.size}`, maxInclusive: tiers[0].tier!.size } } : {}),
+    };
+    prices.push(base);
+    for (const [index, tier] of tiers.entries()) {
+      prices.push({ ...base,
+        inputTokenRange: { label: `> ${tier.tier!.size}`, minExclusive: tier.tier!.size, maxInclusive: tiers[index + 1]?.tier?.size },
+        input: { standard: tier.input ?? cost.input!, cacheHit: tier.cache_read ?? cost.cache_read, explicitCacheCreation: tier.cache_write ?? cost.cache_write },
+        output: tier.output ?? cost.output!,
+      });
+    }
+  }
   return {
-    providerId: "openrouter",
+    providerId,
     providerName,
     modelId: model.id,
     modelName: model.name,
@@ -47,8 +66,8 @@ function resolvedFromModelsDev(providerName: string, model: ModelsDevModel): Res
       outputModalities: normalizeValues(model.modalities?.output),
     },
     aliases: [],
-    officialPrice: null,
-    allPrices: [],
+    officialPrice: selectOfficialPrice(prices),
+    allPrices: prices,
     supplementedFromModelsDev: false,
     modelsDevReferenceUrl: null,
   };
@@ -88,6 +107,12 @@ export function resolveModelSpecification(
     : null;
   if (fromModelsCn) return fromModelsCn;
   if (!allowModelsDevFallback) return null;
+  if (officialChannelIdForModel(upstreamModel) === "openai-api") {
+    const canonical = canonicalModelId(upstreamModel);
+    const provider = modelsDevCatalog?.openai;
+    const model = canonical ? provider?.models?.[canonical] : null;
+    return provider && model ? resolvedFromModelsDev(provider.name, model, "openai") : null;
+  }
   if (channelId !== "openrouter") return null;
   return modelsDevCatalog
     ? resolveOpenRouterModelsDevModel(modelsDevCatalog, upstreamModel)

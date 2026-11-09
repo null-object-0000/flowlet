@@ -25,7 +25,7 @@ export function UsageAnalysisDemoView({ zh, density = "default" }: { zh: boolean
         { value: "laptop", label: zh ? "移动工作站" : "Laptop" },
       ]}
       ariaLabel={zh ? "切换设备" : "Switch device"}
-      onChange={(value) => { setDeviceId(value); setSelected("flowlet-pro"); }}
+      onChange={(value) => { setDeviceId(value); setSelected("deepseek-v4-flash"); }}
     />}
     subtitle={zh ? "合并 Flowlet 请求与可识别模型的 Agent 原生用量，拆解 Token、费用与性能" : "Combine Flowlet requests and native agent usage across tokens, cost and performance"}
     controls={<DesktopTimeScopeView>

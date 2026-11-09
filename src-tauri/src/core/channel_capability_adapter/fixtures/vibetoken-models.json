@@ -1,0 +1,127 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "id": "qwen/qwen3.5-27b",
+      "object": "model",
+      "created": 0,
+      "owned_by": "Alibaba",
+      "context_length": 262144,
+      "max_output_tokens": 65536,
+      "max_completion_tokens": 65536,
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "supported_parameters": [
+        "tools",
+        "tool_choice",
+        "reasoning"
+      ],
+      "modality": "chat",
+      "pricing": {
+        "prompt": "0.60",
+        "completion": "4.80",
+        "unit": "1M tokens"
+      },
+      "official_name": "qwen3.5-27b"
+    },
+    {
+      "id": "deepseek/deepseek-v4-flash",
+      "object": "model",
+      "created": 0,
+      "owned_by": "DeepSeek",
+      "context_length": 1000000,
+      "max_output_tokens": 393216,
+      "max_completion_tokens": 393216,
+      "input_modalities": [
+        "text"
+      ],
+      "supported_parameters": [
+        "tools",
+        "tool_choice",
+        "reasoning"
+      ],
+      "modality": "chat",
+      "pricing": {
+        "prompt": "2.00",
+        "completion": "8.00",
+        "unit": "1M tokens"
+      },
+      "official_name": "deepseek-v4-flash"
+    },
+    {
+      "id": "deepseek/deepseek-v4-pro-0813",
+      "object": "model",
+      "created": 0,
+      "owned_by": "DeepSeek",
+      "context_length": 1000000,
+      "max_output_tokens": 384000,
+      "max_completion_tokens": 384000,
+      "input_modalities": [
+        "text"
+      ],
+      "supported_parameters": [
+        "tools",
+        "tool_choice",
+        "reasoning"
+      ],
+      "modality": "chat",
+      "pricing": {
+        "prompt": "9.00",
+        "completion": "27.00",
+        "unit": "1M tokens"
+      },
+      "official_name": "deepseek-v4-pro-0813"
+    },
+    {
+      "id": "moonshotai/kimi-k3",
+      "object": "model",
+      "created": 0,
+      "owned_by": "MoonshotAI",
+      "context_length": 1048576,
+      "max_output_tokens": 1048576,
+      "max_completion_tokens": 1048576,
+      "input_modalities": [
+        "text",
+        "image"
+      ],
+      "supported_parameters": [
+        "tools",
+        "tool_choice",
+        "reasoning"
+      ],
+      "modality": "chat",
+      "pricing": {
+        "prompt": "20.00",
+        "completion": "100.00",
+        "unit": "1M tokens"
+      },
+      "official_name": "kimi-k3"
+    },
+    {
+      "id": "zai/glm-5.3",
+      "object": "model",
+      "created": 0,
+      "owned_by": "ZAI",
+      "context_length": 1048576,
+      "max_output_tokens": 131072,
+      "max_completion_tokens": 131072,
+      "input_modalities": [
+        "text"
+      ],
+      "supported_parameters": [
+        "tools",
+        "tool_choice",
+        "reasoning"
+      ],
+      "modality": "chat",
+      "pricing": {
+        "prompt": "8.00",
+        "completion": "28.00",
+        "unit": "1M tokens"
+      },
+      "official_name": "glm-5.3"
+    }
+  ]
+}

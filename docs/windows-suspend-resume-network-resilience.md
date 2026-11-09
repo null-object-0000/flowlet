@@ -11,7 +11,7 @@ Windows 自动待机（用户离开后空闲计时器触发，或 Win+L 锁屏�
 | 字段 | 值 |
 |------|-----|
 | created_at | `2026-07-21 10:36:45` UTC = **18:36:45 北京时间（合盖前发出）** |
-| client / channel / model | Pi → LongCat → `flowlet-pro`（`LongCat-2.0`），`request_type=tool_use` |
+| client / channel / model | Pi → LongCat → `flowlet-pro`（`LongCat-2.0`；历史日志原值，该聚合别名已移除），`request_type=tool_use` |
 | status / is_stream | 200 / 流式 |
 | ttfb_ms / ttft_ms | **3345 / 3346（响应头和首个 token 都正常到达）** |
 | duration_ms | **1697228（≈28 分钟）** |

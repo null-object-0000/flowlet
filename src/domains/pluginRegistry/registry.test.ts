@@ -4,7 +4,7 @@ import { AGENT_PLUGINS, AGENT_SESSION_OPTIONS, CHANNEL_PLUGIN_IDS, agentPlugin }
 describe("plugin registry", () => {
   it("registers builtin channels in stable display order", () => {
     expect(CHANNEL_PLUGIN_IDS).toEqual([
-      "longcat", "deepseek", "kimi", "qwen", "custom", "zhipu", "openrouter",
+      "openai-api", "longcat", "deepseek", "kimi", "qwen", "custom", "zhipu", "openrouter", "vibetoken",
     ]);
   });
 
@@ -20,16 +20,14 @@ describe("plugin registry", () => {
     expect(agentPlugin("deepseek-harness").supportsManagedConfig).toBe(true);
     expect(agentPlugin("deepseek-harness").configCapabilities).toEqual([
       expect.objectContaining({ id: "session-extension", defaultEnabled: false, requiresRestart: true }),
-      expect.objectContaining({ id: "model-specs", defaultEnabled: false, requiresRestart: false }),
       expect.objectContaining({ id: "mcp-servers", kind: "list", defaultEnabled: false, requiresRestart: false }),
     ]);
     expect(agentPlugin("pi").configCapabilities).toEqual([
       expect.objectContaining({ id: "session-extension", defaultEnabled: false, requiresRestart: true }),
-      expect.objectContaining({ id: "model-specs", defaultEnabled: false, requiresRestart: false }),
     ]);
-    expect(agentPlugin("opencode").configCapabilities).toEqual([
-      expect.objectContaining({ id: "model-specs", defaultEnabled: false, requiresRestart: true }),
-    ]);
+    // 聚合模型移除后，OpenCode / Claude Code / Codex 不再有模型规格或长上下文开关。
+    expect(agentPlugin("opencode").configCapabilities).toEqual([]);
+    expect(agentPlugin("claude-code").configCapabilities).toEqual([]);
     expect(agentPlugin("hermes").endpointSuffix).toBe("/v1");
     expect(agentPlugin("hermes").surfaces).toEqual(["cli"]);
     expect(agentPlugin("hermes").configCapabilities).toEqual([

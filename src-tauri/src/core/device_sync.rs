@@ -137,7 +137,7 @@ pub async fn build_synced_agent_session(
         return Err("Agent 类型和会话 ID 不能为空".to_string());
     }
     let opencode_pending_sessions = crate::core::opencode_control::pending_session_ids().await;
-    tauri::async_runtime::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         let Some(row) = storage
             .list_agent_sessions_for_device_sync(&opencode_pending_sessions)
             .map_err(|error| error.to_string())?
@@ -184,7 +184,7 @@ pub async fn build_device_snapshot(
     // 与 PC 列表页同一入口合并 OpenCode 实时待确认权限，否则移动端快照会把
     // “等待确认”的会话固化为 SQLite 推断出的“自动运行中”。
     let opencode_pending_sessions = crate::core::opencode_control::pending_session_ids().await;
-    let (days, hours, sessions) = tauri::async_runtime::spawn_blocking(move || {
+    let (days, hours, sessions) = tokio::task::spawn_blocking(move || {
         // 快照携带「代理 + Agent 原生」合并口径，其他设备/移动端才能看到
         // 本机未经过 Flowlet 的 Token（schema v6 的日/小时 native_* 字段）。
         let days = snapshot_storage
@@ -238,7 +238,7 @@ pub async fn build_device_snapshot(
     let agents = build_synced_agent_profiles(&storage, &sessions).await?;
     // 维度用量聚合：最近 90 天按 (日期, 客户端, 渠道, 账号, 模型) 聚合，
     // 附带在快照中发给对方，供用量分析页按设备维度汇总。
-    let usage_breakdowns = tauri::async_runtime::spawn_blocking({
+    let usage_breakdowns = tokio::task::spawn_blocking({
         let snapshot_storage = storage.clone();
         move || snapshot_storage.usage_breakdown_for_sync(90)
     })
@@ -265,7 +265,7 @@ async fn build_synced_agent_profiles(
     );
     let environments = [claude?, opencode?, pi?, chatgpt?];
     let config_storage = storage.clone();
-    let config_states = tauri::async_runtime::spawn_blocking(move || {
+    let config_states = tokio::task::spawn_blocking(move || {
         let bind = config_storage
             .get_app_meta("proxy_bind_config")
             .unwrap_or_default()
@@ -1006,7 +1006,7 @@ pub async fn pull_device_usage(
     }
 
     let import_storage = storage.clone();
-    let import_result = tauri::async_runtime::spawn_blocking(move || {
+    let import_result = tokio::task::spawn_blocking(move || {
         let mut imported_devices = 0usize;
         let mut imported_days = 0usize;
         let mut unchanged_days = 0usize;
@@ -1120,7 +1120,7 @@ async fn pull_device_usage_for_device(
     crate::core::lan_sync::remember_peer(&storage, &bundle.snapshot);
     let snapshot = bundle.snapshot;
     let import_storage = storage.clone();
-    let pull_result = tauri::async_runtime::spawn_blocking(move || {
+    let pull_result = tokio::task::spawn_blocking(move || {
         let result = import_storage
             .import_device_usage(
                 snapshot.schema_version,
@@ -1376,7 +1376,7 @@ pub async fn sync_device_usage(
 
     let import_storage = storage.clone();
     let import_started_at = Instant::now();
-    let import_result = tauri::async_runtime::spawn_blocking(move || {
+    let import_result = tokio::task::spawn_blocking(move || {
         let mut imported_devices = 0usize;
         let mut imported_days = 0usize;
         let mut unchanged_days = 0usize;

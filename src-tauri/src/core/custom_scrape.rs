@@ -360,10 +360,7 @@ fn scan_root(
         if !manifest_path.is_file() {
             continue;
         }
-        let dir_name = entry
-            .file_name()
-            .to_string_lossy()
-            .to_ascii_lowercase();
+        let dir_name = entry.file_name().to_string_lossy().to_ascii_lowercase();
         if !seen.insert(dir_name.clone()) {
             // 同名目录以后加载者（低优先级根目录）为准忽略。
             registry
@@ -407,9 +404,15 @@ fn validate_and_build(raw: &RawManifest, dir: &Path) -> Result<Descriptor, Strin
     if channel_id.is_empty() {
         return Err("channelId 不能为空".to_string());
     }
-    let account_name = raw.account_name.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let account_name = raw
+        .account_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
     if channel_id == "custom" && account_name.is_none() && !raw.fallback {
-        return Err("custom 渠道的描述符必须声明 accountName，或显式设置 fallback=true".to_string());
+        return Err(
+            "custom 渠道的描述符必须声明 accountName，或显式设置 fallback=true".to_string(),
+        );
     }
     if raw.resource_modes.is_empty() {
         return Err("resourceModes 不能为空".to_string());
@@ -430,7 +433,9 @@ fn validate_and_build(raw: &RawManifest, dir: &Path) -> Result<Descriptor, Strin
             return Err("resourceModes 的 resourceMode / modeKey 不能为空".to_string());
         }
         if !raw.modes.contains_key(mode_key) {
-            return Err(format!("resourceMode {resource_mode} 引用了缺失的 mode：{mode_key}"));
+            return Err(format!(
+                "resourceMode {resource_mode} 引用了缺失的 mode：{mode_key}"
+            ));
         }
     }
 
@@ -443,10 +448,7 @@ fn validate_and_build(raw: &RawManifest, dir: &Path) -> Result<Descriptor, Strin
 
     let mut modes = HashMap::new();
     for (mode_key, mode) in &raw.modes {
-        modes.insert(
-            mode_key.clone(),
-            validate_mode(mode_key, mode, dir)?,
-        );
+        modes.insert(mode_key.clone(), validate_mode(mode_key, mode, dir)?);
     }
 
     let summary = raw
@@ -931,8 +933,7 @@ pub fn login_matches(login: &LoginKind, page_url: &str) -> bool {
         LoginKind::None => false,
         LoginKind::Generic => has_login_path(page_url),
         LoginKind::GenericOrHost { host } => {
-            has_login_path(page_url)
-                || page_url.to_ascii_lowercase().contains(host.as_str())
+            has_login_path(page_url) || page_url.to_ascii_lowercase().contains(host.as_str())
         }
     }
 }
@@ -965,8 +966,7 @@ mod tests {
 
     #[test]
     fn friday_example_matches_only_workspace_key_lists() {
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../examples/custom-scrape/friday");
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/custom-scrape/friday");
         let descriptor = load_descriptor(&dir).expect("valid Friday example");
         let mode = &descriptor.modes["paygo"];
         let rule = &mode.slots[0];
@@ -986,7 +986,10 @@ mod tests {
             assert!(!url_matches(matcher, url), "{url}");
         }
         assert!(slot_satisfies(&rule.satisfies, r#"{"items":[]}"#));
-        assert!(!slot_satisfies(&rule.satisfies, r#"{"error":"unauthorized"}"#));
+        assert!(!slot_satisfies(
+            &rule.satisfies,
+            r#"{"error":"unauthorized"}"#
+        ));
     }
 
     #[test]
@@ -1059,10 +1062,15 @@ mod tests {
             "https://friday.example.com/api?x=1"
         ));
         assert!(url_matches(
-            &UrlMatch::Regex(regex::Regex::new(r"^https://friday\.example\.com/api/v2/usage").unwrap()),
+            &UrlMatch::Regex(
+                regex::Regex::new(r"^https://friday\.example\.com/api/v2/usage").unwrap()
+            ),
             "https://friday.example.com/api/v2/usage"
         ));
-        assert!(!url_matches(&UrlMatch::Fallback, "https://friday.example.com/api"));
+        assert!(!url_matches(
+            &UrlMatch::Fallback,
+            "https://friday.example.com/api"
+        ));
     }
 
     #[test]
@@ -1078,10 +1086,7 @@ mod tests {
             },
             "https://friday.example.com/home"
         ));
-        assert!(!login_matches(
-            &LoginKind::Generic,
-            "https://x.com/billing"
-        ));
+        assert!(!login_matches(&LoginKind::Generic, "https://x.com/billing"));
     }
 
     #[test]
@@ -1103,7 +1108,10 @@ mod tests {
             .iter()
             .find(|item| item.pointer("/Template/Code").and_then(|v| v.as_str()) == Some("b"))
             .unwrap();
-        assert_eq!(b.pointer("/Status").and_then(|v| v.as_str()), Some("expired"));
+        assert_eq!(
+            b.pointer("/Status").and_then(|v| v.as_str()),
+            Some("expired")
+        );
         // 裁剪后不保留未声明的字段。
         assert!(items[0].get("unexpected").is_none());
     }

@@ -2,10 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { RouteCandidate } from "../../domains/model/types";
 import type { ModelServiceItem } from "./modelServiceView";
 import {
-  addAggregateRouteGroup,
-  buildAggregateRouteOptions,
   filterModelServiceItems,
-  removeAggregateRouteGroup,
+  removeModelRouteGroup,
   reorderModelRouteGroups,
 } from "./modelServiceInteractions";
 
@@ -32,12 +30,12 @@ function route(
 }
 
 describe("model service interactions", () => {
-  it("filters aggregate and direct models by route channel", () => {
+  it("filters direct models by route channel", () => {
     const models = [
       {
-        publicModel: "flowlet-pro",
+        publicModel: "kimi-k3",
         enabled: true,
-        routes: [route("r1", "flowlet-pro", "kimi", "a1", "openai", 0)],
+        routes: [route("r1", "kimi-k3", "kimi", "a1", "openai", 0)],
       },
       {
         publicModel: "deepseek-v4-pro",
@@ -47,7 +45,7 @@ describe("model service interactions", () => {
     ] as ModelServiceItem[];
 
     expect(filterModelServiceItems(models, "", "kimi").map((model) => model.publicModel))
-      .toEqual(["flowlet-pro"]);
+      .toEqual(["kimi-k3"]);
     expect(filterModelServiceItems(models, "", "deepseek").map((model) => model.publicModel))
       .toEqual(["deepseek-v4-pro"]);
   });
@@ -55,8 +53,8 @@ describe("model service interactions", () => {
   it("filters by model name and upstream model", () => {
     const models = [
       {
-        publicModel: "flowlet-pro",
-        routes: [route("r1", "flowlet-pro", "kimi", "a1", "openai", 0)],
+        publicModel: "kimi-k3",
+        routes: [route("r1", "kimi-k3", "kimi", "a1", "openai", 0)],
       },
       {
         publicModel: "deepseek-v4-pro",
@@ -64,77 +62,56 @@ describe("model service interactions", () => {
       },
     ] as ModelServiceItem[];
 
-    expect(filterModelServiceItems(models, "FLOWLET", "all").map((model) => model.publicModel))
-      .toEqual(["flowlet-pro"]);
+    expect(filterModelServiceItems(models, "KIMI", "all").map((model) => model.publicModel))
+      .toEqual(["kimi-k3"]);
     expect(filterModelServiceItems(models, "deepseek-model", "all").map((model) => model.publicModel))
       .toEqual(["deepseek-v4-pro"]);
   });
 
   it("moves a route group and keeps both protocols at the same priority", () => {
     const routes = [
-      route("kimi-openai", "flowlet-pro", "kimi", "kimi-account", "openai", 0),
-      route("kimi-anthropic", "flowlet-pro", "kimi", "kimi-account", "anthropic", 0),
-      route("deepseek-openai", "flowlet-pro", "deepseek", "deepseek-account", "openai", 1),
+      route("kimi-openai", "kimi-k3", "kimi", "kimi-account", "openai", 0),
+      route("kimi-anthropic", "kimi-k3", "kimi", "kimi-account", "anthropic", 0),
+      route("qwen-openai", "kimi-k3", "qwen", "qwen-account", "openai", 1),
       route("direct", "deepseek-v4-pro", "deepseek", "deepseek-account", "openai", 9),
     ];
     const kimiKey = ["kimi", "kimi-account", "kimi-model"].join("\u0000");
-    const deepseekKey = ["deepseek", "deepseek-account", "deepseek-model"].join("\u0000");
+    const qwenKey = ["qwen", "qwen-account", "qwen-model"].join("\u0000");
 
     const reordered = reorderModelRouteGroups(
       routes,
-      "flowlet-pro",
-      deepseekKey,
+      "kimi-k3",
+      qwenKey,
       kimiKey,
       "updated",
     );
 
-    expect(reordered.find((item) => item.id === "deepseek-openai")?.priority).toBe(0);
+    expect(reordered.find((item) => item.id === "qwen-openai")?.priority).toBe(0);
     expect(reordered.filter((item) => item.id.startsWith("kimi-")).map((item) => item.priority))
       .toEqual([1, 1]);
     expect(reordered.find((item) => item.id === "direct")).toEqual(routes[3]);
   });
 
   it("returns the original array for an unknown drag target", () => {
-    const routes = [route("r1", "flowlet-pro", "kimi", "a1", "openai", 0)];
-    expect(reorderModelRouteGroups(routes, "flowlet-pro", "missing", "also-missing", "updated"))
+    const routes = [route("r1", "kimi-k3", "kimi", "a1", "openai", 0)];
+    expect(reorderModelRouteGroups(routes, "kimi-k3", "missing", "also-missing", "updated"))
       .toBe(routes);
   });
 
-  it("offers every unattached direct channel-model group", () => {
+  it("removes only the selected route group and compacts priorities", () => {
     const routes = [
-      route("direct-openai", "kimi-k3", "kimi", "a1", "openai", 0),
-      route("direct-anthropic", "kimi-k3", "kimi", "a1", "anthropic", 0),
-      route("attached", "flowlet-pro", "kimi", "a1", "openai", 0),
-      route("other", "qwen3.6-flash", "qwen", "a2", "openai", 0),
+      route("direct", "deepseek-v4-pro", "deepseek", "a1", "openai", 8),
+      route("kimi-route", "kimi-k3", "kimi", "a1", "openai", 0),
+      route("qwen-route", "kimi-k3", "qwen", "a2", "openai", 1),
     ];
-    expect(buildAggregateRouteOptions(routes, "flowlet-pro").map((option) => option.upstreamModel))
-      .toEqual(["qwen-model"]);
-    expect(buildAggregateRouteOptions(routes, "flowlet-flash").map((option) => option.upstreamModel))
-      .toEqual(["kimi-model", "qwen-model"]);
-  });
-
-  it("adds all protocols from a direct model without inferring a tier", () => {
-    const routes = [
-      route("direct-openai", "kimi-k3", "kimi", "a1", "openai", 0),
-      route("direct-anthropic", "kimi-k3", "kimi", "a1", "anthropic", 0),
-    ];
-    const sourceKey = JSON.stringify(["kimi", "a1", "kimi-model"]);
-    let id = 0;
-    const next = addAggregateRouteGroup(routes, "flowlet-flash", sourceKey, "now", () => `new-${++id}`);
-    const added = next.filter((item) => item.virtual_model_id === "flowlet-flash");
-    expect(added.map((item) => item.client_protocol)).toEqual(["openai", "anthropic"]);
-    expect(added.every((item) => item.enabled && item.created_at === "now")).toBe(true);
-  });
-
-  it("removes only the selected aggregate relation and compacts priorities", () => {
-    const routes = [
-      route("direct", "kimi-k3", "kimi", "a1", "openai", 8),
-      route("aggregate-kimi", "flowlet-pro", "kimi", "a1", "openai", 0),
-      route("aggregate-qwen", "flowlet-pro", "qwen", "a2", "openai", 1),
-    ];
-    const next = removeAggregateRouteGroup(routes, "flowlet-pro", ["aggregate-kimi"]);
-    expect(next.map((item) => item.id)).toEqual(["direct", "aggregate-qwen"]);
-    expect(next.find((item) => item.id === "aggregate-qwen")?.priority).toBe(0);
+    const next = removeModelRouteGroup(routes, "kimi-k3", ["kimi-route"]);
+    expect(next.map((item) => item.id)).toEqual(["direct", "qwen-route"]);
+    expect(next.find((item) => item.id === "qwen-route")?.priority).toBe(0);
     expect(next.find((item) => item.id === "direct")?.priority).toBe(8);
+  });
+
+  it("returns the original array when the route group is not exposed", () => {
+    const routes = [route("r1", "kimi-k3", "kimi", "a1", "openai", 0)];
+    expect(removeModelRouteGroup(routes, "kimi-k3", ["missing"])).toBe(routes);
   });
 });

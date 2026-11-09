@@ -1,0 +1,9 @@
+.login {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: var(--semi-color-bg-0);
+}
+.login > :global(.semi-card) {
+  width: min(420px, 92vw);
+}

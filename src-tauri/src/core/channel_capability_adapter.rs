@@ -48,6 +48,8 @@ pub(crate) struct ChannelCapabilityAdapter {
     model_sync: ModelSyncFn,
     balance_query: Option<BalanceQueryFn>,
     pub strips_openai_v1_path: bool,
+    /// Whether model forwarding follows Flowlet's explicit upstream proxy settings.
+    pub uses_upstream_proxy_for_models: bool,
     console_scrape: ConsoleScrapeAdapter,
     login_page: LoginPageAdapter,
     scrape_response: Option<ScrapeResponseAdapter>,
@@ -78,7 +80,10 @@ pub(crate) fn merge_scrape_response(kind: &str, existing: &str, incoming: &str) 
 /// 才视为不满足；没有 adapter 处理该槽位时退回“合法 JSON 即视为到位”。
 pub(crate) fn scrape_response_satisfies_slot(kind: &str, body: &str) -> bool {
     let mut saw_rejection = false;
-    for adapter in ADAPTERS.iter().filter_map(|adapter| adapter.scrape_response) {
+    for adapter in ADAPTERS
+        .iter()
+        .filter_map(|adapter| adapter.scrape_response)
+    {
         match (adapter.satisfies)(kind, body) {
             Some(true) => return true,
             Some(false) => saw_rejection = true,
@@ -318,16 +323,26 @@ mod tests {
         // Z.AI 的 token_packs_list 用顶层 `rows`；LongCat 的 token_packs_list 用
         // `data.items`。两者共享槽位名，LongCat 先注册，其 `Some(false)` 不应抢在
         // Z.AI 的 `Some(true)` 之前返回。
-        let zhipu_pack_list = r#"{"code":200,"rows":[{"tokenBalance":1000,"availableBalance":400}],"total":1}"#;
-        assert!(scrape_response_satisfies_slot("token_packs_list", zhipu_pack_list));
+        let zhipu_pack_list =
+            r#"{"code":200,"rows":[{"tokenBalance":1000,"availableBalance":400}],"total":1}"#;
+        assert!(scrape_response_satisfies_slot(
+            "token_packs_list",
+            zhipu_pack_list
+        ));
 
         // LongCat 的完整历史列表仍按 LongCat 口径判定。
         let longcat_history = r#"{"code":0,"data":{"activeCount":0,"historyCount":1,"total":1,"pageSize":9,"items":[{"resourceId":"h-1","statusCode":4}]}}"#;
-        assert!(scrape_response_satisfies_slot("token_packs_list", longcat_history));
+        assert!(scrape_response_satisfies_slot(
+            "token_packs_list",
+            longcat_history
+        ));
 
         // 鉴权错误（两种信封都判定不满足）不会被误判为已捕获。
         let auth_error = r#"{"code":401,"msg":"unauthorized"}"#;
-        assert!(!scrape_response_satisfies_slot("token_packs_list", auth_error));
+        assert!(!scrape_response_satisfies_slot(
+            "token_packs_list",
+            auth_error
+        ));
     }
 
     #[tokio::test]

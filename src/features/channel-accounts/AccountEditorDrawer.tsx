@@ -11,9 +11,11 @@ import type { ChannelPreset } from "../../domains/channel/types";
 import {
   CHATGPT_CHANNEL_ID,
   CHATGPT_PSEUDO_PRESET,
+  ANTIGRAVITY_PSEUDO_PRESET,
   CUSTOM_CHANNEL_ID,
   FLOWLET_SUPPORTED_MODELS,
   OPENROUTER_CHANNEL_ID,
+  OPENAI_API_CHANNEL_ID,
   QWEN_CHANNEL_ID,
   QWEN_TOKEN_PLAN_ANTHROPIC_BASE_URL,
   QWEN_TOKEN_PLAN_OPENAI_BASE_URL,
@@ -31,6 +33,7 @@ import {
   type LongCatPack,
 } from "./longCatPacks";
 import styles from "./AccountEditorDrawer.module.css";
+import { ChannelBrandLogo } from "./ChannelBrandLogo";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import { DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
@@ -71,7 +74,7 @@ type Mode = { kind: "create"; channelId: string } | { kind: "edit"; account: Cha
 export type AccountEditorMode = Mode;
 export type AccountResourceSnapshotDraft = Omit<AccountBalanceSnapshot, "id" | "created_at" | "updated_at">;
 
-type TestInput = { channel_id: string; api_key: string; base_url_override?: string | null };
+type TestInput = { channel_id: string; api_key: string; base_url_override?: string | null; use_upstream_proxy?: boolean | null };
 type ResourceDraft = { balance: string; currency: string; tokenTotal: string; tokenUsed: string; tokenRemaining: string; tokenExpire: string; tokenPacks: string };
 
 type Props = {
@@ -86,14 +89,16 @@ type Props = {
   onScrape?: (accountId: string) => Promise<ScrapeBalanceResult>;
   /** ChatGPT 伪渠道的授权登录（浏览器 OAuth，仅新增模式）。 */
   onAuthorizeChatGpt?: () => Promise<void>;
+  onAuthorizeAntigravity?: () => Promise<void>;
   authorizationBusy?: boolean;
+  desktopCapabilities?: boolean;
 };
 
-export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose, onSave, onTestConnection, onSyncBalance, onScrape, onAuthorizeChatGpt, authorizationBusy = false }: Props) {
+export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose, onSave, onTestConnection, onSyncBalance, onScrape, onAuthorizeChatGpt, onAuthorizeAntigravity, authorizationBusy = false, desktopCapabilities = true }: Props) {
   const { language, t } = useAppPreferences();
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<ChannelAccount>(() => createDraft(mode, accounts, presets, language));
-  const [resource, setResource] = useState<ResourceDraft>(() => resourceDraft(snapshot));
+  const [resource, setResource] = useState<ResourceDraft>(() => resourceDraft(snapshot, draft.channel_id));
   const [advancedOpen, setAdvancedOpen] = useState(
     () => mode.kind === "edit" && mode.account.channel_id === CUSTOM_CHANNEL_ID,
   );
@@ -116,8 +121,8 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
 
   // 新增模式在渠道选择里附加 ChatGPT 伪预设（授权登录，非表单创建）。
   const allPresets = useMemo(
-    () => (mode.kind === "create" ? [...presets, CHATGPT_PSEUDO_PRESET] : presets),
-    [mode.kind, presets],
+    () => (mode.kind === "create" && desktopCapabilities ? [...presets, CHATGPT_PSEUDO_PRESET, ANTIGRAVITY_PSEUDO_PRESET] : presets),
+    [mode.kind, presets, desktopCapabilities],
   );
   const channel = allPresets.find((item) => item.id === draft?.channel_id);
   const customChannel = isCustomChannel(channel);
@@ -132,7 +137,9 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
   const hasCustomScrape = draft?.channel_id === CUSTOM_CHANNEL_ID
     && isCustomScrapeAccount(draft?.name ?? "", customScrapeChannels);
   const isEdit = mode.kind === "edit";
+  const isAntigravityCreate = !isEdit && draft?.channel_id === "antigravity";
   const isChatGptCreate = !isEdit && draft?.channel_id === CHATGPT_CHANNEL_ID;
+  const isSubscriptionCreate = isChatGptCreate || isAntigravityCreate;
   const isOpenRouter = draft?.channel_id === OPENROUTER_CHANNEL_ID;
   const cachedChannelModels = useQuery({
     queryKey: queryKeys.model.channelModels(),
@@ -147,13 +154,14 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
     && isEdit
     && (draft.management_key?.trim() ?? "") !== (mode.account.management_key?.trim() ?? "");
 
-  const handleAuthorizeChatGpt = async () => {
+  const handleAuthorizeSubscription = async () => {
     try {
-      await onAuthorizeChatGpt?.();
-      Toast.success(t("ChatGPT 账号授权成功"));
+      if (isAntigravityCreate) await onAuthorizeAntigravity?.();
+      else await onAuthorizeChatGpt?.();
+      Toast.success(t(isAntigravityCreate ? "Antigravity 账号授权成功" : "ChatGPT 账号授权成功"));
       onClose();
     } catch (error) {
-      Toast.error(t("ChatGPT 账号授权失败：{message}", { message: errorMessage(error) }));
+      Toast.error(t(isAntigravityCreate ? "Antigravity 账号授权失败：{message}" : "ChatGPT 账号授权失败：{message}", { message: errorMessage(error) }));
     }
   };
   const autoSyncBalance = channel?.supports_balance_query === true;
@@ -167,7 +175,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
   const isQwenPayAsYouGo = draft.channel_id === QWEN_CHANNEL_ID && resourceMode === "pay_as_you_go";
   // Z.AI API 按量付费：资源包管理页提供官方余额与额度包抓取，固定自动同步。
   const isZhipuPayAsYouGo = isZhipuPayAsYouGoAccount(draft);
-  const supportsScrape = (channel?.supports_scrape_balance === true || hasCustomScrape) && !autoSyncBalance;
+  const supportsScrape = desktopCapabilities && (channel?.supports_scrape_balance === true || hasCustomScrape) && !autoSyncBalance;
   const resourceSyncMode = isLongCatHybrid || isQwenTokenPlan || isQwenPayAsYouGo || isZhipuPayAsYouGo || hasCustomScrape
     ? "auto"
     : (draft.resource_sync_mode ?? "manual");
@@ -201,7 +209,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
       management_key: channelId === OPENROUTER_CHANNEL_ID ? currentDraft.management_key ?? null : null,
     });
     if (channelId === CUSTOM_CHANNEL_ID) setAdvancedOpen(true);
-    setResource(resourceDraft());
+    setResource(resourceDraft(undefined, channelId));
   }
 
   /** 切换资源模式。千问支持双资源模式：Token Plan 需要配套专属端点——选入时
@@ -243,7 +251,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
     }
     setTesting(true);
     try {
-      await onTestConnection({ channel_id: currentDraft.channel_id, api_key: currentDraft.api_key.trim(), base_url_override: effectiveOpenAiBaseUrl(currentDraft) });
+      await onTestConnection({ channel_id: currentDraft.channel_id, api_key: currentDraft.api_key.trim(), base_url_override: effectiveOpenAiBaseUrl(currentDraft), use_upstream_proxy: currentDraft.use_upstream_proxy });
       update({ credential_status: "healthy", last_error: null });
       Toast.success(t("连接成功，API Key 有效"));
     } catch (error) {
@@ -292,8 +300,13 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
         channel_id: currentDraft.channel_id,
         api_key: currentDraft.api_key.trim(),
         base_url_override: effectiveOpenAiBaseUrl(currentDraft),
+        use_upstream_proxy: currentDraft.use_upstream_proxy,
       });
       const models = result.models.filter((item) => item.model.trim());
+      if (models.length === 0 && result.errors.length > 0) {
+        Toast.error(t("拉取模型列表失败：{message}", { message: result.errors[0] }));
+        return;
+      }
       // 白名单仍按规范模型判断，但勾选值保留上游原始 ID：同一规范模型可能对应
       // 多个独立额度资源（如 deepseek-v4-flash 与 deepseek-v4-flash-0731）。
       // 开放哪些模型一律由用户显式勾选（含 OpenRouter），不默认勾选。
@@ -423,17 +436,17 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
           <strong>{isEdit
             ? t("编辑 {name} 渠道账号", { name: channel?.name ?? t("渠道") })
             : t("新增渠道账号")}</strong>
-          <span>{isEdit ? t("更新 {name} 的连接与资源信息", { name: draft.name }) : t("添加 {name} 账号，用于上游模型转发", { name: channel?.name ?? t("渠道") })}</span>
+          <span>{isEdit ? t("更新 {name} 的连接与资源信息", { name: draft.name }) : t(isSubscriptionCreate ? "授权 {name} 账号，用于查看订阅额度" : "添加 {name} 账号，用于上游模型转发", { name: channel?.name ?? t("渠道") })}</span>
         </div>
       )}
       onCancel={onClose}
       footer={(
         <div className={styles.footer}>
           <Button onClick={onClose}>{t("取消")}</Button>
-          {!isChatGptCreate ? (
+          {!isSubscriptionCreate ? (
             <Button disabled={!draft.api_key.trim()} loading={testing} onClick={() => void handleTest()}>{t("测试连接")}</Button>
           ) : null}
-          {!isChatGptCreate ? (
+          {!isSubscriptionCreate ? (
             <Button theme="solid" type="primary" loading={saving} onClick={() => void handleSave()}>{t(isEdit ? "保存修改" : "保存账号")}</Button>
           ) : null}
         </div>
@@ -456,6 +469,8 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
                       <span className={styles.channelOptionLabel}>
                         {item.id === CUSTOM_CHANNEL_ID ? (
                           <span className={styles.customChannelIcon}>↗</span>
+                        ) : (item.id === OPENAI_API_CHANNEL_ID || item.id === "vibetoken" || item.id === "antigravity") ? (
+                          <ChannelBrandLogo channelId={item.id} name={item.name} />
                         ) : item.id === CHATGPT_CHANNEL_ID ? (
                           <img src="/icons/lobe/openai.svg" alt="" className={styles.logoIcon} />
                         ) : item.id === "kimi" ? (
@@ -471,11 +486,11 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
                   ))}
                 </Select>
               </Field>
-              <div className={styles.enabledRow}>
+              {!isSubscriptionCreate ? <div className={styles.enabledRow}>
                 <span><strong>{t("启用状态")}</strong><small>{t("停用后，该账号不会参与请求转发")}</small></span>
                 <Switch aria-label={t("启用账号")} checked={draft.enabled} onChange={(checked) => update({ enabled: checked })} />
                 <Text>{t(draft.enabled ? "启用" : "停用")}</Text>
-              </div>
+              </div> : null}
             </div>
           ) : (
             <div className={styles.enabledRow}>
@@ -485,10 +500,11 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
             </div>
           )}
 
-          {isChatGptCreate ? (
-            <ChatGptAuthorizePanel
+          {isSubscriptionCreate ? (
+            <SubscriptionAuthorizePanel
+              antigravity={isAntigravityCreate}
               busy={authorizationBusy}
-              onAuthorize={handleAuthorizeChatGpt}
+              onAuthorize={handleAuthorizeSubscription}
             />
           ) : (
             <div className={styles.basicFields}>
@@ -506,6 +522,14 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
               )}>
                 <Input aria-label="API Key" mode="password" value={draft.api_key} placeholder={t("请输入渠道 API Key")} onChange={(value) => update({ api_key: value })} />
               </Field>
+
+              {channel?.id === OPENAI_API_CHANNEL_ID ? (
+                <Text className={styles.apiCreditHelp} type="tertiary" size="small">
+                  {t("先在 OpenAI 平台领取订阅赠送的 API 额度，再填写所绑定组织的项目 API Key。API 余额请在平台账单页查看，可在此手动维护。")}
+                  {" "}<Text link={{ href: "https://platform.openai.com/settings/organization/billing/overview", target: "_blank", rel: "noreferrer" }}>{t("查看 API 额度")}</Text>
+                  {" "}{t("赠送额度不支持通过 API Key 使用 Codex。工具调用建议使用 Responses 协议。")}
+                </Text>
+              ) : null}
 
               {isOpenRouter ? (
                 <div className={styles.managementKeyField}>
@@ -536,7 +560,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
           )}
         </section>
 
-        {!isChatGptCreate ? (
+        {!isSubscriptionCreate ? (
         <section className={styles.section}>
           <div className={`${styles.sectionHeading} ${styles.resourceModeHeading}`}>
             <span><h3>{t("资源模式")}</h3><small>{t(isOpenRouter ? (hasManagementKey ? "按量付费，自动同步账户 Credits" : "按量付费，自动同步 API Key 消费限额") : autoSyncBalance ? "按量付费，余额自动同步" : isLongCatHybrid ? "优先使用资源包，用尽后自动扣除余额" : isQwenTokenPlan ? "订阅额度自动同步" : isZhipuPayAsYouGo ? "按量付费，余额与额度包自动同步" : hasCustomScrape ? "按量付费，余额与用量自动同步" : resourceOptions.length ? "选择资源类型以及资源信息的维护方式" : "手动维护按量付费余额")}</small></span>
@@ -800,6 +824,18 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
           </button>
           {advancedOpen ? (
             <div className={styles.advancedContent}>
+              <Field label={t("账号网络出口")}>
+                <Select
+                  aria-label={t("账号网络出口")}
+                  zIndex={APP_OVERLAY_Z_INDEX.sideSheet + 1}
+                  value={draft.use_upstream_proxy ? "proxy" : "direct"}
+                  optionList={[
+                    { value: "direct", label: t("直连") },
+                    { value: "proxy", label: t("使用全局代理地址") },
+                  ]}
+                  onChange={(value) => update({ use_upstream_proxy: value === "proxy" })}
+                />
+              </Field>
               {draft.workspace_account_id ? (
                 <div className={styles.connectionScope}>
                   <div className={styles.connectionScopeHeader}>
@@ -852,16 +888,16 @@ function Field({ label, children }: { label: React.ReactNode; children: React.Re
 }
 
 /** ChatGPT 伪渠道的新增面板：Codex 账号走浏览器 OAuth 授权，不填 API Key。 */
-function ChatGptAuthorizePanel({ busy, onAuthorize }: { busy: boolean; onAuthorize: () => Promise<void> }) {
+function SubscriptionAuthorizePanel({ busy, onAuthorize, antigravity = false }: { busy: boolean; onAuthorize: () => Promise<void>; antigravity?: boolean }) {
   const { t } = useAppPreferences();
   return (
     <div className={styles.resourcePanel}>
       <div className={styles.resourceHeading}>
-        <strong>{t("ChatGPT 账号授权")}</strong>
+        <strong>{t(antigravity ? "Antigravity 账号授权" : "ChatGPT 账号授权")}</strong>
         <span className={styles.autoBadge}>{t("浏览器授权")}</span>
       </div>
       <p className={styles.packEmpty}>
-        {t("Codex 账号不是通过 API Key 创建的：点击下方按钮会在浏览器中打开 ChatGPT 授权页，授权完成后账号会自动出现在渠道账号列表。")}
+        {t(antigravity ? "使用 Google 账号授权，完成后账号会自动出现在渠道账号列表，无需保持 Antigravity 运行。" : "Codex 账号不是通过 API Key 创建的：点击下方按钮会在浏览器中打开 ChatGPT 授权页，授权完成后账号会自动出现在渠道账号列表。")}
       </p>
       <Button theme="solid" type="primary" loading={busy} onClick={() => void onAuthorize()}>
         {busy ? t("等待浏览器授权…") : t("授权登录")}
@@ -914,7 +950,7 @@ function createDraft(mode: Mode, accounts: ChannelAccount[], presets: ChannelPre
     const forceAutoSync = mode.account.channel_id === "longcat"
       || mode.account.channel_id === QWEN_CHANNEL_ID
       || mode.account.channel_id === ZHIPU_CHANNEL_ID;
-    return { ...mode.account, resource_sync_mode: forceAutoSync ? "auto" : mode.account.resource_sync_mode };
+    return { ...mode.account, resource_sync_mode: mode.account.channel_id === OPENAI_API_CHANNEL_ID ? "manual" : forceAutoSync ? "auto" : mode.account.resource_sync_mode };
   }
   const channel = presets.find((item) => item.id === mode.channelId);
   const count = accounts.filter((item) => item.channel_id === mode.channelId).length;
@@ -931,6 +967,7 @@ function createDraft(mode: Mode, accounts: ChannelAccount[], presets: ChannelPre
     name: language === "en-US" ? (count === 0 ? `${channel?.name ?? "Channel"} primary account` : `${channel?.name ?? "Channel"} account ${count + 1}`) : (count === 0 ? `${channel?.name ?? "渠道"} 主账号` : `${channel?.name ?? "渠道"} 账号 ${count + 1}`),
     api_key: "",
     management_key: null,
+    use_upstream_proxy: false,
     enabled: true,
     priority: accounts.length,
     remark: "",
@@ -951,12 +988,12 @@ function createDraft(mode: Mode, accounts: ChannelAccount[], presets: ChannelPre
   };
 }
 
-function resourceDraft(snapshot?: AccountBalanceSnapshot): ResourceDraft {
+function resourceDraft(snapshot?: AccountBalanceSnapshot, channelId?: string): ResourceDraft {
   const tokenPacks = snapshot?.token_packs ?? "";
   const packExpire = summarizeLongCatPacks(parseStoredLongCatPacks(tokenPacks)).expireAt;
   return {
     balance: snapshot?.balance?.toString() ?? "",
-    currency: snapshot?.currency ?? "CNY",
+    currency: snapshot?.currency ?? (channelId === OPENAI_API_CHANNEL_ID ? "USD" : "CNY"),
     tokenTotal: snapshot?.token_pack_total?.toString() ?? "",
     tokenUsed: snapshot?.token_pack_used?.toString() ?? "",
     tokenRemaining: snapshot?.token_pack_remaining?.toString() ?? "",

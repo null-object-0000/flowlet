@@ -2,6 +2,8 @@ use crate::core::config::{
     ChannelAccount, ChannelPreset, ProtocolType, RequestLogInput, RouteCandidate, RouteRule,
     ACCOUNT_CREDENTIAL_HEALTHY,
 };
+use crate::core::model_catalog::canonical_model_key;
+
 pub(super) struct CandidateSelection {
     pub matched: Vec<RouteCandidate>,
     /// 与请求模型一致、账号可用，但未声明支持当前请求协议的候选。
@@ -9,9 +11,28 @@ pub(super) struct CandidateSelection {
     pub protocol_skipped: Vec<RouteCandidate>,
 }
 
+/// `flowlet-pro` / `flowlet-flash` 是已移除的历史聚合模型对外名，不再是 Flowlet 模型。
+/// 即使某行（例如经自定义中转渠道转发的另一个 Flowlet 实例）把旧别名当作上游模型名、
+/// 从而「规范身份一致」，也不能被对外暴露或路由。
+pub(super) fn is_retired_aggregate_model_id(model: &str) -> bool {
+    matches!(
+        model.trim().to_ascii_lowercase().as_str(),
+        "flowlet-pro" | "flowlet-flash"
+    )
+}
+
+/// 路由行是否有效：`virtual_model_id` 与 `upstream_model` 必须归一为**同一规范模型**。
+///
+/// 聚合模型（flowlet-pro / flowlet-flash）移除后，`virtual_model_id` 的语义就是规范模型 ID；
+/// 一个对外模型不再允许对应异构上游混池。历史遗留或手工写坏的行（两者规范身份不一致）
+/// 视为无效数据，既不参与路由，也不对外暴露。
+pub(super) fn route_identity_is_consistent(route: &RouteCandidate) -> bool {
+    canonical_model_key(&route.virtual_model_id) == canonical_model_key(&route.upstream_model)
+}
+
 // `public_model` 期望是**规范模型 ID**：调用方（proxy.rs）已把入站模型名按
 // model-catalog.json 归一（`routing_model_id`），这里只做精确匹配，不解析别名。
-// 因此高级规则的 `match_model` 也须按规范 ID（或 `flowlet-pro` / `flowlet-flash`）登记。
+// 因此高级规则的 `match_model` 也须按规范 ID 登记。
 pub(super) fn match_candidates(
     routes: &[RouteCandidate],
     rules: &[RouteRule],
@@ -20,7 +41,7 @@ pub(super) fn match_candidates(
     protocol: &ProtocolType,
     client_id: Option<&str>,
     accounts: &[ChannelAccount],
-    channels: &[ChannelPreset],
+    _channels: &[ChannelPreset],
     round_robin: &mut std::collections::HashMap<String, usize>,
 ) -> CandidateSelection {
     let empty = CandidateSelection {
@@ -30,29 +51,29 @@ pub(super) fn match_candidates(
     let Some(public_model) = public_model.filter(|model| !model.trim().is_empty()) else {
         return empty;
     };
-    let is_flowlet_model = matches!(public_model, "flowlet-pro" | "flowlet-flash");
+    if is_retired_aggregate_model_id(public_model) {
+        return empty;
+    }
 
-    // 高级规则保留给旧自定义模型；固定 Flowlet 档位始终使用隔离的模型池。
-    if !is_flowlet_model {
-        if let Some(rule) =
-            find_matching_rule(rules, client_id, Some(public_model), protocol, accounts)
-        {
-            return CandidateSelection {
-                matched: vec![RouteCandidate {
-                    id: format!("rule-{}", rule.id),
-                    virtual_model_id: public_model.to_string(),
-                    channel_id: rule.target_channel_id,
-                    account_id: rule.target_account_id,
-                    upstream_model: rule.target_upstream_model,
-                    client_protocol: protocol.clone(),
-                    priority: rule.priority,
-                    enabled: true,
-                    created_at: String::new(),
-                    updated_at: String::new(),
-                }],
-                protocol_skipped: Vec::new(),
-            };
-        }
+    // 高级规则对所有模型统一生效。规则是显式配置的模型映射：`match_model`（对外规范 ID）
+    // 与 `target_upstream_model` 允许跨规范模型，因此不对规则候选套持久化路由行的身份校验。
+    if let Some(rule) = find_matching_rule(rules, client_id, Some(public_model), protocol, accounts)
+    {
+        return CandidateSelection {
+            matched: vec![RouteCandidate {
+                id: format!("rule-{}", rule.id),
+                virtual_model_id: public_model.to_string(),
+                channel_id: rule.target_channel_id,
+                account_id: rule.target_account_id,
+                upstream_model: rule.target_upstream_model,
+                client_protocol: protocol.clone(),
+                priority: rule.priority,
+                enabled: true,
+                created_at: String::new(),
+                updated_at: String::new(),
+            }],
+            protocol_skipped: Vec::new(),
+        };
     }
 
     let account_by_id: std::collections::HashMap<&str, &ChannelAccount> = accounts
@@ -64,22 +85,15 @@ pub(super) fn match_candidates(
         })
         .map(|account| (account.id.as_str(), account))
         .collect();
-    let dual_protocol_channels: std::collections::HashSet<&str> = channels
-        .iter()
-        .filter(|channel| {
-            channel.enabled
-                && channel.supported_protocols.contains(&ProtocolType::OpenAi)
-                && channel
-                    .supported_protocols
-                    .contains(&ProtocolType::Anthropic)
-        })
-        .map(|channel| channel.id.as_str())
-        .collect();
 
     let mut matched: Vec<RouteCandidate> = Vec::new();
     let mut protocol_skipped: Vec<RouteCandidate> = Vec::new();
     for route in routes {
         if !route.enabled || route.virtual_model_id != public_model {
+            continue;
+        }
+        // 持久化行有效性：旧聚合路由（一个对外名对应异构上游）必须被过滤掉。
+        if !route_identity_is_consistent(route) {
             continue;
         }
         if !account_by_id.contains_key(route.account_id.as_str()) {
@@ -89,16 +103,13 @@ pub(super) fn match_candidates(
             protocol_skipped.push(route.clone());
             continue;
         }
-        if is_flowlet_model && !dual_protocol_channels.contains(route.channel_id.as_str()) {
-            continue;
-        }
         matched.push(route.clone());
     }
 
     sort_route_candidates(&mut matched, &account_by_id);
     sort_route_candidates(&mut protocol_skipped, &account_by_id);
 
-    // 每个“档位 + 协议 + 底层模型”的账号池独立轮询；模型池之间仍按 priority 固定 fallback。
+    // 每个“对外模型 + 协议 + 渠道 + 上游模型”的账号池独立轮询；池与池之间仍按 priority 固定 fallback。
     let mut cursor = 0;
     while cursor < matched.len() {
         let group_priority = matched[cursor].priority;
@@ -239,11 +250,6 @@ pub(super) fn rank_candidates_by_score(
     });
 
     candidates.extend(scored.into_iter().map(|(_, c)| c));
-}
-
-/// 判断是否应该使用小模型，返回最终使用的上游模型名
-pub(super) fn resolve_small_model(original_model: &str) -> String {
-    original_model.to_string()
 }
 
 /// 账号是否可参与路由：启用、配了 API Key、且凭证健康。

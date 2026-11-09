@@ -1437,6 +1437,12 @@ impl Storage {
 
         // 渠道账号：补充 Base URL 覆盖字段
         add_column_if_missing(&connection, "channel_accounts", "base_url_override", "TEXT")?;
+        add_column_if_missing(
+            &connection,
+            "channel_accounts",
+            "use_upstream_proxy",
+            "INTEGER",
+        )?;
         let migrate_anthropic_override = !table_has_column(
             &connection,
             "channel_accounts",
@@ -1490,6 +1496,12 @@ impl Storage {
         // 存量账号（含 resource_mode 为 NULL 的历史账号）统一切到自动同步。
         connection.execute(
             "UPDATE channel_accounts SET resource_sync_mode = 'auto' WHERE channel_id = 'zhipu'",
+            [],
+        )?;
+
+        // ChatGPT API browser synchronization was removed. Preserve account data and snapshots.
+        connection.execute(
+            "UPDATE channel_accounts SET resource_sync_mode = 'manual' WHERE channel_id = 'openai-api' AND resource_sync_mode = 'auto'",
             [],
         )?;
 
@@ -1563,6 +1575,12 @@ impl Storage {
             "INTEGER NOT NULL DEFAULT 0",
         )?;
         add_column_if_missing(&connection, "request_logs", "route_reason", "TEXT")?;
+        add_column_if_missing(
+            &connection,
+            "request_logs",
+            "upstream_proxy_used",
+            "INTEGER",
+        )?;
         add_column_if_missing(
             &connection,
             "request_logs",
@@ -1766,6 +1784,11 @@ impl Storage {
         // 跨设备共享项目表，避免旧库继续保留已无人读写的孤儿数据。
         drop_project_management_schema(&connection)?;
 
+        // 聚合模型移除（2026-11）：把旧的 flowlet-pro / flowlet-flash 路由改写为
+        // 对应的直接模型路由，并清掉更早虚拟模型层遗留的聚合行。必须在所有列补齐之后执行。
+        migrate_legacy_aggregate_routes(&connection)?;
+        remove_legacy_aggregate_virtual_models(&connection)?;
+
         tracing::info!("migrate: 完成");
         Ok(())
     }
@@ -1844,7 +1867,6 @@ fn drop_project_management_schema(connection: &Connection) -> Result<(), Storage
     result?;
     Ok(())
 }
-
 
 fn normalize_legacy_virtual_model_routes_schema(
     connection: &Connection,
@@ -1942,6 +1964,221 @@ fn normalize_legacy_virtual_model_routes_schema(
         "#,
     );
     connection.execute_batch(&migration_sql)?;
+    Ok(())
+}
+
+/// 旧聚合模型路由的一次性迁移（契约 §3）。
+///
+/// 旧版本用 `flowlet-pro` / `flowlet-flash` 作为对外聚合模型名，一个名字对应异构上游混池；
+/// 聚合能力移除后 `virtual_model_id` 的语义是规范模型 ID，因此这些行必须按 `upstream_model`
+/// 归一后的规范模型身份改写为直接模型路由：
+/// 1. `upstream_model` 无法归一为已知规范模型时，原行保持不变（之后会被行身份校验过滤，
+///    既不参与路由也不对外暴露）；
+/// 2. 按 (virtual_model_id, channel_id, account_id, upstream_model, client_protocol) 去重，
+///    保留 priority 最小者（并列取 created_at 早、再取 id），`enabled` 取任一行；
+/// 3. 受影响的 (virtual_model_id, client_protocol) 分组按原 priority、created_at、id 排序后
+///    重新赋 0..n，保持候选的相对顺序。
+///
+/// 没有任何聚合行时不写任何数据；迁移只改写旧聚合行涉及的分组，重复执行结果不变。
+fn migrate_legacy_aggregate_routes(connection: &Connection) -> Result<(), StorageError> {
+    /// `flowlet-pro` / `flowlet-flash` 是已移除的历史聚合模型对外名。
+    const LEGACY_AGGREGATE_MODEL_IDS: [&str; 2] = ["flowlet-pro", "flowlet-flash"];
+
+    #[derive(Clone)]
+    struct StoredRoute {
+        id: String,
+        virtual_model_id: String,
+        channel_id: String,
+        account_id: String,
+        upstream_model: String,
+        client_protocol: String,
+        priority: i64,
+        enabled: bool,
+        created_at: String,
+    }
+
+    type RouteKey = (String, String, String, String, String);
+
+    fn route_key(route: &StoredRoute) -> RouteKey {
+        (
+            route.virtual_model_id.clone(),
+            route.channel_id.clone(),
+            route.account_id.clone(),
+            route.upstream_model.clone(),
+            route.client_protocol.clone(),
+        )
+    }
+
+    fn route_order(left: &StoredRoute, right: &StoredRoute) -> std::cmp::Ordering {
+        left.priority
+            .cmp(&right.priority)
+            .then_with(|| left.created_at.cmp(&right.created_at))
+            .then_with(|| left.id.cmp(&right.id))
+    }
+
+    let mut routes: Vec<StoredRoute> = Vec::new();
+    {
+        let mut statement = connection.prepare(
+            "SELECT id, virtual_model_id, channel_id, account_id, upstream_model, \
+                    client_protocol, priority, enabled, created_at \
+             FROM virtual_model_routes ORDER BY id ASC",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok(StoredRoute {
+                id: row.get(0)?,
+                virtual_model_id: row.get(1)?,
+                channel_id: row.get(2)?,
+                account_id: row.get(3)?,
+                upstream_model: row.get(4)?,
+                client_protocol: row.get(5)?,
+                priority: row.get(6)?,
+                enabled: row.get::<_, i64>(7)? != 0,
+                created_at: row.get(8)?,
+            })
+        })?;
+        for row in rows {
+            routes.push(row?);
+        }
+    }
+    let original = routes.clone();
+
+    // 步骤 1-3：把旧聚合行改写到规范模型 ID。未知上游模型的行保持原样。
+    let mut migrated = vec![false; routes.len()];
+    for (index, route) in routes.iter_mut().enumerate() {
+        let legacy_id = route.virtual_model_id.trim().to_ascii_lowercase();
+        if !LEGACY_AGGREGATE_MODEL_IDS.contains(&legacy_id.as_str()) {
+            continue;
+        }
+        let Some(identity) =
+            crate::core::model_catalog::model_catalog().find(route.upstream_model.trim())
+        else {
+            // 无法确定直接模型身份：保留原行（会被路由/模型列表的身份校验过滤）。
+            continue;
+        };
+        // 使用目录里的规范模型 ID（保留原始大小写），与 routing_model_id / 新建路由一致。
+        route.virtual_model_id = identity.id.clone();
+        migrated[index] = true;
+    }
+    if !migrated.iter().any(|flag| *flag) {
+        return Ok(());
+    }
+
+    // 步骤 4：去重。只合并「至少包含一条迁移行」的分组，不去动与本迁移无关的既有重复行。
+    let mut groups: HashMap<RouteKey, Vec<usize>> = HashMap::new();
+    for index in 0..routes.len() {
+        groups
+            .entry(route_key(&routes[index]))
+            .or_default()
+            .push(index);
+    }
+    let mut dropped = vec![false; routes.len()];
+    let mut affected_groups: std::collections::BTreeSet<(String, String)> =
+        std::collections::BTreeSet::new();
+    for indices in groups.values() {
+        // 只有包含迁移行的分组才会进入重排；与本迁移无关的既有分组保持原样。
+        if !indices.iter().any(|index| migrated[*index]) {
+            continue;
+        }
+        let representative = indices
+            .iter()
+            .copied()
+            .min_by(|left, right| route_order(&routes[*left], &routes[*right]))
+            .expect("分组至少有一行");
+        affected_groups.insert((
+            routes[representative].virtual_model_id.clone(),
+            routes[representative].client_protocol.clone(),
+        ));
+        if indices.len() < 2 {
+            continue;
+        }
+        let any_enabled = indices.iter().any(|index| routes[*index].enabled);
+        for index in indices {
+            if *index == representative {
+                routes[representative].enabled = any_enabled;
+            } else {
+                dropped[*index] = true;
+            }
+        }
+    }
+
+    // 步骤 5：受影响的 (虚拟模型, 协议) 分组重排 priority 为 0..n。
+    let mut priorities: HashMap<usize, i64> = HashMap::new();
+    for (virtual_model_id, client_protocol) in &affected_groups {
+        let mut indices: Vec<usize> = (0..routes.len())
+            .filter(|index| {
+                !dropped[*index]
+                    && routes[*index].virtual_model_id == *virtual_model_id
+                    && routes[*index].client_protocol == *client_protocol
+            })
+            .collect();
+        indices.sort_by(|left, right| route_order(&routes[*left], &routes[*right]));
+        for (position, index) in indices.into_iter().enumerate() {
+            priorities.insert(index, position as i64);
+        }
+    }
+
+    // 落盘：只在确实变化时更新，删除被去重掉的行。整个过程放在一个事务里，
+    // 避免中途失败留下改了一半的路由表。
+    let transaction = connection.unchecked_transaction()?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let mut updated = 0usize;
+    let mut removed = 0usize;
+    for (index, route) in routes.iter().enumerate() {
+        if dropped[index] {
+            transaction.execute(
+                "DELETE FROM virtual_model_routes WHERE id = ?1",
+                rusqlite::params![route.id],
+            )?;
+            removed += 1;
+            continue;
+        }
+        let Some(priority) = priorities.get(&index).copied() else {
+            continue;
+        };
+        let before = &original[index];
+        if before.virtual_model_id == route.virtual_model_id
+            && before.priority == priority
+            && before.enabled == route.enabled
+        {
+            continue;
+        }
+        transaction.execute(
+            "UPDATE virtual_model_routes SET virtual_model_id = ?1, priority = ?2, \
+                    enabled = ?3, updated_at = ?4 WHERE id = ?5",
+            rusqlite::params![
+                route.virtual_model_id,
+                priority,
+                route.enabled as i64,
+                now,
+                route.id
+            ],
+        )?;
+        updated += 1;
+    }
+    transaction.commit()?;
+    if updated > 0 || removed > 0 {
+        tracing::info!(
+            updated,
+            removed,
+            "migrate: 旧聚合模型路由已改写为直接模型路由"
+        );
+    }
+    Ok(())
+}
+
+/// 删除更早「虚拟模型层」遗留的聚合模型行（契约 §1：flowlet-pro / flowlet-flash 不再是
+/// Flowlet 对外模型，不应继续留在库里被 `list_virtual_models` 返回）。
+///
+/// 只删这两条历史别名行，不动表结构、`VirtualModel` 类型和 `save_virtual_models`；
+/// 单条 DELETE 天然幂等，没有历史行时不写数据。
+fn remove_legacy_aggregate_virtual_models(connection: &Connection) -> Result<(), StorageError> {
+    let removed = connection.execute(
+        "DELETE FROM virtual_models WHERE lower(trim(id)) IN (?1, ?2)",
+        rusqlite::params!["flowlet-pro", "flowlet-flash"],
+    )?;
+    if removed > 0 {
+        tracing::info!(removed, "migrate: 已删除历史聚合虚拟模型行");
+    }
     Ok(())
 }
 

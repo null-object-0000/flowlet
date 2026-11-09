@@ -1,5 +1,8 @@
-import type { AgentAccessAdapter } from "../agentAccessAdapters";
-import { credentialsSnippet } from "./shared";
+import type { AgentAccessAdapter, AgentModelProtocol } from "../agentAccessAdapters";
+import { credentialsSnippet, manualModelValue, modelOptions, modelSelectionOptions, selectedModelValue } from "./shared";
+
+/** OpenCode 写入的是 OpenAI-compatible `/v1` provider，可用模型只取 openai 协议。 */
+const OPENCODE_PROTOCOLS: AgentModelProtocol[] = ["openai"];
 
 const OPENCODE_PERMISSION_PLUGIN_SNIPPET = `// 保存为 ~/.config/opencode/plugins/flowlet.ts
 import path from "node:path"
@@ -102,39 +105,41 @@ export const openCodeAdapter: AgentAccessAdapter = {
     label: t("权限插件"),
     value: t(globalConfig?.opencode_permission_bridge ? "已安装" : "需安装或更新"),
   }],
-  configControls: ({ globalConfig, t }) => [{
-    id: "model-specs",
-    label: t("输入模态声明"),
-    descriptions: [
-      t("开启后按当前可用路由为两个聚合模型声明文本或图像输入能力，避免 OpenCode 在发送前丢弃图片。"),
-      t("OpenCode 在启动时建立模型能力缓存，启用或关闭后需要重启 CLI 与 Desktop。"),
-    ],
-    checked: globalConfig?.model_specs ?? false,
-    requiresRestart: true,
-    applyOptions: (checked) => ({ modelSpecs: checked }),
-  }],
-  applyOptions: ({ globalConfig }) => ({ modelSpecs: globalConfig?.model_specs ?? false }),
-  manualSnippets: ({ endpoint, token, displayedToken, globalConfig, t }) => {
-    const model = (id: "flowlet-pro" | "flowlet-flash") => {
-      const value: Record<string, unknown> = { name: id };
-      if (globalConfig?.model_specs) {
-        value.modalities = {
-          input: globalConfig.model_input_modalities?.[id] ?? ["text"],
-          output: ["text"],
-        };
-      }
-      return value;
-    };
+  // 输入模态声明已随聚合模型移除；OpenCode 不再有高级可选能力。
+  configControls: () => [],
+  applyOptions: (context) => modelSelectionOptions(selectedModelValue(modelOptions(context, OPENCODE_PROTOCOLS), context.globalConfig?.primary_model)),
+  manualSnippets: (context) => {
+    const options = modelOptions(context, OPENCODE_PROTOCOLS);
+    const model = manualModelValue(options, context.globalConfig?.primary_model);
+    // small_model 的 fast 缺省等于主模型（前端不提供 fast 选择器，由 Rust 写入端缺省）。
     const provider = JSON.stringify({
       $schema: "https://opencode.ai/config.json",
-      model: "flowlet/flowlet-pro",
-      small_model: "flowlet/flowlet-flash",
-      provider: { flowlet: { name: "Flowlet", npm: "@ai-sdk/openai-compatible", options: { baseURL: endpoint }, models: { "flowlet-pro": model("flowlet-pro"), "flowlet-flash": model("flowlet-flash") } } },
+      model: `flowlet/${model}`,
+      small_model: `flowlet/${model}`,
+      provider: {
+        flowlet: {
+          name: "Flowlet",
+          npm: "@ai-sdk/openai-compatible",
+          options: { baseURL: context.endpoint },
+          // 与 Rust 写入端一致：受管 Provider 只声明所选（主/快速）模型条目。
+          models: { [model]: { name: model } },
+        },
+      },
     }, null, 2);
     return [
-      { label: t("opencode.jsonc 配置片段"), displayValue: provider, copyValue: provider },
-      { label: t("auth.json 凭据片段"), displayValue: credentialsSnippet(displayedToken, "api"), copyValue: credentialsSnippet(token, "api") },
-      { label: t("权限事件插件片段（flowlet.ts）"), displayValue: OPENCODE_PERMISSION_PLUGIN_SNIPPET, copyValue: OPENCODE_PERMISSION_PLUGIN_SNIPPET },
+      { label: context.t("opencode.jsonc 配置片段"), displayValue: provider, copyValue: provider },
+      { label: context.t("auth.json 凭据片段"), displayValue: credentialsSnippet(context.displayedToken, "api"), copyValue: credentialsSnippet(context.token, "api") },
+      { label: context.t("权限事件插件片段（flowlet.ts）"), displayValue: OPENCODE_PERMISSION_PLUGIN_SNIPPET, copyValue: OPENCODE_PERMISSION_PLUGIN_SNIPPET },
     ];
+  },
+  modelSelectors: (context) => {
+    const options = modelOptions(context, OPENCODE_PROTOCOLS);
+    return [{
+      id: "primary",
+      label: context.t("主模型"),
+      value: selectedModelValue(options, context.globalConfig?.primary_model),
+      options,
+      applyOptions: (value) => modelSelectionOptions(value),
+    }];
   },
 };

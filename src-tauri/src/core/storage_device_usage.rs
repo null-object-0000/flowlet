@@ -588,7 +588,10 @@ impl Storage {
         )?;
         let mut imported = 0;
         for breakdown in usage_breakdowns {
-            let is_stale_flowlet_native_alias = breakdown.request_count == 0
+            // 历史兼容：旧版 Codex Desktop 原生用量快照可能以 flowlet-pro / flowlet-flash
+            // 作为模型名落库；它们是聚合别名而非真实上游模型，导入时必须丢弃，否则跨设备
+            // 汇总会重复统计。聚合能力移除后该过滤仍需保留（兼容未升级的发送端）。
+            let is_stale_legacy_aggregate_alias = breakdown.request_count == 0
                 && breakdown.native_event_count > 0
                 && breakdown.upstream_model.as_deref().is_some_and(|model| {
                     matches!(
@@ -596,7 +599,7 @@ impl Storage {
                         "flowlet-pro" | "flowlet-flash"
                     )
                 });
-            if is_stale_flowlet_native_alias {
+            if is_stale_legacy_aggregate_alias {
                 continue;
             }
             // 旧版本曾把 Codex Desktop 原生用量同步为 client_id = "codex"，

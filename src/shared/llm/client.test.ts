@@ -63,7 +63,7 @@ describe("createFlowletAi().chatCompletionsStream", () => {
 
     const ai = createFlowletAi({ baseUrl: "http://127.0.0.1:18640" });
     const pieces: string[] = [];
-    for await (const chunk of ai.chatCompletionsStream({ model: "flowlet-flash", messages: [{ role: "user", content: "hi" }] })) {
+    for await (const chunk of ai.chatCompletionsStream({ model: "deepseek-v4-flash", messages: [{ role: "user", content: "hi" }] })) {
       pieces.push(flowletAiTextFromContent(chunk.choices?.[0]?.delta?.content));
     }
     expect(pieces).toEqual(["你", "好"]);
@@ -211,7 +211,7 @@ describe("createFlowletAi().chatCompletions", () => {
     fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => completion } as unknown as Response);
 
     const ai = createFlowletAi({ baseUrl: "http://127.0.0.1:18640", apiKey: "sk-test" });
-    const result = await ai.chatCompletions({ model: "flowlet-flash", messages: [{ role: "user", content: "hi" }] });
+    const result = await ai.chatCompletions({ model: "deepseek-v4-flash", messages: [{ role: "user", content: "hi" }] });
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(JSON.parse(String(init.body)).stream).toBe(false);

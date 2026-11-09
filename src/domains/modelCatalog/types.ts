@@ -124,6 +124,19 @@ export interface ModelsDevModel {
   id: string;
   name: string;
   description?: string;
+  cost?: {
+    input?: number;
+    output?: number;
+    cache_read?: number;
+    cache_write?: number;
+    tiers?: {
+      input?: number;
+      output?: number;
+      cache_read?: number;
+      cache_write?: number;
+      tier?: { type?: string; size?: number };
+    }[];
+  };
   reasoning?: boolean;
   tool_call?: boolean;
   structured_output?: boolean;

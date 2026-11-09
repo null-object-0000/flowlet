@@ -114,11 +114,13 @@ pub(super) fn build_model_detail_response(
         return model_not_found_response(requested_id);
     };
 
+    // 一个对外模型只对应一个规范模型；候选之间只是账号/渠道/上游变体差异。
+    // 聚合模型移除后不再做「跨模型规格取下限、价格取上界」的合并，改为取优先级最高的
+    // 可用候选作为该模型的单一规格。
     let usable_routes = usable_model_routes(requested_id, routes, accounts, channels);
     let catalog =
         models_cn_json.and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok());
-    let mut candidates = Vec::new();
-    for route in usable_routes {
+    let detail = usable_routes.first().map(|route| {
         let upstream = channel_models.iter().find(|model| {
             model.channel_id == route.channel_id
                 && crate::core::model_catalog::canonical_model_key(&model.model)
@@ -127,22 +129,19 @@ pub(super) fn build_model_detail_response(
         let catalog_model = catalog
             .as_ref()
             .and_then(|value| find_models_cn_model(value, &route.upstream_model));
-        candidates.push(resolve_candidate_detail(route, upstream, catalog_model));
-    }
+        resolve_candidate_detail(route, upstream, catalog_model)
+    });
 
-    let context_window = min_present(candidates.iter().map(|item| item.context_window));
-    let max_output_tokens = min_present(candidates.iter().map(|item| item.max_output_tokens));
-    let pricing = aggregate_pricing(&candidates);
-    let sources = candidates
+    let context_window = detail.as_ref().and_then(|item| item.context_window);
+    let max_output_tokens = detail.as_ref().and_then(|item| item.max_output_tokens);
+    let pricing: Vec<serde_json::Value> = detail
         .iter()
+        .filter_map(|item| item.pricing.clone())
+        .collect();
+    let specification_source = detail
+        .as_ref()
         .map(|item| item.specification_source.as_str())
-        .filter(|source| *source != "unavailable")
-        .collect::<BTreeSet<_>>();
-    let specification_source = match sources.len() {
-        0 => "unavailable",
-        1 => sources.iter().next().copied().unwrap_or("unavailable"),
-        _ => "mixed",
-    };
+        .unwrap_or("unavailable");
 
     json_response(serde_json::json!({
         "id": entry.id,
@@ -408,56 +407,6 @@ fn pricing_json(
     })
 }
 
-fn aggregate_pricing(candidates: &[CandidateDetail]) -> Vec<serde_json::Value> {
-    let mut by_currency = std::collections::BTreeMap::<String, serde_json::Value>::new();
-    for price in candidates
-        .iter()
-        .filter_map(|candidate| candidate.pricing.as_ref())
-    {
-        let currency = price
-            .get("currency")
-            .and_then(|value| value.as_str())
-            .map(str::to_string)
-            .unwrap_or_else(|| {
-                format!(
-                    "upstream:{}:{}",
-                    price
-                        .get("channel_id")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or(""),
-                    price
-                        .get("upstream_model")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                )
-            });
-        let replace = by_currency.get(&currency).is_none_or(|current| {
-            let current_total = current
-                .pointer("/input/standard")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.0)
-                + current
-                    .get("output")
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(0.0);
-            let next_total = price
-                .pointer("/input/standard")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.0)
-                + price.get("output").and_then(|v| v.as_f64()).unwrap_or(0.0);
-            next_total > current_total
-        });
-        if replace {
-            by_currency.insert(currency, price.clone());
-        }
-    }
-    by_currency.into_values().collect()
-}
-
-fn min_present(values: impl Iterator<Item = Option<i64>>) -> Option<i64> {
-    values.flatten().min()
-}
-
 fn parse_unix_seconds(raw: &str) -> i64 {
     if raw.is_empty() {
         return 0;
@@ -510,9 +459,9 @@ struct ModelEntry {
 }
 
 /// 从 routes 中按 protocol+enabled+healthy 过滤后，收集对外模型集合。
-/// 同时包含聚合模型（flowlet-pro/flash）与直接底层模型。
-/// 直接模型：virtual_model_id 与 upstream_model 归一后身份相同，以渠道 vendor 为 owned_by；
-/// 聚合模型：owned_by = "flowlet"。
+/// 对外模型 = 路由的规范模型 ID（`virtual_model_id`）；同一个规范模型只返回一次，
+/// owned_by 一律取承载渠道的 vendor（渠道缺失时回退 "flowlet"）。
+/// 规范身份不一致的脏行不参与对外暴露。
 fn collect_model_entries(
     routes: &[RouteCandidate],
     accounts: &[ChannelAccount],
@@ -530,17 +479,6 @@ fn collect_model_entries(
         .map(|a| a.id.as_str())
         .collect();
 
-    let dual_protocol_channels: BTreeSet<&str> = channels
-        .iter()
-        .filter(|channel| {
-            channel.supported_protocols.contains(&ProtocolType::OpenAi)
-                && channel
-                    .supported_protocols
-                    .contains(&ProtocolType::Anthropic)
-        })
-        .map(|channel| channel.id.as_str())
-        .collect();
-
     let vendor_by_channel: std::collections::HashMap<&str, &str> = channels
         .iter()
         .map(|channel| (channel.id.as_str(), channel.vendor.as_str()))
@@ -556,18 +494,13 @@ fn collect_model_entries(
         {
             continue;
         }
-        let is_aggregate = matches!(
-            route.virtual_model_id.as_str(),
-            "flowlet-pro" | "flowlet-flash"
-        );
-        // 聚合模型必须来自双协议渠道；直接模型按 client_protocol 自然兼容。
-        if is_aggregate && !dual_protocol_channels.contains(route.channel_id.as_str()) {
+        // 已移除的历史聚合模型对外名不再暴露。
+        if super::proxy_routing::is_retired_aggregate_model_id(&route.virtual_model_id) {
             continue;
         }
-        // 直接模型允许上游保留 vendor 前缀或别名，但规范身份必须与对外模型一致。
-        if !is_aggregate
-            && crate::core::model_catalog::canonical_model_key(&route.virtual_model_id)
-                != crate::core::model_catalog::canonical_model_key(&route.upstream_model)
+        // 规范身份必须一致：一个对外模型不再允许对应异构上游混池。
+        if crate::core::model_catalog::canonical_model_key(&route.virtual_model_id)
+            != crate::core::model_catalog::canonical_model_key(&route.upstream_model)
         {
             continue;
         }
@@ -575,40 +508,23 @@ fn collect_model_entries(
         if id.is_empty() || !seen.insert(id.to_string()) {
             continue;
         }
-        let owned_by = if is_aggregate {
-            "flowlet".to_string()
-        } else {
-            vendor_by_channel
+        result.push(ModelEntry {
+            id: id.to_string(),
+            owned_by: vendor_by_channel
                 .get(route.channel_id.as_str())
                 .copied()
                 .unwrap_or("flowlet")
-                .to_string()
-        };
-        result.push(ModelEntry {
-            id: id.to_string(),
-            owned_by,
+                .to_string(),
             created_at: route.created_at.clone(),
         });
     }
-    // 排序固定：flowlet-pro → flowlet-flash → 其余按名字典序（需求八）。
-    result.sort_by(|a, b| {
-        rank_model(&a.id)
-            .cmp(&rank_model(&b.id))
-            .then_with(|| a.id.cmp(&b.id))
-    });
+    // 对外模型只按名字典序排列；聚合模型的固定优先顺序已随聚合能力移除。
+    result.sort_by(|a, b| a.id.cmp(&b.id));
     result
 }
 
-fn rank_model(id: &str) -> u8 {
-    match id {
-        "flowlet-pro" => 0,
-        "flowlet-flash" => 1,
-        _ => 2,
-    }
-}
-
 fn build_openai_model_list(entries: &[ModelEntry]) -> Response {
-    // Flowlet 聚合模型的 owned_by 固定为 "flowlet"；直接模型使用其所属渠道 vendor。
+    // owned_by 一律取承载渠道的 vendor；渠道信息缺失时回退 "flowlet"（见 collect_model_entries）。
     let data: Vec<serde_json::Value> = entries
         .iter()
         .map(|entry| {
@@ -937,9 +853,10 @@ pub(super) use crate::core::agent_identity_adapter::identify_client_by_ua;
 /// 读取本头，再回退到 UA 规则，确保开箱即可归属，不依赖用户 config.json 是否含
 /// 对应规则。该头仅用于本地归属，不参与鉴权或路由；Flowlet 在识别后、转发上游前
 /// 会将其剥离，不向上游泄露。
-pub(super) use crate::core::agent_session_identity::{
-    AGENT_CLIENT_HEADER, AGENT_SESSION_HEADER, DSH_NATIVE_SESSION_HEADER,
-};
+pub(super) use crate::core::agent_session_identity::{AGENT_CLIENT_HEADER, AGENT_SESSION_HEADER};
+// DSH 原生会话头只在测试中直接断言透传行为；非测试构建不引入以免告警。
+#[cfg(test)]
+pub(super) use crate::core::agent_session_identity::DSH_NATIVE_SESSION_HEADER;
 
 /// Pi 与 Flowlet 约定的会话标识头。
 ///
@@ -1385,20 +1302,20 @@ mod tests {
     #[test]
     fn extract_model_strips_long_context_suffix() {
         // Claude Code 的 [1m] 后缀正常会在发送前剥离；代理层防御性兼容带后缀的请求。
-        let suffixed = br#"{"model":"flowlet-pro[1m]"}"#;
+        let suffixed = br#"{"model":"deepseek-v4-pro[1m]"}"#;
         assert_eq!(
             extract_model(suffixed, &ProtocolType::Anthropic).as_deref(),
-            Some("flowlet-pro")
+            Some("deepseek-v4-pro")
         );
-        let upper = br#"{"model":"flowlet-pro[1M]"}"#;
+        let upper = br#"{"model":"deepseek-v4-pro[1M]"}"#;
         assert_eq!(
             extract_model(upper, &ProtocolType::OpenAi).as_deref(),
-            Some("flowlet-pro")
+            Some("deepseek-v4-pro")
         );
-        let plain = br#"{"model":"flowlet-pro"}"#;
+        let plain = br#"{"model":"deepseek-v4-pro"}"#;
         assert_eq!(
             extract_model(plain, &ProtocolType::Anthropic).as_deref(),
-            Some("flowlet-pro")
+            Some("deepseek-v4-pro")
         );
     }
 
@@ -1538,6 +1455,94 @@ pub(super) fn ensure_reasoning_content_passback(
             "reasoning_content".to_string(),
             serde_json::Value::String(String::new()),
         );
+        changed = true;
+    }
+    if !changed {
+        return body.to_vec();
+    }
+    serde_json::to_vec(&value).unwrap_or_else(|_| body.to_vec())
+}
+
+// ─── Anthropic thinking 回传补全（DeepSeek Messages 上游）─────────────────────
+
+/// DeepSeek 官方 Anthropic Messages 端点在 thinking 模式下要求：当前用户轮内
+/// （最后一条含 `text` 块的 `user` 消息之后）每条 `assistant` 消息都必须携带
+/// `thinking` 内容块，缺失时上游直接返回 400：
+/// `The content[].thinking in the thinking mode must be passed back to the API.`
+///
+/// 同一规范模型的候选池可能横跨不同上游：部分中转渠道既不返回 thinking 块
+/// （或只返回不带 signature 的 thinking），也不校验 thinking 回传；而 Anthropic
+/// Files API 按账号绑定的设计会在会话中途把请求 pin 到 DeepSeek 官方账号。
+/// 于是历史里由中转生成的 assistant 消息缺少 thinking 块，原样透传就会被官方端点拒绝。
+///
+/// 这里在转发到 DeepSeek 推理上游前，为当前用户轮内缺失 `thinking` 块的
+/// `assistant` 消息补一个空 thinking 块：只追加、不改写已有 thinking 块与 signature，
+/// 位置放在内容数组最前（与 Anthropic 规范中 thinking 块在前的约束一致）；
+/// 已完成的历史轮次不改写（官方端点不校验它们），工具块、文本块与其他消息保持原样。
+///
+/// 仅在确有修改时返回新 body；其余请求原样透传。与 `ensure_reasoning_content_passback`
+/// 一样，这是「不随意改写请求结构」的受控例外，修改该行为须同步 `AGENTS.md` 与
+/// `docs/deepseek-harness-integration.md`。
+pub(super) fn ensure_anthropic_thinking_passback(
+    body: &[u8],
+    upstream_model: &str,
+    protocol: &ProtocolType,
+) -> Vec<u8> {
+    if *protocol != ProtocolType::Anthropic || !is_deepseek_reasoning_model(upstream_model) {
+        return body.to_vec();
+    }
+    let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return body.to_vec();
+    };
+    // 仅在客户端显式开启 thinking 时上游才做该校验；未声明或 disabled 时原样透传。
+    if value
+        .get("thinking")
+        .and_then(|thinking| thinking.get("type"))
+        .and_then(|kind| kind.as_str())
+        != Some("enabled")
+    {
+        return body.to_vec();
+    }
+    let Some(messages) = value.get_mut("messages").and_then(|v| v.as_array_mut()) else {
+        return body.to_vec();
+    };
+    // 当前用户轮从「最后一条含 text 内容的 user 消息」之后开始。tool_result、图片
+    // 也是 user 角色，但工具调用链仍属于同一条用户轮，因此只认 text 内容。
+    let is_text_user_message = |message: &serde_json::Value| -> bool {
+        if message.get("role").and_then(|role| role.as_str()) != Some("user") {
+            return false;
+        }
+        match message.get("content") {
+            // Anthropic 允许 user 消息直接用字符串，同样视为用户轮起点。
+            Some(serde_json::Value::String(_)) => true,
+            Some(serde_json::Value::Array(blocks)) => blocks
+                .iter()
+                .any(|block| block.get("type").and_then(|kind| kind.as_str()) == Some("text")),
+            _ => false,
+        }
+    };
+    let turn_start = messages
+        .iter()
+        .rposition(|message| is_text_user_message(message))
+        .map_or(0, |index| index + 1);
+    let mut changed = false;
+    for message in messages.iter_mut().skip(turn_start) {
+        let Some(message) = message.as_object_mut() else {
+            continue;
+        };
+        if message.get("role").and_then(|role| role.as_str()) != Some("assistant") {
+            continue;
+        }
+        let Some(content) = message.get_mut("content").and_then(|v| v.as_array_mut()) else {
+            continue;
+        };
+        if content
+            .iter()
+            .any(|block| block.get("type").and_then(|kind| kind.as_str()) == Some("thinking"))
+        {
+            continue;
+        }
+        content.insert(0, serde_json::json!({ "type": "thinking", "thinking": "" }));
         changed = true;
     }
     if !changed {

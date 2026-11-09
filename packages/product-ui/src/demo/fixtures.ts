@@ -55,7 +55,7 @@ export function createRequestLogsFixture(zh: boolean): {
         id: "req-1",
         time: "14:32:18",
         client: "Claude Code",
-        model: "flowlet-pro",
+        model: "deepseek-v4-pro",
         method: "POST",
         path: "/v1/responses",
         channel: "DeepSeek",
@@ -88,7 +88,7 @@ export function createRequestLogsFixture(zh: boolean): {
         id: "req-3",
         time: "14:28:09",
         client: "OpenCode",
-        model: "flowlet-pro",
+        model: "deepseek-v4-pro",
         method: "POST",
         path: "/v1/responses",
         channel: "DeepSeek",
@@ -220,7 +220,7 @@ export function createUsageAnalysisFixture(
 } {
   const fixture = {
     entries: [
-      { key: "flowlet-pro", label: "flowlet-pro", sublabel: "DeepSeek · 工作账号", badge: { letter: "F" }, tokenValue: "6.42M", tokenShare: "46%", costValue: "$8.21", costShare: "51%" },
+      { key: "deepseek-v4-flash", label: "deepseek-v4-flash", sublabel: "DeepSeek · 工作账号", badge: { letter: "D" }, tokenValue: "6.42M", tokenShare: "46%", costValue: "$8.21", costShare: "51%" },
       { key: "qwen3.8-max", label: "qwen3.8-max", sublabel: "Qwen · Token 计划", badge: { letter: "Q" }, tokenValue: "3.11M", tokenShare: "22%", costValue: "$3.44", costShare: "21%" },
       { key: "longcat-2.0", label: "longcat-2.0", sublabel: "LongCat · 标准账号", badge: { letter: "L" }, tokenValue: "2.04M", tokenShare: "15%", costValue: "$2.18", costShare: "13%" },
       { key: "deepseek-v4", label: "deepseek-v4-pro", sublabel: "DeepSeek · 个人账号", badge: { letter: "D" }, tokenValue: "1.68M", tokenShare: "12%", costValue: "$2.02", costShare: "12%" },
@@ -232,7 +232,7 @@ export function createUsageAnalysisFixture(
       { key: "openrouter", label: "OpenRouter", shortLabel: "OR" },
     ],
     rows: [
-      { key: "flowlet-pro", label: "flowlet-pro", cells: [
+      { key: "deepseek-v4-flash", label: "deepseek-v4-flash", cells: [
         { value: "4.2M", level: 4 },
         { value: "1.1M", level: 2 },
         { value: "612K", level: 1 },
@@ -258,7 +258,7 @@ export function createUsageAnalysisFixture(
       ] },
     ],
     detail: {
-      label: "flowlet-pro",
+      label: "deepseek-v4-flash",
       inputOutput: zh ? "6.1M / 2.3M" : "6.1M / 2.3M",
       outputSpeed: "38.4 tok/s",
       cacheHitRate: "38.6%",
@@ -302,7 +302,7 @@ export function createUsageAnalysisFixture(
         ["personal-account", zh ? "DeepSeek · 个人账号" : "DeepSeek · Personal", "DeepSeek"],
       ],
       columns: [
-        ["flowlet-pro", "flowlet-pro", "pro"],
+        ["deepseek-v4-flash", "deepseek-v4-flash", "flash"],
         ["qwen3.8-max", "qwen3.8-max", "qwen"],
         ["longcat-2.0", "longcat-2.0", "LC"],
         ["deepseek-v4-pro", "deepseek-v4-pro", "DS"],
@@ -317,7 +317,7 @@ export function createUsageAnalysisFixture(
         ["pi", "Pi", "CLI"],
       ],
       columns: [
-        ["flowlet-pro", "flowlet-pro", "pro"],
+        ["deepseek-v4-flash", "deepseek-v4-flash", "flash"],
         ["qwen3.8-max", "qwen3.8-max", "qwen"],
         ["longcat-2.0", "longcat-2.0", "LC"],
         ["deepseek-v4-pro", "deepseek-v4-pro", "DS"],
@@ -332,7 +332,7 @@ export function createUsageAnalysisFixture(
         ["server", zh ? "家庭服务器" : "Home server", "Linux"],
       ],
       columns: [
-        ["flowlet-pro", "flowlet-pro", "pro"],
+        ["deepseek-v4-flash", "deepseek-v4-flash", "flash"],
         ["qwen3.8-max", "qwen3.8-max", "qwen"],
         ["longcat-2.0", "longcat-2.0", "LC"],
         ["deepseek-v4-pro", "deepseek-v4-pro", "DS"],
@@ -376,43 +376,35 @@ export function createUsageAnalysisFixture(
 
 export function createModelsServiceFixture(zh: boolean): {
   stats: ModelsServiceStatModel[];
-  groups: { aggregate: ModelsServiceItemModel[]; direct: ModelsServiceItemModel[] };
+  models: ModelsServiceItemModel[];
   labels: ModelsServiceLabels;
 } {
   return {
     stats: [
-      { key: "models", label: zh ? "对外模型" : "Models", value: "16" },
+      { key: "models", label: zh ? "对外模型" : "Models", value: "14" },
       { key: "enabled", label: zh ? "已启用" : "Enabled", value: "2", tone: "success" },
       { key: "channels", label: zh ? "已接入渠道" : "Channels", value: "7" },
     ],
-    groups: {
-      aggregate: [
-        { id: "flowlet-pro", kind: "aggregate", name: "flowlet-pro", typeLabel: zh ? "Flowlet · 聚合模型" : "Flowlet · Aggregate", summary: zh ? "2 个可用账号" : "2 accounts", enabled: true, logo: "/flowlet-logo.png" },
-        { id: "flowlet-flash", kind: "aggregate", name: "flowlet-flash", typeLabel: zh ? "Flowlet · 聚合模型" : "Flowlet · Aggregate", summary: zh ? "3 个可用账号" : "3 accounts", enabled: true, logo: "/flowlet-logo.png" },
-      ],
-      direct: [
-        { id: "deepseek-v4-flash", kind: "direct", name: "deepseek-v4-flash", typeLabel: "DeepSeek · 渠道模型", summary: zh ? "已加入 2 个聚合模型" : "In 2 aggregates", enabled: false, logo: "/icons/lobe/deepseek-color.svg" },
-        { id: "deepseek-v4-pro", kind: "direct", name: "deepseek-v4-pro", typeLabel: "DeepSeek · 渠道模型", summary: zh ? "尚未加入路由" : "Not routed", summaryMuted: true, enabled: false, logo: "/icons/lobe/deepseek-color.svg" },
-        { id: "glm-4.5-air", kind: "direct", name: "glm-4.5-air", typeLabel: "Z.AI · 渠道模型", summary: zh ? "已加入 1 个聚合模型" : "In 1 aggregate", enabled: false, logo: "/icons/lobe/zhipu-color.svg" },
-        { id: "glm-4.7", kind: "direct", name: "glm-4.7", typeLabel: "Z.AI · 渠道模型", summary: zh ? "已加入 1 个聚合模型" : "In 1 aggregate", enabled: false, logo: "/icons/lobe/zhipu-color.svg" },
-        { id: "glm-5.3", kind: "direct", name: "glm-5.3", typeLabel: "Z.AI · 渠道模型", summary: zh ? "已加入 1 个聚合模型" : "In 1 aggregate", enabled: false, logo: "/icons/lobe/zhipu-color.svg" },
-        { id: "glm-5.2", kind: "direct", name: "glm-5.2", typeLabel: "Z.AI · 渠道模型", summary: zh ? "尚未加入路由" : "Not routed", summaryMuted: true, enabled: false, logo: "/icons/lobe/zhipu-color.svg" },
-        { id: "longcat-2.0", kind: "direct", name: "longcat-2.0", typeLabel: "LongCat · 渠道模型", summary: zh ? "已加入 1 个聚合模型" : "In 1 aggregate", enabled: false, logo: "/icons/lobe/longcat-color.svg" },
-        { id: "kimi-k3", kind: "direct", name: "kimi-k3", typeLabel: "Kimi · 渠道模型", summary: zh ? "已加入 1 个聚合模型" : "In 1 aggregate", enabled: false, logo: "/icons/lobe/kimi-color.svg" },
-        { id: "kimi-k2.7-code", kind: "direct", name: "kimi-k2.7-code", typeLabel: "Kimi · 渠道模型", summary: zh ? "尚未加入路由" : "Not routed", summaryMuted: true, enabled: false, logo: "/icons/lobe/kimi-color.svg" },
-        { id: "qwen3.8-max", kind: "direct", name: "qwen3.8-max", typeLabel: "Qwen · 渠道模型", summary: zh ? "已加入 1 个聚合模型" : "In 1 aggregate", enabled: false, logo: "/icons/lobe/qwen-color.svg" },
-        { id: "qwen3.7-max", kind: "direct", name: "qwen3.7-max", typeLabel: "Qwen · 渠道模型", summary: zh ? "尚未加入路由" : "Not routed", summaryMuted: true, enabled: false, logo: "/icons/lobe/qwen-color.svg" },
-        { id: "qwen3.7-plus", kind: "direct", name: "qwen3.7-plus", typeLabel: "Qwen · 渠道模型", summary: zh ? "尚未加入路由" : "Not routed", summaryMuted: true, enabled: false, logo: "/icons/lobe/qwen-color.svg" },
-        { id: "qwen3.7-flash", kind: "direct", name: "qwen3.7-flash", typeLabel: "Qwen · 渠道模型", summary: zh ? "尚未加入路由" : "Not routed", summaryMuted: true, enabled: false, logo: "/icons/lobe/qwen-color.svg" },
-        { id: "qwen3.6-plus", kind: "direct", name: "qwen3.6-plus", typeLabel: "Qwen · 渠道模型", summary: zh ? "尚未加入路由" : "Not routed", summaryMuted: true, enabled: false, logo: "/icons/lobe/qwen-color.svg" },
-      ],
-    },
+    models: [
+      { id: "deepseek-v4-flash", name: "deepseek-v4-flash", typeLabel: "DeepSeek · 渠道模型", summary: zh ? "2 个可用账号" : "2 accounts", enabled: true, logo: "/icons/lobe/deepseek-color.svg" },
+      { id: "deepseek-v4-pro", name: "deepseek-v4-pro", typeLabel: "DeepSeek · 渠道模型", summary: zh ? "无可用账号" : "No accounts", summaryMuted: true, enabled: false, logo: "/icons/lobe/deepseek-color.svg" },
+      { id: "glm-4.5-air", name: "glm-4.5-air", typeLabel: "Z.AI · 渠道模型", summary: zh ? "无可用账号" : "No accounts", summaryMuted: true, enabled: false, logo: "/icons/lobe/zhipu-color.svg" },
+      { id: "glm-4.7", name: "glm-4.7", typeLabel: "Z.AI · 渠道模型", summary: zh ? "无可用账号" : "No accounts", summaryMuted: true, enabled: false, logo: "/icons/lobe/zhipu-color.svg" },
+      { id: "glm-5.3", name: "glm-5.3", typeLabel: "Z.AI · 渠道模型", summary: zh ? "1 个可用账号" : "1 account", enabled: true, logo: "/icons/lobe/zhipu-color.svg" },
+      { id: "glm-5.2", name: "glm-5.2", typeLabel: "Z.AI · 渠道模型", summary: zh ? "无可用账号" : "No accounts", summaryMuted: true, enabled: false, logo: "/icons/lobe/zhipu-color.svg" },
+      { id: "longcat-2.0", name: "longcat-2.0", typeLabel: "LongCat · 渠道模型", summary: zh ? "无可用账号" : "No accounts", summaryMuted: true, enabled: false, logo: "/icons/lobe/longcat-color.svg" },
+      { id: "kimi-k3", name: "kimi-k3", typeLabel: "Kimi · 渠道模型", summary: zh ? "无可用账号" : "No accounts", summaryMuted: true, enabled: false, logo: "/icons/lobe/kimi-color.svg" },
+      { id: "kimi-k2.7-code", name: "kimi-k2.7-code", typeLabel: "Kimi · 渠道模型", summary: zh ? "无可用账号" : "No accounts", summaryMuted: true, enabled: false, logo: "/icons/lobe/kimi-color.svg" },
+      { id: "qwen3.8-max", name: "qwen3.8-max", typeLabel: "Qwen · 渠道模型", summary: zh ? "无可用账号" : "No accounts", summaryMuted: true, enabled: false, logo: "/icons/lobe/qwen-color.svg" },
+      { id: "qwen3.7-max", name: "qwen3.7-max", typeLabel: "Qwen · 渠道模型", summary: zh ? "无可用账号" : "No accounts", summaryMuted: true, enabled: false, logo: "/icons/lobe/qwen-color.svg" },
+      { id: "qwen3.7-plus", name: "qwen3.7-plus", typeLabel: "Qwen · 渠道模型", summary: zh ? "无可用账号" : "No accounts", summaryMuted: true, enabled: false, logo: "/icons/lobe/qwen-color.svg" },
+      { id: "qwen3.7-flash", name: "qwen3.7-flash", typeLabel: "Qwen · 渠道模型", summary: zh ? "无可用账号" : "No accounts", summaryMuted: true, enabled: false, logo: "/icons/lobe/qwen-color.svg" },
+      { id: "qwen3.6-plus", name: "qwen3.6-plus", typeLabel: "Qwen · 渠道模型", summary: zh ? "无可用账号" : "No accounts", summaryMuted: true, enabled: false, logo: "/icons/lobe/qwen-color.svg" },
+    ],
     labels: {
       stats: {},
-      aggregateGroup: zh ? "聚合模型" : "Aggregate",
-      directGroup: zh ? "渠道模型" : "Direct",
       statsAria: zh ? "模型服务统计" : "Model service summary",
-      currentVisible: zh ? "当前显示 16 / 共 16 个模型" : "Showing 16 of 16 models",
+      currentVisible: zh ? "当前显示 14 / 共 14 个模型" : "Showing 14 of 14 models",
       hint: zh ? "选择模型后在右侧查看详情" : "Select a model to view details",
       ready: zh ? "可用" : "Ready",
       off: zh ? "关闭" : "Off",

@@ -69,7 +69,8 @@ impl DeviceIdentity {
         uuid::Uuid::parse_str(&identity.device_id)
             .map_err(|_| DeviceIdentityError::InvalidDeviceId(identity.device_id.clone()))?;
         let detected_platform = current_platform();
-        identity.platform = resolve_platform(&identity.platform, &detected_platform, std::env::consts::OS);
+        identity.platform =
+            resolve_platform(&identity.platform, &detected_platform, std::env::consts::OS);
         if identity.display_name.trim().is_empty() {
             identity.display_name = default_display_name(&identity.platform, &identity.device_id);
         }
@@ -871,7 +872,10 @@ fn platform_matches_os(platform: &str, os: &str) -> bool {
 }
 
 fn is_linux_platform(platform: &str) -> bool {
-    !matches!(platform, "" | "unknown" | "windows" | "macos" | "android" | "ios")
+    !matches!(
+        platform,
+        "" | "unknown" | "windows" | "macos" | "android" | "ios"
+    )
 }
 
 fn default_display_name(platform: &str, device_id: &str) -> String {
@@ -1427,7 +1431,10 @@ mod tests {
 
     #[test]
     fn linux_distro_id_ignores_malformed_os_release() {
-        assert_eq!(linux_distro_id_from("NAME=Ubuntu\nVERSION=1\n").as_deref(), None);
+        assert_eq!(
+            linux_distro_id_from("NAME=Ubuntu\nVERSION=1\n").as_deref(),
+            None
+        );
         assert_eq!(linux_distro_id_from("").as_deref(), None);
     }
 
@@ -1468,6 +1475,9 @@ mod tests {
     #[test]
     fn default_display_name_uses_distro_label() {
         let name = default_display_name("ubuntu", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
-        assert!(name.starts_with("Ubuntu · "), "unexpected default name: {name}");
+        assert!(
+            name.starts_with("Ubuntu · "),
+            "unexpected default name: {name}"
+        );
     }
 }

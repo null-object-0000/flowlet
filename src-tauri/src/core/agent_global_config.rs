@@ -9,6 +9,7 @@ use std::sync::{Mutex, OnceLock};
 use super::agent_environment::display_path;
 use super::codex_account::codex_home;
 use super::codex_model_catalog;
+use super::model_catalog::model_catalog;
 
 pub(crate) mod adapters;
 
@@ -73,15 +74,6 @@ pub struct AgentGlobalConfigReport {
     /// 仅 Codex：`model_catalog_json` 指向 Flowlet 生成的模型目录且文件在位。
     #[serde(default)]
     pub model_catalog_configured: bool,
-    /// Claude Code 主模型是否写入 `[1m]` 长上下文后缀；其他 Agent 恒为 false。
-    #[serde(default)]
-    pub primary_long_context: bool,
-    /// Claude Code 快速模型与子 Agent 模型是否写入 `[1m]` 后缀；其他 Agent 恒为 false。
-    #[serde(default)]
-    pub fast_long_context: bool,
-    /// 兼容旧版前端的汇总状态；仅当主模型和快速模型都启用 1M 时为 true。
-    #[serde(default)]
-    pub long_context: bool,
     pub backup_available: bool,
     pub external_environment_overrides: Vec<String>,
     pub error: Option<String>,
@@ -89,12 +81,6 @@ pub struct AgentGlobalConfigReport {
     /// 扩展为 Agent 请求注入 x-flowlet-session 头，使 Flowlet 能按会话归并请求。
     #[serde(default)]
     pub session_extension: bool,
-    /// 支持模型能力声明的 Agent：是否已在受管模型条目中声明聚合模型规格。
-    #[serde(default)]
-    pub model_specs: bool,
-    /// 从受管配置中解析出的聚合模型输入模态，供状态展示与手动片段保持一致。
-    #[serde(default)]
-    pub model_input_modalities: BTreeMap<String, Vec<String>>,
     /// 仅 DeepSeek Harness：从各 base Profile 受管块回读的 MCP 服务器列表
     /// （按 id 合并，首个出现的 Profile 优先）。
     #[serde(default)]
@@ -108,32 +94,19 @@ pub struct AgentGlobalConfigReport {
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentGlobalConfigOptions {
-    /// 兼容旧版前端：未提供独立选项时，同时控制主模型与快速模型。
-    #[serde(default)]
-    pub long_context: Option<bool>,
-    /// 仅 Claude Code：为主模型环境变量附加 `[1m]` 后缀。
-    #[serde(default)]
-    pub primary_long_context: Option<bool>,
-    /// 仅 Claude Code：为快速模型和子 Agent 模型附加 `[1m]` 后缀。
-    #[serde(default)]
-    pub fast_long_context: Option<bool>,
-    /// Pi / DeepSeek Harness：是否安装可选会话扩展。安装后可为发往 Flowlet 渠道的
-    /// 请求注入 x-flowlet-session，使 Flowlet 能按会话归并请求。两个 Adapter 在未传
-    /// 选项时均默认不安装（不改变已有扩展文件）。
+    /// Pi / DeepSeek Harness / Hermes：是否安装可选会话扩展。安装后可为发往 Flowlet
+    /// 渠道的请求注入 x-flowlet-session，使 Flowlet 能按会话归并请求。Adapter 在未传
+    /// 选项时默认不安装（不改变已有扩展文件）。
     #[serde(default)]
     pub session_extension: Option<bool>,
-    /// 是否声明聚合模型规格。DSH 写入 contextWindow 与 input；OpenCode / Pi
-    /// 写入各自官方模型格式的输入模态字段。未传选项时不填写。
-    #[serde(default)]
-    pub model_specs: Option<bool>,
-    /// 由 Rust command 根据当前路由与本地模型目录注入，拒绝前端直接提供，确保与代理
-    /// 的图片候选过滤使用同一份能力事实源。
-    #[serde(skip)]
-    pub(crate) model_input_modalities: Option<BTreeMap<String, Vec<String>>>,
-    /// 仅 Hermes Agent：用户选择的默认模型（`flowlet-pro` / `flowlet-flash`）。
-    /// 未传或非法时使用 Adapter 默认值（flowlet-pro）；其余 Agent 忽略该字段。
+    /// 用户在接入抽屉中显式选择的主模型（规范模型 ID）。所有 Agent 都使用该值；
+    /// 未传时由 `apply_agent_global_config` command 按当前可用模型注入。
     #[serde(default)]
     pub primary_model: Option<String>,
+    /// 快速模型：仅 Claude Code 的主/快速模型组与 OpenCode 的 `small_model` 使用。
+    /// 缺省时回退到 `primary_model`（不再存在「快速模型必须是另一个模型」的语义）。
+    #[serde(default)]
+    pub fast_model: Option<String>,
     /// 仅 DeepSeek Harness：受管 MCP 服务器列表。`Some(非空)` 把列表整块写入
     /// 每个 base Profile 的 cordis.patch.yml；`Some(空)` 移除全部受管 MCP 块；
     /// `None` 表示不触碰 MCP 配置（兼容旧前端）。
@@ -141,27 +114,47 @@ pub struct AgentGlobalConfigOptions {
     pub mcp_servers: Option<Vec<McpServerSpec>>,
 }
 
-impl AgentGlobalConfigOptions {
-    fn claude_long_context(&self) -> (bool, bool) {
-        (
-            self.primary_long_context
-                .or(self.long_context)
-                .unwrap_or(false),
-            self.fast_long_context
-                .or(self.long_context)
-                .unwrap_or(false),
-        )
-    }
+/// 把用户传入的模型名归一为 `model-catalog.json` 中的规范模型 ID。
+///
+/// 允许别名、厂商前缀写法和大小写变体（与入站路由使用同一份目录归一规则），
+/// 但目录里未登记的名字一律拒绝——聚合模型移除后不再有任何「任意模型名都会被
+/// 接受」的兜底路径。
+pub(crate) fn canonical_known_model(model: &str) -> Result<String, String> {
+    model_catalog()
+        .find(model)
+        .map(|identity| identity.id.clone())
+        .ok_or_else(|| format!("模型 {model} 不在 Flowlet 模型目录中，无法写入 Agent 配置"))
 }
 
-fn declared_model_inputs(
-    model_input_modalities: Option<&BTreeMap<String, Vec<String>>>,
-    model: &str,
-) -> Vec<String> {
-    model_input_modalities
-        .and_then(|inputs| inputs.get(model).cloned())
-        .filter(|inputs| !inputs.is_empty())
-        .unwrap_or_else(|| vec!["text".to_string()])
+/// 模型是否在 `model-catalog.json` 中登记。
+///
+/// inspect 用它识别「历史聚合模型配置」：`flowlet-pro` / `flowlet-flash` 已从目录移除，
+/// 这类旧配置即使结构完整也必须提示用户重新一键接入（Partial），不能报成已接入。
+pub(crate) fn is_known_catalog_model(model: &str) -> bool {
+    model_catalog().find(model).is_some()
+}
+
+/// 解析本次写入使用的（主模型，快速模型）。
+///
+/// `primaryModel` 必须提供，否则拒绝写入；正常调用链由 `apply_agent_global_config`
+/// command 按当前可用模型补齐。`fastModel` 缺省时回退到主模型。
+pub(crate) fn resolve_model_choices(
+    options: Option<&AgentGlobalConfigOptions>,
+) -> Result<(String, String), String> {
+    let primary = options
+        .and_then(|options| options.primary_model.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "未指定默认模型：请先在接入抽屉中选择一个已开放的模型".to_string())?;
+    let primary = canonical_known_model(primary)?;
+    let fast = options
+        .and_then(|options| options.fast_model.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(canonical_known_model)
+        .transpose()?
+        .unwrap_or_else(|| primary.clone());
+    Ok((primary, fast))
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

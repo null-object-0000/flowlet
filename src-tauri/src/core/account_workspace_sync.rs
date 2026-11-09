@@ -366,6 +366,7 @@ fn apply_catalog(
             .map_err(|error| error.to_string())?
             .unwrap_or_else(|| record.id.clone());
         local.push(ChannelAccount {
+            use_upstream_proxy: Some(false),
             id: local_account_id,
             workspace_account_id: Some(record.id.clone()),
             channel_id: record.channel_id.clone(),

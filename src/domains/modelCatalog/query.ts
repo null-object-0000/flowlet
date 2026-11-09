@@ -43,7 +43,13 @@ export function useLocalModelsDevCatalog(): {
 } {
   const query = useQuery({
     queryKey: queryKeys.modelCatalog.modelsDevCatalog(),
-    queryFn: () => backgroundTaskCommands.getModelsDevProviderCatalog("openrouter"),
+    queryFn: async () => {
+      const subsets = await Promise.all(["openrouter", "openai"].map(
+        (providerId) => backgroundTaskCommands.getModelsDevProviderCatalog(providerId),
+      ));
+      const available = subsets.filter((subset): subset is string => subset != null);
+      return available.length ? JSON.stringify(Object.assign({}, ...available.map((subset) => JSON.parse(subset)))) : null;
+    },
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 60_1000,
     refetchOnWindowFocus: false,

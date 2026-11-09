@@ -54,7 +54,7 @@ export function useAccountActions(presets: ChannelPreset[]) {
   });
 
   const testConnection = useMutation({
-    mutationFn: (input: { channel_id: string; api_key: string; base_url_override?: string | null }) =>
+    mutationFn: (input: { channel_id: string; api_key: string; base_url_override?: string | null; use_upstream_proxy?: boolean | null }) =>
       accountCommands.testConnection(input),
   });
 

@@ -1,5 +1,7 @@
 use super::super::{AgentIdentityAdapter, AgentUaRule, HeaderLookup};
-use crate::core::agent_session_identity::{AgentSessionIdentity, AGENT_CLIENT_HEADER, AGENT_SESSION_HEADER};
+use crate::core::agent_session_identity::{
+    AgentSessionIdentity, AGENT_CLIENT_HEADER, AGENT_SESSION_HEADER,
+};
 
 pub(super) struct HermesIdentityAdapter;
 

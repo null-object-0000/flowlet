@@ -1,7 +1,7 @@
 use super::MobileAppState;
 use crate::core::device_identity::{
-    DailyUsageTotal, HourlyUsageTotal, KnownDevice, SharedAgentSession,
-    SyncedAccountResource, SyncedAgentProfile, SyncedAgentSession,
+    DailyUsageTotal, HourlyUsageTotal, KnownDevice, SharedAgentSession, SyncedAccountResource,
+    SyncedAgentProfile, SyncedAgentSession,
 };
 
 #[tauri::command]

@@ -16,9 +16,10 @@ type Props = {
   todayUsage: UsageTodaySummary | null;
   onOpenUsage: () => void;
   onOpenDetails: () => void;
+  showConnectionTest?: boolean;
 };
 
-export function OverviewServiceStrip({ status, phase, bindConfig, baseUrl, todayUsage, onOpenUsage, onOpenDetails }: Props) {
+export function OverviewServiceStrip({ status, phase, bindConfig, baseUrl, todayUsage, onOpenUsage, onOpenDetails, showConnectionTest = true }: Props) {
   const { language, t } = useAppPreferences();
   const running = status?.running === true;
   const [, forceTick] = useState(0);
@@ -37,12 +38,29 @@ export function OverviewServiceStrip({ status, phase, bindConfig, baseUrl, today
 
   const copy = async (value: string, kind: "endpoint" | "token") => {
     try {
-      await navigator.clipboard.writeText(value);
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(value);
+      } else {
+        // Clipboard API is unavailable on an HTTP intranet deployment.
+        const field = document.createElement("textarea");
+        field.value = value;
+        field.style.position = "fixed";
+        field.style.opacity = "0";
+        const previousFocus = document.activeElement;
+        document.body.append(field);
+        try {
+          field.select();
+          if (!document.execCommand("copy")) throw new Error("Copy unavailable");
+        } finally {
+          field.remove();
+          if (previousFocus instanceof HTMLElement) previousFocus.focus();
+        }
+      }
       Toast.success(kind === "endpoint"
         ? t("{label} 已复制", { label: t("客户端接入") })
         : t("{label} 已复制", { label: t("客户端 Token") }));
     } catch {
-      Toast.success(t("已复制到剪贴板"));
+      Toast.error(t("复制失败"));
     }
   };
 
@@ -78,7 +96,7 @@ export function OverviewServiceStrip({ status, phase, bindConfig, baseUrl, today
       onOpenUsage={onOpenUsage}
       onOpenDetails={onOpenDetails}
       onCopy={copy}
-      onTest={test}
+      onTest={showConnectionTest ? test : undefined}
     />
   );
 }

@@ -1,8 +1,8 @@
 use super::agent_session_identity::{from_http_headers, AgentSessionIdentity};
 use super::channels_config::openai_path_strips_v1;
 use super::config::{
-    classify_request, ChannelAccount, ChannelPreset, LogCaptureConfig, ProtocolType, ProxyBindConfig,
-    RequestLogInput, RouteCandidate, UsageRecordInput,
+    classify_request, ChannelAccount, ChannelPreset, LogCaptureConfig, ProtocolType,
+    ProxyBindConfig, RequestLogInput, RouteCandidate, UsageRecordInput,
 };
 use super::model_catalog::routing_model_id;
 use super::power::{ActivityPermit, ActivityTracker};
@@ -123,10 +123,10 @@ fn extract_agent_session(headers: &HeaderMap) -> Option<AgentSessionIdentity> {
     from_http_headers(headers)
 }
 
-#[path = "proxy_http.rs"]
-mod proxy_http;
 #[path = "proxy_anthropic_compat.rs"]
 mod proxy_anthropic_compat;
+#[path = "proxy_http.rs"]
+mod proxy_http;
 // Re-export 给 lib.rs 用（proxy_http mod 本身是私有的，需要手动暴露）
 pub use proxy_http::extract_log_capture;
 
@@ -168,10 +168,11 @@ mod proxy_routing;
 use proxy_http::{
     add_cors_headers, apply_request_headers, build_model_detail_response,
     build_model_list_response, build_upstream_url, build_upstream_url_without_openai_v1,
-    copy_response_headers, cors_preflight_response, encode_body_base64, ensure_config_file,
-    ensure_reasoning_content_passback, extract_model, files_api_request, identify_client,
-    identify_client_agent, is_model_list_request, is_streaming_response, load_ua_rules,
-    model_detail_request_id, rewrite_model, sanitize_headers, FilesApiOp,
+    copy_response_headers, cors_preflight_response, encode_body_base64,
+    ensure_anthropic_thinking_passback, ensure_config_file, ensure_reasoning_content_passback,
+    extract_model, files_api_request, identify_client, identify_client_agent,
+    is_model_list_request, is_streaming_response, load_ua_rules, model_detail_request_id,
+    rewrite_model, sanitize_headers,
 };
 // 仅测试（proxy_tests）需要直接调用 UA 子串匹配；非测试构建不应引入以免告警。
 #[cfg(test)]
@@ -179,8 +180,7 @@ use proxy_http::identify_client_by_ua;
 use proxy_routing::{
     body_contains_account_deactivated, body_contains_product_not_activated,
     body_contains_quota_exceeded, enrich_upstream_error_log, files_account, match_candidates,
-    network_error_route_reason, resolve_small_model, should_inspect_fallback_body,
-    should_try_next_status,
+    network_error_route_reason, should_inspect_fallback_body, should_try_next_status,
 };
 #[derive(Debug, Error)]
 pub enum ProxyError {
@@ -198,6 +198,8 @@ pub enum ProxyError {
 enum ProxyForwardError {
     #[error(transparent)]
     Network(#[from] reqwest::Error),
+    #[error("{0}")]
+    ProxyConfiguration(String),
     #[error("上游{phase}等待超过 {timeout_seconds} 秒")]
     Timeout {
         phase: &'static str,
@@ -210,6 +212,7 @@ impl ProxyForwardError {
         match self {
             Self::Network(err) => network_error_route_reason(err),
             Self::Timeout { .. } => "timeout",
+            Self::ProxyConfiguration(_) => "upstream_proxy_configuration_error",
         }
     }
 }
@@ -266,12 +269,25 @@ struct ProxyAppState {
     #[allow(dead_code)]
     pub upstream_timeout_seconds: u64,
     pub rate_limiter: RateLimiter,
-    pub capture: LogCaptureConfig,
+    /// 捕获配置与 `FlowletServices.capture` 共享同一个 `Arc`：设置页保存后，
+    /// 下一次请求即可读到新配置（无需重启代理）。
+    pub capture: Arc<Mutex<LogCaptureConfig>>,
     pub bind_config: Arc<Mutex<ProxyBindConfig>>,
     /// 活动请求计数：有请求转发上游期间抑制系统自动待机（Windows）
     pub activity: ActivityTracker,
     /// 本地 config.json 文件路径，每次请求热读 UA rules 用
     pub config_path: std::path::PathBuf,
+}
+
+impl ProxyAppState {
+    /// 每个请求开始时快照一次捕获配置，保证同一次请求内 Header/Body/usage 的
+    /// 捕获口径一致，同时让设置页的修改在下一个请求生效。
+    fn capture_config(&self) -> LogCaptureConfig {
+        self.capture
+            .lock()
+            .map(|value| value.clone())
+            .unwrap_or_default()
+    }
 }
 
 impl ProxyController {
@@ -325,6 +341,33 @@ impl ProxyController {
         rate_limiter: RateLimiter,
         config_path: std::path::PathBuf,
     ) -> Result<(), ProxyError> {
+        self.start_with_bind_auth(
+            shared,
+            storage,
+            upstream_timeout_seconds,
+            Arc::new(Mutex::new(capture)),
+            bind_addr_str,
+            rate_limiter,
+            config_path,
+            false,
+        )
+        .await
+    }
+
+    /// Server hosts enforce client credentials for every model endpoint.
+    ///
+    /// `capture` 使用共享 `Arc`：服务设置页保存后无需重启代理，下一次请求即读取新配置。
+    pub async fn start_with_bind_auth(
+        &self,
+        shared: ProxySharedConfig,
+        storage: Storage,
+        upstream_timeout_seconds: u64,
+        capture: Arc<Mutex<LogCaptureConfig>>,
+        bind_addr_str: &str,
+        rate_limiter: RateLimiter,
+        config_path: std::path::PathBuf,
+        require_client_auth: bool,
+    ) -> Result<(), ProxyError> {
         let mut runtime = self
             .inner
             .lock()
@@ -374,14 +417,9 @@ impl ProxyController {
             .route("/anthropic/v1/{*path}", any(forward_anthropic_compatible))
             .with_state(ProxyAppState {
                 shared,
-                client: Client::builder()
-                    // Windows 待机/网络切换会在连接池里留下僵尸连接（无 RST 的半开连接），
-                    // 恢复后复用会静默挂起。限制空闲连接存活、开启 TCP keepalive 探针、
-                    // 约束新建连接耗时，让恢复后的首批请求快速自愈。
-                    // 见 docs/windows-suspend-resume-network-resilience.md。
-                    .pool_idle_timeout(Duration::from_secs(60))
-                    .tcp_keepalive(Duration::from_secs(30))
-                    .connect_timeout(Duration::from_secs(10))
+                // Shared transport tuning includes suspend/resume connection recovery.
+                // See docs/windows-suspend-resume-network-resilience.md.
+                client: super::upstream_proxy::model_client_builder()
                     .build()
                     .map_err(|err| ProxyError::StartFailed(err.to_string()))?,
                 storage,
@@ -392,6 +430,26 @@ impl ProxyController {
                 activity: ActivityTracker::new(),
                 config_path,
             });
+
+        let app = if require_client_auth {
+            let config = self.bind_config.clone();
+            app.layer(axum::middleware::from_fn(move |request: Request, next: axum::middleware::Next| {
+                let valid = request.uri().path() == "/health" || config.lock().ok().is_some_and(|config| {
+                    !config.default_client_token.is_empty() && identify_client(request.headers(), &config.default_client_token).is_some()
+                });
+                async move {
+                    if !valid {
+                        let mut response = Response::new(Body::from(serde_json::json!({"error":{"message":"Invalid client API key","type":"authentication_error","code":"invalid_api_key"}}).to_string()));
+                        *response.status_mut() = StatusCode::UNAUTHORIZED;
+                        response.headers_mut().insert("Content-Type", "application/json".parse().unwrap());
+                        return response;
+                    }
+                    next.run(request).await
+                }
+            }))
+        } else {
+            app
+        };
 
         tokio::spawn(async move {
             let server = axum::serve(listener, app).with_graceful_shutdown(async move {
@@ -524,6 +582,8 @@ async fn forward_files_api_request(
         .unwrap_or_else(|| "/".to_string());
     let agent_session = extract_agent_session(&parts.headers);
     let ua_rules = load_ua_rules(&state.config_path);
+    // Files API 不捕获 Body，但 Header 与响应仍按当前捕获配置处理。
+    let capture = state.capture_config();
     let (client_id, client_name) = match identify_client_agent(&parts.headers, &ua_rules) {
         Some((id, name)) => (Some(id), Some(name)),
         None => (None, Some("未知".to_string())),
@@ -552,6 +612,7 @@ async fn forward_files_api_request(
         method: parts.method.to_string(),
         path,
         upstream_url: None,
+        upstream_proxy_used: None,
         status: None,
         latency_ms: Some(0),
         is_stream: false,
@@ -561,7 +622,7 @@ async fn forward_files_api_request(
         ttfb_ms: None,
         duration_ms: None,
         attempt_seq: 0,
-        req_headers_json: capture_headers(&parts.headers, &state.capture, true),
+        req_headers_json: capture_headers(&parts.headers, &capture, true),
         // multipart 上传可能到 128 MiB，不再额外复制一份进日志。
         req_body_b64: None,
         res_headers_json: None,
@@ -617,9 +678,10 @@ async fn forward_files_api_request(
         .timeout_seconds
         .unwrap_or(state.upstream_timeout_seconds);
 
-    let builder = state
-        .client
-        .request(parts.method.clone(), upstream_url.clone());
+    let (http_client, upstream_proxy_used, _) =
+        super::upstream_proxy::model_forwarding_client(account, &state.client, &upstream_url)
+            .map_err(ProxyForwardError::ProxyConfiguration)?;
+    let builder = http_client.request(parts.method.clone(), upstream_url.clone());
     let builder = apply_request_headers(
         builder,
         &parts.headers,
@@ -634,11 +696,12 @@ async fn forward_files_api_request(
     log.account_id = Some(account.id.clone());
     log.account_name = Some(account.name.clone());
     log.upstream_url = Some(upstream_url);
+    log.upstream_proxy_used = upstream_proxy_used;
 
     let started_at = Instant::now();
     let upstream_response = match tokio::time::timeout(
         Duration::from_secs(timeout_seconds),
-        state.client.execute(upstream_request),
+        http_client.execute(upstream_request),
     )
     .await
     {
@@ -671,8 +734,8 @@ async fn forward_files_api_request(
     log.status = Some(status.as_u16() as i64);
     log.ttfb_ms = Some(ttfb_ms);
     log.duration_ms = Some(started_at.elapsed().as_millis() as i64);
-    log.res_headers_json = capture_headers(&headers, &state.capture, false);
-    log.res_body_b64 = capture_body(&body, &state.capture, false);
+    log.res_headers_json = capture_headers(&headers, &capture, false);
+    log.res_body_b64 = capture_body(&body, &capture, false);
     // 上游状态一律不改写：DSH 依赖原文做配额自愈，delete 还要求 `type: "file_deleted"`。
     if !status.is_success() {
         log.error_message = Some(format!("files_api_upstream_status_{}", status.as_u16()));
@@ -730,6 +793,9 @@ async fn forward_request(
     {
         return forward_files_api_request(state, parts, body).await;
     }
+
+    // 本请求使用启动时/设置页最近的捕获配置快照；后续设置页修改从下一个请求生效。
+    let capture = state.capture_config();
 
     let body_bytes = axum::body::to_bytes(body, usize::MAX)
         .await
@@ -1034,6 +1100,7 @@ async fn forward_request(
             method,
             path,
             upstream_url: None,
+            upstream_proxy_used: None,
             status: Some(error_status.as_u16() as i64),
             latency_ms: Some(0),
             is_stream: false,
@@ -1043,10 +1110,10 @@ async fn forward_request(
             ttfb_ms: None,
             duration_ms: None,
             attempt_seq: skipped_total as i64,
-            req_headers_json: capture_headers(&parts.headers, &state.capture, true),
-            req_body_b64: capture_body(&body_bytes, &state.capture, true),
-            res_headers_json: capture_headers(response.headers(), &state.capture, false),
-            res_body_b64: capture_body(&payload_bytes, &state.capture, false),
+            req_headers_json: capture_headers(&parts.headers, &capture, true),
+            req_body_b64: capture_body(&body_bytes, &capture, true),
+            res_headers_json: capture_headers(response.headers(), &capture, false),
+            res_body_b64: capture_body(&payload_bytes, &capture, false),
             is_last_attempt: true,
         };
         record_request_log(state.storage, log);
@@ -1063,7 +1130,6 @@ async fn forward_request(
 
     // accounts / channels 已在上面从共享锁 clone，直接复用
     let storage = state.storage.clone();
-    let http_client = state.client.clone();
     let protocol_str = detected_protocol.as_str().to_string();
     let method_clone = method.clone();
     let path_clone = path.clone();
@@ -1081,13 +1147,18 @@ async fn forward_request(
             continue;
         };
 
-        // 小模型路由判断：简单短聊天请求使用渠道配置的小模型
-        let effective_model = resolve_small_model(&candidate.upstream_model);
+        // 直接把路由候选记录的上游模型名写回请求体；不再有小模型档位改写。
+        let effective_model = candidate.upstream_model.clone();
         let routed_body = rewrite_model(&body_bytes, &effective_model, &detected_protocol);
         // DeepSeek 推理上游强制 thinking 会话的 assistant 消息回传 reasoning_content；
         // 客户端（如 DSH/pi-ai）经本地端点无法按 URL 识别并自动补全，这里在转发前补缺失字段。
         let routed_body =
             ensure_reasoning_content_passback(&routed_body, &effective_model, &detected_protocol);
+        // Anthropic thinking 会话的 assistant 消息回传 thinking 块同理：DeepSeek 官方
+        // Messages 端点缺少即 400。候选池跨上游（中转渠道可能缺 thinking 块）或 Files API
+        // pinning 切换账号时，历史里会缺少上游要求的 thinking 块，这里在转发前补齐空块。
+        let routed_body =
+            ensure_anthropic_thinking_passback(&routed_body, &effective_model, &detected_protocol);
 
         // 账号级 Base URL 按协议分别覆盖，未配置时回退到渠道默认地址。
         // Responses 复用 OpenAI 的覆盖地址（两者共享上游 Base URL）。
@@ -1110,6 +1181,12 @@ async fn forward_request(
         } else {
             build_upstream_url(base_url, &parts.uri, &detected_protocol)
         };
+        let client =
+            super::upstream_proxy::model_forwarding_client(account, &state.client, &upstream_url);
+        let (http_client, upstream_proxy_used, retry_proxy_connect) = client
+            .as_ref()
+            .map(|(client, used, retry)| (client, *used, *retry))
+            .unwrap_or((&state.client, None, false));
         let mut builder = http_client.request(parts.method.clone(), upstream_url.clone());
 
         // 渠道超时限制等待响应头，以及流式响应连续无数据的时长。
@@ -1130,11 +1207,11 @@ async fn forward_request(
         // 先构造唯一的最终上游请求，再从这个 Request 捕获日志并执行它。
         // 此时 URL、鉴权头和 model 均已完成路由改写，日志与第三方实际收到的报文一致。
         let upstream_request = builder.body(routed_body).build()?;
-        let req_headers_json = capture_headers(upstream_request.headers(), &state.capture, true);
+        let req_headers_json = capture_headers(upstream_request.headers(), &capture, true);
         let req_body_b64 = upstream_request
             .body()
             .and_then(reqwest::Body::as_bytes)
-            .and_then(|bytes| capture_body(bytes, &state.capture, true));
+            .and_then(|bytes| capture_body(bytes, &capture, true));
 
         // 为当前候选准备日志上下文（send_at = 此刻，T0 真实起点）
         let log_context = RouteLogContext {
@@ -1156,6 +1233,7 @@ async fn forward_request(
             method: method_clone.clone(),
             path: path_clone.clone(),
             upstream_url,
+            upstream_proxy_used,
             client_protocol: protocol_str.clone(),
             upstream_protocol: protocol_str.clone(),
             send_at: Instant::now(),
@@ -1163,14 +1241,26 @@ async fn forward_request(
             req_body_b64,
         };
 
-        let upstream_result =
-            match tokio::time::timeout(timeout, http_client.execute(upstream_request)).await {
+        let upstream_result = match client.as_ref() {
+            Err(error) => Err(ProxyForwardError::ProxyConfiguration(error.clone())),
+            Ok(_) => match tokio::time::timeout(
+                timeout,
+                super::upstream_proxy::execute_model_request(
+                    &candidate.channel_id,
+                    http_client,
+                    upstream_request,
+                    retry_proxy_connect,
+                ),
+            )
+            .await
+            {
                 Ok(result) => result.map_err(ProxyForwardError::Network),
                 Err(_) => Err(ProxyForwardError::Timeout {
                     phase: "响应头",
                     timeout_seconds,
                 }),
-            };
+            },
+        };
 
         match upstream_result {
             Ok(upstream_response) => {
@@ -1250,8 +1340,8 @@ async fn forward_request(
                             );
                             log.ttfb_ms = Some(ttfb_ms);
                             log.duration_ms = Some(duration_ms);
-                            if state.capture.capture_res_headers {
-                                let keys = if state.capture.redact_sensitive_headers {
+                            if capture.capture_res_headers {
+                                let keys = if capture.redact_sensitive_headers {
                                     LogCaptureConfig::redacted_header_keys()
                                 } else {
                                     &[]
@@ -1259,12 +1349,12 @@ async fn forward_request(
                                 log.res_headers_json =
                                     Some(sanitize_headers(&headers, keys).to_string());
                             }
-                            if state.capture.capture_res_body {
+                            if capture.capture_res_body {
                                 let body_for_log = body.to_vec();
                                 log.res_body_b64 = proxy_http::prepare_captured_res_body(
                                     &body_for_log,
                                     proxy_http::content_encoding_value(&headers).as_deref(),
-                                    state.capture.max_body_bytes,
+                                    capture.max_body_bytes,
                                 );
                             }
                             record_request_log(storage.clone(), log);
@@ -1296,8 +1386,8 @@ async fn forward_request(
                         );
                         log.ttfb_ms = Some(ttfb_ms);
                         log.duration_ms = Some(duration_ms);
-                        if state.capture.capture_res_headers {
-                            let keys = if state.capture.redact_sensitive_headers {
+                        if capture.capture_res_headers {
+                            let keys = if capture.redact_sensitive_headers {
                                 LogCaptureConfig::redacted_header_keys()
                             } else {
                                 &[]
@@ -1305,11 +1395,11 @@ async fn forward_request(
                             log.res_headers_json =
                                 Some(sanitize_headers(&headers, keys).to_string());
                         }
-                        if state.capture.capture_res_body {
+                        if capture.capture_res_body {
                             log.res_body_b64 = proxy_http::prepare_captured_res_body(
                                 &body,
                                 proxy_http::content_encoding_value(&headers).as_deref(),
-                                state.capture.max_body_bytes,
+                                capture.max_body_bytes,
                             );
                         }
                         record_request_log(storage.clone(), log);
@@ -1317,8 +1407,8 @@ async fn forward_request(
                     }
 
                     // 非 2xx 不会 fallback 的 buffered 分支
-                    let res_headers_json = if state.capture.capture_res_headers {
-                        let keys = if state.capture.redact_sensitive_headers {
+                    let res_headers_json = if capture.capture_res_headers {
+                        let keys = if capture.redact_sensitive_headers {
                             LogCaptureConfig::redacted_header_keys()
                         } else {
                             &[]
@@ -1328,11 +1418,11 @@ async fn forward_request(
                         None
                     };
                     let body_for_log: Vec<u8> = body.to_vec();
-                    let res_body_b64 = if state.capture.capture_res_body {
+                    let res_body_b64 = if capture.capture_res_body {
                         proxy_http::prepare_captured_res_body(
                             &body_for_log,
                             proxy_http::content_encoding_value(&headers).as_deref(),
-                            state.capture.max_body_bytes,
+                            capture.max_body_bytes,
                         )
                     } else {
                         None
@@ -1376,7 +1466,7 @@ async fn forward_request(
                     fallback_count,
                     route_reason,
                     &detected_protocol,
-                    &state.capture,
+                    &capture,
                     timeout_seconds,
                     activity_permit,
                 )
@@ -1384,7 +1474,12 @@ async fn forward_request(
             }
             Err(err) => {
                 let route_reason = err.route_reason();
-                let error_msg = err.to_string();
+                let error_msg = match &err {
+                    ProxyForwardError::Network(error) => {
+                        super::upstream_proxy::model_network_error(&candidate.channel_id, error)
+                    }
+                    _ => err.to_string(),
+                };
 
                 if index + 1 < candidates.len() {
                     fallback_count += 1;
@@ -1443,6 +1538,7 @@ struct RouteLogContext {
     method: String,
     path: String,
     upstream_url: String,
+    upstream_proxy_used: Option<bool>,
     client_protocol: String,
     upstream_protocol: String,
     /// 本次候选 send 开始的时刻，用于后续计算 TTFB 与 duration
@@ -1518,6 +1614,7 @@ impl RouteLogContext {
             method: self.method.clone(),
             path: self.path.clone(),
             upstream_url: Some(self.upstream_url.clone()),
+            upstream_proxy_used: self.upstream_proxy_used,
             status,
             latency_ms,
             is_stream,
@@ -1703,8 +1800,10 @@ async fn build_response(
             Duration::from_secs(timeout_seconds),
             activity_permit,
         );
-        let stream =
-            proxy_anthropic_compat::normalize_content_block_starts(stream, normalize_content_blocks);
+        let stream = proxy_anthropic_compat::normalize_content_block_starts(
+            stream,
+            normalize_content_blocks,
+        );
 
         let usage_capture = UsageCapture {
             storage: storage.clone(),
@@ -1971,15 +2070,20 @@ fn record_skipped_route_logs(
     reason: &'static str,
 ) {
     for (index, candidate) in skipped.iter().enumerate() {
-        let account = accounts.iter().find(|account| account.id == candidate.account_id);
-        let channel = channels.iter().find(|channel| channel.id == candidate.channel_id);
+        let account = accounts
+            .iter()
+            .find(|account| account.id == candidate.account_id);
+        let channel = channels
+            .iter()
+            .find(|channel| channel.id == candidate.channel_id);
         record_request_log(
             storage.clone(),
             RequestLogInput {
                 request_id: request_id.to_string(),
                 agent_type: agent_session.map(|value| value.agent_type.clone()),
                 agent_session_id: agent_session.map(|value| value.session_id.clone()),
-                parent_agent_session_id: agent_session.and_then(|value| value.parent_session_id.clone()),
+                parent_agent_session_id: agent_session
+                    .and_then(|value| value.parent_session_id.clone()),
                 client_id: client_id.map(str::to_string),
                 client_name: client_name.map(str::to_string),
                 channel_id: Some(candidate.channel_id.clone()),
@@ -1995,6 +2099,7 @@ fn record_skipped_route_logs(
                 method: method.to_string(),
                 path: path.to_string(),
                 upstream_url: None,
+                upstream_proxy_used: None,
                 status: None,
                 latency_ms: Some(0),
                 is_stream: false,
@@ -2037,6 +2142,41 @@ struct StreamDone {
     pub route_reason: Option<String>,
 }
 
+/// 跨 chunk 检测 SSE 终止事件时保留的最大尾部字节数。终止标记本身都很短，
+/// 512 字节足够覆盖被 TCP 分片截断的标记。
+const MAX_TERMINAL_PROBE_BYTES: usize = 512;
+
+/// 上游 SSE 是否已经进入终止状态。OpenAI chat/completions 以 `data: [DONE]`
+/// 结束；Anthropic messages 以 `message_stop` 结束；Responses 以
+/// `response.completed` 结束。
+fn contains_stream_terminal_marker(bytes: &[u8]) -> bool {
+    const MARKERS: [&[u8]; 5] = [
+        b"data: [DONE]",
+        b"data:[DONE]",
+        b"\"type\":\"message_stop\"",
+        b"event: message_stop",
+        b"\"type\":\"response.completed\"",
+    ];
+    MARKERS
+        .iter()
+        .any(|marker| bytes.windows(marker.len()).any(|window| window == *marker))
+}
+
+fn track_stream_terminal_event(state: &mut TimedStreamState, bytes: &[u8]) {
+    if state.terminal_event_seen {
+        return;
+    }
+    state.terminal_probe.extend_from_slice(bytes);
+    if state.terminal_probe.len() > MAX_TERMINAL_PROBE_BYTES {
+        let dropped = state.terminal_probe.len() - MAX_TERMINAL_PROBE_BYTES;
+        state.terminal_probe.drain(..dropped);
+    }
+    if contains_stream_terminal_marker(&state.terminal_probe) {
+        state.terminal_event_seen = true;
+        state.terminal_probe.clear();
+    }
+}
+
 /// 包装上游 body 字节流：捕获最多 capture.max_body_bytes 的响应体字节
 /// 与 SSE 首尾片段文本摘要；每次等待下一块数据使用空闲超时，
 /// 流结束时通过 tx_done 回写 StreamDone。
@@ -2071,6 +2211,8 @@ fn capture_timed_stream(
         first_line: None,
         last_line: None,
         line_count: 0,
+        terminal_event_seen: false,
+        terminal_probe: Vec::new(),
         _activity_permit: activity_permit,
     };
     futures_util::stream::unfold(state, move |mut state| async move {
@@ -2103,6 +2245,7 @@ fn capture_timed_stream(
                     state.usage_body_buf.clear();
                 }
                 state.usage_accumulator.push(&bytes);
+                track_stream_terminal_event(&mut state, &bytes);
                 let piece = String::from_utf8_lossy(&bytes);
                 for line in piece.split('\n') {
                     let trimmed = line.trim_end_matches('\r');
@@ -2241,13 +2384,26 @@ struct TimedStreamState {
     first_line: Option<String>,
     last_line: Option<String>,
     line_count: usize,
+    /// 是否已读到上游 SSE 终止事件（OpenAI `[DONE]`、Anthropic `message_stop`、
+    /// Responses `response.completed`）。客户端常在该事件后立即关闭连接，
+    /// 此时响应其实已经完整，不能按“下游中断”记失败。
+    terminal_event_seen: bool,
+    /// 跨 chunk 检测终止事件的滑动窗口：SSE 行可能被 TCP 分片截断。
+    terminal_probe: Vec<u8>,
     /// 流式请求的活动凭证：随状态存活，流被 drop 时才归还计数
     _activity_permit: ActivityPermit,
 }
 
 impl Drop for TimedStreamState {
     fn drop(&mut self) {
-        if !self.done_sent {
+        if self.done_sent {
+            return;
+        }
+        if self.terminal_event_seen {
+            // 上游已经发出终止事件，说明重放内容完整；客户端只是先于上游 EOF
+            // 关闭了连接（常见于读到 `[DONE]` 就结束读取的 SDK 客户端）。
+            send_stream_done(self, true, None, None);
+        } else {
             send_stream_done(
                 self,
                 false,

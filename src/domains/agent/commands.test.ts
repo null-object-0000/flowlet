@@ -83,14 +83,14 @@ describe("agent commands", () => {
     expect(invoke).toHaveBeenCalledWith(command, { agentId: "claude-code" });
   });
 
-  it("passes independent Claude Code context options through the typed boundary", async () => {
+  it("passes explicit model choices through the typed boundary", async () => {
     vi.mocked(invoke).mockResolvedValue({});
 
-    await applyAgentGlobalConfig("claude-code", { primaryLongContext: true, fastLongContext: false });
+    await applyAgentGlobalConfig("claude-code", { primaryModel: "deepseek-v4-pro", fastModel: "deepseek-v4-flash" });
 
     expect(invoke).toHaveBeenCalledWith("apply_agent_global_config", {
       agentId: "claude-code",
-      options: { primaryLongContext: true, fastLongContext: false },
+      options: { primaryModel: "deepseek-v4-pro", fastModel: "deepseek-v4-flash" },
     });
   });
 

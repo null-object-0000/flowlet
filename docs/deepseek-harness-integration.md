@@ -16,7 +16,7 @@ Desktop：用户主要通过 `dsh web` 打开的本地浏览器界面使用它�
 | Adapter | 当前能力 | 明确边界 |
 |---|---|---|
 | Environment | 分别检测 `$DSH_HOME`/`~/.dsh`、3080 Web 运行状态、PATH 中的 `dsh` 与包版本，并挂载可选 Runtime 能力 | 可只读识别无歧义的 `_npx/<hash>` 包版本并解析 bin 入口；多版本共存时要求全局安装。已安装不等于 Web 正在运行 |
-| Global Config | 解析配置状态；直接安全合并官方 YAML，一键写入/恢复 Provider、默认模型和 Client Token；精确会话插件与模型规格声明均为默认关闭的高级能力 | 基础接入不依赖 DSH Web 或 Profile；复用 DSH 的文件锁协议，保留非受管配置和注释 |
+| Global Config | 解析配置状态；直接安全合并官方 YAML，一键写入/恢复 Provider、所选默认模型和 Client Token；精确会话插件为默认关闭的高级能力 | 基础接入不依赖 DSH Web 或 Profile；复用 DSH 的文件锁协议，保留非受管配置和注释 |
 | Session | 读取 `sessions/**/session.jsonl(.zstd)` v0–v4，展示最终消息、工具事件和原生 Token 用量 | DSH 预发布格式无迁移承诺；更高代际只降级该会话；打包 delta chunk 不作为最终消息展示 |
 | Identity | 使用官方 User-Agent 识别客户端；读取 `x-flowlet-session`（受管桥接注入）或 DSH 原生 `x-deepseek-harness-session-id`，两者都只做归属、不剥离原生头 | 与其他 Agent 共用编译期 Identity Adapter registry，实时请求与历史修复规则一致 |
 | Runtime（Environment 可选能力） | 在接入抽屉内启动、停止并展示 DSH Web 状态；全局 npm 安装执行 `dsh web --no-open`，npx 缓存安装执行 `npx @deepseek-ai/dsh web --no-open`；Windows 下托管子进程绑定 Job Object（KILL_ON_JOB_CLOSE），Flowlet 异常退出时由内核回收整棵进程树 | 只停止当前 Flowlet 启动并记录的子进程；手动或其他程序启动的 3080 进程仅显示为外部运行，不接管、不强杀；Job Object 只覆盖 Flowlet 自己启动的进程，孤儿进程仍需在原启动位置停止 |
@@ -34,18 +34,15 @@ llm-pi-ai:
       api: openai-completions
       baseURL: http://127.0.0.1:18640/v1
       models:
-        - id: flowlet-pro
-        - id: flowlet-flash
+        - id: deepseek-v4-pro
 agent-default-model:
   provider: flowlet
-  model: flowlet-pro
+  model: deepseek-v4-pro
 ```
 
-模型规格声明开启后，Flowlet 会按 `models-cn` 优先、`models.dev` 仅补 OpenRouter 缺失模型的
-目录语义，为 `flowlet-pro` / `flowlet-flash` 分别写入 `input: [text]` 或
-`input: [text, image]`。DSH 官方目前只接受 `text` / `image` 两种输入模态；Flowlet 不把目录中的
-音频、视频能力写入 DSH。只要聚合模型存在至少一个当前可用的图片候选，就声明 `image`。
-字段约束核对自 DSH 官方
+聚合模型移除后，Flowlet 不再向 DSH Provider 的模型条目写入 `contextWindow` 或 `input` 等
+模型规格声明；`models` 条目只写入用户在接入抽屉中显式选择的默认模型（示例为
+`deepseek-v4-pro`），DSH 按该单一模型自身能力工作。字段约束核对自 DSH 官方
 [`providers.md`](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/guide/providers.md)
 与 [`config-catalog.md`](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/config-catalog.md)，
 对应本地上游提交 `99f6f02fecdb7dff40c3fbc9470f5907c29f74ca`。
@@ -56,14 +53,11 @@ agent-default-model:
 仅文本处理。被过滤的候选会以“已跳过 · 不支持图像输入”的本地降级节点写入请求日志，不伪造
 上游请求；实际命中的候选继续显示在其后。文本请求不改变现有候选顺序与降级逻辑。
 
-模型规格声明同样是默认关闭的高级能力：开启后，Flowlet 会在模型的 `models` 条目写入上述
-`input` 以及 `contextWindow: 1048576`（1M），使 DSH 按聚合模型能力做请求前校验和上下文预算；不声明
-`maxTokens`——DSH 一旦在模型条目声明 `maxTokens` 就会把它变成每次请求自动携带的输出上限，
-而 Flowlet 聚合路由各上游的上限不同，声明单一值会把能力锁死在最低值甚至触发低上限上游报错，
-因此保持 DSH 默认的 32768 保守能力值，由后续代理层能力感知统一处理。该开关与 Codex 的
-1M 语义一致：仅当 `flowlet-pro` / `flowlet-flash` 的所有启用路由都支持 1M 上下文时开启。
-`contextWindow`、`input` 与 Provider 其余字段同属受管路径，随同一事务备份和恢复；关闭选项即移除声明，
-settings.yaml 热加载、无需重启。
+模型规格声明（`contextWindow` / `input`，以及原为规避跨上游上限差异而不声明 `maxTokens` 的
+整套逻辑）已随聚合模型移除：它依赖「一个聚合模型对应多个异构上游」的前提，该前提不存在后
+声明单一上下文窗口无法同时成立。因此 DSH 高级配置区现在只保留**精确会话关联**与
+**MCP 服务器**两项能力，两者默认关闭、可由用户独立开关与完整恢复；基础 Provider 接入不依赖
+它们，也不要求 DSH Profile 已初始化。
 
 凭据单独写入 `$DSH_HOME/.credentials.yaml`：
 
@@ -119,6 +113,44 @@ Flowlet 在代理层处理：`ensure_reasoning_content_passback`（`proxy_http.r
 OpenAI chat/completions 生效，其余请求与协议原样透传。修改该行为须同步 `AGENTS.md`
 第 5 节与本说明。
 
+### Anthropic thinking 回传补全（代理层）
+
+DeepSeek 官方 Anthropic Messages 端点在 `thinking.type == "enabled"` 时要求：**当前用户轮内**
+（最后一条含 `text` 块的 `user` 消息之后）每条 `assistant` 消息都必须携带 `thinking` 内容块，
+缺失时上游直接返回 400：
+
+```text
+The `content[].thinking` in the thinking mode must be passed back to the API.
+```
+
+（实测补充：已完成的历史轮次不受校验；空 `thinking: ""` 块、无 signature 均被接受。）
+
+同一规范模型的候选池横跨不同上游时，这一校验会被触发：部分中转渠道既不返回 thinking
+块（或只返回不带 signature 的 thinking），也不校验 thinking 回传；而 Anthropic Files API
+按账号绑定的设计，会让带 `anthropic-beta: files-api-*` 且引用 file id 的请求在会话中途
+pin 到 DeepSeek 官方账号。此时历史里由中转生成、缺少 thinking 块的 assistant 消息被原样
+转发，就会得到上面的 400（2026-11-09 DSH 会话 `session-84c71256` 即此链路：turn 4 的
+8 条 assistant 消息由 custom 渠道 "Friday" 生成且缺少 thinking，Files API 图片首次出现
+后请求切到 DeepSeek 官方账号，第 82 步请求被拒；用户发出新的用户轮后旧历史不再被校验，
+会话自动恢复）。
+
+Flowlet 在代理层处理：`ensure_anthropic_thinking_passback`（`proxy_http.rs`，由
+`proxy.rs` 在 `rewrite_model` 与 `ensure_reasoning_content_passback` 之后调用）为转发到
+DeepSeek 推理模型（`canonical_model_key` 归一后的 `deepseek-v4-flash` /
+`deepseek-v4.1-flash` / `deepseek-v4-flash-vision-exp` / `deepseek-v4-pro`）的 Anthropic
+Messages 请求，在当前用户轮内缺失 `thinking` 块的 `assistant` 消息内容数组**最前**插入
+`{"type":"thinking","thinking":""}`：仅追加、不改写已有 thinking 块与 signature，已完成
+轮次、工具块、文本块与其他消息保持原样；客户端未开启 thinking（未声明或 `disabled`）时
+原样透传。该行为是「不随意改写请求结构」的受控例外：按上游模型门控、仅 Anthropic
+Messages 生效。修改该行为须同步 `AGENTS.md` 第 5 节与本说明。
+
+该补全不能替代上游能力：它只补“缺失字段”，不伪造 thinking 内容（空串）也不补 signature；
+跨上游 thinking 的语义仍以真实上游为准。回归测试为 `proxy_tests.rs` 的
+`ensure_anthropic_thinking_passback_*` 三组单元用例（当前轮补齐、已完成轮次不动、
+非 DeepSeek/非 Anthropic/thinking 未开启原样透传与别名归一），以及代理链路的
+`anthropic_thinking_route_injects_thinking_passback` —— 该用例模拟缺少 thinking 的
+assistant 工具调用历史，断言转发到上游的请求体已补齐空 thinking 块且其余内容不变。
+
 一键接入直接修改 DSH 官方配置文件。Flowlet 使用与 DSH 相同的相邻 `<file>.lock` 独占锁协议，
 按叶子路径合并 `llm-pi-ai.providers.flowlet`、`agent-default-model.provider`、
 `agent-default-model.model` 与专用凭据，再通过临时文件替换完成原子写入；两份文件任一写入失败时
@@ -130,10 +162,10 @@ OpenAI chat/completions 生效，其余请求与协议原样透传。修改该�
 `packages/boot/app-boot/src/profile.ts` 的 `PROFILE_PATCH_TEMPLATE`。契约测试覆盖官方以 `[]` 初始化的
 `cordis.patch.yml` 从接入、重复接入、关闭高级能力到恢复的完整生命周期；每个中间产物都重新解析为
 YAML 顶层数组，防止再次生成 `[]` 后直接追加 `- insert` 这类原子写入成功但语义无效的文件。
-模型规格声明同样有基于真实上游 fixture 的生命周期契约：写入、重复写入、关闭、恢复每一步都重新
-解析 `settings.yaml`，断言 `contextWindow` 与各模型的 `input` 出现在模型条目、关闭后不残留、恢复后逐字节还原。
+聚合模型移除后模型规格声明不再存在，对应生命周期契约随之删除；精确会话关联与 MCP 服务器
+仍各自保留基于真实上游 fixture 的 `inspect → apply → reapply → disable → restore` 契约。
 
-任何可选高级能力（精确会话关联、模型规格声明、MCP 服务器）都由用户显式开启，默认不启用；未开启时基础
+任何可选高级能力（精确会话关联、MCP 服务器）都由用户显式开启，默认不启用；未开启时基础
 接入不依赖 DSH Web 或 Profile。开关与主操作“重新写入 Flowlet 配置”互为独立：按钮按当前报告
 状态保留已启用的高级能力，不会被默认值覆盖关闭。
 
@@ -399,10 +431,9 @@ css-variables 主题，boot 语法 ts/bash/json，常用语言按需加载，未
   且后一字符为 CJK 时额外闭合；其他无空格续排场景沿用 CommonMark 默认行为。
 
 - DSH 提升 `SESSION_FORMAT_VERSION` 时，先按新版本语义补迁移/解析测试，再扩大接受范围。
-- 思考模式（`reasoningEfforts` / `compat.thinkingFormat` 声明）未在本次提供：Flowlet 聚合路由
-  横跨多种上游思考格式（deepseek 的 `thinking` + `reasoning_effort`、qwen 的 `enable_thinking` 等），
+- 思考模式（`reasoningEfforts` / `compat.thinkingFormat` 声明）未在本次提供：Flowlet 的同一规范模型
+  候选池横跨多种上游思考格式（deepseek 的 `thinking` + `reasoning_effort`、qwen 的 `enable_thinking` 等），
   仅在 DSH 侧声明一种格式仍无法覆盖全部上游，且代理层按上游转换思考参数涉及请求/响应改写，
   与当前“不做跨协议转换”的协议原则冲突；待代理层具备按上游能力转换思考参数的阶段再提供。
   思考参数的**回传**侧已由代理层 `ensure_reasoning_content_passback` 处理（见上文），
   仅缺失字段补全、不转换思考参数。
-- 模型规格声明 `contextWindow` 与按当前可用路由计算的 `input`，仍不声明 `maxTokens`，理由见上文。

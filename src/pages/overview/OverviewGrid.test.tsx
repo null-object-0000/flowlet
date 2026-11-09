@@ -80,10 +80,10 @@ function makeAccount(overrides: Partial<ChannelAccount> = {}): ChannelAccount {
 function makeRoute(overrides: Partial<RouteCandidate> = {}): RouteCandidate {
   return {
     id: "route-1",
-    virtual_model_id: "flowlet-pro",
+    virtual_model_id: "deepseek-v4-pro",
     channel_id: "longcat",
     account_id: "acc-1",
-    upstream_model: "flowlet-pro",
+    upstream_model: "deepseek-v4-pro",
     client_protocol: "openai",
     priority: 1,
     enabled: true,
@@ -115,8 +115,8 @@ describe("OverviewGrid", () => {
     );
 
     expect(screen.getByText("已启用 1 / 共 1 个账号")).toBeInTheDocument();
-    expect(screen.getByText("聚合模型")).toBeInTheDocument();
-    expect(screen.getByText("共 2 个聚合模型")).toBeInTheDocument();
+    expect(screen.getByText("开放模型")).toBeInTheDocument();
+    expect(screen.getByText("共 1 个模型")).toBeInTheDocument();
     expect(screen.getByText("AI Agent 接入")).toBeInTheDocument();
   });
 
@@ -140,8 +140,8 @@ describe("OverviewGrid", () => {
 
     expect(screen.getByText("已启用 0 / 共 0 个账号")).toBeInTheDocument();
     expect(screen.getByText("选择一个渠道添加首个账号")).toBeInTheDocument();
-    expect(screen.getByText("聚合模型")).toBeInTheDocument();
-    expect(screen.getByText("添加渠道账号并配置聚合路由后，这里会显示可用状态。")).toBeInTheDocument();
+    expect(screen.getByText("开放模型")).toBeInTheDocument();
+    expect(screen.getByText("添加渠道账号并选择开放模型后，这里会显示模型。")).toBeInTheDocument();
     expect(screen.getByText("AI Agent 接入")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "添加 DeepSeek" }));

@@ -356,13 +356,15 @@ mod tests {
         assert_eq!(
             registry.channel_ids().collect::<Vec<_>>(),
             vec![
+                "openai-api",
                 "longcat",
                 "deepseek",
                 "kimi",
                 "qwen",
                 "custom",
                 "zhipu",
-                "openrouter"
+                "openrouter",
+                "vibetoken"
             ]
         );
         assert_eq!(
@@ -371,7 +373,14 @@ mod tests {
                 .iter()
                 .map(|agent| agent.id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["claude-code", "opencode", "pi", "codex", "deepseek-harness", "hermes"]
+            vec![
+                "claude-code",
+                "opencode",
+                "pi",
+                "codex",
+                "deepseek-harness",
+                "hermes"
+            ]
         );
         assert_eq!(
             registry.agent("claude-code").unwrap().endpoint_suffix,
@@ -411,7 +420,7 @@ mod tests {
                 .iter()
                 .map(|capability| capability.id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["session-extension", "model-specs", "mcp-servers"]
+            vec!["session-extension", "mcp-servers"]
         );
         assert_eq!(
             registry
@@ -421,7 +430,7 @@ mod tests {
                 .iter()
                 .map(|capability| capability.id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["model-specs"]
+            Vec::<&str>::new()
         );
         assert_eq!(
             registry
@@ -431,7 +440,7 @@ mod tests {
                 .iter()
                 .map(|capability| capability.id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["session-extension", "model-specs"]
+            vec!["session-extension"]
         );
     }
 

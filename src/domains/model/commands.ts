@@ -118,8 +118,7 @@ function defaultModelsForAccount(
  *  selected `exposed_models`. Existing routes are returned unchanged so
  *  user-controlled enabled state, priority and timestamps survive. Removing
  *  deselected models is the caller's job (see the save-time reconciliation).
- *  Aggregate membership is managed explicitly on the model-services page and
- *  is never inferred from an upstream model name. New routes are enabled only
+ *  New routes are enabled only
  *  for the globally earliest account; routes added
  *  for every later official or custom account start disabled. */
 export function mergeDefaultRoutes(

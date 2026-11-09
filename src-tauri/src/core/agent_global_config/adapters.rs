@@ -60,9 +60,23 @@ mod tests {
                 .iter()
                 .map(|bundle| bundle.global_config.id())
                 .collect::<Vec<_>>(),
-            vec!["claude-code", "opencode", "pi", "codex", "deepseek-harness", "hermes"]
+            vec![
+                "claude-code",
+                "opencode",
+                "pi",
+                "codex",
+                "deepseek-harness",
+                "hermes"
+            ]
         );
-        for adapter_id in ["claude-code", "opencode", "pi", "codex", "deepseek-harness", "hermes"] {
+        for adapter_id in [
+            "claude-code",
+            "opencode",
+            "pi",
+            "codex",
+            "deepseek-harness",
+            "hermes",
+        ] {
             assert!(has_adapter(adapter_id), "missing adapter: {adapter_id}");
             assert!(adapter(adapter_id).is_ok());
         }

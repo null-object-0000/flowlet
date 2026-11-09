@@ -16,6 +16,7 @@ pub(super) const ADAPTER: ChannelCapabilityAdapter = ChannelCapabilityAdapter {
     model_sync: sync,
     balance_query: None,
     strips_openai_v1_path: false,
+    uses_upstream_proxy_for_models: false,
     console_scrape: ConsoleScrapeAdapter::None,
     login_page: LoginPageAdapter::None,
     scrape_response: None,

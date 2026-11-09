@@ -13,11 +13,14 @@ if (!root) {
 }
 const appRoot = root;
 
-const mobileTarget = import.meta.env.MODE === "mobile"
+const webTarget = import.meta.env.MODE === "web";
+const mobileTarget = !webTarget && (
+  import.meta.env.MODE === "mobile"
   || import.meta.env.VITE_FLOWLET_TARGET === "mobile"
   || import.meta.env.TAURI_ENV_PLATFORM === "android"
   || import.meta.env.TAURI_ENV_PLATFORM === "ios"
-  || /\b(?:Android|iPhone|iPad|iPod)\b/i.test(navigator.userAgent);
+  || /\b(?:Android|iPhone|iPad|iPod)\b/i.test(navigator.userAgent)
+);
 const demoTarget = import.meta.env.MODE === "demo" || import.meta.env.VITE_FLOWLET_DEMO === "true";
 
 if (mobileTarget) {
@@ -35,17 +38,19 @@ configureAppOverlayLayers({ mobile: mobileTarget });
 // 浏览器能力）。只在真实桌面应用的生产构建生效：开发调试（tauri dev）、官网 Demo
 // 与移动端保留默认行为。preventDefault 只抑制默认菜单，不阻断 DOM 事件本身，
 // 应用后续如需自定义右键菜单仍可正常触发。
-if (!mobileTarget && !demoTarget && import.meta.env.PROD) {
+if (!mobileTarget && !demoTarget && !webTarget && import.meta.env.PROD) {
   document.addEventListener("contextmenu", (event) => event.preventDefault());
 }
-if (!mobileTarget && !demoTarget) {
+if (!mobileTarget && !demoTarget && !webTarget) {
   void import("./platform/tauri/window").then(({ windowCommands }) => {
     configureSideSheetWindowDragging(windowCommands.startDragging, windowCommands.toggleMaximize);
   });
 }
 
 async function renderApp() {
-  const RootApp = demoTarget
+  const RootApp = webTarget
+    ? (await import("./web/WebApp")).WebApp
+    : demoTarget
     ? (await import("./demo/DesktopDemoApp")).DesktopDemoApp
     : mobileTarget
       ? (await import("./mobile/MobileApp")).MobileApp

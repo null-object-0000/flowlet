@@ -1,17 +1,30 @@
 [package]
 name = "flowlet"
-version = "0.1.1"
+version = "0.1.2"
 description = "本地 AI 请求路由客户端"
 authors = ["Flowlet"]
 edition = "2021"
 default-run = "flowlet"
 
+[features]
+default = ["desktop"]
+desktop = ["dep:tauri", "tauri/wry", "tauri/tray-icon", "dep:tauri-build", "dep:tauri-plugin-autostart", "dep:tauri-plugin-dialog", "dep:tauri-plugin-notification", "dep:tauri-plugin-opener", "dep:tauri-plugin-window-state", "dep:webkit2gtk"]
+
 [lib]
 name = "flowlet_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[[bin]]
+name = "flowlet"
+path = "src/main.rs"
+required-features = ["desktop"]
+
+[[bin]]
+name = "headless"
+path = "src/bin/headless.rs"
+
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "2", features = [], optional = true }
 
 [dependencies]
 axum = "0.8"
@@ -35,6 +48,7 @@ keyring = "4.1.5"
 # Linux / macOS 单例锁使用 BSD flock（见 main.rs 的 single_instance 模块）。
 libc = "0.2"
 regex = "1"
+hyper-util = { version = "0.1", features = ["client-proxy"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 rusty-s3 = "0.10.1"
 rusqlite = { version = "0.37", features = ["bundled", "backup"] }
@@ -42,7 +56,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
 sha2 = "0.10"
-tauri = { version = "2", features = [] }
+tauri = { version = "2", optional = true }
 url = "2"
 thiserror = "2"
 # Codex 全局配置是 TOML（~/.codex/config.toml）；toml_edit 做保留用户注释与
@@ -50,6 +64,7 @@ thiserror = "2"
 toml_edit = "0.22"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "net", "signal", "process", "time", "io-util"] }
 tokio-util = "0.7"
+tower-http = { version = "0.6", features = ["fs"] }
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "chrono"] }
@@ -58,13 +73,12 @@ zip = { version = "4", default-features = false, features = ["deflate"] }
 zstd = "0.13"
 
 [target.'cfg(any(windows, target_os = "macos", target_os = "linux"))'.dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
-tauri-plugin-autostart = "2"
-tauri-plugin-dialog = "2"
-tauri-plugin-notification = "2"
-tauri-plugin-opener = "2"
+tauri-plugin-autostart = { version = "2", optional = true }
+tauri-plugin-dialog = { version = "2", optional = true }
+tauri-plugin-notification = { version = "2", optional = true }
+tauri-plugin-opener = { version = "2", optional = true }
 # 记住主窗口上次的尺寸/位置/最大化状态，跨启动恢复；隐藏到托盘与退出时保存。
-tauri-plugin-window-state = "2"
+tauri-plugin-window-state = { version = "2", optional = true }
 
 [target.'cfg(target_os = "android")'.dependencies]
 android-native-keyring-store = "1.0.0"
@@ -88,7 +102,27 @@ tauri-winrt-notification = "0.7.3"
 [target.'cfg(target_os = "linux")'.dependencies]
 # Ubuntu 使用 WebKitGTK 的 resource-load-started + WebResource::data 获取页面
 # 自己发出的 HTTPS 响应，不复刻 Cookie、签名或请求头。
-webkit2gtk = "2.0.2"
+webkit2gtk = { version = "2.0.2", optional = true }
 
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
 tauri-plugin-barcode-scanner = "2.4.5"
+
+# ---------------------------------------------------------------------------
+# 过渡期构建提速（详见 docs/migration/build-perf.md）
+#
+# 目标：在不改变产物语义/平台支持的前提下，降低日常 Rust 重编译的 CPU、IO 与
+# 产物体积。桌面开发最常触发的是本 crate（flowlet_lib + 两个 bin）重编译，依赖
+# 通常只需编译一次；因此这里对「依赖」与「本 crate」分别设置调试信息级别。
+#
+# - 本 crate：line-tables-only，保留 backtrace 的文件:行号，便于日常排查；
+#   如需完整变量级调试，临时改成 debug = 2（see docs 里的临时切换方法）。
+# - 第三方依赖：debug = 0，不再产出巨大的 DWARF；这是本机热链接耗时、产物体积
+#   和磁盘写入下降的主要来源（依赖 rlib 会被反复链接进 cdylib/staticlib/bin）。
+#
+# 一次性代价：首次应用本段会全量重建所有依赖；回滚同样会触发一次全量重建。
+# ---------------------------------------------------------------------------
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = 0

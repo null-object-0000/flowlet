@@ -117,7 +117,7 @@ Flowlet 内嵌 Agent 终端
 - 安装版本：只读；
 - 可执行文件：默认隐藏在高级信息中；
 - 工作目录：用户明确选择，记忆最近一次非敏感目录；
-- 模型：默认 `flowlet-pro`，允许切换 `flowlet-flash`；
+- 模型：接入抽屉中显式选择的规范模型（当前协议下已开放）；未选择时由 Rust 按模型 id 字典序取第一个可用模型；
 - 接入模式：固定通过 Flowlet，不在内嵌终端中混用 Agent 当前的外部网关配置。
 
 ### 4.5 生命周期交互
@@ -223,8 +223,8 @@ Claude Code 通过 Flowlet 启动时注入：
 ```text
 ANTHROPIC_BASE_URL=http://127.0.0.1:<port>/anthropic
 ANTHROPIC_AUTH_TOKEN=<Flowlet Client Token>
-ANTHROPIC_MODEL=flowlet-pro | flowlet-flash
-CLAUDE_CODE_SUBAGENT_MODEL=flowlet-flash
+ANTHROPIC_MODEL=<所选主模型，如 deepseek-v4-pro>
+CLAUDE_CODE_SUBAGENT_MODEL=<所选快速模型，如 deepseek-v4-flash>
 ```
 
 不得把上游渠道 API Key 注入 Agent 进程。

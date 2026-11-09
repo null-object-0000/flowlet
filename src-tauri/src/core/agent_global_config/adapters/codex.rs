@@ -3,7 +3,6 @@ use super::AgentGlobalConfigAdapter;
 
 const CODEX_BACKUP_FILE: &str = "codex-global-config-backup.json";
 const CODEX_PROVIDER_ID: &str = "flowlet";
-const CODEX_PRIMARY_MODEL: &str = "flowlet-pro";
 const CODEX_WIRE_API: &str = "responses";
 const CODEX_AUTH_KEY: &str = "OPENAI_API_KEY";
 pub(in crate::core::agent_global_config) const CODEX_MODEL_CATALOG_REF: &str =
@@ -31,14 +30,17 @@ impl AgentGlobalConfigAdapter for CodexAdapter {
         &self,
         expected_base_url: &str,
         client_token: &str,
-        _options: Option<&AgentGlobalConfigOptions>,
+        options: Option<&AgentGlobalConfigOptions>,
     ) -> Result<AgentGlobalConfigReport, String> {
+        // Codex 只使用主模型：模型目录按该模型动态生成。
+        let (primary_model, _fast_model) = resolve_model_choices(options)?;
         apply_codex(
             &codex_config_path(),
             &codex_auth_path(),
             &codex_models_path(),
             expected_base_url,
             client_token,
+            &primary_model,
         )
     }
 
@@ -124,6 +126,11 @@ fn read_codex_document(config_path: &Path) -> Result<toml_edit::DocumentMut, Str
     content
         .parse::<toml_edit::DocumentMut>()
         .map_err(|error| format!("解析 {} 失败：{error}", config_path.display()))
+}
+
+/// 读取模型目录文件内容；不存在或不可读时返回 None。
+fn read_models_catalog_content(path: &Path) -> Option<String> {
+    std::fs::read_to_string(path).ok()
 }
 
 /// toml_edit 值 → serde_json（用于备份快照；手工转换，不依赖 serde 集成）。
@@ -250,15 +257,10 @@ pub(in crate::core::agent_global_config) fn inspect_codex(
         subagent_model: None,
         model_catalog_path: None,
         model_catalog_configured: false,
-        primary_long_context: false,
-        fast_long_context: false,
-        long_context: false,
         backup_available,
         external_environment_overrides: Vec::new(),
         error: None,
         session_extension: false,
-        model_specs: false,
-        model_input_modalities: BTreeMap::new(),
         opencode_permission_bridge: false,
         mcp_servers: Vec::new(),
     };
@@ -289,6 +291,14 @@ pub(in crate::core::agent_global_config) fn inspect_codex(
     // 模型目录是否由 Flowlet 管理：config.toml 指向 Flowlet 的目录引用，且文件在位。
     let model_catalog_configured =
         model_catalog_json.as_deref() == Some(CODEX_MODEL_CATALOG_REF) && models_path.is_file();
+    // 目录内容必须是按当前所选模型生成的单条目：用户在 config.toml 里手改了 model
+    // 但没重新一键写入时，目录仍声明旧模型，此时应提示重新写入（Partial）。
+    let catalog_declares_model = model_catalog_configured
+        && read_models_catalog_content(models_path)
+            .zip(model.as_deref())
+            .is_some_and(|(content, model)| {
+                codex_model_catalog::catalog_declares_model(&content, model)
+            });
     report.model_catalog_path = model_catalog_json.clone();
     report.model_catalog_configured = model_catalog_configured;
     report.primary_model = model.clone();
@@ -330,7 +340,7 @@ pub(in crate::core::agent_global_config) fn inspect_codex(
         .is_some_and(|url| normalize_url(url) == normalize_url(expected_base_url));
 
     let is_flowlet = model_provider.as_deref() == Some(CODEX_PROVIDER_ID)
-        && model.as_deref() == Some(CODEX_PRIMARY_MODEL)
+        && catalog_declares_model
         && disable_response_storage
         && preferred_auth_method.as_deref() == Some("apikey")
         && provider_wire_api == Some(CODEX_WIRE_API)
@@ -349,7 +359,6 @@ pub(in crate::core::agent_global_config) fn inspect_codex(
         AgentGlobalConfigState::OtherGateway
     } else if model_provider.as_deref() == Some(CODEX_PROVIDER_ID)
         || provider.is_some()
-        || model.as_deref() == Some(CODEX_PRIMARY_MODEL)
         || disable_response_storage
         || auth_token_configured
     {
@@ -366,6 +375,7 @@ pub(in crate::core::agent_global_config) fn apply_codex(
     models_path: &Path,
     expected_base_url: &str,
     client_token: &str,
+    primary_model: &str,
 ) -> Result<AgentGlobalConfigReport, String> {
     if client_token.trim().is_empty() {
         return Err("Flowlet 默认 Client Token 未配置，无法写入 Codex".to_string());
@@ -431,7 +441,7 @@ pub(in crate::core::agent_global_config) fn apply_codex(
         }
     }
 
-    doc["model"] = toml_edit::value(CODEX_PRIMARY_MODEL);
+    doc["model"] = toml_edit::value(primary_model);
     doc["model_provider"] = toml_edit::value(CODEX_PROVIDER_ID);
     doc["disable_response_storage"] = toml_edit::value(true);
     doc["preferred_auth_method"] = toml_edit::value("apikey");
@@ -452,10 +462,14 @@ pub(in crate::core::agent_global_config) fn apply_codex(
         Value::String(client_token.trim().to_string()),
     );
 
-    // 模型目录内容取内置数据源（仓库根目录 codex-models.json 的编译时快照）。
-    let models_bytes = codex_model_catalog::DEFAULT_CODEX_MODELS_JSON
-        .as_bytes()
-        .to_vec();
+    // 模型目录按所选模型从 models-cn.json 动态生成（单条目）：
+    // context_window 取 limits.contextTokens，input_modalities 取
+    // capabilities.inputModalities 中的 text/image，推理档位按 capabilities.thinking。
+    let models_bytes = codex_model_catalog::catalog_content(
+        crate::core::model_input_capabilities::read_models_cn_source().as_deref(),
+        primary_model,
+    )?
+    .into_bytes();
     if let Err(failure) = write_files_transactionally(
         "Codex 配置、凭据与模型目录文件",
         &[

@@ -3,8 +3,6 @@ use super::AgentGlobalConfigAdapter;
 
 const PI_BACKUP_FILE: &str = "pi-global-config-backup.json";
 pub(in crate::core::agent_global_config) const PI_PROVIDER_ID: &str = "flowlet";
-pub(in crate::core::agent_global_config) const PI_PRIMARY_MODEL: &str = "flowlet-pro";
-pub(in crate::core::agent_global_config) const PI_FAST_MODEL: &str = "flowlet-flash";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct PiConfigBackup {
@@ -83,7 +81,8 @@ impl AgentGlobalConfigAdapter for PiAdapter {
         client_token: &str,
         options: Option<&AgentGlobalConfigOptions>,
     ) -> Result<AgentGlobalConfigReport, String> {
-        apply_pi_with_model_specs(
+        let (primary_model, fast_model) = resolve_model_choices(options)?;
+        apply_pi(
             &pi_settings_path()?,
             &pi_models_path()?,
             &pi_auth_path()?,
@@ -93,10 +92,8 @@ impl AgentGlobalConfigAdapter for PiAdapter {
             options
                 .and_then(|options| options.session_extension)
                 .unwrap_or(false),
-            options
-                .and_then(|options| options.model_specs)
-                .unwrap_or(false),
-            options.and_then(|options| options.model_input_modalities.as_ref()),
+            &primary_model,
+            &fast_model,
         )
     }
 
@@ -124,9 +121,7 @@ pub(in crate::core::agent_global_config) fn inspect_pi(
                   base_url: Option<String>,
                   api_key_configured: bool,
                   primary_model: Option<String>,
-                  error: Option<String>,
-                  model_specs: bool,
-                  model_input_modalities: BTreeMap<String, Vec<String>>| {
+                  error: Option<String>| {
         AgentGlobalConfigReport {
             agent_id: "pi".to_string(),
             // UI 的“配置文件”指向真正承载 Flowlet Provider 的 models.json，
@@ -143,15 +138,10 @@ pub(in crate::core::agent_global_config) fn inspect_pi(
             subagent_model: None,
             model_catalog_path: None,
             model_catalog_configured: false,
-            primary_long_context: false,
-            fast_long_context: false,
-            long_context: false,
             backup_available,
             external_environment_overrides: Vec::new(),
             error,
             session_extension,
-            model_specs,
-            model_input_modalities,
             opencode_permission_bridge: false,
             mcp_servers: Vec::new(),
         }
@@ -164,8 +154,6 @@ pub(in crate::core::agent_global_config) fn inspect_pi(
             false,
             None,
             None,
-            false,
-            BTreeMap::new(),
         ));
     }
 
@@ -178,8 +166,6 @@ pub(in crate::core::agent_global_config) fn inspect_pi(
                 false,
                 None,
                 Some(error),
-                false,
-                BTreeMap::new(),
             ));
         }
     };
@@ -192,8 +178,6 @@ pub(in crate::core::agent_global_config) fn inspect_pi(
                 false,
                 None,
                 Some(error),
-                false,
-                BTreeMap::new(),
             ));
         }
     };
@@ -206,8 +190,6 @@ pub(in crate::core::agent_global_config) fn inspect_pi(
                 false,
                 None,
                 Some(error),
-                false,
-                BTreeMap::new(),
             ));
         }
     };
@@ -232,44 +214,6 @@ pub(in crate::core::agent_global_config) fn inspect_pi(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let models_shape_matches =
-        model_ids.contains(&PI_PRIMARY_MODEL) && model_ids.contains(&PI_FAST_MODEL);
-    let model_specs = provider
-        .and_then(|value| value.get("models"))
-        .and_then(Value::as_array)
-        .is_some_and(|models| {
-            [PI_PRIMARY_MODEL, PI_FAST_MODEL]
-                .into_iter()
-                .all(|model_id| {
-                    models.iter().any(|model| {
-                        model.get("id").and_then(Value::as_str) == Some(model_id)
-                            && model
-                                .get("input")
-                                .and_then(Value::as_array)
-                                .is_some_and(|inputs| {
-                                    inputs.iter().any(|input| input.as_str() == Some("text"))
-                                })
-                    })
-                })
-        });
-    let model_input_modalities = provider
-        .and_then(|value| value.get("models"))
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|model| {
-            let id = model.get("id").and_then(Value::as_str)?;
-            let inputs = model.get("input").and_then(Value::as_array)?;
-            Some((
-                id.to_string(),
-                inputs
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(ToOwned::to_owned)
-                    .collect(),
-            ))
-        })
-        .collect();
     let api_key_configured = auth
         .pointer("/flowlet/key")
         .and_then(Value::as_str)
@@ -281,6 +225,10 @@ pub(in crate::core::agent_global_config) fn inspect_pi(
         .get("defaultModel")
         .and_then(Value::as_str)
         .map(ToOwned::to_owned);
+    // defaultModel 必须由受管 Provider 声明，否则 Pi 模型选择器里没有该模型。
+    let models_shape_matches = primary_model
+        .as_deref()
+        .is_some_and(|model| is_known_catalog_model(model) && model_ids.contains(&model));
     let expected_base_url = normalize_url(expected_base_url);
     let base_url_matches =
         base_url.as_deref().map(normalize_url).as_deref() == Some(expected_base_url.as_str());
@@ -290,7 +238,7 @@ pub(in crate::core::agent_global_config) fn inspect_pi(
         && api_key_configured
         && auth_type_matches
         && default_provider == Some(PI_PROVIDER_ID)
-        && primary_model.as_deref() == Some(PI_PRIMARY_MODEL)
+        && models_shape_matches
     {
         AgentGlobalConfigState::Flowlet
     } else if base_url
@@ -316,12 +264,11 @@ pub(in crate::core::agent_global_config) fn inspect_pi(
         api_key_configured,
         primary_model,
         None,
-        model_specs,
-        model_input_modalities,
     ))
 }
 
-#[cfg(test)]
+/// 写入 Pi 全局配置：`defaultModel` 使用用户选择的规范模型 ID；provider.models 保留
+/// 客户端需要的条目，但不声明模型 `input`（不再有聚合输入模态能力）。
 pub(in crate::core::agent_global_config) fn apply_pi(
     settings_path: &Path,
     models_path: &Path,
@@ -330,30 +277,8 @@ pub(in crate::core::agent_global_config) fn apply_pi(
     expected_base_url: &str,
     client_token: &str,
     session_extension: bool,
-) -> Result<AgentGlobalConfigReport, String> {
-    apply_pi_with_model_specs(
-        settings_path,
-        models_path,
-        auth_path,
-        extension_path,
-        expected_base_url,
-        client_token,
-        session_extension,
-        false,
-        None,
-    )
-}
-
-pub(in crate::core::agent_global_config) fn apply_pi_with_model_specs(
-    settings_path: &Path,
-    models_path: &Path,
-    auth_path: &Path,
-    extension_path: &Path,
-    expected_base_url: &str,
-    client_token: &str,
-    session_extension: bool,
-    model_specs: bool,
-    model_input_modalities: Option<&BTreeMap<String, Vec<String>>>,
+    primary_model: &str,
+    fast_model: &str,
 ) -> Result<AgentGlobalConfigReport, String> {
     if client_token.trim().is_empty() {
         return Err("Flowlet 默认 Client Token 未配置，无法写入 Pi".to_string());
@@ -418,29 +343,21 @@ pub(in crate::core::agent_global_config) fn apply_pi_with_model_specs(
         .unwrap()
         .entry("providers")
         .or_insert_with(|| Value::Object(Map::new()));
-    let provider = if model_specs {
-        let pro_inputs = declared_model_inputs(model_input_modalities, PI_PRIMARY_MODEL);
-        let flash_inputs = declared_model_inputs(model_input_modalities, PI_FAST_MODEL);
-        serde_json::json!({
-            "baseUrl": expected_base_url,
-            "api": "openai-completions",
-            "headers": { "x-flowlet-client": "pi" },
-            "models": [
-                { "id": PI_PRIMARY_MODEL, "name": PI_PRIMARY_MODEL, "input": pro_inputs },
-                { "id": PI_FAST_MODEL, "name": PI_FAST_MODEL, "input": flash_inputs }
-            ]
-        })
-    } else {
-        serde_json::json!({
-            "baseUrl": expected_base_url,
-            "api": "openai-completions",
-            "headers": { "x-flowlet-client": "pi" },
-            "models": [
-                { "id": PI_PRIMARY_MODEL, "name": PI_PRIMARY_MODEL },
-                { "id": PI_FAST_MODEL, "name": PI_FAST_MODEL }
-            ]
-        })
-    };
+    let mut models_entries: Vec<Value> = Vec::new();
+    for model in [primary_model, fast_model] {
+        if !models_entries
+            .iter()
+            .any(|entry| entry.get("id").and_then(Value::as_str) == Some(model))
+        {
+            models_entries.push(serde_json::json!({ "id": model, "name": model }));
+        }
+    }
+    let provider = serde_json::json!({
+        "baseUrl": expected_base_url,
+        "api": "openai-completions",
+        "headers": { "x-flowlet-client": "pi" },
+        "models": models_entries
+    });
     providers
         .as_object_mut()
         .unwrap()
@@ -456,7 +373,7 @@ pub(in crate::core::agent_global_config) fn apply_pi_with_model_specs(
     );
     settings_object.insert(
         "defaultModel".to_string(),
-        Value::String(PI_PRIMARY_MODEL.to_string()),
+        Value::String(primary_model.to_string()),
     );
 
     let mut writes = vec![

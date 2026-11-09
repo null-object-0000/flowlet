@@ -3,9 +3,8 @@ import type { ModelPriceInfo } from "../../domains/settings/types";
 import { officialChannelIdForModel } from "../../domains/channel/types";
 import type { ModelServiceItem } from "./modelServiceView";
 
-/** 直接渠道模型的产品级基础信息：上下文/最大输出限制（来自渠道模型同步）
- *  与定价（来自 config.json `channels_config.model_prices`）。聚合模型
- *  （flowlet-pro/flowlet-flash）没有单一上游，不产出基础信息。 */
+/** 开放模型的产品级基础信息：上下文/最大输出限制（来自渠道模型同步）
+ *  与定价（来自 config.json `channels_config.model_prices`）。 */
 export type ModelBasicInfo = {
   contextWindow: number | null;
   maxOutputTokens: number | null;
@@ -23,8 +22,7 @@ export function buildModelBasicInfo(
   channelModels: ChannelModel[],
   prices: ModelPriceInfo[],
 ): ModelBasicInfo | null {
-  if (model.kind !== "direct") return null;
-  // 直接模型满足 virtual_model_id === upstream_model（见 proxy_http.rs
+  // 路由满足 virtual_model_id 与 upstream_model 属于同一规范模型（见 proxy_http.rs
   // /models 暴露逻辑），publicModel 可作上游名兜底。
   const channelId =
     officialChannelIdForModel(model.publicModel)

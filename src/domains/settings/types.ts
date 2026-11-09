@@ -51,7 +51,6 @@ export interface UsageCostDisplayConfig {
 export interface UpstreamProxyConfig {
   enabled: boolean;
   url: string;
-  no_proxy: string;
 }
 
 export interface DatabaseMaintenanceStats {

@@ -153,3 +153,5 @@
   .longCatSyncControls { grid-template-columns: 1fr; }
   .longCatSyncControls > button { width: 100%; }
 }
+
+.apiCreditHelp { grid-column: 1 / -1; font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); }

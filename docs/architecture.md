@@ -14,7 +14,7 @@ Flowlet 的第一阶段目标是做一个桌面优先、本地运行、多协议
 
 产品重心是开箱即用的本地 AI 请求路由体验：普通用户选择渠道模板、填写 API Key、选择模型即可接入；中转站等非内置服务使用 `custom` 渠道模板，在账号级填写 OpenAI/Anthropic Base URL，并从标准 OpenAI-compatible `/models` 拉取模型。Flowlet 只允许勾选全局白名单内的返回模型，路由严格取最近一次 `/models` 结果、用户选择和全局白名单的交集，只为已配置地址的协议生成路由，仍不做跨协议转换。更高级的 Header、价格和错误识别规则继续保留为后续能力。
 
-账号保存后只自动补齐对应的直接模型路由；只有全局第一个渠道账号的新直连路由默认开启，后续新增账号的新直连路由默认关闭。`flowlet-pro` 与 `flowlet-flash` 不再按模型名或渠道预设推断候选，用户在模型服务页从已有渠道模型中显式添加、移除、启停和排序。已有聚合路由保持不变，直到用户主动调整。
+账号保存后只自动补齐对应的直接模型路由；只有全局第一个渠道账号的新直连路由默认开启，后续新增账号的新直连路由默认关闭。Flowlet 不再提供聚合模型：路由的 `virtual_model_id` 直接保存规范模型 ID，`upstream_model` 保留上游原始 ID，同一规范模型的多账号/多变体形成候选池，用户在模型服务页显式启停和排序。旧版本的 `flowlet-pro` / `flowlet-flash` 聚合路由会在升级迁移时改写为直接模型路由（去重、保留相对顺序），无法归一的旧行保留但不参与路由。
 
 架构设计必须服务于以下边界：
 
@@ -69,6 +69,7 @@ Flowlet Desktop
   │        ├─ storage_stats.rs         统计查询
   │        ├─ storage_tasks.rs         后台任务持久化
   │        ├─ job_runtime.rs           后台任务并发作用域、活动关联与取消信号
+  │        ├─ host_scheduler.rs        Host 共用的周期任务（存储清理 / 模型目录同步）
   │        ├─ storage_tests.rs         存储测试
   │        ├─ sync.rs                  标准 OpenAI 模型同步与共享 URL、排序工具
   │        ├─ usage.rs                 Token 提取与成本估算
@@ -88,7 +89,7 @@ Flowlet Desktop
   │        ├─ agent_source_watcher.rs  Agent 数据源文件监听
   │        ├─ codex_account.rs         Codex 账号与用量
   │        ├─ cost_ledger_source_probe.rs 成本账本只读数据源探针
-  │        └─ web/                     内嵌 Web 资源
+  │        └─ web/                     浏览器管理 API 与静态资源服务
   └─ docs/                             产品和架构文档
 ```
 
@@ -99,11 +100,27 @@ Flowlet Desktop
 `core::services::FlowletServices` 是不依赖 Tauri 的应用服务容器，统一拥有 SQLite
 `Storage`、渠道配置、运行时配置快照和代理生命周期。Desktop 与 headless Host 使用同一个
 `FlowletServices::open` 完成渠道配置回退、内置配置合并、默认预设初始化、旧空账号清理、
-固定虚拟模型补齐和默认路由合并，并通过同一组 `start_proxy` / `stop_proxy` 方法管理代理。
+模型与路由数据整理和默认路由合并，并通过同一组 `start_proxy` / `stop_proxy` 方法管理代理。
 
-Tauri `AppState` 组合 `FlowletServices`，只额外承担窗口、托盘、WebView、设备身份、文件监听和
-平台事件等 Host 能力。headless 不再复制 Storage、快照和代理启动装配，也不再因没有账号或路由
+Tauri `AppState` 组合 `FlowletServices`，只额外承担窗口、托盘、WebView、文件监听和平台事件等
+Host 能力。设备身份属于 Host 级持久化状态：桌面 Host 与 headless Host 都在数据目录生成并复用
+`flowlet-device.json`（headless 的 `WebState` 持有其副本），因此 Docker 实例在用量统计中拥有
+稳定的本机设备 ID。headless 不再复制 Storage、快照和代理启动装配，也不再因没有账号或路由
 而拒绝监听；空配置下的代理启动语义与桌面端一致。
+
+独立服务使用 `--no-default-features --bin headless` 编译，Cargo 的 `desktop` feature 隔离
+Tauri、WebKitGTK、窗口和控制台抓取模块。`build:web` 复用 React 页面，域命令在 Web 模式下由
+`platform/web/client.ts` 转成同源 HTTP POST，经 `core::web` 的显式命令白名单执行；未知命令
+返回 501，不能通过 HTTP 调用任意桌面命令。Web Host 挂载渠道、模型、请求日志、会话管理、用量统计
+与用量洞察页面；会话管理只聚合本实例请求日志的观测会话（不读取服务端本机 Agent 原生会话文件），
+并为用量页面提供只读的设备目录与设备日/小时用量命令。桌面 Host 与 Web Host 共用
+`core::host_scheduler` 的周期任务：每 15 分钟执行一次存储清理（Body 过期/超限 + 余额快照保留），
+每 1 小时同步 models-cn 与 models.dev 目录；设置页保存的 `log_capture` 通过共享
+`Arc<Mutex<LogCaptureConfig>>` 立即作用于运行中的代理，定时清理也读取同一份配置。
+管理 API 强制 Bearer 管理凭据并禁止缓存；模型入口单独校验调用密钥，含 `/models` 在内的
+模型端点都需要凭据。`/health` 仅作为公开存活检查。桌面和 Web 余额同步共用
+`core::account_balance`，保持余额快照、凭证状态和运行时同步一致。
+Docker 使用非 root 用户与 `/data` 命名卷保存 SQLite、配置与价格目录；详见 [Docker 部署](docker.md)。
 
 渠道能力注册表直接绑定各 Adapter 的类型化异步入口。标准 OpenAI-compatible 模型列表同步
 以及 URL、排序等无渠道含义的工具保留在 `sync.rs`；Kimi 的专属列表 DTO、发布时间校准和
@@ -154,8 +171,8 @@ Rust 编译期环境与全局配置适配器。接入抽屉同样通过 `globalC
 `AgentAccessAdapter`，由适配器提供安装名称、额外状态、配置开关、写入选项和手动配置片段；
 通用 SideSheet 不再按 Agent ID 维护条件分支。Surface 是受控能力枚举：`cli` 表示终端交互面、
 `desktop` 表示原生桌面面、`web` 表示本机 Web；分发方式（如 npm/npx）不再冒充产品 Surface。
-Codex 手动配置中的模型目录直接读取仓库根目录
-`codex-models.json`，避免前端常量与 Rust 内置目录漂移。前端接入实现分别位于
+Codex 手动配置中的模型目录按所选模型从前端已加载的 `models-cn` 目录动态生成，规则与 Rust
+`codex_model_catalog` 对齐，不再读取仓库静态快照。前端接入实现分别位于
 `features/agent-access/agent-access-adapters/`，统一 `agentAccessAdapter()` 入口保持稳定。
 
 Rust 环境检测入口通过编译期 `AgentEnvironmentAdapter` registry 按 `environmentAdapterId`
@@ -209,9 +226,11 @@ Codex、OpenCode 与 Pi 的文件/SQLite 定位和时间线解析进一步下沉
 `list_agent_capabilities` 从已经对账的声明与 Bundle 生成类型化能力报告，向前端公开 Surface、
 会话类型（含 `clientId`）与配置开关。
 
-当前代码已经接入 SQLite 基础配置存储。后续架构文档不再把 SQLite 视为未来能力，而是把它作为 Channel、Account、Model、Client、虚拟模型、日志、用量、价格和快照数据的本地持久化层。
+当前代码已经接入 SQLite 基础配置存储。后续架构文档不再把 SQLite 视为未来能力，而是把它作为 Channel、Account、Model、Client、模型路由（`virtual_models` / `virtual_model_routes`）、日志、用量、价格和快照数据的本地持久化层。
 
 SQLite 迁移由 `Storage::migrate` 负责。除非需求明确允许且已评估用户数据影响，不得直接删除或重建现有表；新增或调整持久化结构必须提供迁移并补充存储测试。
+
+聚合模型移除通过 `Storage::migrate` 中的一次性、幂等迁移完成：把 `virtual_model_id IN ('flowlet-pro','flowlet-flash')` 的旧路由按 `upstream_model` 归一改写为规范模型 ID，按 `(virtual_model_id, channel_id, account_id, upstream_model, client_protocol)` 去重（保留 priority 最小者，并列取 `created_at` 更早、再取 `id`；`enabled` 取任一为 1），再对受迁移影响的分组按 `(virtual_model_id, client_protocol)` 重排 priority 为 `0..n`；无法归一的旧行保留原样但由路由层的规范身份校验过滤。同一迁移还会删除 `virtual_models` 表中残留的 `flowlet-pro` / `flowlet-flash` 行。表结构与字段名不变，迁移幂等。
 
 ## 当前阶段核心模型
 
@@ -309,7 +328,7 @@ Anthropic-compatible Channel Account
   把候选收窄到同一账号。
 - 将本地协议入口路径拼接到渠道模板的协议 `base_url`。
 - 替换上游 `Authorization` Header 或 `X-Api-Key` Header。
-- 必要时将虚拟模型名映射为上游模型名。
+- 必要时用路由的 `upstream_model` 替换入站规范模型 ID（入站别名归一发生在路由匹配之前）。
 
 响应侧不做业务改写：
 
@@ -321,7 +340,7 @@ Anthropic-compatible Channel Account
 
 ## 运行时配置快照
 
-渠道模板、渠道账号、路由候选、路由规则和虚拟模型由 Rust 端
+渠道模板、渠道账号、路由候选、路由规则和模型身份（`virtual_models`）由 Rust 端
 `RuntimeConfigStore` 统一发布为带单调递增 `revision` 的不可变
 `RuntimeConfigSnapshot`。SQLite 仍是持久化事实源；配置 mutation 只有在持久化成功后
 才发布下一版内存快照。
@@ -364,9 +383,18 @@ Claude Code 探测同时检查 PATH 和官方常见安装位置，返回当前�
 
 Codex CLI 当前支持安装探测、账号用量复用和原生会话读取。Codex 与 Claude Code、OpenCode、Pi 同为标准一等 Agent，由 `agent_global_config` 模块一键写入 `~/.codex/config.toml`（`[model_providers.flowlet]` 经 Responses wire API 指向本地代理、`requires_openai_auth = true`）与 `~/.codex/config.toml`，受管字段先备份再写入、恢复时还原；Codex CLI、ChatGPT 桌面端与 VS Code 插件共享同一份配置。账号观测（订阅用量、套餐、Credits、重置机会）承载于概览页渠道账号卡片的伪账号行——该伪账号只读、不参与路由、不开放编辑，行点击打开只读详情抽屉。当前准确支持范围见 [`support-matrix.md`](./support-matrix.md)。
 
+Antigravity 订阅额度也由概览页渠道账号卡片承载，但使用独立只读观测报告，而不是持久化渠道账号。
+`useAntigravityAccounts -> query_antigravity_accounts` 并行组合 Google OAuth 远端额度与本地服务观测。
+`antigravity_oauth` 负责浏览器授权、PKCE/state 回调校验、独立离线授权保存、令牌续期和远端额度查询；
+授权后无需保持 Antigravity 运行。授权数据保存在数据库同级 `antigravity-accounts`，与客户端凭据隔离，
+不安装扩展、不写客户端配置、不参与代理路由。自动刷新由前端每两分钟触发，失败保留上次成功快照并标记过期；
+权限不足或无实测额度时显示错误，不将模型可用性当作 100% 额度。本地发现与授权账号按邮箱去重，授权账号优先。
+详情和兼容边界见
+[`antigravity-account.md`](./antigravity-account.md)。
+
 Claude Code 用户级全局配置由独立的 `agent_global_config` 模块管理。前端只读取脱敏状态并触发应用或恢复；Rust 解析 `CLAUDE_CONFIG_DIR` / `~/.claude/settings.json`，安全合并 Flowlet Base URL、Client Token 和模型别名映射。修改前只备份受管字段，恢复时不覆盖用户后续新增的其他 Claude 设置。完整字段和优先级见 [`claude-code-global-config.md`](./claude-code-global-config.md)。
 
-OpenCode CLI 与 Desktop 共用用户级配置。Flowlet 在 `~/.config/opencode/opencode.jsonc`（或已有的 `opencode.json`）中结构化合并 `provider.flowlet`、`model`、`small_model`，并把本地 Server 固定到 `127.0.0.1:4096`；Client Token 单独写入 `~/.local/share/opencode/auth.json` 的 `flowlet` 凭据项。JSONC 修改保留未受管字段和注释；配置与凭据均先备份受管值，再支持恢复。完整行为见 [`opencode-global-config.md`](./opencode-global-config.md)。
+OpenCode CLI 与 Desktop 共用用户级配置。Flowlet 在 `~/.config/opencode/opencode.jsonc`（或已有的 `opencode.json`）中结构化合并 `provider.flowlet`、`model`（主模型）与 `small_model`（快速模型）；Flowlet 不再修改 `server.hostname` / `server.port`，重新应用配置时会清理由短暂发布版本写入的固定端口字段并恢复备份原值。Client Token 单独写入 `~/.local/share/opencode/auth.json` 的 `flowlet` 凭据项。JSONC 修改保留未受管字段和注释；配置与凭据均先备份受管值，再支持恢复。完整行为见 [`opencode-global-config.md`](./opencode-global-config.md)。
 
 Agent 接入抽屉中的 Client Token 默认使用固定长度掩码；查看按钮只在当前抽屉会话中临时展示，关闭后恢复掩码，复制始终使用真实值。Claude Code 手动片段与一键写入字段保持一致；OpenCode 将 Provider 配置和 `auth.json` 凭据拆成两个片段。OpenCode 配置与凭据采用双文件事务写入，第二个文件失败时恢复两个文件的原始字节内容。
 
@@ -507,7 +535,7 @@ API Key 字段保留独立类型，方便后续接入系统密钥链或本地加
 - `/health` 返回本地服务健康状态。
 - `/v1/*`、`/openai/v1/*` 透明转发到 OpenAI-compatible 渠道端点。
 - `/anthropic/v1/messages`、`/anthropic/v1/models` 透明转发到 Anthropic-compatible 渠道端点。
-- `GET /v1/models/{model}` 由本地代理直接返回开放模型详情，不转发单一上游。规格和价格优先读取渠道详情同步所得 `channel_models`，字段缺失时回退本地 `models-cn.json`；聚合模型按当前可用路由取规格下限，已知币种的目录价格按币种给出候选上界；上游未声明币种的原始价格按候选独立返回，避免猜测币种或汇率。`max_input_tokens` 仅在数据源明确提供独立输入上限时返回；不得用上下文窗口减最大输出推导，当前数据源未提供时返回 `null`。
+- `GET /v1/models/{model}` 由本地代理直接返回开放模型详情，不转发单一上游。规格和价格优先读取渠道详情同步所得 `channel_models`，字段缺失时回退本地 `models-cn.json`；只返回单一规范模型的规格与价格，不再按候选合并规格下限或价格上界。`max_input_tokens` 仅在数据源明确提供独立输入上限时返回；不得用上下文窗口减最大输出推导，当前数据源未提供时返回 `null`。
 - `/v1/responses`（及裸根 `/responses`）作为独立的 Responses 协议转发到声明
   `"responses"` 的渠道端点（上游 URL 从 OpenAI Base URL 派生，仅无状态透传，
   非 POST 管理接口返回 405）。
@@ -541,7 +569,8 @@ SQLite 当前保存本地配置、日志、用量和同步快照，核心表包�
 来源设备恢复成当前设备身份。设备身份格式无效时启动明确失败，不静默生成新 ID。
 身份文件同时保存用户可编辑的 `displayName` 和平台类型；默认名称只由平台和设备 ID
 短前缀组成，不采集主机名、用户名、MAC、序列号或硬件 ID。重命名只更新展示名称，
-不会改变 `deviceId`，保存后立即热生效。
+不会改变 `deviceId`，保存后立即热生效。headless / Docker Host 同样在数据目录生成并
+复用该文件，因此 Docker 数据卷中的设备身份跨重启稳定，用量统计中的「本机」即该服务实例。
 
 多设备共享使用最小设备快照：`device_usage_snapshot` 返回设备 ID、身份
 创建时间、展示名称、平台、Flowlet 版本、快照生成时间、当前本地时区偏移，以及按设备
@@ -818,8 +847,7 @@ Flowlet 的 Agent 原生 Token，以及 `device_daily_usage` 中其他设备当�
 PC 用量分析页的 `usage_summary` 进一步把能够确认具体模型的纯原生事件映射为同一只读分析行：
 事件自身的 `model` 优先；Codex 等 token 事件不携带模型时，仅在同一会话的
 `agent_session_snapshots.summary_json.models` 能确认唯一规范模型时回填，多模型或未知模型会话不猜。
-`flowlet-pro` / `flowlet-flash` 是客户端公开聚合别名，不是真实上游模型，因此不会作为 Codex 原生
-模型分析行计入；这类会话的真实模型与用量以 Flowlet 请求账本中的 `upstream_model` 为准。该规则也
+历史日志中可能出现的 `flowlet-pro` / `flowlet-flash` 是已移除的旧聚合别名，不是真实上游模型，因此不会作为 Codex 原生模型分析行计入；这类会话的真实模型与用量以 Flowlet 请求账本中的 `upstream_model` 为准。该规则也
 避免共享 Codex 会话被多台设备同时扫描、但只有实际请求设备持有代理日志时产生跨设备重复统计。
 时间范围比较先通过 SQLite `datetime()` 统一 RFC3339 表示，避免周期起点当天的边界误收。
 `channel_id = agent-native` 仅表示来源，`account_id` 保存 Agent 类型，
@@ -853,8 +881,11 @@ Codex 账号支持单账号删除（`delete_codex_account`）：按 `account_id 
 
 Agent 数据同步在应用启动约 3 秒后首次检查，窗口前台每 1 分钟、后台每 5 分钟检查一次，恢复到前台时
 尽快补查。自动检查只有发现来源指纹变化时才创建任务；会话页手动同步会强制重新整理并始终保留记录。
+前端周期、文件事件与恢复前台触发共用单个执行槽；扫描未完成时合并为一次后续检查，防止生成并行扫描
+和多条周期定时器。窗口隐藏后立即把周期检查延后至后台间隔；卸载后不再刷新查询或重建定时器。
 Rust 使用 `notify` 监听现有 OpenCode 数据库、Claude Code 项目目录和 Codex sessions 目录，文件事件只作为
 “需要重新扫描”的提示，由前端静默 8 秒后触发同一增量同步，并限制文件事件触发间隔至少 30 秒；
+冷却期内的新变化延迟到冷却结束后检查，不直接丢弃。
 定时轮询始终保留为漏事件和新目录的兜底。扫描指纹时仅短暂持有 SQLite 锁，解析 Agent 原始文件期间
 不占用数据库，确保后台任务记录查询和其他页面查询不会被长任务阻塞。
 同步发现仍可访问数据源中的会话已经消失或归档时，不删除 Flowlet 已保存的摘要快照和
@@ -927,7 +958,7 @@ Anthropic `/messages/count_tokens` 只计算上下文长度，不执行模型推
 `duration_ms = NULL`，详情页仅在该状态下短周期刷新，结束后停止轮询。
 
 上游返回 403 时，代理会检查结构化错误体；若错误码为 `account_deactivated` 或消息明确
-表示 `api key is disabled`，当前账号会被标记为凭据不可用，并继续尝试同一聚合模型的
+表示 `api key is disabled`，当前账号会被标记为凭据不可用，并继续尝试同一规范模型的
 下一个候选（包括跨渠道降级）。该状态视为可恢复的临时停用：后续每个新请求仍会探测
 一次该账号，探测成功后立即恢复为 `healthy` 并清除错误。普通 403 仍保持终态，避免对
 权限或请求错误盲目重试；401 无效密钥仍需修改 Key 或显式测试连接成功后恢复。
@@ -935,7 +966,7 @@ Anthropic `/messages/count_tokens` 只计算上下文长度，不执行模型推
 普通 400 请求参数错误同样保持终态，不跨模型重试。若 400 错误体同时明确返回
 `code = invalid_parameter_error` 且消息表示 `product is not activated`，则说明当前上游
 账号未开通所选模型产品，而非客户端请求结构无效；代理会把该 attempt 记为
-`product_not_activated` 并继续尝试同一 Flowlet 聚合模型的下一个候选。
+`product_not_activated` 并继续尝试同一规范模型的下一个候选。
 
 模型价格不写入 SQLite。运行时价格表在内存中装配，来源按优先级为：本地 `models-cn.json`
 （国内厂商官方价，CNY，含 `inputTokenRange` 分级与促销价优选）与 `models-dev.json`
@@ -973,6 +1004,9 @@ Anthropic `/messages/count_tokens` 只计算上下文长度，不执行模型推
 修改编译/磁盘配置仍按配置加载流程生效，`config.json` 不是价格的唯一真实来源。
 
 ## 桌面端 UI
+
+桌面路由保留概览同步加载，模型服务、请求日志、会话管理、用量统计、用量洞察和设置页面按需加载。
+各页面的 Suspense 边界放在壳内，加载期间保留侧栏和窗口控件；后台同步组件不随页面切换重建。
 
 桌面 UI 只做管理、接入引导和状态观测，不承载复杂平台能力：
 

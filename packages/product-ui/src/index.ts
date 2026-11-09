@@ -30,8 +30,8 @@ export type {
 } from "./desktop/UsageAnalysisView";
 export { UsageStatisticsView } from "./desktop/UsageStatisticsView";
 export type { UsageStatisticsCellModel, UsageStatisticsConfidenceModel, UsageStatisticsDetailMetricModel, UsageStatisticsDetailModel, UsageStatisticsLabels, UsageStatisticsMetric, UsageStatisticsPeriod, UsageStatisticsStatModel } from "./desktop/UsageStatisticsView";
-export { ModelsServiceCapabilityListView, ModelsServiceDetailView, ModelsServiceInfoBannerView, ModelsServiceMetricGridView, ModelsServiceRefreshActionView, ModelsServiceRelationListView, ModelsServiceRouteListView, ModelsServiceRouteOverviewView, ModelsServiceSectionView, ModelsServiceTabContentView, ModelsServiceToolbarView, ModelsServiceView } from "./desktop/ModelsServiceView";
-export type { ModelsServiceCapabilityModel, ModelsServiceDetailTabModel, ModelsServiceFilterOption, ModelsServiceItemModel, ModelsServiceLabels, ModelsServiceMetricModel, ModelsServiceRelationModel, ModelsServiceRouteModel, ModelsServiceStatModel } from "./desktop/ModelsServiceView";
+export { ModelsServiceCapabilityListView, ModelsServiceDetailView, ModelsServiceInfoBannerView, ModelsServiceMetricGridView, ModelsServiceRefreshActionView, ModelsServiceRouteListView, ModelsServiceRouteOverviewView, ModelsServiceSectionView, ModelsServiceTabContentView, ModelsServiceToolbarView, ModelsServiceView } from "./desktop/ModelsServiceView";
+export type { ModelsServiceCapabilityModel, ModelsServiceDetailTabModel, ModelsServiceFilterOption, ModelsServiceItemModel, ModelsServiceLabels, ModelsServiceMetricModel, ModelsServiceRouteModel, ModelsServiceStatModel } from "./desktop/ModelsServiceView";
 export { DesktopOverviewDemoView } from "./demo/DesktopOverviewDemoView";
 export { RequestLogsDemoView } from "./demo/RequestLogsDemoView";
 export { AgentSessionsDemoView } from "./demo/AgentSessionsDemoView";

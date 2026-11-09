@@ -16,6 +16,7 @@ pub(super) const ADAPTER: ChannelCapabilityAdapter = ChannelCapabilityAdapter {
     model_sync: sync,
     balance_query: None,
     strips_openai_v1_path: false,
+    uses_upstream_proxy_for_models: false,
     console_scrape: ConsoleScrapeAdapter::ResourceModes(&[
         // Token Plan 订阅：套餐专属控制台抓订阅额度。
         ("token_plan", "token_plan"),
@@ -100,10 +101,7 @@ fn merge_fq_instance_responses(existing: &str, incoming: &str) -> Option<String>
         .filter_map(|code| by_code.get(code))
         .filter_map(keep_fq_instance_fields)
         .collect::<Vec<_>>();
-    Some(
-        serde_json::json!({ "data": { "Data": merged, "TotalCount": merged.len() } })
-            .to_string(),
-    )
+    Some(serde_json::json!({ "data": { "Data": merged, "TotalCount": merged.len() } }).to_string())
 }
 
 /// 裁剪单条额度实例，只保留前端展示需要的最小字段集。
@@ -112,7 +110,10 @@ fn keep_fq_instance_fields(value: &Value) -> Option<Value> {
     let code = template.get("Code")?.as_str()?;
     let name = template.get("Name").and_then(Value::as_str).unwrap_or("");
     let mut instance = serde_json::Map::new();
-    instance.insert("Template".to_string(), serde_json::json!({ "Code": code, "Name": name }));
+    instance.insert(
+        "Template".to_string(),
+        serde_json::json!({ "Code": code, "Name": name }),
+    );
     for key in [
         "Status",
         "InitCapacity",
@@ -129,7 +130,8 @@ fn keep_fq_instance_fields(value: &Value) -> Option<Value> {
 }
 
 fn scrape_response_satisfies(kind: &str, body: &str) -> Option<bool> {
-    const TOKEN_PLAN_KINDS: [&str; 4] = ["subscription", "quota_config", "reset_card_list", "usage"];
+    const TOKEN_PLAN_KINDS: [&str; 4] =
+        ["subscription", "quota_config", "reset_card_list", "usage"];
     if TOKEN_PLAN_KINDS.contains(&kind) {
         return token_plan_payload_satisfies(kind, body);
     }
@@ -206,7 +208,9 @@ fn token_plan_payload_satisfies(kind: &str, body: &str) -> Option<bool> {
                 .iter()
                 .any(|(key, value)| is_usage_percentage_key(key) && value.as_f64().is_some())
         })),
-        "reset_card_list" => Some(payload.is_some_and(|value| value.is_array() || value.is_object())),
+        "reset_card_list" => {
+            Some(payload.is_some_and(|value| value.is_array() || value.is_object()))
+        }
         _ => None,
     }
 }
@@ -319,7 +323,9 @@ mod tests {
         assert_eq!(
             scrape_response_satisfies(
                 "quota_config",
-                &broad_scope_gateway(serde_json::json!({ "standard": { "monthlyLabel": "月额度" } }))
+                &broad_scope_gateway(
+                    serde_json::json!({ "standard": { "monthlyLabel": "月额度" } })
+                )
             ),
             Some(false)
         );
@@ -327,7 +333,9 @@ mod tests {
         assert_eq!(
             scrape_response_satisfies(
                 "usage",
-                &broad_scope_gateway(serde_json::json!({ "per1MonthResetTime": 1_792_598_400_000_i64 }))
+                &broad_scope_gateway(
+                    serde_json::json!({ "per1MonthResetTime": 1_792_598_400_000_i64 })
+                )
             ),
             Some(false)
         );
@@ -377,14 +385,16 @@ mod tests {
         assert_eq!(
             scrape_response_satisfies(
                 "cert_info",
-                &serde_json::json!({ "data": { "certified": true, "aliyunId": "a@b.c" } }).to_string()
+                &serde_json::json!({ "data": { "certified": true, "aliyunId": "a@b.c" } })
+                    .to_string()
             ),
             Some(true)
         );
         assert_eq!(
             scrape_response_satisfies(
                 "session_info",
-                &serde_json::json!({ "data": { "secToken": "BDOTMAdWyBRYtagG0vJGy3" } }).to_string()
+                &serde_json::json!({ "data": { "secToken": "BDOTMAdWyBRYtagG0vJGy3" } })
+                    .to_string()
             ),
             Some(true)
         );
@@ -410,7 +420,14 @@ mod tests {
             scrape_response_satisfies("usage", &response(serde_json::json!({}))),
             Some(false)
         );
-        for kind in ["freetier_list", "fq_instance", "billing_amount", "settle_bill", "cert_info", "session_info"] {
+        for kind in [
+            "freetier_list",
+            "fq_instance",
+            "billing_amount",
+            "settle_bill",
+            "cert_info",
+            "session_info",
+        ] {
             assert_eq!(
                 scrape_response_satisfies(
                     kind,
@@ -448,7 +465,9 @@ mod tests {
             Some("settle_bill")
         );
         assert_eq!(
-            classify_scrape_response("https://account.qianwenai.com/cert/aliyuncert/queryCurrentCertInfo"),
+            classify_scrape_response(
+                "https://account.qianwenai.com/cert/aliyuncert/queryCurrentCertInfo"
+            ),
             Some("cert_info")
         );
         assert_eq!(
@@ -492,21 +511,35 @@ mod tests {
         ]));
         let merged = merge_fq_instance_responses(&batch1, &batch2).expect("merged");
         let value: serde_json::Value = serde_json::from_str(&merged).expect("json");
-        let data = value.get("data").and_then(|v| v.get("Data")).and_then(|v| v.as_array());
+        let data = value
+            .get("data")
+            .and_then(|v| v.get("Data"))
+            .and_then(|v| v.as_array());
         let data = data.expect("data array");
         assert_eq!(data.len(), 3, "去重后保留 3 个实例");
         let codes: Vec<&str> = data
             .iter()
-            .filter_map(|item| item.pointer("/Template/Code").and_then(serde_json::Value::as_str))
+            .filter_map(|item| {
+                item.pointer("/Template/Code")
+                    .and_then(serde_json::Value::as_str)
+            })
             .collect();
-        assert_eq!(codes, vec!["sfm_public_cn_a", "sfm_public_cn_b", "sfm_public_cn_c"]);
+        assert_eq!(
+            codes,
+            vec!["sfm_public_cn_a", "sfm_public_cn_b", "sfm_public_cn_c"]
+        );
         // 同名模板后到覆盖先到：b 取 batch2 的 Name。
         let b = data
             .iter()
-            .find(|item| item.pointer("/Template/Code").and_then(serde_json::Value::as_str) == Some("sfm_public_cn_b"))
+            .find(|item| {
+                item.pointer("/Template/Code")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("sfm_public_cn_b")
+            })
             .expect("b instance");
         assert_eq!(
-            b.pointer("/Template/Name").and_then(serde_json::Value::as_str),
+            b.pointer("/Template/Name")
+                .and_then(serde_json::Value::as_str),
             Some("qwen-b-updated")
         );
         // 裁剪后不含 InstanceName / Uid。

@@ -15,7 +15,7 @@ export type AccountActionRequest =
   | { kind: "edit"; accountId: string }
   | { kind: "delete"; accountId: string };
 
-type TestInput = { channel_id: string; api_key: string; base_url_override?: string | null };
+type TestInput = { channel_id: string; api_key: string; base_url_override?: string | null; use_upstream_proxy?: boolean | null };
 type Props = {
   request: AccountActionRequest | null;
   accounts: ChannelAccount[];
@@ -29,7 +29,9 @@ type Props = {
   onSyncBalance: (accountId: string) => Promise<AccountBalanceResult | void>;
   onScrape: (accountId: string) => Promise<ScrapeBalanceResult>;
   onAuthorizeChatGpt?: () => Promise<void>;
+  onAuthorizeAntigravity?: () => Promise<void>;
   authorizationBusy?: boolean;
+  desktopCapabilities?: boolean;
 };
 
 /**
@@ -51,7 +53,9 @@ export function AccountActionOverlay(props: Props) {
     onSyncBalance,
     onScrape,
     onAuthorizeChatGpt,
+    onAuthorizeAntigravity,
     authorizationBusy = false,
+    desktopCapabilities = true,
   } = props;
   const snapshotByAccount = useMemo(
     () => new Map(snapshots.map((item) => [item.account_id, item])),
@@ -100,6 +104,7 @@ export function AccountActionOverlay(props: Props) {
   return (
     <>
       {activeEditor ? <AccountEditorDrawer
+        desktopCapabilities={desktopCapabilities}
         key={activeEditor.kind === "create" ? `create:${activeEditor.channelId}` : `edit:${activeEditor.account.id}`}
         mode={activeEditor}
         accounts={accounts}
@@ -111,6 +116,7 @@ export function AccountActionOverlay(props: Props) {
         onSyncBalance={onSyncBalance}
         onScrape={onScrape}
         onAuthorizeChatGpt={onAuthorizeChatGpt}
+        onAuthorizeAntigravity={onAuthorizeAntigravity}
         authorizationBusy={authorizationBusy}
       /> : null}
       <Modal
@@ -139,8 +145,8 @@ function resolveRequestedEditor(
 ): AccountEditorMode | null {
   if (!request || request.kind === "delete") return null;
   if (request.kind === "create") {
-    if (request.channelId === CHATGPT_CHANNEL_ID) {
-      return { kind: "create", channelId: CHATGPT_CHANNEL_ID };
+    if (request.channelId === CHATGPT_CHANNEL_ID || request.channelId === "antigravity") {
+      return { kind: "create", channelId: request.channelId };
     }
     return presets.some((item) => item.id === request.channelId)
       ? { kind: "create", channelId: request.channelId }

@@ -26,7 +26,7 @@ describe("deriveTrajectoryRows", () => {
         id: "request",
         kind: "request",
         title: "Request #2",
-        model: "flowlet-pro",
+        model: "deepseek-v4-pro",
         trace: {
           sequence: 42,
           eventType: "request/header",

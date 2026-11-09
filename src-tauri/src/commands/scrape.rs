@@ -1,6 +1,4 @@
-use crate::core::channel_capability_adapter::{
-    query_channel_balance, supports_official_balance, sync_channel_models,
-};
+use crate::core::channel_capability_adapter::{supports_official_balance, sync_channel_models};
 use crate::core::channels_config::ChannelsConfig;
 use crate::core::config::{
     AccountBalanceSnapshot, AccountStatsRow, ChannelAccount, ChannelPreset, RouteCandidate,
@@ -70,8 +68,8 @@ pub(crate) fn get_models_dev_provider_catalog(
 }
 
 fn models_dev_provider_subset(raw: &str, provider_id: &str) -> Result<Option<String>, String> {
-    let catalog: serde_json::Value = serde_json::from_str(&raw)
-        .map_err(|error| format!("解析 models.dev 目录失败：{error}"))?;
+    let catalog: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|error| format!("解析 models.dev 目录失败：{error}"))?;
     let Some(provider) = catalog.get(provider_id) else {
         return Ok(None);
     };
@@ -98,7 +96,9 @@ mod model_catalog_read_tests {
         let value: serde_json::Value = serde_json::from_str(&subset).unwrap();
         assert!(value.get("openrouter").is_some());
         assert!(value.get("deepseek").is_none());
-        assert!(models_dev_provider_subset(raw, "missing").unwrap().is_none());
+        assert!(models_dev_provider_subset(raw, "missing")
+            .unwrap()
+            .is_none());
     }
 }
 
@@ -416,137 +416,7 @@ pub(crate) async fn query_balance(
     state: tauri::State<'_, AppState>,
     account_id: String,
 ) -> Result<BalanceQueryResult, String> {
-    let account = {
-        let snapshot = state.runtime_config.snapshot();
-        snapshot
-            .accounts
-            .iter()
-            .find(|a| a.id == account_id)
-            .ok_or("账号不存在")?
-            .clone()
-    };
-
-    let preset_supports_balance = state
-        .runtime_config
-        .snapshot()
-        .channels
-        .iter()
-        .find(|preset| preset.id == account.channel_id)
-        .is_some_and(|preset| preset.supports_balance_query);
-    if !preset_supports_balance || !supports_official_balance(&account.channel_id) {
-        return Ok(BalanceQueryResult {
-            balance: None,
-            currency: None,
-            is_available: false,
-            error: Some("当前渠道不支持官方余额查询".to_string()),
-        });
-    }
-
-    if account.effective_openai_base_url().is_some() {
-        return Ok(BalanceQueryResult {
-            balance: None,
-            currency: None,
-            is_available: false,
-            error: Some("自定义 OpenAI Base URL 不支持官方余额自动同步".to_string()),
-        });
-    }
-
-    let config = state
-        .channels_config
-        .lock()
-        .map_err(|_| "锁定渠道运行时配置失败".to_string())?
-        .clone();
-    let is_openrouter = account.channel_id == "openrouter";
-    let uses_management_key = is_openrouter
-        && account
-            .management_key
-            .as_deref()
-            .is_some_and(|value| !value.trim().is_empty());
-
-    // 直接在命令自身的 async 上下文里 await。适配器返回的 Future 全部是 `Send`
-    // （见 `channel_capability_adapter` 的 `BalanceQueryFuture`），底层 HTTP 也是异步
-    // 实现，因此既不需要 `spawn_blocking`，更不能在阻塞线程里自建嵌套 tokio runtime。
-    //
-    // 2026-09-19 事故现场：这里原先是「在 spawn_blocking 内自建 current-thread tokio
-    // runtime，并用 unwrap_or_else 把 runtime 搭建失败转成 panic」。一旦搭建因进程资源
-    // 耗尽返回 Err（tokio 的 build() 只在创建 IO/signal driver 失败时报错），一次本可
-    // 上报给用户的 I/O 错误就被升级成 panic。嵌套 runtime 本身在 spawn_blocking 里是
-    // 允许的（tokio 只在 block_on 时检查运行上下文，build() 不检查），所以这不是
-    // 「必然 panic」的写法——但它是纯粹的重复开销与风险面，必须去掉。禁止该 bug class
-    // 复现的回归测试见文件末尾的 `nested_runtime_regression_tests`。
-    let result = query_channel_balance(&account, &config).await?;
-
-    // 更新账号凭证状态与最后错误信息。
-    // 测试连接成功 → 重置为 healthy；若返回 401 则标记为 invalid_key。
-    // Management Key 与模型调用 API Key 相互独立，其查询结果不得改变路由凭证状态。
-    // 同时更新共享内存，保证 SQLite / 共享内存 / 前端状态一致，下一次路由立即生效。
-    if result.error.is_none() {
-        if !uses_management_key {
-            let _ = state.storage.mark_account_credential_healthy(&account_id);
-        }
-        state.runtime_config.update(|snapshot| {
-            if let Some(shared_account) = snapshot
-                .accounts
-                .iter_mut()
-                .find(|item| item.id == account_id)
-            {
-                if !uses_management_key {
-                    shared_account.credential_status =
-                        crate::core::config::ACCOUNT_CREDENTIAL_HEALTHY.to_string();
-                }
-                shared_account.last_error = None;
-            }
-        });
-    }
-    if let Some(ref err) = result.error {
-        let _ = state.storage.update_account_last_error(&account_id, err);
-        if !uses_management_key && (err.contains("HTTP 401") || err.contains("401")) {
-            let _ = state.storage.mark_account_credential_invalid(&account_id);
-            state.runtime_config.update(|snapshot| {
-                if let Some(shared_account) = snapshot
-                    .accounts
-                    .iter_mut()
-                    .find(|item| item.id == account_id)
-                {
-                    shared_account.credential_status =
-                        crate::core::config::ACCOUNT_CREDENTIAL_INVALID_KEY.to_string();
-                    shared_account.last_error = Some(err.clone());
-                }
-            });
-        }
-    } else {
-        let now = chrono::Utc::now().to_rfc3339();
-        let snapshot = AccountBalanceSnapshot {
-            id: format!("balance-{}-{}", account_id, uuid::Uuid::new_v4()),
-            account_id: account_id.clone(),
-            balance: result.balance,
-            currency: result.currency.clone(),
-            token_pack_total: None,
-            token_pack_used: None,
-            token_pack_remaining: None,
-            token_pack_expire_at: None,
-            token_packs: None,
-            raw_scraped_json: None,
-            source: "sync".to_string(),
-            synced_at: Some(now.clone()),
-            remark: Some(if uses_management_key {
-                "OpenRouter Management Key 账户 Credits 同步".to_string()
-            } else if is_openrouter {
-                "OpenRouter API Key 限额同步".to_string()
-            } else {
-                "官方余额接口同步".to_string()
-            }),
-            created_at: now.clone(),
-            updated_at: now,
-        };
-        state
-            .storage
-            .save_balance_snapshot(&snapshot)
-            .map_err(|err| err.to_string())?;
-        let _ = state.storage.update_account_last_used(&account_id);
-    }
-
-    Ok(result)
+    crate::core::account_balance::query_balance(&state, account_id).await
 }
 
 /// 用连接参数拉取某渠道上游的模型列表（底层 /models 能力）。
@@ -560,12 +430,14 @@ pub(crate) async fn fetch_channel_models(
     channel_id: String,
     api_key: String,
     base_url_override: Option<String>,
+    use_upstream_proxy: Option<bool>,
 ) -> Result<ModelSyncResult, String> {
     let account = ChannelAccount {
         id: String::new(),
         channel_id: channel_id.clone(),
         api_key,
         base_url_override,
+        use_upstream_proxy,
         enabled: true,
         ..Default::default()
     };
@@ -1227,9 +1099,13 @@ mod scrape_capture_tests {
     #[test]
     fn qwen_authentication_errors_do_not_count_as_complete_capture() {
         let config = default_channels_config();
-        let mode =
-            crate::core::scrape_console::resolve_scrape_mode(&config, "qwen", Some("token_plan"), None)
-                .expect("qwen token plan scrape mode");
+        let mode = crate::core::scrape_console::resolve_scrape_mode(
+            &config,
+            "qwen",
+            Some("token_plan"),
+            None,
+        )
+        .expect("qwen token plan scrape mode");
         let error = r#"{"code":"UNAUTHORIZED","message":"login required"}"#.to_string();
         let responses = vec![
             (
@@ -1433,10 +1309,7 @@ mod scrape_capture_tests {
             normalize_scrape_token_packs("zhipu", &slots, Some(extracted)).as_deref(),
             Some(extracted)
         );
-        assert_eq!(
-            normalize_scrape_token_packs("zhipu", &slots, None),
-            None
-        );
+        assert_eq!(normalize_scrape_token_packs("zhipu", &slots, None), None);
     }
 
     #[test]
@@ -1474,7 +1347,8 @@ mod scrape_capture_tests {
 
         // 只有残缺体并入时不破坏已满足槽位的完整体。
         let items: Vec<serde_json::Value> = serde_json::from_str(
-            &serde_json::to_string(&[serde_json::json!({ "url": url, "body": truncated })]).unwrap(),
+            &serde_json::to_string(&[serde_json::json!({ "url": url, "body": truncated })])
+                .unwrap(),
         )
         .unwrap();
         let mut entry = vec![(url.to_string(), complete.to_string())];
@@ -1563,9 +1437,7 @@ fn scrape_responses_complete(
         .iter()
         .filter_map(|(url, body)| {
             let kind = engine.classify(url);
-            engine
-                .satisfies(&kind, body)
-                .then(|| (kind, body.clone()))
+            engine.satisfies(&kind, body).then(|| (kind, body.clone()))
         })
         .collect::<std::collections::HashMap<_, _>>();
     scrape_console::aggregate_complete(&slots, mode)
@@ -1587,9 +1459,7 @@ fn collect_scrape_slots(
         .flatten()
         .filter_map(|(url, body)| {
             let kind = engine.classify(url);
-            engine
-                .satisfies(&kind, body)
-                .then(|| (kind, body.clone()))
+            engine.satisfies(&kind, body).then(|| (kind, body.clone()))
         })
         .collect())
 }
@@ -1662,7 +1532,10 @@ async fn drain_scrape_page_stash(
             .cloned()
             .unwrap_or_default()
     };
-    let device = value.get("device").cloned().unwrap_or(serde_json::Value::Null);
+    let device = value
+        .get("device")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
     let install = value
         .get("install")
         .and_then(serde_json::Value::as_str)
@@ -2334,11 +2207,7 @@ pub(crate) async fn probe_scrape_login(
                 }
             }
         }
-        format!(
-            "（缺少：{}）{}",
-            missing_slots.join(", "),
-            raw_summary
-        )
+        format!("（缺少：{}）{}", missing_slots.join(", "), raw_summary)
     };
 
     let status = ScrapeLoginStatus {
@@ -2628,7 +2497,8 @@ pub(crate) async fn scrape_balance(
         .get("token_packs")
         .filter(|value| value.is_array())
         .and_then(|value| serde_json::to_string(value).ok());
-    let token_packs = normalize_scrape_token_packs(&channel_id, &slots, extracted_token_packs.as_deref());
+    let token_packs =
+        normalize_scrape_token_packs(&channel_id, &slots, extracted_token_packs.as_deref());
 
     let now = chrono::Utc::now().to_rfc3339();
     let raw_scraped_json = if mode.aggregate {
@@ -2999,7 +2869,8 @@ pub(crate) async fn sync_scrape_balances(
 
 /// 列出本机自定义渠道抓取描述符（供前端判断 custom 账号是否具备抓取能力）。
 #[tauri::command]
-pub(crate) fn list_custom_scrape_channels() -> Result<Vec<crate::core::custom_scrape::CustomScrapeChannelInfo>, String> {
+pub(crate) fn list_custom_scrape_channels(
+) -> Result<Vec<crate::core::custom_scrape::CustomScrapeChannelInfo>, String> {
     Ok(crate::core::custom_scrape::list_channels())
 }
 
@@ -3017,10 +2888,12 @@ pub(crate) fn reload_custom_scrape_registry(
     Ok(registry
         .descriptors
         .iter()
-        .map(|descriptor| crate::core::custom_scrape::CustomScrapeChannelInfo {
-            channel_id: descriptor.channel_id.clone(),
-            account_name: descriptor.account_name.clone(),
-        })
+        .map(
+            |descriptor| crate::core::custom_scrape::CustomScrapeChannelInfo {
+                channel_id: descriptor.channel_id.clone(),
+                account_name: descriptor.account_name.clone(),
+            },
+        )
         .collect())
 }
 

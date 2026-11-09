@@ -161,3 +161,11 @@ vite.config.ts.timestamp-*
 
 .cargo-target-check/
 dist-mobile/
+
+# Local Antigravity OAuth grants and quota snapshots
+antigravity-accounts/
+
+# Standalone web build and server data
+dist-web/
+flowlet-data/
+!.env.docker.example

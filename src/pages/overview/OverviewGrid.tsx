@@ -1,3 +1,4 @@
+import type { AntigravityAccountReport } from "../../domains/agent/antigravity";
 import { useNavigate } from "react-router-dom";
 import { OverviewGridView } from "@flowlet/product-ui";
 import type { AccountBalanceSnapshot, ChannelAccount } from "../../domains/account/types";
@@ -15,6 +16,9 @@ type Props = {
   channels: ChannelPreset[];
   balanceSnapshots: AccountBalanceSnapshot[];
   codexAccounts?: CodexAccountReport[];
+  antigravityAccounts?: AntigravityAccountReport[];
+  antigravityError?: boolean;
+  onOpenAntigravity?: (accountId: string | null) => void;
   routes: RouteCandidate[];
   baseUrl: string;
   bindConfig?: ProxyBindConfig;
@@ -29,6 +33,9 @@ export function OverviewGrid({
   channels,
   balanceSnapshots,
   codexAccounts,
+  antigravityAccounts,
+  antigravityError,
+  onOpenAntigravity,
   routes,
   baseUrl,
   bindConfig,
@@ -46,6 +53,9 @@ export function OverviewGrid({
           channels={channels}
           snapshots={balanceSnapshots}
           codexAccounts={codexAccounts}
+          antigravityAccounts={antigravityAccounts}
+          antigravityError={antigravityError}
+          onOpenAntigravity={onOpenAntigravity}
           onCreate={(channelId) => onAccountRequest({ kind: "create", channelId })}
           onEdit={(accountId) => onAccountRequest({ kind: "edit", accountId })}
           onToggle={onToggleAccount}

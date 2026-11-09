@@ -1,6 +1,6 @@
 {
   "name": "flowlet",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -30,7 +30,9 @@
     "test:watch": "vitest --config src/vitest.config.ts",
     "website:dev": "npm run dev --workspace flowlet-website",
     "website:check": "npm run check --workspace flowlet-website",
-    "website:build": "npm run build --workspace flowlet-website"
+    "website:build": "npm run build --workspace flowlet-website",
+    "build:web": "tsc && vite build --mode web --outDir dist-web",
+    "dev:web": "vite --mode web"
   },
   "dependencies": {
     "@douyinfe/semi-icons": "^2.101.0",

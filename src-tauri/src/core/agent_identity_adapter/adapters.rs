@@ -31,7 +31,14 @@ mod tests {
             crate::core::agent_plugin_bundle::identity_adapters()
                 .map(|adapter| adapter.id())
                 .collect::<Vec<_>>(),
-            vec!["claude-code", "pi", "deepseek-harness", "codex", "opencode", "hermes"]
+            vec![
+                "claude-code",
+                "pi",
+                "deepseek-harness",
+                "codex",
+                "opencode",
+                "hermes"
+            ]
         );
     }
 }

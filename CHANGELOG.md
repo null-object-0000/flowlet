@@ -2,7 +2,7 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [未发布]
+## [0.1.2] - 2026-11-09
 
 ### 移除
 
@@ -14,6 +14,69 @@
 - 新增一次性迁移：删除 `projects` / `project_tasks` / `recurring_tasks` / `recurring_task_runs` /
   `device_projects` 表，清理任务审核通知 / 项目工作区 ETag 等 `app_meta` 键，并删除
   `background_jobs` 中项目任务、重复任务与项目工作区同步的孤儿记录及事件。
+
+### 移除聚合模型
+
+- 彻底移除聚合模型 `flowlet-pro` / `flowlet-flash`：`/v1/models`、模型服务页、Agent 默认配置与
+  文档示例只使用规范模型 ID；
+- 路由只接受规范模型身份（`virtual_model_id` 与 `upstream_model` 归一后必须一致），不再存在
+  「一个对外模型名对应异构上游混池」的语义；
+- Agent 接入改为在接入抽屉中显式选择默认模型：Claude Code 支持主模型 + 快速模型，其余 Agent
+  使用单个主模型；未选择时由 Rust 按模型 id 字典序取第一个可用模型，没有可用模型时禁用一键
+  接入并提示先开放模型；
+- 删除 Codex 静态模型目录快照 `codex-models.json`，改为按所选主模型从 `models-cn.json` 动态
+  生成 `~/.codex/model-catalog.flowlet.json`；
+- 删除 Claude Code `[1m]` 长上下文、DSH `contextWindow` 与输入模态声明、OpenCode / Pi 输入模态
+  声明；DSH 高级配置区只保留精确会话关联与 MCP 服务器。
+
+### 迁移
+
+- 升级时执行一次性、幂等迁移：旧 `flowlet-pro` / `flowlet-flash` 路由按 `upstream_model` 归一
+  改写为对应直接模型路由，按 `(virtual_model_id, channel_id, account_id, upstream_model,
+  client_protocol)` 去重并重排 priority，同时删除 `virtual_models` 中残留的旧聚合行；无法归一
+  的旧行保留原样但不再参与路由，表结构不变；
+- 历史请求日志中的 `flowlet-pro` / `flowlet-flash` 原值按原样展示；用量统计保留旧别名过滤，
+  避免跨设备或旧快照重复统计。
+
+### Docker / Web Host 会话管理
+
+- 浏览器管理界面新增「会话管理」页，与桌面端共享同一套筛选、分页、Token/费用展示与
+  会话详情抽屉；
+- 会话目录只来自本实例 `request_logs` 的观测聚合：Web 管理 API 只新增
+  `list_agent_sessions`、`list_agent_session_children`、`list_agent_session_clients`、
+  `get_agent_session_flowlet_usage` 四个白名单命令，且只读取观测会话，不扫描服务器本机
+  Agent 原生会话文件；
+- 观测会话的详情保留请求统计与「查看请求日志」入口；原生用量、原生时间线与 OpenCode
+  实时权限确认仍只在桌面端提供，Web 页面对应区块明确隐藏而不伪造数据；
+- 不新增数据库表或字段，会话仍由请求日志实时聚合。
+
+### 新增渠道与账号
+
+- 新增 ChatGPT API（`openai-api`）渠道：项目 API Key、OpenAI / Responses 协议、模型列表拉取与全局白名单勾选；
+- 新增 VibeToken 渠道：OpenAI / Responses 协议与官方余额查询；
+- 新增 Antigravity 订阅额度观测：Google OAuth 浏览器授权、离线授权保存、远端套餐/额度/重置时间查询、令牌续期、重新授权与移除；观测报告不参与代理路由；
+- 新增官方余额自动同步（DeepSeek / Kimi / OpenRouter / VibeToken 等）、账号工作区同步与余额快照；
+- 新增设备用量聚合与读取，为 Web 版「用量统计」提供本机设备身份与日/小时聚合数据。
+
+### 设置与用量
+
+- 设置页重构为可搜索的分类面板，新增「内容捕获与保留策略」「上游代理」「费用展示」独立区块，桌面端与 Web 版共用同一实现；
+- 费用展示支持统一货币折算、目标币种、固定汇率与备注；Web 版保存到 SQLite `app_meta`，不写入容器 `config.json`；
+- 用量统计与用量洞察支持设备切换、设备维度聚合、Token 明细与未识别 Token 请求明细。
+
+### 运行时与工程
+
+- 后台维护任务抽取为 `host_scheduler`，桌面端与 headless 共用：每 15 分钟执行存储清理，每 1 小时同步 models-cn / models.dev 目录，并写入后台任务日志；
+- Cargo 拆分 `desktop` feature 与独立 `headless` bin；无显示服务环境可用 `--no-default-features --bin headless` 构建；
+- 新增浏览器管理 Host：显式管理命令白名单、管理凭据与模型调用凭据分离、`/health` 存活检查；
+- 浏览器管理界面支持渠道账号、模型服务、请求日志、会话管理、用量统计/洞察与设置，复用桌面端领域命令；
+- 新增 Dockerfile、docker-compose、`.env.docker.example` 与 Docker 部署文档。
+
+### 文档
+
+- 新增 `docs/docker.md`（Docker / 浏览器部署）与 `docs/antigravity-account.md`（Antigravity 订阅额度观测）；
+- 新增管理端 OIDC SSO 设计文档（目标 GitLab 实例已完成 M0 门禁验证；登录功能尚未实现，不在本版本启用）；
+- 新增 Electron 迁移方案与代码勘察文档（方案评审中，不改变当前 Tauri 运行时）。
 
 ## [0.1.1] - 2026-09-11
 
@@ -83,3 +146,4 @@ Flowlet 的首个正式公开版本。
 
 [0.1.1]: https://github.com/null-object-0000/flowlet/releases/tag/v0.1.1
 [0.1.0]: https://github.com/null-object-0000/flowlet/releases/tag/v0.1.0
+[0.1.2]: https://github.com/null-object-0000/flowlet/releases/tag/v0.1.2

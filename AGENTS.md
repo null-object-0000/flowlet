@@ -2,8 +2,6 @@
 
 本文件是 Flowlet 项目中所有 AI 编程 Agent 的统一协作规范。
 
-维护本项目需安装 Semi Design 技能：https://semi.design/zh-CN/start/mcp-skills
-
 涉及 AI / LLM 品牌图标时，必须先读取 Lobe Icons 官方技能：https://lobehub.com/icons/skill.md
 
 图标资源默认规则：
@@ -40,6 +38,12 @@ Flowlet 是一个面向 AI Agent 的本地桌面模型服务控制台。
 - 提供 Agent 接入配置与后续会话观测能力。
 
 Flowlet 不以通用企业级 LLM 网关为核心定位。
+
+除桌面 Host，也支持独立 headless / Docker Host 与浏览器管理界面，部署步骤见
+`docs/docker.md`。服务端复用 `FlowletServices`、存储和渠道能力；管理 HTTP API 必须使用
+显式命令白名单，并将管理凭据与模型调用凭据分开鉴权。Web Host 不提供本机 Agent 配置写入、
+桌面 WebView 抓取或本机 OAuth 能力；不能为了复用页面而开放任意桌面命令。
+
 
 内置渠道、模型目录和 Agent 的扩展声明统一登记在仓库根目录
 `plugin-registry.json`。注册表只声明受控贡献，具体适配器仍由前端/Rust 编译期代码实现；
@@ -208,6 +212,17 @@ Flowlet 当前支持：
   的受控例外：按上游模型（canonical_model_key 归一后的 DeepSeek 推理模型）门控，仅对
   OpenAI chat/completions 生效，其余请求与协议原样透传；新增/删除该行为须同步本说明与
   `docs/deepseek-harness-integration.md`；
+* DeepSeek 官方 Anthropic Messages 端点在 thinking 模式下要求当前用户轮内每条 assistant
+  消息都回传 `thinking` 内容块（缺失即 400：`The content[].thinking in the thinking mode
+  must be passed back to the API.`）。同一规范模型的候选池可能横跨返回/校验行为不同的中转
+  渠道，Anthropic Files API 的账号绑定又会在会话中途把请求 pin 到 DeepSeek 官方账号，历史
+  里会出现由中转生成、缺失 thinking 块的 assistant 消息。`ensure_anthropic_thinking_passback`
+  在转发到 DeepSeek 推理模型前，为当前用户轮（最后一条含 `text` 块的 user 消息之后）内缺失
+  thinking 块的 assistant 消息补空 thinking 块：插在内容数组最前，仅追加、不改写已有块与
+  signature，已完成轮次不动。这是「不随意改写请求结构」的受控例外：按上游模型
+  （canonical_model_key 归一后的 DeepSeek 推理模型）门控，仅对 Anthropic Messages 生效，
+  其余请求与协议原样透传；新增/删除该行为须同步本说明与
+  `docs/deepseek-harness-integration.md`；
 * Responses 是独立的第三协议（`supported_protocols` 中的 `"responses"`），
   入站 `POST /v1/responses`（兼容裸根路径 `/responses`）按协议独立匹配路由，
   上游端点从渠道 OpenAI Base URL 派生、复用 OpenAI 鉴权；
@@ -219,13 +234,16 @@ Flowlet 当前支持：
   那把 API Key 上有效。这是「无模型请求也能被代理」的受控例外：上游 status / headers / body
   一律原样透传（客户端依赖错误原文做配额自愈），新增/删除该行为须同步本说明与
   `docs/deepseek-harness-integration.md`；
+* 上游网络出口可按账号选择。新账号默认直连，显式使用代理时采用全局代理地址，
+  同时适用于模型转发、模型列表、连接测试与 API 余额查询。升级时，已有账号按原模型转发策略固化出口：
+  全局代理启用时，由 ChannelCapabilityAdapter 声明代理转发的账号迁移为使用代理，其他账号迁移为直连。保存后下一次尝试生效；代理失败时同一候选不得静默改走直连；
 * Responses 仅保证无状态透传：不支持存储响应管理接口
   （retrieve / delete / input_items，非 POST 请求返回 405），
   不保证 `previous_response_id` / `store` 的多账号粘性；
-  当前由 LongCat、DeepSeek、Qwen、OpenRouter 渠道承载，Kimi 不支持该协议；
-* 对外模型名使用 `virtual_model_id`；
+  当前由 ChatGPT API（openai-api）、LongCat、DeepSeek、Qwen、OpenRouter 渠道承载，Kimi 不支持该协议；
+* 对外模型名使用 `virtual_model_id`（值为规范模型 ID）；
 * `upstream_model` 只用于向上游发起请求前替换模型名；
-* 直接模型请求先用 `model-catalog.json` 把入站模型名归一到规范模型 ID，再匹配
+* 入站模型名先用 `model-catalog.json` 归一到规范模型 ID，再匹配
   `virtual_model_id`（登记别名、厂商官方 API 名、厂商前缀写法与大小写变体都归一到同一
   规范 ID；目录里未登记的名字不归一，仍返回 `model_not_exposed`）。这是「客户端按上游
   官方名接入」的兼容点，详见第 6 节；
@@ -253,8 +271,13 @@ Channel
 * 不创建隐式默认账号；
 * 账号必须由用户主动创建；
 * 开放模型必须明确绑定可用账号；
-* 模型对外名称是 `virtual_model_id`；
-* 模型上游名称是 `upstream_model`；
+* 模型对外名称是规范模型 ID（存于 `virtual_model_id`），模型上游名称是 `upstream_model`；
+* 持久化路由行只按规范模型身份匹配：`virtual_model_id` 与 `upstream_model` 归一后必须属于同一
+  规范模型，不满足的行视为无效，不参与路由、不对外暴露；同一规范模型的多账号/多变体仍形成
+  候选池；高级规则的显式模型映射是例外，允许跨规范模型指向目标上游；
+* 旧版本曾用 `flowlet-pro` / `flowlet-flash` 作为聚合对外模型名；升级迁移会把这些旧路由按
+  `upstream_model` 归一改写为对应直接模型路由（去重、保留启停与相对顺序），无法归一的旧行
+  保留原样但不再参与路由；历史日志中的原值按原样展示；
 * 模型身份和官方归属由规范化模型 ID 决定，不由实际承载请求的渠道决定；
 * 自定义/中转渠道只能成为模型的 Route Candidate，不得生成“自定义渠道品牌”的同名模型；
 * 模型列表与模型用量按规范化模型 ID 全局合并；渠道、账号维度仍保留实际路由归属；
@@ -266,6 +289,11 @@ Channel
 Flowlet 支持的模型（全局白名单，不按渠道区分）：
 
 ```text
+- gpt-6.1-sol
+- gpt-6.1-terra
+- gpt-6-astra
+- gpt-6-sol
+- gpt-6-luna
 - LongCat-2.0
 - LongCat-2.5
 - deepseek-v4-flash
@@ -342,7 +370,7 @@ DeepSeek 等其它模型，这些模型同样受全局白名单约束（在即�
 （即 DeepSeek 官方 `deepseek-v4-pro` 的日期快照），两者必须允许分别选择和路由。
 Flowlet 在 `model-catalog.json` 维护「上游变体 → 规范模型 ID」映射，前端和 Rust
 读取同一目录，不得重新引入两份别名表。变体按规范 ID 命中白名单、参与用量合并与
-品牌/档位/基准价格解析；编辑器勾选、`synced_models`、`exposed_models` 与路由的
+品牌/基准价格解析；编辑器勾选、`synced_models`、`exposed_models` 与路由的
 `upstream_model` 均保留 `/models` 返回的上游原名，路由 `virtual_model_id` 使用规范 ID。
 同一规范模型的多个上游 ID 不新增对外模型身份，但会生成多个可独立启停、排序和失败
 降级的 Route Candidate；`/models` 对外仍只返回一次规范模型 ID。
@@ -375,7 +403,7 @@ Rust `find_models_cn_model` 与费用匹配 `estimate_cost_at` 均已按此实�
 
 * 顶部 service-strip 通栏：代理服务状态（绿点 + 运行中 + 运行时长）、今日 Token 消耗总量、客户端接入（协议切换 + Base URL + 复制/测试 + 接入详情）、客户端 Token（掩码 + 显隐 + 复制）；
 * 主体 2×2 网格：左侧渠道账号占满两行，右上开放模型，右下 AI Agent 接入；
-* UI 可以基于 Semi Design 和当前 Design Tokens 调整，但不得擅自改变模块划分、功能或左侧菜单枚举；
+* UI 可以基于当前 Design Tokens 调整，但不得擅自改变模块划分、功能或左侧菜单枚举；
 * 1200×720 桌面窗口下概览页不得出现页面级滚动条；内容溢出应优先通过组件密度、字号层级和内部布局解决；
 * 跨页面视觉调整优先修改 Design Tokens 或共享组件，不要只为概览页复制一套局部样式；
 * 新增账号、管理账号、管理模型、查看接入详情等轻量导航动作使用链接按钮，不伪装成主操作按钮。
@@ -397,7 +425,7 @@ Rust `find_models_cn_model` 与费用匹配 `estimate_cost_at` 均已按此实�
 
 * 顶部 service-strip 完整展示代理状态、今日 Token、客户端接入和 Client Token；
 * 主体仍展示渠道账号、开放模型和 AI Agent 接入三个模块；
-* 渠道账号模块在空状态中展示简短引导，以及 LongCat、DeepSeek、Kimi、Qwen、Z.AI 和 OpenRouter 添加入口；
+* 渠道账号模块在空状态中展示简短引导，以及 ChatGPT API、LongCat、DeepSeek、Kimi、Qwen、Z.AI 和 OpenRouter 添加入口；
 * 开放模型模块展示与当前配置相符的空状态，引导用户添加账号并明确选择开放模型；
 * AI Agent 接入保持可用，允许用户提前查看或写入客户端配置；
 * 不展示独立的“开始接入”页面或大段三步说明。
@@ -469,6 +497,11 @@ Agent 默认只做非侵入接入，禁止照搬已有 Agent 的特殊扩展路�
 
 点击 Agent 卡片不应只复制一个 Base URL。应优先打开完整接入说明或配置抽屉。
 
+Agent 接入必须让用户在接入抽屉中显式选择默认模型：Claude Code 可分别选择主模型与快速模型
+（快速模型缺省等于主模型），其余 Agent 选择一个主模型；模型必须是当前 Agent 协议下已开放的
+规范模型 ID。未选择时由 Rust command 按模型 id 字典序取第一个可用模型；没有可用模型时禁用
+一键接入并提示先开放模型。不得再写入聚合模型或虚拟模型别名。
+
 ### 客户端归属标记头
 
 请求日志 / 用量中的”客户端”归属优先由请求头 `x-flowlet-client` 决定，再回退到
@@ -486,14 +519,13 @@ Agent 默认只做非侵入接入，禁止照搬已有 Agent 的特殊扩展路�
 `identify_client_from_json` 复用实时识别逻辑），已有归属的记录不会被覆盖。用户在
 “设置 → 维护 → 数据完整性检查”点击”开始检查”即可触发修复。
 
-### OpenCode / Pi 输入模态声明
+### OpenCode / Pi 输入模态声明（已移除）
 
-OpenCode 与 Pi 的模型输入模态声明是默认关闭的可选能力：开启后，Flowlet 必须按当前启用路由
-与本地模型目录计算 `flowlet-pro` / `flowlet-flash` 的真实聚合输入能力；OpenCode 写入模型级
-`modalities.input` / `modalities.output`，Pi 写入模型级 `input`，只声明客户端官方支持的
-`text` / `image`。没有图片候选时只声明 `text`，不得为了放开客户端附件入口而固定写死
-`image`；代理仍需在实际图片请求时再次按候选能力过滤。关闭能力时必须移除受管声明，恢复时
-还原接入前 Provider；OpenCode 需重启刷新能力缓存，Pi 打开模型选择器会重读 `models.json`。
+Flowlet 不再提供 OpenCode / Pi 的模型输入模态声明，也不提供 Claude Code `[1m]` 长上下文、
+DSH `contextWindow` / 输入模态声明等派生能力：这些能力都依赖「一个对外模型名对应异构上游
+混池」的聚合语义，聚合模型移除后不再成立。客户端在接入抽屉中显式选择默认模型，Flowlet
+只按该模型的真实能力转发请求；图片请求的候选过滤仍由代理按**单一模型**的目录能力执行
+（沿用 `model_input_modality_unsupported`），不依赖客户端声明。
 
 ### Pi 会话标识头
 
@@ -504,7 +536,8 @@ Claude Code（`x-claude-code-session-id`）那样直接读取。对这类 Agent�
 请求的 headers 组装完成后注入 `x-flowlet-session: <session_uuid>`（值来自
 `ctx.sessionManager.getSessionId()`，与 Pi 原生会话文件头行的 `id` 一致），并以已存在的
 `x-flowlet-client: pi` 标记头为门控，确保只污染该 Agent 发往 Flowlet 渠道的请求。高级能力统一
-收纳在接入抽屉折叠的“高级配置”区，默认全部不开启；关闭或未开启时可保留已有扩展文件，
+收纳在接入抽屉折叠的“高级配置”区（聚合模型移除后，该区只保留会话扩展与 MCP 服务器两类能力，
+不再有模型规格或输入模态声明开关），默认全部不开启；关闭或未开启时可保留已有扩展文件，
 恢复接入时按备份完整还原。基础 Provider 接入不依赖该扩展。
 
 代理侧由 Pi 的独立 Identity Adapter 以 `x-flowlet-client: pi` 为门控读取
@@ -534,14 +567,12 @@ DeepSeek Harness 使用其强制携带的 `deepseek-harness/` User-Agent 识别�
 `flowlet-session-bridge.mjs`：插件从 `llm/stream` 读取当前 `GenerateOptions.sessionId`，使用
 `AsyncLocalStorage` 只为当前 Flowlet Provider 发往本地 Base URL 的请求注入
 `x-flowlet-session`。插件必须随 Profile 配置一同备份、原子写入和恢复，不得修改 DSH npm 包或
-缓存；关闭选项会移除受管桥接，启用或关闭后需重启正在运行的 DSH。用户开启“模型规格声明”后，
-Flowlet 在 Provider 的 `models` 条目写入 `contextWindow: 1048576`（仅当 `flowlet-pro` /
-`flowlet-flash` 的所有启用路由都支持 1M 上下文时可开启），并按当前可用路由分别写入
-`input: [text]` 或 `input: [text, image]`；图片请求进入代理后必须再次按模型目录能力过滤候选，
-无图片候选时返回 `model_input_modality_unsupported`，未知能力不得冒险放行。不声明 `maxTokens`——DSH 会把模型
-条目 `maxTokens` 变成每请求自动携带的输出上限，聚合路由各上游上限不同，声明单一值会把能力
-锁死在最低值；该项随 settings.yaml 热加载，无需重启。代理以 DSH UA 为门控读取并在转发上游前
-剥离该头；静态 Provider Header、文件更新时间或最近活跃会话均不得用于猜测请求所属 session。
+缓存；关闭选项会移除受管桥接，启用或关闭后需重启正在运行的 DSH。聚合模型移除后，Flowlet
+不再写入 `contextWindow` 或模型 `input` 声明：默认模型由用户在接入抽屉中显式选择，能力判断
+以该单一模型的真实目录能力为准，图片请求仍由代理按模型目录能力过滤候选，无图片候选时返回
+`model_input_modality_unsupported`，未知能力不得冒险放行。代理以 DSH UA 为门控读取
+`x-flowlet-session` 并在转发上游前剥离该头；静态 Provider Header、文件更新时间或最近活跃会话
+均不得用于猜测请求所属 session。
 用户开启“MCP 服务器”（`configCapabilities` 中 kind 为 `list`）后，Flowlet 在每个已初始化的
 base-bundle DSH Profile 的 `cordis.patch.yml` 部署受管 `deepseek-harness-mcp-servers` 块：块内每个
 服务器一个 `- insert:` 的 `@deepseek-ai/dsh-mcp-client` 插件实例（stdio 或 streamable-http），
@@ -553,7 +584,7 @@ command / args / env / cwd / url / headers，camelCase）在 Rust 与前端同�
 受管块按 id 跨 Profile 合并回读当前列表。管理界面位于接入抽屉的独立「MCP 服务器」Tab
 （仅 DeepSeek Harness 显示，高级配置区不重复渲染），面板本地维护草稿、点「写回 Flowlet」
 一次性提交。env/headers 只写普通字符串，不生成 `!!js` 运行时注入表达式。该能力独立于
-精确会话关联与模型规格声明，三者开关互不影响；预设（Chrome DevTools / GitHub /
+精确会话关联，两者开关互不影响；预设（Chrome DevTools / GitHub /
 Sequential Thinking / 自定义）与字段约束见 `docs/deepseek-harness-integration.md`。
 
 ### Codex 系一键接入
@@ -563,21 +594,28 @@ Codex 与 Claude Code、OpenCode、Pi 同为标准一等 Agent（`AgentKind = "c
 手动配置片段。Codex CLI、ChatGPT 桌面端 Codex 与 VS Code Codex 插件共享同一份
 `~/.codex/config.toml` 与 `auth.json`，一键写入一次即覆盖三端，不需要分别配置。
 受管内容包括：`[model_providers.flowlet]`（`wire_api = "responses"`、本地 Base URL、
-`requires_openai_auth = true`）、顶层 `model = "flowlet-pro"` 与
+`requires_openai_auth = true`）、顶层 `model = "<接入抽屉中选择的主模型>"` 与
 `disable_response_storage = true`——后者是无状态 Responses 路由的**强制项**，
 防止 Codex 携带 `store`/`previous_response_id` 破坏多账号路由；Client Token 写入
 `auth.json` 的 `OPENAI_API_KEY`（不动系统环境变量，备份/恢复保留原有登录态字段）。
-`flowlet-pro` / `flowlet-flash` 是 Flowlet 私有聚合模型，不在 Codex 内置模型目录，
-必须额外声明模型元数据（上下文窗口、推理档位）：一键写入会生成
-`~/.codex/model-catalog.flowlet.json`（内容来自仓库根目录 `codex-models.json` 的
-内置快照，前端手动片段常量 `CODEX_MODEL_CATALOG_JSON` 需与其保持一致）并写入顶层
+聚合模型已移除：接入抽屉要求用户为 Codex 显式选择一个当前 `responses` 协议下已开放的
+规范模型作为 `model`；未传模型时 Rust command 按模型 id 字典序取第一个可用模型。
+Codex 使用自定义模型、不在内置目录中，必须额外声明模型元数据（上下文窗口、推理档位）：
+一键写入会**按所选模型动态生成**单条目 `~/.codex/model-catalog.flowlet.json`——
+`context_window` / `max_context_window` 取 `models-cn.json` 的 `limits.contextTokens`，
+`input_modalities` 始终包含 `text`、目录含 `image` 时追加，`supported_reasoning_levels` /
+`default_reasoning_level` 按 `capabilities.thinking` 给档位（支持推理：`low` / `medium` /
+`high` / `xhigh`、默认 `high`；否则 `low` / `medium` / `high`、默认 `medium`），
+`supports_reasoning_summaries` 跟随该能力；其余必需字段沿用固定常量；查不到模型时使用保守条目
+（`context_window: 128000`、`input_modalities: ["text"]`）并告警。同时写入顶层
 `model_catalog_json = "~/.codex/model-catalog.flowlet.json"`；该字段仅在 Codex 启动时
-读取一次，补写后需重启 Codex。生成文件名带 `flowlet` 前缀，避免覆盖 DeepSeek
-（`~/.codex/models.json`）或千问（`~/.codex/model-catalog.local.json`）的目录文件。
-模型目录是 Codex 启动时 serde 反序列化的必填字段集合，缺 `shell_type` 等字段会直接报错
-（`missing field ...`）；推理档位只使用 `none` / `minimal` / `low` / `medium` / `high` /
-`xhigh`，不使用 `max` / `ultra`（后者需 Codex ≥ 0.144）。字段清单见 `docs/config.md` 第 10 节，
-`src-tauri/src/core/codex_model_catalog.rs` 有对应回归测试。
+读取一次，补写后需重启 Codex。仓库根目录不再维护 `codex-models.json` 快照，
+前端手动配置片段的目录 JSON 必须与上述动态生成规则保持一致。生成文件名带 `flowlet` 前缀，
+避免覆盖 DeepSeek（`~/.codex/models.json`）或千问（`~/.codex/model-catalog.local.json`）的
+目录文件。模型目录是 Codex 启动时 serde 反序列化的必填字段集合，缺 `shell_type` 等字段会
+直接报错（`missing field ...`）；推理档位只使用 `none` / `minimal` / `low` / `medium` /
+`high` / `xhigh`，不使用 `max` / `ultra`（后者需 Codex ≥ 0.144）。字段清单见
+`docs/config.md` 第 10 节，`src-tauri/src/core/codex_model_catalog.rs` 有对应回归测试。
 Codex 的 User-Agent（`codex_cli_rs/`）可区分，归属走 UA 规则（config.json 默认集 +
 内置兜底规则），不需要 `x-flowlet-client` 标记头。
 
@@ -626,7 +664,7 @@ Flowlet 已完成前端目录正式化：`src/` 是唯一正式前端，使用 R
 
 * 不得重新引入 Mantine 组件、样式或旧前端 Hook；
 * 前端依赖方向保持 `pages -> features -> domains -> platform`，`shared` 不导入具体业务领域；
-* 优先使用 Semi 组件 props、Flowlet Design Tokens 和共享 UI 组件，再增加同目录 CSS Module；
+* 优先使用现有组件提供的 props、Flowlet Design Tokens 和共享 UI 组件，再增加同目录 CSS Module；
 * 页面或 feature 不得全局覆盖 `.semi-*`，不得依赖不断提高选择器优先级或 `!important` 解决样式冲突；
 * 无系统边框窗口的拖动区和窗口控制按钮是全局固定层；`SideSheet` / Drawer 必须使用 `src/shared/ui/overlayLayers.ts` 的共享层级，确保弹层标题、关闭按钮位于窗口标题层之上，不得在业务组件中临时堆叠 `z-index`；
 * 提高 `SideSheet` / Modal 层级时必须同步检查 Toast：Semi 静态 Toast 默认层级可能低于自定义弹层，必须保持 `Toast > 二级 Modal > SideSheet > 窗口标题层`，并验证弹层内的成功、警告和错误提示未被遮挡；
@@ -768,7 +806,7 @@ src/
 2. 新增渠道时，按 `docs/config.md` 第 8 节的步骤操作；
 3. 若运行时行为（热更新 / 需重启）发生变化，同步更新第 7 节；
 4. 若源码中反序列化结构（`channels_config.rs` / `config.rs`）发生变化，同步更新第 9 节；
-5. **默认值同步**：修改 `channels_config.default_exposed_models` 时，必须同步 `model-catalog.json` 中对应渠道的模型身份，或明确说明该预设为何不属于支持白名单；修改 `channels_config.flowlet_tiers` 时，必须同步 `src/domains/channel/types.ts` 中的 `FLOWLET_TIERS_BY_CHANNEL_MODEL`；修改 Rust 工厂默认值时同步 `src-tauri/src/core/config.rs`（详见 `docs/config.md`）。
+5. **默认值同步**：修改 `channels_config.default_exposed_models` 时，必须同步 `model-catalog.json` 中对应渠道的模型身份，或明确说明该预设为何不属于支持白名单；修改 Rust 工厂默认值时同步 `src-tauri/src/core/config.rs`（详见 `docs/config.md`）。
 
 ### 加载优先级
 

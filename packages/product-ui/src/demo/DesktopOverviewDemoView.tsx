@@ -93,10 +93,10 @@ export function DesktopOverviewDemoView({ zh, density = "default", onOpenUsage }
             />
           ))}</OverviewListView>
         </OverviewModuleCardView>}
-        models={<OverviewModuleCardView title={zh ? "聚合模型" : "Aggregate models"} meta={zh ? "共 2 个聚合模型" : "2 aggregate models"} action={zh ? "管理模型" : "Manage"}>
+        models={<OverviewModuleCardView title={zh ? "开放模型" : "Exposed models"} meta={zh ? "共 2 个模型" : "2 models"} action={zh ? "管理模型" : "Manage"}>
           <OverviewListView>
-            <OverviewListRowView logo={<img src="/flowlet-logo.png" alt="" />} title={<span className={styles.titleLine}><span>flowlet-pro</span><small>{zh ? "能力优先" : "Capability first"}</small></span>} subtitle={zh ? "2 / 2 个模型可用 · 2 / 2 个账号可用" : "2 / 2 models · 2 / 2 accounts"} trailing={<OverviewStatusPillView>{zh ? "可用" : "Ready"}</OverviewStatusPillView>} />
-            <OverviewListRowView logo={<img src="/flowlet-logo.png" alt="" />} title={<span className={styles.titleLine}><span>flowlet-flash</span><small>{zh ? "速度优先" : "Speed first"}</small></span>} subtitle={zh ? "4 / 4 个模型可用 · 3 / 3 个账号可用" : "4 / 4 models · 3 / 3 accounts"} trailing={<OverviewStatusPillView>{zh ? "可用" : "Ready"}</OverviewStatusPillView>} />
+            <OverviewListRowView logo={<img src="/icons/lobe/deepseek-color.svg" alt="" />} title={<span className={styles.titleLine}><span>deepseek-v4-pro</span><small>DeepSeek</small></span>} subtitle={zh ? "2 / 2 个模型可用 · 1 / 2 个账号可用" : "2 / 2 models · 1 / 2 accounts"} trailing={<OverviewStatusPillView tone="warning">{zh ? "部分可用" : "Partial"}</OverviewStatusPillView>} />
+            <OverviewListRowView logo={<img src="/icons/lobe/deepseek-color.svg" alt="" />} title={<span className={styles.titleLine}><span>deepseek-v4-flash</span><small>DeepSeek</small></span>} subtitle={zh ? "1 / 1 个模型可用 · 1 / 1 个账号可用" : "1 / 1 models · 1 / 1 accounts"} trailing={<OverviewStatusPillView>{zh ? "可用" : "Ready"}</OverviewStatusPillView>} />
           </OverviewListView>
         </OverviewModuleCardView>}
         agents={<OverviewModuleCardView title={zh ? "AI Agent 接入" : "AI agent access"}>

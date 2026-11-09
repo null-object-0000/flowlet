@@ -1,3 +1,5 @@
+import { useAntigravityAccounts, useAntigravityAccountActions } from "../../features/channel-accounts/useAntigravityAccounts";
+import { AntigravityAccountSideSheet } from "../../features/channel-accounts/AntigravityAccountView";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, Toast } from "@douyinfe/semi-ui-19";
@@ -29,6 +31,9 @@ export function OverviewPage() {
   const proxy = useProxyOverviewLifecycle(!accounts.isLoading);
   const hasAccounts = (accounts.data?.length ?? 0) > 0;
   const balanceSnapshots = useLatestBalanceSnapshots(hasAccounts);
+  const antigravityAccounts = useAntigravityAccounts();
+  const antigravityActions = useAntigravityAccountActions();
+  const [antigravitySheet, setAntigravitySheet] = useState<{ accountId: string | null } | null>(null);
   const codexAccounts = useCodexAccounts(hasAccounts);
   const codexAccountRefreshOne = useCodexAccountRefreshOne();
   const codexAccountAuthorization = useCodexAccountAuthorization();
@@ -103,7 +108,7 @@ export function OverviewPage() {
       {accounts.isError ? <Card>{t("加载渠道账号失败：{message}", { message: accounts.error.message })}</Card> : null}
 
       {hasAccounts && (routes.isLoading || bindConfig.isLoading) ? <Card>{t("正在加载模型和接入配置…")}</Card> : null}
-      {hasAccounts && routes.isError ? <Card>{t("加载聚合模型失败：{message}", { message: routes.error.message })}</Card> : null}
+      {hasAccounts && routes.isError ? <Card>{t("加载开放模型失败：{message}", { message: routes.error.message })}</Card> : null}
       {hasAccounts && bindConfig.isError ? <Card>{t("加载客户端配置失败：{message}", { message: bindConfig.error.message })}</Card> : null}
 
       {!accounts.isLoading && !accounts.isError ? (
@@ -112,6 +117,9 @@ export function OverviewPage() {
           channels={presets.data ?? []}
           balanceSnapshots={balanceSnapshots.data ?? []}
           codexAccounts={codexAccounts.data?.accounts}
+          antigravityAccounts={antigravityAccounts.data?.accounts}
+          antigravityError={antigravityAccounts.isError}
+          onOpenAntigravity={(accountId) => setAntigravitySheet({ accountId })}
           routes={routes.data ?? []}
           baseUrl={baseUrl}
           bindConfig={bindConfig.data}
@@ -155,8 +163,33 @@ export function OverviewPage() {
         onSyncBalance={(accountId) => accountActions.queryBalance.mutateAsync(accountId)}
         onScrape={(accountId) => accountActions.scrapeBalance.mutateAsync(accountId)}
         onAuthorizeChatGpt={authorizeChatGptFromDrawer}
-        authorizationBusy={codexAccountAuthorization.isPending}
+        onAuthorizeAntigravity={async () => { await antigravityActions.authorize.mutateAsync(); }}
+        authorizationBusy={codexAccountAuthorization.isPending || antigravityActions.authorize.isPending}
       />
+
+      {antigravitySheet ? <AntigravityAccountSideSheet
+        accounts={antigravityAccounts.data?.accounts ?? []}
+        accountId={antigravitySheet.accountId}
+        loading={antigravityAccounts.isFetching}
+        error={antigravityAccounts.error?.message}
+        onRefresh={() => { void antigravityAccounts.refetch(); }}
+        authorizationBusy={antigravityActions.authorize.isPending}
+        deletionBusy={antigravityActions.remove.isPending}
+        actionError={antigravityActions.authorize.error?.message || antigravityActions.remove.error?.message}
+        onAuthorize={() => {
+          void antigravityActions.authorize.mutateAsync().then((report) => {
+            setAntigravitySheet({ accountId: report.account_id });
+            Toast.success(t("Antigravity 账号授权成功"));
+          }).catch(() => { /* Mutation error is displayed in the sheet. */ });
+        }}
+        onDelete={(accountId) => {
+          void antigravityActions.remove.mutateAsync(accountId).then(() => {
+            setAntigravitySheet({ accountId: null });
+            Toast.success(t("Antigravity 授权已移除"));
+          }).catch(() => { /* Mutation error is displayed in the sheet. */ });
+        }}
+        onClose={() => setAntigravitySheet(null)}
+      /> : null}
 
       {codexSheetVisible ? (
         <CodexAccountSideSheet

@@ -25,6 +25,9 @@ export type ProtocolType = "openai" | "anthropic" | "responses";
 
 export type AuthStrategy = "bearer" | "x_api_key";
 
+/** OpenAI API project-key channel, separate from Codex subscription observation. */
+export const OPENAI_API_CHANNEL_ID = "openai-api";
+
 export const CUSTOM_CHANNEL_ID = "custom";
 
 /** OpenRouter 聚合渠道 ID。OpenRouter 的 `/models` 返回全部主流模型（带
@@ -65,6 +68,12 @@ export const CHATGPT_PSEUDO_PRESET: ChannelPreset = {
   created_at: "",
   updated_at: "",
 };
+
+/** 仅供新增抽屉授权观测，不注册代理渠道或模型路由。 */
+export const ANTIGRAVITY_PSEUDO_PRESET: ChannelPreset = {
+  ...CHATGPT_PSEUDO_PRESET, id: "antigravity", name: "Antigravity", vendor: "google",
+};
+
 
 export type ChannelPreset = {
   id: string;

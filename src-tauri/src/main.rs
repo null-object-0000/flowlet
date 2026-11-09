@@ -125,10 +125,7 @@ mod single_instance {
             let lock_path = dir.join("flowlet.lock");
 
             let first = acquire_at(&lock_path).expect("首次加锁应成功");
-            assert!(
-                acquire_at(&lock_path).is_none(),
-                "持锁期间第二次加锁应失败"
-            );
+            assert!(acquire_at(&lock_path).is_none(), "持锁期间第二次加锁应失败");
 
             drop(first);
             let _second = acquire_at(&lock_path).expect("释放后再次加锁应成功");

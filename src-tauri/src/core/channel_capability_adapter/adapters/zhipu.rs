@@ -19,6 +19,7 @@ pub(super) const ADAPTER: ChannelCapabilityAdapter = ChannelCapabilityAdapter {
     model_sync: sync,
     balance_query: None,
     strips_openai_v1_path: true,
+    uses_upstream_proxy_for_models: false,
     // Z.AI 按量付费账号由官方控制台自动同步：资源包管理页会同时发起
     // tokenAccounts/list/my（资源包）与 account/query-customer-account-report（钱包）。
     console_scrape: ConsoleScrapeAdapter::ResourceModes(&[("pay_as_you_go", "paygo")]),

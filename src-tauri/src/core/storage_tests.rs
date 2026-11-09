@@ -2,7 +2,7 @@ use super::Storage;
 use crate::core::channels_config::{ChannelsConfig, DEFAULT_CONFIG_JSON};
 use crate::core::config::{
     ChannelAccount, ChannelPreset, DeviceUsageBreakdownRow, LogsFilter, ModelPrice, ProtocolType,
-    RequestLogInput, RouteCandidate, UsageRecordInput, UsageSummaryRow,
+    RequestLogInput, RouteCandidate, UsageRecordInput, UsageSummaryRow, VirtualModel,
 };
 use crate::core::device_identity::{
     DailyUsageTotal, HourlyUsageTotal, SyncedAgentInstallation, SyncedAgentInteraction,
@@ -296,6 +296,7 @@ fn request_log_for_repair(
         method: "POST".to_string(),
         path: "/v1/chat/completions".to_string(),
         upstream_url: None,
+        upstream_proxy_used: None,
         status: Some(200),
         latency_ms: Some(20),
         is_stream: false,
@@ -483,6 +484,7 @@ fn lists_only_main_opencode_sessions_and_loads_children_separately() {
         method: "POST".to_string(),
         path: "/v1/chat/completions".to_string(),
         upstream_url: Some("https://api.longcat.chat/openai/v1/chat/completions".to_string()),
+        upstream_proxy_used: None,
         status: Some(200),
         latency_ms: Some(20),
         is_stream: true,
@@ -1032,6 +1034,7 @@ data: [DONE]
             method: "POST".to_string(),
             path: "/v1/chat/completions".to_string(),
             upstream_url: Some("https://api.longcat.chat/openai/v1/chat/completions".to_string()),
+            upstream_proxy_used: None,
             status: Some(200),
             latency_ms: Some(50),
             is_stream: true,
@@ -1666,6 +1669,7 @@ fn body_request_log(request_id: &str) -> RequestLogInput {
         method: "POST".to_string(),
         path: "/v1/chat/completions".to_string(),
         upstream_url: None,
+        upstream_proxy_used: None,
         status: Some(200),
         latency_ms: Some(20),
         is_stream: false,
@@ -3467,7 +3471,7 @@ fn usage_breakdown_for_sync_includes_historical_native_model_usage() {
 }
 
 #[test]
-fn usage_breakdown_for_sync_excludes_flowlet_aggregate_aliases() {
+fn usage_breakdown_for_sync_excludes_legacy_aggregate_aliases() {
     let connection = Connection::open_in_memory().expect("open in-memory sqlite");
     let storage = Storage::from_connection_for_test(connection);
     storage.migrate().expect("migrate schema");
@@ -3484,7 +3488,7 @@ fn usage_breakdown_for_sync_excludes_flowlet_aggregate_aliases() {
                        'flowlet-pro', 120, 80, 0, 20, 5, 140, datetime('now'))",
             [],
         )
-        .expect("insert aggregate alias event");
+        .expect("insert legacy aggregate alias event");
 
     let rows = storage
         .usage_breakdown_for_sync(90)
@@ -3760,7 +3764,12 @@ fn prune_balance_snapshots_ignores_unparseable_timestamps() {
     let storage = snapshot_test_storage();
     // julianday() 解析失败返回 NULL，`NULL < x` 不为真，因此格式异常的行不会被误删。
     storage
-        .save_balance_snapshot(&snapshot_row("broken", "account-a", "not-a-timestamp", None))
+        .save_balance_snapshot(&snapshot_row(
+            "broken",
+            "account-a",
+            "not-a-timestamp",
+            None,
+        ))
         .unwrap();
 
     let (expired, _) = storage.prune_balance_snapshots(0, 0).unwrap();
@@ -3938,4 +3947,531 @@ fn migrate_drops_project_management_tables_and_keeps_unrelated_data() {
         )
         .expect("count channel_accounts");
     assert_eq!(channel_accounts, 1, "渠道账号表必须保留");
+}
+
+#[test]
+fn openai_api_preset_upgrade_preserves_accounts_and_is_idempotent() {
+    let path = std::env::temp_dir().join(format!(
+        "flowlet-openai-upgrade-{}.sqlite",
+        uuid::Uuid::new_v4()
+    ));
+    let storage = Storage::open(&path).unwrap();
+    let json = serde_json::from_str(DEFAULT_CONFIG_JSON).unwrap();
+    let config = ChannelsConfig::from_config_json(&json).unwrap();
+    let legacy: Vec<_> = config
+        .presets
+        .iter()
+        .filter(|p| p.id != "openai-api")
+        .cloned()
+        .collect();
+    storage.save_channel_presets(&legacy).unwrap();
+    let account = ChannelAccount {
+        id: "legacy-account".into(),
+        channel_id: "deepseek".into(),
+        api_key: "preserved-key".into(),
+        base_url_override: Some("https://example.test/v1".into()),
+        ..Default::default()
+    };
+    storage.save_channel_accounts(&[account.clone()]).unwrap();
+    for _ in 0..2 {
+        storage.ensure_missing_presets(&config.presets).unwrap();
+        storage
+            .sync_preset_maintained_config(&config.presets)
+            .unwrap();
+    }
+    let presets = storage.list_channel_presets().unwrap();
+    assert_eq!(presets.len(), config.presets.len());
+    let preset = presets.iter().find(|p| p.id == "openai-api").unwrap();
+    assert_eq!(preset.openai_base_url, "https://api.openai.com/v1");
+    assert_eq!(
+        preset.supported_protocols,
+        vec![ProtocolType::OpenAi, ProtocolType::Responses]
+    );
+    assert!(!preset.supports_balance_query);
+    let kept = storage.list_channel_accounts().unwrap();
+    assert_eq!(kept[0].api_key, account.api_key);
+    assert_eq!(kept[0].base_url_override, account.base_url_override);
+    drop(storage);
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+    }
+}
+
+#[test]
+fn removing_openai_console_sync_preserves_credentials_and_custom_endpoints() {
+    let storage = Storage::from_connection_for_test(Connection::open_in_memory().unwrap());
+    storage.migrate().unwrap();
+    let accounts = vec![
+        ChannelAccount {
+            id: "official-openai".into(),
+            channel_id: "openai-api".into(),
+            api_key: "preserved".into(),
+            resource_sync_mode: "auto".into(),
+            ..Default::default()
+        },
+        ChannelAccount {
+            id: "relay-openai".into(),
+            channel_id: "openai-api".into(),
+            api_key: "relay-preserved".into(),
+            resource_sync_mode: "auto".into(),
+            base_url_override: Some("https://relay.example/v1".into()),
+            ..Default::default()
+        },
+    ];
+    storage.save_channel_accounts(&accounts).unwrap();
+    for _ in 0..2 {
+        storage.migrate().unwrap();
+    }
+    let actual = storage.list_channel_accounts().unwrap();
+    for expected in accounts {
+        let got = actual.iter().find(|item| item.id == expected.id).unwrap();
+        assert_eq!(got.api_key, expected.api_key);
+        assert_eq!(got.base_url_override, expected.base_url_override);
+        assert_eq!(got.exposed_models, expected.exposed_models);
+        assert_eq!(got.resource_sync_mode, "manual");
+    }
+}
+
+#[test]
+fn vibetoken_preset_upgrade_preserves_accounts_and_is_idempotent() {
+    let path = std::env::temp_dir().join(format!(
+        "flowlet-vibetoken-upgrade-{}.sqlite",
+        uuid::Uuid::new_v4()
+    ));
+    let storage = Storage::open(&path).unwrap();
+    let json = serde_json::from_str(DEFAULT_CONFIG_JSON).unwrap();
+    let config = ChannelsConfig::from_config_json(&json).unwrap();
+    let legacy: Vec<_> = config
+        .presets
+        .iter()
+        .filter(|p| p.id != "vibetoken")
+        .cloned()
+        .collect();
+    storage.save_channel_presets(&legacy).unwrap();
+    let account = ChannelAccount {
+        id: "legacy-account".into(),
+        channel_id: "deepseek".into(),
+        api_key: "preserved-key".into(),
+        base_url_override: Some("https://example.test/v1".into()),
+        ..Default::default()
+    };
+    storage.save_channel_accounts(&[account.clone()]).unwrap();
+    let route = RouteCandidate {
+        id: "legacy-route".into(),
+        channel_id: "deepseek".into(),
+        account_id: account.id.clone(),
+        virtual_model_id: "deepseek-v4-pro".into(),
+        upstream_model: "deepseek-v4-pro".into(),
+        enabled: false,
+        priority: 17,
+        ..Default::default()
+    };
+    storage.save_route_candidates(&[route.clone()]).unwrap();
+    for _ in 0..2 {
+        storage.ensure_missing_presets(&config.presets).unwrap();
+        storage
+            .sync_preset_maintained_config(&config.presets)
+            .unwrap();
+    }
+    let presets = storage.list_channel_presets().unwrap();
+    assert_eq!(presets.len(), config.presets.len());
+    let preset = presets.iter().find(|p| p.id == "vibetoken").unwrap();
+    assert_eq!(preset.openai_base_url, "https://vibetoken.cn/v1");
+    assert_eq!(
+        preset.supported_protocols,
+        vec![ProtocolType::OpenAi, ProtocolType::Responses]
+    );
+    assert!(preset.supports_balance_query);
+    let kept = storage.list_channel_accounts().unwrap();
+    assert_eq!(kept[0].api_key, account.api_key);
+    assert_eq!(kept[0].base_url_override, account.base_url_override);
+    let routes = storage.list_route_candidates().unwrap();
+    assert_eq!(routes[0].priority, route.priority);
+    assert_eq!(routes[0].enabled, route.enabled);
+    // Existing preset runtime fields are maintained as well.
+    let mut stale = preset.clone();
+    stale.supported_protocols = vec![ProtocolType::Anthropic];
+    stale.openai_base_url = "https://obsolete.example".into();
+    storage.save_channel_presets(&[stale]).unwrap();
+    storage
+        .sync_preset_maintained_config(&config.presets)
+        .unwrap();
+    let maintained = storage.list_channel_presets().unwrap();
+    assert_eq!(maintained[0].openai_base_url, preset.openai_base_url);
+    assert_eq!(
+        maintained[0].supported_protocols,
+        preset.supported_protocols
+    );
+    drop(storage);
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+    }
+}
+
+// ─── 旧聚合模型路由迁移（聚合能力移除） ─────────────────────────────────────
+
+fn seed_route_row(
+    storage: &Storage,
+    id: &str,
+    virtual_model_id: &str,
+    channel_id: &str,
+    account_id: &str,
+    upstream_model: &str,
+    client_protocol: &str,
+    priority: i64,
+    enabled: bool,
+    created_at: &str,
+) {
+    let connection = storage.connection.lock().unwrap();
+    connection
+        .execute(
+            "INSERT INTO virtual_model_routes (
+                id, virtual_model_id, channel_id, account_id, upstream_model,
+                client_protocol, priority, enabled, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
+            rusqlite::params![
+                id,
+                virtual_model_id,
+                channel_id,
+                account_id,
+                upstream_model,
+                client_protocol,
+                priority,
+                enabled as i64,
+                created_at,
+            ],
+        )
+        .expect("seed route row");
+}
+
+fn route_snapshot(storage: &Storage) -> Vec<(String, String, String, String, String, i64, bool)> {
+    storage
+        .list_route_candidates()
+        .unwrap()
+        .into_iter()
+        .map(|route| {
+            (
+                route.id,
+                route.virtual_model_id,
+                route.channel_id,
+                route.account_id,
+                route.upstream_model,
+                route.priority,
+                route.enabled,
+            )
+        })
+        .collect()
+}
+
+fn legacy_route_migration_storage() -> Storage {
+    let storage = Storage::from_connection_for_test(Connection::open_in_memory().unwrap());
+    storage.migrate().expect("migrate base schema");
+    storage
+}
+
+#[test]
+fn migrate_rewrites_legacy_aggregate_routes_to_direct_models() {
+    let storage = legacy_route_migration_storage();
+    // 旧聚合模型：一个对外名对应异构上游（deepseek / LongCat / flash）。
+    seed_route_row(
+        &storage,
+        "route-lc",
+        "flowlet-pro",
+        "longcat",
+        "account-lc",
+        "LongCat-2.0",
+        "openai",
+        10,
+        true,
+        "2026-01-01T00:00:00Z",
+    );
+    seed_route_row(
+        &storage,
+        "route-ds",
+        "flowlet-pro",
+        "deepseek",
+        "account-ds",
+        "deepseek-v4-pro",
+        "openai",
+        0,
+        true,
+        "2026-01-01T00:00:00Z",
+    );
+    seed_route_row(
+        &storage,
+        "route-flash",
+        "flowlet-flash",
+        "deepseek",
+        "account-ds",
+        "deepseek-v4-flash",
+        "anthropic",
+        0,
+        false,
+        "2026-01-01T00:00:00Z",
+    );
+
+    storage.migrate().expect("run legacy aggregate migration");
+
+    let routes = storage.list_route_candidates().unwrap();
+    let by_id = |id: &str| routes.iter().find(|route| route.id == id).unwrap();
+    // LongCat-2.0 保留目录里的原始大小写，而不是 canonical_model_key 的小写结果。
+    assert_eq!(by_id("route-lc").virtual_model_id, "LongCat-2.0");
+    assert_eq!(by_id("route-ds").virtual_model_id, "deepseek-v4-pro");
+    assert_eq!(by_id("route-flash").virtual_model_id, "deepseek-v4-flash");
+    assert!(routes
+        .iter()
+        .all(|route| !route.virtual_model_id.starts_with("flowlet-")));
+    // 去重/重排不改变每个模型的协议与启停状态。
+    assert_eq!(
+        by_id("route-flash").client_protocol,
+        ProtocolType::Anthropic
+    );
+    assert!(!by_id("route-flash").enabled);
+
+    // 幂等：再跑一次不再有任何数据变化。
+    let before = route_snapshot(&storage);
+    storage.migrate().expect("rerun migration");
+    assert_eq!(route_snapshot(&storage), before);
+}
+
+#[test]
+fn migrate_dedupes_legacy_aggregate_routes_and_merges_enabled() {
+    let storage = legacy_route_migration_storage();
+    // 同一 (渠道, 账号, 上游模型, 协议) 的重复聚合路由：保留 priority 最小者，enabled 取任一。
+    seed_route_row(
+        &storage,
+        "route-a",
+        "flowlet-pro",
+        "deepseek",
+        "account-a",
+        "deepseek-v4-pro",
+        "openai",
+        2,
+        false,
+        "2026-01-01T00:00:00Z",
+    );
+    seed_route_row(
+        &storage,
+        "route-b",
+        "flowlet-pro",
+        "deepseek",
+        "account-a",
+        "deepseek-v4-pro",
+        "openai",
+        5,
+        true,
+        "2026-01-02T00:00:00Z",
+    );
+    seed_route_row(
+        &storage,
+        "route-c",
+        "flowlet-pro",
+        "deepseek",
+        "account-b",
+        "deepseek-v4-pro",
+        "openai",
+        3,
+        true,
+        "2026-01-03T00:00:00Z",
+    );
+
+    storage.migrate().expect("run legacy aggregate migration");
+
+    let routes = storage.list_route_candidates().unwrap();
+    let ids: Vec<&str> = routes.iter().map(|route| route.id.as_str()).collect();
+    assert_eq!(ids, vec!["route-a", "route-c"]);
+    let kept = &routes[0];
+    assert_eq!(kept.virtual_model_id, "deepseek-v4-pro");
+    // enabled 取任一行：route-a 原本关闭、route-b 开启 → 合并后开启。
+    assert!(kept.enabled);
+    // 重排后按原 priority/created_at/id 顺序赋 0..n。
+    assert_eq!(
+        routes
+            .iter()
+            .map(|route| route.priority)
+            .collect::<Vec<_>>(),
+        vec![0, 1]
+    );
+}
+
+#[test]
+fn migrate_merges_legacy_routes_that_collide_with_existing_direct_routes() {
+    let storage = legacy_route_migration_storage();
+    // 用户此前已有一条同 (渠道, 账号, 上游, 协议) 的直接路由，迁移后两条会变成同一身份。
+    seed_route_row(
+        &storage,
+        "route-direct",
+        "deepseek-v4-pro",
+        "deepseek",
+        "account-a",
+        "deepseek-v4-pro",
+        "openai",
+        4,
+        true,
+        "2026-01-02T00:00:00Z",
+    );
+    seed_route_row(
+        &storage,
+        "route-legacy",
+        "flowlet-pro",
+        "deepseek",
+        "account-a",
+        "deepseek-v4-pro",
+        "openai",
+        0,
+        false,
+        "2026-01-01T00:00:00Z",
+    );
+
+    storage.migrate().expect("run legacy aggregate migration");
+
+    let routes = storage.list_route_candidates().unwrap();
+    assert_eq!(routes.len(), 1);
+    // priority 最小者（旧的聚合路由）保留，enabled 合并为开启。
+    assert_eq!(routes[0].id, "route-legacy");
+    assert_eq!(routes[0].virtual_model_id, "deepseek-v4-pro");
+    assert_eq!(routes[0].priority, 0);
+    assert!(routes[0].enabled);
+}
+
+#[test]
+fn migrate_reorders_legacy_route_priorities_per_model_and_protocol() {
+    let storage = legacy_route_migration_storage();
+    for (id, account, priority) in [
+        ("route-high", "account-a", 9),
+        ("route-low", "account-b", 1),
+        ("route-mid", "account-c", 5),
+    ] {
+        seed_route_row(
+            &storage,
+            id,
+            "flowlet-pro",
+            "deepseek",
+            account,
+            "deepseek-v4-pro",
+            "openai",
+            priority,
+            true,
+            "2026-01-01T00:00:00Z",
+        );
+    }
+    // 无关的直接模型路由保持原 priority（迁移只重排含聚合行的分组）。
+    seed_route_row(
+        &storage,
+        "route-unrelated",
+        "kimi-k3",
+        "kimi",
+        "account-kimi",
+        "kimi-k3",
+        "openai",
+        7,
+        true,
+        "2026-01-01T00:00:00Z",
+    );
+
+    storage.migrate().expect("run legacy aggregate migration");
+
+    let routes = storage.list_route_candidates().unwrap();
+    let priority_of = |id: &str| routes.iter().find(|route| route.id == id).unwrap().priority;
+    assert_eq!(priority_of("route-low"), 0);
+    assert_eq!(priority_of("route-mid"), 1);
+    assert_eq!(priority_of("route-high"), 2);
+    assert_eq!(priority_of("route-unrelated"), 7);
+}
+
+#[test]
+fn migrate_keeps_legacy_routes_with_unknown_upstream_models() {
+    let storage = legacy_route_migration_storage();
+    // 上游模型不在 model-catalog.json：无法确定直接模型身份，原行保留（之后被路由身份校验过滤）。
+    seed_route_row(
+        &storage,
+        "route-unknown",
+        "flowlet-flash",
+        "custom",
+        "account-custom",
+        "not-a-catalog-model",
+        "openai",
+        0,
+        true,
+        "2026-01-01T00:00:00Z",
+    );
+    seed_route_row(
+        &storage,
+        "route-valid",
+        "flowlet-pro",
+        "deepseek",
+        "account-ds",
+        "deepseek-v4-pro",
+        "openai",
+        0,
+        true,
+        "2026-01-01T00:00:00Z",
+    );
+
+    storage.migrate().expect("run legacy aggregate migration");
+
+    let routes = storage.list_route_candidates().unwrap();
+    let unknown = routes
+        .iter()
+        .find(|route| route.id == "route-unknown")
+        .unwrap();
+    assert_eq!(unknown.virtual_model_id, "flowlet-flash");
+    // 可迁移的行照常改写。
+    assert_eq!(
+        routes
+            .iter()
+            .find(|route| route.id == "route-valid")
+            .unwrap()
+            .virtual_model_id,
+        "deepseek-v4-pro"
+    );
+
+    // 幂等：未知上游行不会被反复改写，也不会阻止第二次迁移。
+    let before = route_snapshot(&storage);
+    storage.migrate().expect("rerun migration");
+    assert_eq!(route_snapshot(&storage), before);
+}
+
+#[test]
+fn migrate_removes_legacy_aggregate_virtual_models() {
+    let storage = legacy_route_migration_storage();
+    let now = "2026-01-01T00:00:00Z";
+    let virtual_model = |id: &str, name: &str| VirtualModel {
+        id: id.to_string(),
+        name: name.to_string(),
+        protocol_type: ProtocolType::OpenAi,
+        routing_strategy: "model_order_then_round_robin".to_string(),
+        enabled: true,
+        created_at: now.to_string(),
+        updated_at: now.to_string(),
+    };
+    storage
+        .save_virtual_models(&[
+            virtual_model("flowlet-pro", "Flowlet Pro"),
+            virtual_model("flowlet-flash", "Flowlet Flash"),
+            // 非历史别名行必须保留
+            virtual_model("auto", "Auto"),
+        ])
+        .expect("seed legacy virtual models");
+
+    storage.migrate().expect("run legacy aggregate migration");
+
+    let ids: Vec<String> = storage
+        .list_virtual_models()
+        .unwrap()
+        .into_iter()
+        .map(|model| model.id)
+        .collect();
+    // 只清掉历史聚合别名行，其他虚拟模型行保留，表结构/类型不变。
+    assert_eq!(ids, vec!["auto".to_string()]);
+
+    // 幂等：再跑一次不再有任何变化。
+    storage.migrate().expect("rerun migration");
+    let ids_after: Vec<String> = storage
+        .list_virtual_models()
+        .unwrap()
+        .into_iter()
+        .map(|model| model.id)
+        .collect();
+    assert_eq!(ids_after, ids);
 }

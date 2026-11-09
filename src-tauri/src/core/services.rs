@@ -1,7 +1,5 @@
 use super::channels_config::{ChannelsConfig, DEFAULT_CONFIG_JSON};
-use super::config::{
-    ChannelAccount, LogCaptureConfig, ProtocolType, ProxyBindConfig, RouteCandidate, VirtualModel,
-};
+use super::config::{LogCaptureConfig, ProxyBindConfig, RouteCandidate};
 use super::job_runtime::JobRuntime;
 use super::presets::builtin_channel_presets;
 use super::proxy::{extract_log_capture, read_config_raw, ProxyController, ProxySharedConfig};
@@ -28,6 +26,7 @@ pub struct FlowletServices {
     pub config_path: PathBuf,
     pub channels_config: Arc<Mutex<ChannelsConfig>>,
     pub upstream_timeout_seconds: u64,
+    require_client_auth: bool,
 }
 
 impl FlowletServices {
@@ -37,15 +36,19 @@ impl FlowletServices {
         let storage = Storage::open(db_path).map_err(|error| error.to_string())?;
 
         initialize_channel_presets(&storage, &channels_config)?;
-        let snapshot = load_runtime_snapshot(&storage, &channels_config)?;
-        super::storage::storage_tasks::rebuild_price_table(&storage, &config_path);
 
         let config_value = read_config_raw(&config_path)
             .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok());
-        let capture = config_value
-            .as_ref()
-            .map(extract_log_capture)
-            .unwrap_or_default();
+        let capture = storage
+            .get_app_meta("log_capture_config")
+            .map_err(|error| error.to_string())?
+            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .unwrap_or_else(|| {
+                config_value
+                    .as_ref()
+                    .map(extract_log_capture)
+                    .unwrap_or_default()
+            });
         let bind_config = config_value
             .as_ref()
             .and_then(parse_bind_config)
@@ -69,6 +72,8 @@ impl FlowletServices {
             tracing::warn!(error = %error, "忽略无效的上游代理配置，回退直连");
         }
 
+        let snapshot = load_runtime_snapshot(&storage, &channels_config)?;
+        super::storage::storage_tasks::rebuild_price_table(&storage, &config_path);
         Ok(Self {
             proxy: ProxyController {
                 inner: Arc::new(Mutex::new(super::proxy::ProxyRuntime::default())),
@@ -82,18 +87,22 @@ impl FlowletServices {
             config_path,
             channels_config: Arc::new(Mutex::new(channels_config)),
             upstream_timeout_seconds: DEFAULT_UPSTREAM_TIMEOUT_SECONDS,
+            require_client_auth: false,
         })
+    }
+
+    /// Require a client API key when this service is exposed by the server host.
+    pub fn with_client_auth(mut self) -> Self {
+        self.require_client_auth = true;
+        self
     }
 
     pub async fn start_proxy(&self) -> Result<(), String> {
         if self.proxy.status().running {
             return Ok(());
         }
-        let capture = self
-            .capture
-            .lock()
-            .map(|value| value.clone())
-            .unwrap_or_default();
+        // 与代理共享同一个 Arc：设置页保存捕获配置后，下一次请求立即生效。
+        let capture = self.capture.clone();
         let bind_addr = self
             .bind_config
             .lock()
@@ -110,7 +119,7 @@ impl FlowletServices {
         };
 
         self.proxy
-            .start_with_bind(
+            .start_with_bind_auth(
                 shared,
                 self.storage.clone(),
                 self.upstream_timeout_seconds,
@@ -118,6 +127,7 @@ impl FlowletServices {
                 &bind_addr,
                 RateLimiter::new(600),
                 self.config_path.clone(),
+                self.require_client_auth,
             )
             .await
             .map_err(|error| error.to_string())
@@ -188,38 +198,29 @@ fn load_runtime_snapshot(
     let mut accounts = storage
         .list_channel_accounts()
         .map_err(|error| error.to_string())?;
-    let cleaned_accounts: Vec<ChannelAccount> = accounts
-        .iter()
-        .filter(|account| !(account.id == "account-default" && account.api_key.trim().is_empty()))
-        .cloned()
-        .collect();
-    if cleaned_accounts.len() != accounts.len() {
-        storage
-            .save_channel_accounts(&cleaned_accounts)
-            .map_err(|error| error.to_string())?;
-        accounts = cleaned_accounts;
-    }
-
-    let mut virtual_models = storage
-        .list_virtual_models()
-        .map_err(|error| error.to_string())?;
-    let now = chrono::Utc::now().to_rfc3339();
-    for (id, name) in [
-        ("flowlet-pro", "Flowlet Pro"),
-        ("flowlet-flash", "Flowlet Flash"),
-    ] {
-        if !virtual_models.iter().any(|model| model.id == id) {
-            virtual_models.push(VirtualModel {
-                id: id.to_string(),
-                name: name.to_string(),
-                protocol_type: ProtocolType::OpenAi,
-                routing_strategy: "model_order_then_round_robin".to_string(),
-                enabled: true,
-                created_at: now.clone(),
-                updated_at: now.clone(),
-            });
+    let original_count = accounts.len();
+    accounts
+        .retain(|account| !(account.id == "account-default" && account.api_key.trim().is_empty()));
+    let mut accounts_changed = accounts.len() != original_count;
+    let proxy_active = super::upstream_proxy::current().is_active();
+    for account in &mut accounts {
+        if account.use_upstream_proxy.is_none() {
+            let used_model_proxy =
+                super::channel_capability_adapter::channel_adapter(&account.channel_id)
+                    .is_some_and(|adapter| adapter.uses_upstream_proxy_for_models);
+            account.use_upstream_proxy = Some(proxy_active && used_model_proxy);
+            accounts_changed = true;
         }
     }
+    if accounts_changed {
+        storage
+            .save_channel_accounts(&accounts)
+            .map_err(|error| error.to_string())?;
+    }
+
+    let virtual_models = storage
+        .list_virtual_models()
+        .map_err(|error| error.to_string())?;
     storage
         .save_virtual_models(&virtual_models)
         .map_err(|error| error.to_string())?;
@@ -326,6 +327,15 @@ pub fn merge_builtin_config(mut external: ChannelsConfig) -> ChannelsConfig {
             external.presets.push(preset);
         }
     }
+    // Ignore obsolete ChatGPT API browser-sync settings from older portable configs.
+    external.scrape.remove("openai-api");
+    if let Some(preset) = external
+        .presets
+        .iter_mut()
+        .find(|preset| preset.id == "openai-api")
+    {
+        preset.supports_scrape_balance = false;
+    }
     for price in builtin.prices {
         if !external.prices.iter().any(|current| {
             current.channel_id == price.channel_id && current.upstream_model == price.upstream_model
@@ -354,6 +364,66 @@ fn parse_channels_config(content: &str, source: &str) -> Result<ChannelsConfig, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vibetoken_is_merged_into_legacy_external_config() {
+        let mut external = parse_channels_config(DEFAULT_CONFIG_JSON, "test").unwrap();
+        external.presets.retain(|p| p.id != "vibetoken");
+        external.endpoints.remove("vibetoken");
+        for _ in 0..2 {
+            external = merge_builtin_config(external);
+        }
+        assert_eq!(
+            external
+                .presets
+                .iter()
+                .filter(|p| p.id == "vibetoken")
+                .count(),
+            1
+        );
+        assert_eq!(
+            external.vibetoken_balance_endpoint(),
+            "https://vibetoken.cn/api/v1/billing/balance"
+        );
+        assert_eq!(
+            external.models_endpoint_url("vibetoken").as_deref(),
+            Some("https://vibetoken.cn/v1/models")
+        );
+        external.endpoints.remove("vibetoken");
+        assert_eq!(
+            external.models_endpoint_url("vibetoken").as_deref(),
+            Some("https://vibetoken.cn/v1/models")
+        );
+        assert_eq!(
+            external.vibetoken_balance_endpoint(),
+            "https://vibetoken.cn/api/v1/billing/balance"
+        );
+    }
+
+    #[test]
+    fn openai_browser_sync_is_removed_even_from_legacy_config() {
+        let mut external = parse_channels_config(DEFAULT_CONFIG_JSON, "test").unwrap();
+        let legacy_mode = external.scrape.get("zhipu").unwrap().clone();
+        external.scrape.insert("openai-api".into(), legacy_mode);
+        external
+            .presets
+            .iter_mut()
+            .find(|p| p.id == "openai-api")
+            .unwrap()
+            .supports_scrape_balance = true;
+        for _ in 0..2 {
+            external = merge_builtin_config(external);
+        }
+        assert!(
+            !external
+                .presets
+                .iter()
+                .find(|p| p.id == "openai-api")
+                .unwrap()
+                .supports_scrape_balance
+        );
+        assert!(!external.scrape.contains_key("openai-api"));
+    }
 
     #[tokio::test]
     async fn services_start_with_empty_accounts_and_routes() {

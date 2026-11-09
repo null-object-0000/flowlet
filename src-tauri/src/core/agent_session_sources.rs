@@ -139,7 +139,8 @@ mod tests {
 
     #[test]
     fn hermes_candidates_dedup_across_homes() {
-        let root = std::env::temp_dir().join(format!("flowlet-hermes-dedup-{}", uuid::Uuid::new_v4()));
+        let root =
+            std::env::temp_dir().join(format!("flowlet-hermes-dedup-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(root.join("profiles").join("p")).unwrap();
         std::fs::write(root.join("state.db"), b"").unwrap();
 

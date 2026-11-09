@@ -44,16 +44,17 @@ async fn sync_models(account: &ChannelAccount, config: &ChannelsConfig) -> Model
     if account.api_key.trim().is_empty() {
         return sync_error("API Key 未配置");
     }
-    let client = match crate::core::upstream_proxy::apply_to(reqwest::Client::builder())
-        .and_then(|builder| {
-            builder
-                .timeout(std::time::Duration::from_secs(15))
-                .build()
-                .map_err(|error| error.to_string())
-        }) {
-        Ok(client) => client,
-        Err(error) => return sync_error(format!("创建 HTTP 客户端失败: {error}")),
-    };
+    let client =
+        match crate::core::upstream_proxy::apply_to_account(reqwest::Client::builder(), account)
+            .and_then(|builder| {
+                builder
+                    .timeout(std::time::Duration::from_secs(15))
+                    .build()
+                    .map_err(|error| error.to_string())
+            }) {
+            Ok(client) => client,
+            Err(error) => return sync_error(format!("创建 HTTP 客户端失败: {error}")),
+        };
     let body = match fetch_model_list(&client, account, config).await {
         Ok(body) => body,
         Err(result) => return result,
@@ -206,6 +207,7 @@ pub(super) const ADAPTER: ChannelCapabilityAdapter = ChannelCapabilityAdapter {
     model_sync: sync,
     balance_query: None,
     strips_openai_v1_path: false,
+    uses_upstream_proxy_for_models: false,
     console_scrape: ConsoleScrapeAdapter::Fixed("hybrid"),
     login_page: LoginPageAdapter::Generic,
     scrape_response: Some(ScrapeResponseAdapter {

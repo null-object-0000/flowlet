@@ -30,8 +30,18 @@ const { Text } = Typography;
 const EMPTY_DEVICES: Array<{ deviceId: string; displayName: string; isCurrent: boolean }> = [];
 const EMPTY_ROWS: AgentSessionRow[] = [];
 
-export function AgentSessionsPage() {
+export type AgentSessionsHostMode = "desktop" | "web";
+
+/**
+ * 会话管理页。
+ *
+ * `hostMode = "web"` 用于 Docker / Web Host：会话只来自本实例的 Flowlet 请求观测，
+ * 不读取服务器本机 Agent 原生会话文件、进程内 OpenCode 权限，也不运行桌面端的
+ * Agent 数据同步。桌面端保持原有「观测 + 原生」合并口径。
+ */
+export function AgentSessionsPage({ hostMode = "desktop" }: { hostMode?: AgentSessionsHostMode } = {}) {
   const { language, t } = useAppPreferences();
+  const webHost = hostMode === "web";
   const navigate = useNavigate();
   const knownDevices = useKnownDevices();
   const devices = knownDevices.data ?? EMPTY_DEVICES;
@@ -64,13 +74,15 @@ export function AgentSessionsPage() {
 
   // 当前设备：本地会话（观察 + 原生），服务端筛选分页；远端设备：同步快照，客户端筛选分页。
   const sessions = useAgentSessions(filter, refresh.autoRefresh, isCurrentDevice);
+  // Web Host 没有设备同步，只展示本实例的观测会话。
   const sharedSessions = useSharedDeviceSessions(
     isCurrentDevice ? null : deviceId,
-    !isCurrentDevice && deviceId != null,
+    !webHost && !isCurrentDevice && deviceId != null,
     refresh.autoRefresh,
   );
   const syncAgentData = useAgentDataSync();
-  const syncStatus = useAgentSyncStatus();
+  // Web Host 没有 Agent 数据同步任务，避免请求桌面专属 command。
+  const syncStatus = useAgentSyncStatus(!webHost);
 
   const remoteRows = useMemo(() => {
     if (isCurrentDevice || deviceId == null) return EMPTY_ROWS;
@@ -185,24 +197,24 @@ export function AgentSessionsPage() {
       {isError ? <div className={styles.state}><strong>{t("会话加载失败")}</strong><span>{errorMessageValue}</span><Button onClick={() => void refetch()}>{t("重试")}</Button></div> : null}
       {!isError ? (
         <AgentSessionsView
-          rows={toAgentSessionRowModels(page.rows, language, t)}
+          rows={toAgentSessionRowModels(page.rows, language, t, webHost)}
           loading={loading}
           loadingRowCount={filter.pageSize}
           bodyRef={bodyRef}
           renderRequests={(row, index) => {
             const raw = page.rows[index];
             if (!raw) return <span>—</span>;
-            return <SessionRequestsCell row={raw} language={language} />;
+            return <SessionRequestsCell row={raw} language={language} enableNative={!webHost} />;
           }}
           renderToken={(row, index) => {
             const raw = page.rows[index];
             if (!raw) return <span>—</span>;
-            return <SessionTokenCell row={raw} language={language} />;
+            return <SessionTokenCell row={raw} language={language} enableNative={!webHost} />;
           }}
           renderCost={(row, index) => {
             const raw = page.rows[index];
             if (!raw) return <span>—</span>;
-            return <SessionCostCell row={raw} />;
+            return <SessionCostCell row={raw} enableNative={!webHost} />;
           }}
           labels={{
             activity: t("最近活动"),
@@ -217,25 +229,26 @@ export function AgentSessionsPage() {
           toolbar={(
             <DesktopFilterToolbarView
               ariaLabel={t("会话筛选")}
-              search={{ value: searchDraft, placeholder: t("搜索会话标题、ID 或项目目录"), width: 280 }}
+              search={{ value: searchDraft, placeholder: webHost ? t("搜索会话 ID 或父会话") : t("搜索会话标题、ID 或项目目录"), width: 280 }}
               selects={[
                 { key: "client", insetLabel: t("客户端"), value: filter.agentType || "__all__", ariaLabel: t("客户端"), width: 210, options: [
                   { value: "__all__", label: t("全部客户端") },
                   ...AGENT_SESSION_OPTIONS.map((session) => ({ value: session.id, label: session.name })),
                 ] },
-                { key: "runtime", insetLabel: t("运行状态"), value: filter.runtimeStatus || "__all__", ariaLabel: t("运行状态"), width: 210, options: [
+                // Web Host 只有请求观测，没有本机 Agent 运行态，不展示运行状态筛选。
+                ...(webHost ? [] : [{ key: "runtime", insetLabel: t("运行状态"), value: filter.runtimeStatus || "__all__", ariaLabel: t("运行状态"), width: 210, options: [
                   { value: "__all__", label: t("全部状态") },
                   { value: "running", label: t("自动运行中") },
                   { value: "waiting_user", label: t("等待用户确认") },
                   { value: "idle", label: t("空闲") },
                   { value: "unknown", label: t("无法判断") },
-                ] },
+                ] }]),
               ]}
               onSearchChange={setSearchDraft}
               onSelectChange={(key, value) => setFilter((current) => key === "client"
                 ? { ...current, agentType: value === "__all__" ? "" : value as AgentSessionFilter["agentType"], page: 1 }
                 : { ...current, runtimeStatus: value === "__all__" ? "" : value as AgentSessionFilter["runtimeStatus"], page: 1 })}
-              actions={(
+              actions={webHost ? undefined : (
                 <div className={styles.syncActions}>
                   {isCurrentDevice ? (
                     <>
@@ -285,6 +298,7 @@ export function AgentSessionsPage() {
       {selectedSession ? (
         <AgentSessionDetailSideSheet
           session={selectedSession}
+          hostMode={hostMode}
           remote={Boolean(selectedSession.remoteDeviceId)}
           onClose={() => setSelectedSession(null)}
           onViewRequestLogs={(sessionId) => navigate(`/logs?search=${encodeURIComponent(sessionId)}`)}
@@ -341,9 +355,9 @@ function projectName(path: string) {
   return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
 }
 
-function SessionRequestsCell({ row, language }: { row: AgentSessionRow; language: "zh-CN" | "en-US" }) {
+function SessionRequestsCell({ row, language, enableNative = true }: { row: AgentSessionRow; language: "zh-CN" | "en-US"; enableNative?: boolean }) {
   const { t } = useAppPreferences();
-  const nativeSummary = useAgentSessionNativeSummary(row);
+  const nativeSummary = useAgentSessionNativeSummary(row, enableNative);
   const resolvedNativeSummary = row.nativeSummary ?? nativeSummary.data;
   const requestCount = row.flowletObserved ? row.requestCount : resolvedNativeSummary?.turnCount ?? null;
   const nativeTruncated = resolvedNativeSummary?.truncated === true;
@@ -359,9 +373,9 @@ function SessionRequestsCell({ row, language }: { row: AgentSessionRow; language
   );
 }
 
-function SessionTokenCell({ row, language }: { row: AgentSessionRow; language: "zh-CN" | "en-US" }) {
+function SessionTokenCell({ row, language, enableNative = true }: { row: AgentSessionRow; language: "zh-CN" | "en-US"; enableNative?: boolean }) {
   const { t } = useAppPreferences();
-  const nativeSummary = useAgentSessionNativeSummary(row);
+  const nativeSummary = useAgentSessionNativeSummary(row, enableNative);
   const resolvedNativeSummary = row.nativeSummary ?? nativeSummary.data;
   const nativeUsage = !row.flowletObserved ? resolvedNativeSummary?.usage ?? null : null;
   const nativeTruncated = resolvedNativeSummary?.truncated === true;
@@ -409,9 +423,9 @@ function SessionTokenCell({ row, language }: { row: AgentSessionRow; language: "
   );
 }
 
-function SessionCostCell({ row }: { row: AgentSessionRow }) {
+function SessionCostCell({ row, enableNative = true }: { row: AgentSessionRow; enableNative?: boolean }) {
   const { t } = useAppPreferences();
-  const nativeSummary = useAgentSessionNativeSummary(row);
+  const nativeSummary = useAgentSessionNativeSummary(row, enableNative);
   const resolvedNativeSummary = row.nativeSummary ?? nativeSummary.data;
   const nativeUsage = !row.flowletObserved ? resolvedNativeSummary?.usage ?? null : null;
   const nativeEstimate = nativeUsage?.apiEquivalent ?? null;
@@ -437,8 +451,11 @@ function SessionCostCell({ row }: { row: AgentSessionRow }) {
   );
 }
 
-/** 把领域行映射为共享展示模型：状态、Token、费用等文案已在此完成本地化。 */
-function toAgentSessionRowModels(rows: AgentSessionRow[], language: "zh-CN" | "en-US", t: (key: string, values?: Record<string, string | number>) => string): AgentSessionRowModel[] {
+/** 把领域行映射为共享展示模型：状态、Token、费用等文案已在此完成本地化。
+ *
+ * `webHost = true` 时页面只有请求观测，没有本机 Agent 原生运行态：状态列展示
+ * 「已观测」而不是猜测运行中/空闲，避免把所有会话都渲染成「无法判断」。 */
+function toAgentSessionRowModels(rows: AgentSessionRow[], language: "zh-CN" | "en-US", t: (key: string, values?: Record<string, string | number>) => string, webHost = false): AgentSessionRowModel[] {
   return rows.map((row) => {
     const nativeSummary = row.nativeSummary ?? null;
     const nativeUsage = !row.flowletObserved ? nativeSummary?.usage ?? null : null;
@@ -483,13 +500,15 @@ function toAgentSessionRowModels(rows: AgentSessionRow[], language: "zh-CN" | "e
         `${t("输入")} ${formatCompactNumber(tokenBreakdown.input, language)} · ${t("输出")} ${formatCompactNumber(tokenBreakdown.output, language)}`,
       ].join(" · ") : undefined,
       cost: remote ? undefined : row.flowletObserved ? formatCostCny(row.estimatedCost) : nativeUsage ? nativeCostDisplay(nativeUsage) : undefined,
-      status: {
-        running: t("自动运行中"),
-        waiting_user: t("等待用户确认"),
-        idle: t("空闲"),
-        unknown: t("无法判断"),
-      }[status],
-      statusTone: (status === "running" ? "running" : status === "waiting_user" ? "waiting" : "idle") as AgentSessionStatusTone,
+      status: webHost
+        ? t("已观测")
+        : {
+          running: t("自动运行中"),
+          waiting_user: t("等待用户确认"),
+          idle: t("空闲"),
+          unknown: t("无法判断"),
+        }[status],
+      statusTone: (webHost ? "idle" : status === "running" ? "running" : status === "waiting_user" ? "waiting" : "idle") as AgentSessionStatusTone,
       statusHint: health,
     };
   });

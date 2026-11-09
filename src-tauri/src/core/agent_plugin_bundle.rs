@@ -143,8 +143,14 @@ pub(crate) fn capabilities() -> AgentCapabilitiesReport {
 }
 
 /// 保留既有 Session Header 冲突时的识别优先级；产品展示顺序仍使用 Bundle/注册表顺序。
-const IDENTITY_PRECEDENCE: [&str; 6] =
-    ["claude-code", "pi", "deepseek-harness", "codex", "opencode", "hermes"];
+const IDENTITY_PRECEDENCE: [&str; 6] = [
+    "claude-code",
+    "pi",
+    "deepseek-harness",
+    "codex",
+    "opencode",
+    "hermes",
+];
 
 pub(crate) fn identity_adapters() -> impl Iterator<Item = &'static dyn AgentIdentityAdapter> {
     IDENTITY_PRECEDENCE.iter().filter_map(|id| {
@@ -163,7 +169,14 @@ mod tests {
     fn registers_each_agent_once_with_all_compiled_capabilities() {
         assert_eq!(
             bundles().iter().map(|bundle| bundle.id).collect::<Vec<_>>(),
-            vec!["claude-code", "opencode", "pi", "codex", "deepseek-harness", "hermes"]
+            vec![
+                "claude-code",
+                "opencode",
+                "pi",
+                "codex",
+                "deepseek-harness",
+                "hermes"
+            ]
         );
         for bundle in bundles() {
             assert_eq!(bundle.id, bundle.global_config.id());
@@ -174,7 +187,14 @@ mod tests {
             identity_adapters()
                 .map(|adapter| adapter.id())
                 .collect::<Vec<_>>(),
-            vec!["claude-code", "pi", "deepseek-harness", "codex", "opencode", "hermes"]
+            vec![
+                "claude-code",
+                "pi",
+                "deepseek-harness",
+                "codex",
+                "opencode",
+                "hermes"
+            ]
         );
     }
 
@@ -200,7 +220,7 @@ mod tests {
                 .iter()
                 .map(|capability| capability.id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["session-extension", "model-specs", "mcp-servers"]
+            vec!["session-extension", "mcp-servers"]
         );
     }
 }

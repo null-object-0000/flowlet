@@ -12,7 +12,6 @@ export type ModelsServiceStatModel = {
 
 export type ModelsServiceItemModel = {
   id: string;
-  kind: "aggregate" | "direct";
   name: string;
   typeLabel: string;
   summary: ReactNode;
@@ -27,8 +26,6 @@ export type ModelsServiceItemModel = {
 export type ModelsServiceLabels = {
   stats: Record<string, string>;
   statsAria?: string;
-  aggregateGroup: string;
-  directGroup: string;
   currentVisible: string;
   hint: string;
   ready: string;
@@ -60,23 +57,12 @@ export type ModelsServiceRouteModel = {
   removeLabel?: string;
   removeTitle?: string;
 };
-export type ModelsServiceRelationModel = {
-  key: string;
-  logo?: ReactNode;
-  title: ReactNode;
-  subtitle: ReactNode;
-  enabled: boolean;
-  activeLabel: ReactNode;
-  idleLabel: ReactNode;
-};
-
 type Props = {
   stats: ModelsServiceStatModel[];
-  groups: { aggregate: ModelsServiceItemModel[]; direct: ModelsServiceItemModel[] };
+  models: ModelsServiceItemModel[];
   labels: ModelsServiceLabels;
   density?: "default" | "compact";
   toolbar?: ReactNode;
-  kindSummary?: ReactNode;
   detail?: ReactNode;
   loading?: boolean;
   empty?: ReactNode;
@@ -90,7 +76,7 @@ function ModelLogo({ logo }: { logo?: ReactNode | string }) {
   return logo ? <span className={styles.modelLogoNode}>{logo}</span> : <span className={styles.modelLogoFallback} />;
 }
 
-export function ModelsServiceView({ stats, groups, labels, density = "default", toolbar, kindSummary, detail, loading = false, empty, onSelect, onToggle, selectedId }: Props) {
+export function ModelsServiceView({ stats, models, labels, density = "default", toolbar, detail, loading = false, empty, onSelect, onToggle, selectedId }: Props) {
   const renderRow = (model: ModelsServiceItemModel) => (
     <div key={model.id} className={`${styles.modelRow} ${selectedId === model.id ? styles.selected : ""}`}>
       <button type="button" className={styles.modelRowMain} aria-pressed={selectedId === model.id} onClick={() => onSelect?.(model.id)}>
@@ -108,12 +94,11 @@ export function ModelsServiceView({ stats, groups, labels, density = "default", 
     </div>
   );
 
-  const total = groups.aggregate.length + groups.direct.length;
+  const total = models.length;
   return (
     <div className={`${styles.page} ${density === "compact" ? styles.compact : ""}`}>
       <section className={styles.statsBar} aria-label={labels.statsAria ?? "model stats"}>
         {stats.map((stat) => <div className={styles.stat} key={stat.key}><span>{stat.label}</span><strong className={stat.tone === "success" ? styles.statSuccess : ""}>{stat.value}</strong></div>)}
-        {kindSummary ? <span className={styles.kindSummary}>{kindSummary}</span> : null}
       </section>
 
       <div className={styles.workspace}>
@@ -122,8 +107,7 @@ export function ModelsServiceView({ stats, groups, labels, density = "default", 
           <div className={styles.modelList}>
             {loading ? <div className={styles.empty}>{labels.empty}</div> : null}
             {!loading && total === 0 ? <div className={styles.empty}>{empty ?? labels.empty}</div> : null}
-            {groups.aggregate.length > 0 ? <><div className={styles.groupTitle}>{labels.aggregateGroup}<span className={styles.groupCount}>{groups.aggregate.length}</span></div>{groups.aggregate.map(renderRow)}</> : null}
-            {groups.direct.length > 0 ? <><div className={styles.groupTitle}>{labels.directGroup}<span className={styles.groupCount}>{groups.direct.length}</span></div>{groups.direct.map(renderRow)}</> : null}
+            {models.map(renderRow)}
           </div>
           <footer className={styles.listFooter}><span>{labels.currentVisible}</span><span>{labels.hint}</span></footer>
         </section>
@@ -295,12 +279,4 @@ export function ModelsServiceRouteListView({ routes, busy = false, removable = f
         </div>;
     });
   return framed ? <div className={styles.configBox}>{content}</div> : <>{content}</>;
-}
-
-export function ModelsServiceRelationListView({ relations }: { relations: ModelsServiceRelationModel[] }) {
-  return <div className={styles.configBox}>{relations.map((relation) => <div className={styles.relationRow} key={relation.key}>
-    {relation.logo}
-    <span className={styles.routeCopy}><strong>{relation.title}</strong><small>{relation.subtitle}</small></span>
-    <span className={relation.enabled ? styles.relationActive : styles.relationIdle}>{relation.enabled ? relation.activeLabel : relation.idleLabel}</span>
-  </div>)}</div>;
 }

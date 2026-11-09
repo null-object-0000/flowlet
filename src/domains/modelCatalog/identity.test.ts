@@ -10,8 +10,8 @@ import {
 
 describe("model identity catalog", () => {
   it("provides the complete supported-model whitelist without duplicates", () => {
-    expect(FLOWLET_SUPPORTED_MODELS).toHaveLength(24);
-    expect(new Set(FLOWLET_SUPPORTED_MODELS.map((model) => model.toLowerCase())).size).toBe(24);
+    expect(FLOWLET_SUPPORTED_MODELS).toHaveLength(29);
+    expect(new Set(FLOWLET_SUPPORTED_MODELS.map((model) => model.toLowerCase())).size).toBe(29);
     expect(FLOWLET_SUPPORTED_MODELS).toContain("LongCat-2.0");
     expect(FLOWLET_SUPPORTED_MODELS).toContain("LongCat-2.5");
     expect(FLOWLET_SUPPORTED_MODELS).toContain("deepseek-v4-flash");

@@ -492,6 +492,43 @@ impl ChannelPreset {
         }
     }
 
+    /// VibeToken aggregation: explicit model selection, OpenAI chat and stateless Responses.
+    pub fn vibetoken() -> Self {
+        Self {
+            id: "vibetoken".into(),
+            name: "VibeToken".into(),
+            vendor: "vibetoken".into(),
+            platform_url: Some("https://vibetoken.cn/api-key".into()),
+            enabled: true,
+            supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Responses],
+            openai_base_url: "https://vibetoken.cn/v1".into(),
+            openai_auth: AuthStrategy::Bearer,
+            supports_model_list: true,
+            supports_balance_query: true,
+            ..Default::default()
+        }
+    }
+
+    /// OpenAI API project keys, including credits linked from a ChatGPT subscription.
+    pub fn openai_api() -> Self {
+        Self {
+            id: "openai-api".to_string(),
+            name: "ChatGPT API".to_string(),
+            vendor: "openai".to_string(),
+            platform_url: Some("https://platform.openai.com/api-keys".to_string()),
+            enabled: true,
+            supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Responses],
+            openai_base_url: "https://api.openai.com/v1".to_string(),
+            anthropic_base_url: String::new(),
+            openai_auth: AuthStrategy::Bearer,
+            anthropic_auth: AuthStrategy::Bearer,
+            default_model: "gpt-6.1-sol".to_string(),
+            small_model: Some("gpt-6-luna".to_string()),
+            supports_model_list: true,
+            ..Default::default()
+        }
+    }
+
     pub fn base_url_for(&self, protocol: &ProtocolType) -> &str {
         match protocol {
             // Responses API 端点统一从 OpenAI Base URL 派生（`{base}/responses`，
@@ -549,6 +586,9 @@ pub struct ChannelAccount {
     pub resource_sync_mode: String,
     /// Account-level OpenAI-compatible upstream URL override.
     pub base_url_override: Option<String>,
+    /// None preserves the legacy policy for this account.
+    #[serde(default)]
+    pub use_upstream_proxy: Option<bool>,
     /// Account-level Anthropic-compatible upstream URL override.
     #[serde(default)]
     pub anthropic_base_url_override: Option<String>,
@@ -592,6 +632,7 @@ impl Default for ChannelAccount {
             resource_mode: None,
             resource_sync_mode: default_resource_sync_mode(),
             base_url_override: None,
+            use_upstream_proxy: None,
             anthropic_base_url_override: None,
             workspace_default_base_url: None,
             workspace_default_anthropic_base_url: None,
@@ -1107,6 +1148,7 @@ pub struct RequestLogRow {
     pub method: String,
     pub path: String,
     pub upstream_url: Option<String>,
+    pub upstream_proxy_used: Option<bool>,
     pub status: Option<i64>,
     pub latency_ms: Option<i64>,
     pub is_stream: bool,
@@ -1418,7 +1460,8 @@ mod tests {
         );
 
         // 只有其中一个字段
-        let partial = serde_json::json!({ "usage_retention": { "balance_snapshot_retention_days": 7 } });
+        let partial =
+            serde_json::json!({ "usage_retention": { "balance_snapshot_retention_days": 7 } });
         let parsed = UsageRetentionConfig::from_config_json(&partial);
         assert_eq!(parsed.balance_snapshot_retention_days, 7);
         assert_eq!(
@@ -1664,6 +1707,7 @@ pub struct RequestLogInput {
     pub method: String,
     pub path: String,
     pub upstream_url: Option<String>,
+    pub upstream_proxy_used: Option<bool>,
     pub status: Option<i64>,
     pub latency_ms: Option<i64>,
     pub is_stream: bool,

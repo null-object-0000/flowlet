@@ -225,3 +225,25 @@ describe("resolveModelSpecification", () => {
     )).toBeNull();
   });
 });
+
+describe("OpenAI API specifications", () => {
+  it("uses official ownership through custom and aggregate channels with USD context tiers", () => {
+    const catalog = { openai: { id: "openai", name: "OpenAI", models: {
+      "gpt-6.1-sol": { id: "gpt-6.1-sol", name: "GPT-6.1 Sol", reasoning: true, tool_call: true,
+        modalities: { input: ["text", "image"], output: ["text"] },
+        limit: { context: 1050000, output: 128000 },
+        cost: { input: 2, output: 10, cache_read: 0.1,
+          tiers: [{ input: 4, output: 15, cache_read: 0.2, tier: { type: "context", size: 272000 } }] },
+      },
+    } } };
+    for (const channel of ["openai-api", "custom", "openrouter"]) {
+      const model = resolveModelSpecification(null, catalog, channel, "openai/gpt-6.1-sol");
+      expect(model?.providerId).toBe("openai");
+      expect(model?.limits.contextTokens).toBe(1050000);
+      expect(model?.capabilities.inputModalities).toEqual(["text", "image"]);
+      expect(model?.officialPrice).toMatchObject({ currency: "USD", inputUncached: 2, inputCached: 0.1, output: 10 });
+      expect(model?.allPrices[1]).toMatchObject({ inputTokenRange: { minExclusive: 272000 }, input: { standard: 4 }, output: 15 });
+    }
+    expect(resolveModelSpecification(null, catalog, "openai-api", "unknown")).toBeNull();
+  });
+});

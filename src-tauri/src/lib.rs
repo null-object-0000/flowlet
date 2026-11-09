@@ -42,9 +42,8 @@ struct AppState {
     /// per-account 待处理拦截响应缓冲(抓取过程中临时存放)。
     scrape_pending: Arc<Mutex<std::collections::HashMap<String, Vec<(String, String)>>>>,
     /// per-account 已解析的抓取模式。原生网络监听与页面 IPC 回传都据此做 URL→槽位分派。
-    scrape_modes: Arc<
-        Mutex<std::collections::HashMap<String, core::scrape_console::ScrapeModeRuntime>>,
-    >,
+    scrape_modes:
+        Arc<Mutex<std::collections::HashMap<String, core::scrape_console::ScrapeModeRuntime>>>,
     /// per-account 当前 document-start 拦截器就绪标识。
     scrape_ready:
         Arc<Mutex<std::collections::HashMap<String, core::scrape_console::ScrapeInterceptorReady>>>,
@@ -750,39 +749,20 @@ fn run_desktop() {
             let timer_config_path = state.config_path.clone();
             let timer_jobs = state.jobs.clone();
             tauri::async_runtime::spawn(async move {
-                let period = std::time::Duration::from_secs(15 * 60);
-                let mut interval =
-                    tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+                let mut interval = tokio::time::interval_at(
+                    tokio::time::Instant::now()
+                        + crate::core::host_scheduler::STORAGE_CLEANUP_FIRST_DELAY,
+                    crate::core::host_scheduler::STORAGE_CLEANUP_INTERVAL,
+                );
                 interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                 loop {
                     interval.tick().await;
-                    let storage = timer_storage.clone();
-                    let cfg_path = timer_config_path.clone();
-                    let jobs = timer_jobs.clone();
-                    let result = tauri::async_runtime::spawn_blocking(move || {
-                        storage.run_scheduled_body_cleanup_job(&cfg_path, &jobs)
-                    })
+                    crate::core::host_scheduler::run_storage_cleanup_once(
+                        timer_storage.clone(),
+                        timer_config_path.clone(),
+                        timer_jobs.clone(),
+                    )
                     .await;
-                    match result {
-                        Ok(Ok((job_id, expired, pruned, before, after))) => {
-                            let before_mb = before as f64 / 1048576.0;
-                            let after_mb = after as f64 / 1048576.0;
-                            tracing::info!(
-                                job_id = %job_id,
-                                expired,
-                                pruned,
-                                before_mb = format!("{before_mb:.1}"),
-                                after_mb = format!("{after_mb:.1}"),
-                                "scheduled storage cleanup finished"
-                            );
-                        }
-                        Ok(Err(error)) => {
-                            tracing::warn!(error = %error, "scheduled storage cleanup job failed");
-                        }
-                        Err(error) => {
-                            tracing::warn!(error = %error, "scheduled body cleanup task panicked");
-                        }
-                    }
                 }
             });
 
@@ -792,46 +772,20 @@ fn run_desktop() {
             let catalog_timer_config_path = state.config_path.clone();
             let catalog_timer_jobs = state.jobs.clone();
             tauri::async_runtime::spawn(async move {
-                let period = std::time::Duration::from_secs(60 * 60);
-                let mut interval =
-                    tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+                let mut interval = tokio::time::interval_at(
+                    tokio::time::Instant::now()
+                        + crate::core::host_scheduler::CATALOG_SYNC_FIRST_DELAY,
+                    crate::core::host_scheduler::CATALOG_SYNC_INTERVAL,
+                );
                 interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-                let models_cn_url = "https://null-object-0000.github.io/models-cn/api.json";
-                let models_dev_url = "https://models.dev/api.json";
                 loop {
                     interval.tick().await;
-                    let storage = catalog_timer_storage.clone();
-                    let config_path = catalog_timer_config_path.clone();
-                    match crate::core::storage::storage_tasks::sync_models_cn_catalog(&storage, &catalog_timer_jobs, &config_path, models_cn_url, "scheduled").await {
-                        Ok(sync_result) => {
-                            tracing::info!(
-                                started = sync_result.started,
-                                skipped = sync_result.skipped,
-                                providers = sync_result.provider_count,
-                                models = sync_result.model_count,
-                                "scheduled models-cn sync finished"
-                            );
-                        }
-                        Err(error) => {
-                            tracing::warn!(error = %error, "scheduled models-cn sync failed");
-                        }
-                    }
-                    let storage = catalog_timer_storage.clone();
-                    let config_path = catalog_timer_config_path.clone();
-                    match crate::core::storage::storage_tasks::sync_models_dev_catalog(&storage, &catalog_timer_jobs, &config_path, models_dev_url, "scheduled").await {
-                        Ok(sync_result) => {
-                            tracing::info!(
-                                started = sync_result.started,
-                                skipped = sync_result.skipped,
-                                providers = sync_result.provider_count,
-                                models = sync_result.model_count,
-                                "scheduled models.dev sync finished"
-                            );
-                        }
-                        Err(error) => {
-                            tracing::warn!(error = %error, "scheduled models.dev sync failed");
-                        }
-                    }
+                    crate::core::host_scheduler::run_catalog_sync_once(
+                        catalog_timer_storage.clone(),
+                        catalog_timer_config_path.clone(),
+                        catalog_timer_jobs.clone(),
+                    )
+                    .await;
                 }
             });
 
@@ -850,6 +804,9 @@ fn run_desktop() {
             commands::list_cached_codex_accounts,
             commands::query_codex_account,
             commands::query_codex_accounts,
+            commands::query_antigravity_accounts,
+            commands::authorize_antigravity_account,
+            commands::delete_antigravity_account,
             commands::sync_codex_accounts,
             commands::authorize_codex_account,
             commands::delete_codex_account,

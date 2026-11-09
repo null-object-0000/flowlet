@@ -144,7 +144,7 @@ Flowlet 的 `custom` 渠道天然对应其中的 OpenAI + Anthropic 两面；**G
 - 每个模型新增**可选**字段 `kind: "chat" | "image"`（缺省 `chat`）与 `requestShape`（仅 `kind = image` 需要）；
 - 建议 `schemaVersion` **保持 1**（字段可选、向后兼容）。理由：[identity.ts:23](../src/domains/modelCatalog/identity.ts#L23) 与 [model_catalog.rs:42](../src-tauri/src/core/model_catalog.rs#L42) 都硬断言 `schemaVersion === 1`，升级版本号需同步改两处校验与既有测试；
 - 按 §2.1 新增 8 个生图模型条目，`aliases` 登记上游变体，遵守 AGENTS.md §6「模型身份由规范化模型 ID 决定」；`ownerChannelId` 的处理见 §3.4；
-- 生图模型**不同时进入 `flowlet_tiers` 聚合池**；
+- 生图模型**不同时进入 chat 模型的候选池**；
 - ⚠️ **两处硬断言必须同步改**，否则测试直接失败：
   - [model_catalog.rs:155](../src-tauri/src/core/model_catalog.rs#L155) `assert_eq!(catalog.supported_models().len(), 23)` —— 模型总数写死在测试里；
   - [model_catalog.rs:219](../src-tauri/src/core/model_catalog.rs#L219) `embedded_channel_defaults_match_catalog_ownership` 要求**每个 `ownerChannelId` 都是 `config.json` → `channels_config.default_exposed_models` 的 key**，且该数组包含该模型 id，最后还断言 `configured_count == models.len()`。
@@ -203,7 +203,7 @@ Flowlet 的 `custom` 渠道天然对应其中的 OpenAI + Anthropic 两面；**G
 - 账号编辑器：模型列表按 `kind` 分组、打「生图」Tag；**生图模型要显示 `requestShape` 对应的调用形态提示**（三种形态尺寸写法不同，写错会 400）；复用同一 OpenAI Base URL 输入，不新增账号字段；
 - 模型服务页：`MODEL_MODALITY_LABELS` 已含 `image → 图像`，**无需改标签**；只需让生图模型在 `models-cn.json` 中带上 `outputModalities: ["image"]`，规格缺失时走既有空态；
 - Seedream 模型需提示「上游默认打水印，需显式传 `watermark: false`」；
-- 聚合模型：`flowlet-pro` / `flowlet-flash` 成员选择器必须禁用 `kind = image` 的模型；`aggregate_model_inputs` 与 DSH/OpenCode/Pi 的模型声明都不应把生图模型算入。
+- 聚合模型已移除，模型服务页不再有成员选择器；生图模型不得生成 chat 协议路由，也不得进入 DSH/OpenCode/Pi 的模型声明。
 
 #### ⑩ 渠道与注册表
 
@@ -259,7 +259,7 @@ Flowlet 的 `custom` 渠道天然对应其中的 OpenAI + Anthropic 两面；**G
 
 - `mergeDefaultRoutes` / `reconcileAccountRoutes` 的 kind 门控单测（含 custom 渠道不被误删）；
 - `ProtocolType` 展示兜底单测；
-- 生图模型不出现在聚合模型候选中的单测。
+- 生图模型不进入 chat 模型候选池的单测。
 
 ### 3.7 实现前必须实测确认项
 
@@ -273,7 +273,7 @@ Flowlet 的 `custom` 渠道天然对应其中的 OpenAI + Anthropic 两面；**G
 ## 4. B 档与 C 档边界（本次不做）
 
 - **B 档 · 计量完整**：`models-cn.json` 引入 `unit = "per_image"` + 像素阶梯（`maxPixels` / `outputYuanPerImage`，见 §2.1 价格表）；GPT Image 系列按 token 模式解析网关返回的 `usage`；成本账本与用量页支持两种口径。预计 +2–3 天。
-- **C 档 · Agent 侧**：OpenCode / Pi / DSH 的模型声明是 chat 语义，生图模型不得进入 `flowlet-pro` / `flowlet-flash` 聚合池，也不得写入客户端的模型能力声明。
+- **C 档 · Agent 侧**：OpenCode / Pi / DSH 的模型声明是 chat 语义，生图模型不得进入 chat 模型候选池，也不得写入客户端的模型能力声明。
 
 ---
 

@@ -267,6 +267,57 @@ fn matches_agent_session_runtime_status(row: &AgentSessionRow, runtime_status: &
     runtime_status.is_empty() || row.runtime_status == runtime_status
 }
 
+fn sort_agent_session_catalog_by_activity(catalog: &mut [AgentSessionRow]) {
+    catalog.sort_by(|left, right| {
+        crate::core::agent_session_metadata::session_time_millis(&right.activity_at)
+            .cmp(&crate::core::agent_session_metadata::session_time_millis(
+                &left.activity_at,
+            ))
+            .then_with(|| right.session_id.cmp(&left.session_id))
+    });
+}
+
+/// 对会话目录应用筛选、搜索、分页并排序，返回主会话页。
+///
+/// 桌面 Host 与 Web Host 共用同一套展示口径，差异只在目录来源：
+/// 桌面合并本机原生会话，Web 只使用请求观测目录。
+fn agent_sessions_page(
+    mut catalog: Vec<AgentSessionRow>,
+    filter: &AgentSessionsFilter,
+) -> AgentSessionsPageResult {
+    let page = filter.page.max(1);
+    let page_size = filter.page_size.clamp(1, 500);
+    let offset = ((page - 1) * page_size) as usize;
+    let search = filter.search.trim().to_lowercase();
+    let agent_type = filter.agent_type.trim();
+    let runtime_status = filter.runtime_status.trim();
+    let project_path = filter.project_path.trim();
+    let matching_roots = matching_root_session_keys(&catalog, &search);
+    let project_matching_roots = matching_root_session_keys_by(&catalog, |row| {
+        session_matches_project_path(row, project_path)
+    });
+    catalog.retain(|row| {
+        row.parent_session_id.is_none()
+            && matching_roots.contains(&agent_session_key(row))
+            && project_matching_roots.contains(&agent_session_key(row))
+            && matches_agent_session_type(row, agent_type)
+            && matches_agent_session_runtime_status(row, runtime_status)
+    });
+    sort_agent_session_catalog_by_activity(&mut catalog);
+    let total = catalog.len() as i64;
+    let rows = catalog
+        .into_iter()
+        .skip(offset)
+        .take(page_size as usize)
+        .collect();
+    AgentSessionsPageResult {
+        rows,
+        total,
+        page,
+        page_size,
+    }
+}
+
 /// OpenCode 的待确认权限是进程内实时状态，优先级高于 SQLite 中“末条 assistant
 /// 尚未完成”的运行态推断。PC 列表页（过滤分页前）与设备同步快照（状态筛选与
 /// 传输前）必须走同一入口合并，两端运行状态才一致。
@@ -575,13 +626,13 @@ fn unique_snapshot_model(summary_json: &str) -> Option<String> {
         .then_some(first)
 }
 
-/// Flowlet 聚合模型是客户端侧公开别名，不是真实上游模型。
+/// `flowlet-pro` / `flowlet-flash` 是 Flowlet **历史**聚合模型别名，不是真实上游模型。
 ///
 /// Codex 的原生会话文件会记录该别名；同一份会话还可能被多个设备扫描到，而只有
-/// 实际发起请求的设备拥有对应的 Flowlet 请求日志。因此原生分析不能把聚合别名当成
+/// 实际发起请求的设备拥有对应的 Flowlet 请求日志。因此原生分析不能把历史别名当成
 /// 独立模型计入，否则跨设备汇总会重复统计并展示错误模型。真实模型统一由代理请求
-/// 账本中的 `upstream_model` 提供。
-fn is_flowlet_aggregate_model(model: &str) -> bool {
+/// 账本中的 `upstream_model` 提供。该过滤是历史兼容，聚合能力移除后仍必须保留。
+fn is_legacy_aggregate_alias(model: &str) -> bool {
     matches!(
         model.trim().to_ascii_lowercase().as_str(),
         "flowlet-pro" | "flowlet-flash"
@@ -882,11 +933,11 @@ impl Storage {
                     status, latency_ms, is_stream, error_message, fallback_count,
                     route_reason, created_at,
                     ttfb_ms, duration_ms, attempt_seq, req_headers_json, req_body_b64,
-                    res_headers_json, res_body_b64, is_last_attempt, upstream_url
+                    res_headers_json, res_body_b64, is_last_attempt, upstream_url, upstream_proxy_used
                 ) VALUES (
                     ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
                     ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, datetime('now'),
-                    ?26, ?27, ?28, ?29, NULL, ?30, NULL, ?31, ?32
+                    ?26, ?27, ?28, ?29, NULL, ?30, NULL, ?31, ?32, ?33
                 )
                 "#,
                 params![
@@ -922,6 +973,7 @@ impl Storage {
                     log.res_headers_json,
                     log.is_last_attempt as i64,
                     log.upstream_url,
+                    log.upstream_proxy_used,
                 ],
             )?;
             transaction.execute(
@@ -1149,18 +1201,12 @@ impl Storage {
         Ok(())
     }
 
+    /// 桌面 Host 的会话目录：Flowlet 请求观测 + 本机 Agent 原生会话。
     pub fn list_agent_sessions(
         &self,
         filter: AgentSessionsFilter,
         opencode_pending_sessions: &std::collections::HashSet<String>,
     ) -> Result<AgentSessionsPageResult, StorageError> {
-        let page = filter.page.max(1);
-        let page_size = filter.page_size.clamp(1, 500);
-        let offset = ((page - 1) * page_size) as usize;
-        let search = filter.search.trim().to_lowercase();
-        let agent_type = filter.agent_type.trim();
-        let runtime_status = filter.runtime_status.trim();
-        let project_path = filter.project_path.trim();
         let mut catalog = crate::core::agent_session_metadata::merge_agent_session_catalog(
             self.list_observed_agent_sessions()?,
             self.list_native_agent_sessions(),
@@ -1169,36 +1215,22 @@ impl Storage {
         // 都会与实时状态不一致。
         apply_opencode_pending_sessions(&mut catalog, opencode_pending_sessions);
         self.mark_unassociated_flowlet_requests(&mut catalog);
-        let matching_roots = matching_root_session_keys(&catalog, &search);
-        let project_matching_roots = matching_root_session_keys_by(&catalog, |row| {
-            session_matches_project_path(row, project_path)
-        });
-        catalog.retain(|row| {
-            row.parent_session_id.is_none()
-                && matching_roots.contains(&agent_session_key(row))
-                && project_matching_roots.contains(&agent_session_key(row))
-                && matches_agent_session_type(row, agent_type)
-                && matches_agent_session_runtime_status(row, runtime_status)
-        });
-        catalog.sort_by(|left, right| {
-            crate::core::agent_session_metadata::session_time_millis(&right.activity_at)
-                .cmp(&crate::core::agent_session_metadata::session_time_millis(
-                    &left.activity_at,
-                ))
-                .then_with(|| right.session_id.cmp(&left.session_id))
-        });
-        let total = catalog.len() as i64;
-        let rows = catalog
-            .into_iter()
-            .skip(offset)
-            .take(page_size as usize)
-            .collect();
-        Ok(AgentSessionsPageResult {
-            rows,
-            total,
-            page,
-            page_size,
-        })
+        Ok(agent_sessions_page(catalog, &filter))
+    }
+
+    /// Web Host 的会话目录：只聚合经过本实例的请求观测。
+    ///
+    /// Docker / headless 部署没有桌面用户的 Agent 数据目录，`list_native_agent_sessions`
+    /// 既读不到真实会话，也不应该扫描服务器上的个人配置；因此 Web Host 明确只使用
+    /// `request_logs` 聚合出的观测会话（`flowlet_observed = true`）。
+    pub fn list_observed_agent_sessions_page(
+        &self,
+        filter: AgentSessionsFilter,
+    ) -> Result<AgentSessionsPageResult, StorageError> {
+        Ok(agent_sessions_page(
+            self.list_observed_agent_sessions()?,
+            &filter,
+        ))
     }
 
     /// 返回用于设备快照的全部根会话。同步层会在此结果上应用
@@ -1233,7 +1265,8 @@ impl Storage {
     /// 复用后台 Agent 数据同步写入的 `agent_session_snapshots`，不在用量页面查询时
     /// 重新解析完整会话正文。已被 Flowlet 观测的会话不返回，避免与
     /// `usage_records` 重复统计。
-    pub fn agent_native_usage_summary(        &self,
+    pub fn agent_native_usage_summary(
+        &self,
     ) -> Result<Vec<AgentNativeUsageSummaryRow>, StorageError> {
         // 用量汇总不区分运行状态，无需实时待确认权限集合。
         Ok(build_agent_native_usage_summary(
@@ -1266,6 +1299,33 @@ impl Storage {
                 &crate::core::agent_session_metadata::session_time_millis(&left.activity_at),
             )
         });
+        Ok(rows)
+    }
+
+    /// Web Host：只返回请求观测目录中的直接子会话。
+    ///
+    /// 与桌面版 `list_agent_session_children` 的差异只在数据来源：Web 不读取
+    /// 服务器本机 Agent 原生会话文件，因此不会出现「父会话在 Web、子会话只在
+    /// 桌面本机」的混合树。
+    pub fn list_observed_agent_session_children(
+        &self,
+        agent_type: &str,
+        parent_session_id: &str,
+    ) -> Result<Vec<AgentSessionRow>, StorageError> {
+        let agent_type = agent_type.trim();
+        let parent_session_id = parent_session_id.trim();
+        if agent_type.is_empty() || parent_session_id.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut rows = self
+            .list_observed_agent_sessions()?
+            .into_iter()
+            .filter(|row| {
+                row.agent_type == agent_type
+                    && row.parent_session_id.as_deref() == Some(parent_session_id)
+            })
+            .collect::<Vec<_>>();
+        sort_agent_session_catalog_by_activity(&mut rows);
         Ok(rows)
     }
 
@@ -1489,7 +1549,7 @@ impl Storage {
                 req_headers_json, req_body_b64, req_body_cleared_at, req_body_cleanup_reason,
                 res_headers_json, res_body_b64, res_body_cleared_at, res_body_cleanup_reason,
                 is_last_attempt, ttft_ms, upstream_url,
-                agent_type, agent_session_id, parent_agent_session_id
+                agent_type, agent_session_id, parent_agent_session_id, upstream_proxy_used
             FROM request_logs
             WHERE is_last_attempt = 1
             ORDER BY created_at DESC
@@ -1550,6 +1610,7 @@ impl Storage {
                 agent_type: row.get(37)?,
                 agent_session_id: row.get(38)?,
                 parent_agent_session_id: row.get(39)?,
+                upstream_proxy_used: row.get(40)?,
             })
         })?;
         let mut logs = Vec::new();
@@ -1663,7 +1724,7 @@ impl Storage {
                 ur.estimated_input_uncached_cost, ur.estimated_input_cached_cost,
                 ur.estimated_input_cache_write_cost, ur.estimated_output_cost,
                 rl.ttft_ms, ur.input_cached_tokens, ur.input_uncached_tokens, rl.upstream_url,
-                rl.agent_type, rl.agent_session_id, rl.parent_agent_session_id
+                rl.agent_type, rl.agent_session_id, rl.parent_agent_session_id, rl.upstream_proxy_used
             FROM request_logs rl
             LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
             LEFT JOIN channel_accounts ca ON ca.id = rl.account_id
@@ -1725,6 +1786,7 @@ impl Storage {
                 agent_type: row.get(47)?,
                 agent_session_id: row.get(48)?,
                 parent_agent_session_id: row.get(49)?,
+                upstream_proxy_used: row.get(50)?,
             })
         })?;
         let mut logs = Vec::new();
@@ -3163,7 +3225,7 @@ impl Storage {
                     generation_output_tokens
                 FROM device_usage_breakdowns remote
                 WHERE device_id != ?2
-                  -- 兼容已落库的旧快照：聚合别名不是上游模型，不能作为原生模型行。
+                  -- 兼容已落库的旧快照：历史聚合别名不是上游模型，不能作为原生模型行。
                   AND NOT (
                       request_count = 0 AND native_event_count > 0
                       AND lower(trim(upstream_model)) IN ('flowlet-pro', 'flowlet-flash')
@@ -3296,7 +3358,7 @@ impl Storage {
             let Some(model) = model else {
                 continue;
             };
-            if is_flowlet_aggregate_model(&model) {
+            if is_legacy_aggregate_alias(&model) {
                 continue;
             }
             let aggregate = native_aggregates
@@ -3492,7 +3554,7 @@ impl Storage {
             let Some(model) = model else {
                 continue;
             };
-            if is_flowlet_aggregate_model(&model) {
+            if is_legacy_aggregate_alias(&model) {
                 continue;
             }
             let aggregate = aggregates.entry((date, agent_type, model)).or_default();
@@ -4018,7 +4080,7 @@ impl Storage {
                 ur.estimated_input_uncached_cost, ur.estimated_input_cached_cost,
                 ur.estimated_input_cache_write_cost, ur.estimated_output_cost,
                 rl.ttft_ms, ur.input_cached_tokens, ur.input_uncached_tokens, rl.upstream_url,
-                rl.agent_type, rl.agent_session_id, rl.parent_agent_session_id
+                rl.agent_type, rl.agent_session_id, rl.parent_agent_session_id, rl.upstream_proxy_used
             FROM request_logs rl
             LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
             LEFT JOIN channel_accounts ca ON ca.id = rl.account_id
@@ -4091,6 +4153,7 @@ impl Storage {
                 agent_type: row.get(39)?,
                 agent_session_id: row.get(40)?,
                 parent_agent_session_id: row.get(41)?,
+                upstream_proxy_used: row.get(42)?,
             })
         })?;
 
@@ -4484,17 +4547,35 @@ mod estimate_cost_tests {
                             ModelPriceDailyInterval {
                                 start: "00:00".to_string(),
                                 end: "09:00".to_string(),
-                                days: vec!["mon".into(), "tue".into(), "wed".into(), "thu".into(), "fri".into()],
+                                days: vec![
+                                    "mon".into(),
+                                    "tue".into(),
+                                    "wed".into(),
+                                    "thu".into(),
+                                    "fri".into(),
+                                ],
                             },
                             ModelPriceDailyInterval {
                                 start: "12:00".to_string(),
                                 end: "14:00".to_string(),
-                                days: vec!["mon".into(), "tue".into(), "wed".into(), "thu".into(), "fri".into()],
+                                days: vec![
+                                    "mon".into(),
+                                    "tue".into(),
+                                    "wed".into(),
+                                    "thu".into(),
+                                    "fri".into(),
+                                ],
                             },
                             ModelPriceDailyInterval {
                                 start: "18:00".to_string(),
                                 end: "00:00".to_string(),
-                                days: vec!["mon".into(), "tue".into(), "wed".into(), "thu".into(), "fri".into()],
+                                days: vec![
+                                    "mon".into(),
+                                    "tue".into(),
+                                    "wed".into(),
+                                    "thu".into(),
+                                    "fri".into(),
+                                ],
                             },
                             ModelPriceDailyInterval {
                                 start: "00:00".to_string(),
@@ -4518,12 +4599,24 @@ mod estimate_cost_tests {
                             ModelPriceDailyInterval {
                                 start: "09:00".to_string(),
                                 end: "12:00".to_string(),
-                                days: vec!["mon".into(), "tue".into(), "wed".into(), "thu".into(), "fri".into()],
+                                days: vec![
+                                    "mon".into(),
+                                    "tue".into(),
+                                    "wed".into(),
+                                    "thu".into(),
+                                    "fri".into(),
+                                ],
                             },
                             ModelPriceDailyInterval {
                                 start: "14:00".to_string(),
                                 end: "18:00".to_string(),
-                                days: vec!["mon".into(), "tue".into(), "wed".into(), "thu".into(), "fri".into()],
+                                days: vec![
+                                    "mon".into(),
+                                    "tue".into(),
+                                    "wed".into(),
+                                    "thu".into(),
+                                    "fri".into(),
+                                ],
                             },
                         ],
                     }),

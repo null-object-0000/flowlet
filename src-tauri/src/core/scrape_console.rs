@@ -83,18 +83,16 @@ impl<'a> ScrapeSlotEngine<'a> {
 
     pub fn merge(&self, kind: &str, existing: &str, incoming: &str) -> Option<String> {
         if let Some(rules) = &self.mode.slot_rules {
-            match rules.iter().find(|rule| rule.key == kind).map(|rule| &rule.merge) {
+            match rules
+                .iter()
+                .find(|rule| rule.key == kind)
+                .map(|rule| &rule.merge)
+            {
                 Some(custom_scrape::SlotMerge::MergeArrays {
                     path,
                     dedup_by,
                     keep_fields,
-                }) => custom_scrape::merge_arrays(
-                    path,
-                    dedup_by,
-                    keep_fields,
-                    existing,
-                    incoming,
-                ),
+                }) => custom_scrape::merge_arrays(path, dedup_by, keep_fields, existing, incoming),
                 _ => None,
             }
         } else {
@@ -185,11 +183,10 @@ fn resolve_builtin_scrape_mode(
     // 历史账号可能未写入 resource_mode(如千问 API 按量付费、LongCat hybrid)，
     // 或 resource_mode 无法映射到该渠道的抓取模式；此时回退到渠道默认资源模式,
     // 与前端 defaultResourceMode 保持一致,避免把合法账号误判为“不支持控制台抓取”。
-    let mode_key = console_scrape_mode_key(channel_id, resource_mode)
-        .or_else(|| {
-            default_resource_mode(channel_id)
-                .and_then(|default| console_scrape_mode_key(channel_id, Some(default)))
-        })?;
+    let mode_key = console_scrape_mode_key(channel_id, resource_mode).or_else(|| {
+        default_resource_mode(channel_id)
+            .and_then(|default| console_scrape_mode_key(channel_id, Some(default)))
+    })?;
     let cfg = channels_config.scrape_config(channel_id, mode_key)?;
     Some(ScrapeModeRuntime {
         console_url: cfg.console_url.clone(),
@@ -404,7 +401,12 @@ fn attach_webview2_response_capture(
                             let body_bytes = body.len();
                             if let Ok(mut guard) = response_pending.lock() {
                                 let entry = guard.entry(response_account_id.clone()).or_default();
-                                record_captured_response(entry, response_url.clone(), body, &engine);
+                                record_captured_response(
+                                    entry,
+                                    response_url.clone(),
+                                    body,
+                                    &engine,
+                                );
                             }
                             tracing::info!(
                                 account_id = %response_account_id,
@@ -516,7 +518,12 @@ pub fn install_linux_response_capture(
                                 if let Ok(mut guard) = response_pending.lock() {
                                     let entry =
                                         guard.entry(response_account_id.clone()).or_default();
-                                    record_captured_response(entry, response_url.clone(), body, &engine);
+                                    record_captured_response(
+                                        entry,
+                                        response_url.clone(),
+                                        body,
+                                        &engine,
+                                    );
                                 }
                                 tracing::info!(
                                     account_id = %response_account_id,
@@ -873,7 +880,9 @@ mod tests {
             "settle_bill"
         );
         assert_eq!(
-            classify_response_url("https://account.qianwenai.com/cert/aliyuncert/queryCurrentCertInfo"),
+            classify_response_url(
+                "https://account.qianwenai.com/cert/aliyuncert/queryCurrentCertInfo"
+            ),
             "cert_info"
         );
         assert_eq!(
@@ -1433,9 +1442,12 @@ mod tests {
             .expect_err("fd 压力必须被拒绝");
         assert!(fd_error.contains("文件描述符"), "unexpected: {fd_error}");
         // 内存不足。
-        let mem_error = evaluate_scrape_webview_budget(None, None, Some(1024))
-            .expect_err("内存压力必须被拒绝");
-        assert!(mem_error.contains("可用内存不足"), "unexpected: {mem_error}");
+        let mem_error =
+            evaluate_scrape_webview_budget(None, None, Some(1024)).expect_err("内存压力必须被拒绝");
+        assert!(
+            mem_error.contains("可用内存不足"),
+            "unexpected: {mem_error}"
+        );
     }
 
     #[test]
@@ -1456,10 +1468,7 @@ mod tests {
         // 没有任何人工会话时，除本次账号外全部回收。
         let empty = std::collections::HashSet::new();
         let all = scrape_webview_reclaim_candidates(&live, &empty, "account-a");
-        assert_eq!(
-            all,
-            vec!["account-b".to_string(), "account-c".to_string()]
-        );
+        assert_eq!(all, vec!["account-b".to_string(), "account-c".to_string()]);
     }
 
     #[test]
@@ -1471,7 +1480,8 @@ mod tests {
                        Max locked memory         65536                65536                bytes     \n";
         assert_eq!(parse_nofile_soft_limit(content), Some(524_288));
         // `unlimited` 不能被解析成数字。
-        let unlimited = "Max open files            unlimited            unlimited            files     \n";
+        let unlimited =
+            "Max open files            unlimited            unlimited            files     \n";
         assert_eq!(parse_nofile_soft_limit(unlimited), None);
         assert_eq!(parse_nofile_soft_limit("Max cpu time 1 1 seconds\n"), None);
     }

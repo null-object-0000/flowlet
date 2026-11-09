@@ -1,13 +1,9 @@
-use super::config::{
-    ChannelAccount, ChannelPreset, ProtocolType, RouteCandidate, ACCOUNT_CREDENTIAL_HEALTHY,
-};
+use super::config::{ProtocolType, RouteCandidate};
 use super::model_catalog::{canonical_model_key, model_catalog};
-use super::runtime_config::RuntimeConfigSnapshot;
 use serde_json::Value;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::sync::{OnceLock, RwLock};
 
-const TEXT_MODALITY: &str = "text";
 const IMAGE_MODALITY: &str = "image";
 
 #[derive(Clone, Debug, Default)]
@@ -23,7 +19,7 @@ impl ModelInputCapabilityIndex {
             index.merge_models_cn(raw);
         }
         if let Some(raw) = models_dev {
-            index.merge_openrouter_models_dev(raw);
+            index.merge_models_dev(raw);
         }
         index
     }
@@ -66,29 +62,33 @@ impl ModelInputCapabilityIndex {
         }
     }
 
-    fn merge_openrouter_models_dev(&mut self, raw: &str) {
+    fn merge_models_dev(&mut self, raw: &str) {
         let Ok(catalog) = serde_json::from_str::<Value>(raw) else {
             return;
         };
-        let Some(models) = catalog
-            .get("openrouter")
-            .and_then(|provider| provider.get("models"))
-            .and_then(Value::as_object)
-        else {
-            return;
-        };
-        for (model_id, model) in models {
-            let key = canonical_model_key(model_id);
-            let is_openrouter_model = model_catalog()
-                .find(model_id)
-                .is_some_and(|identity| identity.owner_channel_id == "openrouter");
-            if !is_openrouter_model || self.models_cn_models.contains(&key) {
+        for (provider_id, owner_id) in [("openrouter", "openrouter"), ("openai", "openai-api")] {
+            let Some(models) = catalog
+                .get(provider_id)
+                .and_then(|provider| provider.get("models"))
+                .and_then(Value::as_object)
+            else {
                 continue;
+            };
+            for (model_id, model) in models {
+                let key = canonical_model_key(model_id);
+                let matches_owner = model_catalog()
+                    .find(model_id)
+                    .is_some_and(|identity| identity.owner_channel_id == owner_id);
+                if !matches_owner || self.models_cn_models.contains(&key) {
+                    continue;
+                }
+                self.modalities.insert(
+                    key,
+                    normalized_modalities(
+                        model.pointer("/modalities/input").and_then(Value::as_array),
+                    ),
+                );
             }
-            self.modalities.insert(
-                key,
-                normalized_modalities(model.pointer("/modalities/input").and_then(Value::as_array)),
-            );
         }
     }
 
@@ -114,7 +114,32 @@ fn capability_cache() -> &'static RwLock<Option<ModelInputCapabilityIndex>> {
     CACHE.get_or_init(|| RwLock::new(None))
 }
 
+// Tokio task scope keeps mock catalogs isolated between concurrent async tests.
+#[cfg(test)]
+tokio::task_local! {
+    static TEST_INDEX: ModelInputCapabilityIndex;
+}
+
+#[cfg(test)]
+pub(crate) async fn with_test_catalogs<F: std::future::Future>(
+    models_cn: Option<&str>,
+    models_dev: Option<&str>,
+    future: F,
+) -> F::Output {
+    TEST_INDEX
+        .scope(
+            ModelInputCapabilityIndex::from_catalogs(models_cn, models_dev),
+            future,
+        )
+        .await
+}
+
 fn current_index() -> ModelInputCapabilityIndex {
+    #[cfg(test)]
+    if let Ok(index) = TEST_INDEX.try_with(Clone::clone) {
+        return index;
+    }
+
     if let Some(index) = capability_cache()
         .read()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -129,7 +154,7 @@ fn current_index() -> ModelInputCapabilityIndex {
     if let Some(index) = cache.as_ref().cloned() {
         return index;
     }
-    let mut models_cn = super::storage::storage_tasks::read_models_cn_file();
+    let models_cn = read_models_cn_source();
     #[cfg(desktop)]
     let mut models_dev = super::storage::storage_tasks::read_models_dev_file();
     #[cfg(not(desktop))]
@@ -139,8 +164,6 @@ fn current_index() -> ModelInputCapabilityIndex {
     #[cfg(debug_assertions)]
     {
         let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
-        models_cn =
-            models_cn.or_else(|| std::fs::read_to_string(manifest.join("models-cn.json")).ok());
         models_dev =
             models_dev.or_else(|| std::fs::read_to_string(manifest.join("models-dev.json")).ok());
     }
@@ -148,6 +171,24 @@ fn current_index() -> ModelInputCapabilityIndex {
         ModelInputCapabilityIndex::from_catalogs(models_cn.as_deref(), models_dev.as_deref());
     *cache = Some(index.clone());
     index
+}
+
+/// 读取 `models-cn.json` 原文：运行期目录（exe 同级，可由同步任务原子替换）优先，
+/// 开发/测试构建回退到仓库随包资源。Codex 模型目录生成与输入能力索引共用同一份
+/// 解析入口，避免两处各写一套路径猜测。
+pub(crate) fn read_models_cn_source() -> Option<String> {
+    let raw = super::storage::storage_tasks::read_models_cn_file();
+    #[cfg(debug_assertions)]
+    {
+        return raw.or_else(|| {
+            std::fs::read_to_string(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("models-cn.json"),
+            )
+            .ok()
+        });
+    }
+    #[cfg(not(debug_assertions))]
+    raw
 }
 
 /// models-cn / models.dev 原子替换成功后使能力缓存失效；下一次需要时再解析。
@@ -212,52 +253,6 @@ fn partition_image_capable_candidates_with_index(
         }
     }
     skipped
-}
-
-fn route_is_usable_for_aggregate(
-    route: &RouteCandidate,
-    accounts: &[ChannelAccount],
-    channels: &[ChannelPreset],
-) -> bool {
-    route.enabled
-        && route.client_protocol == ProtocolType::OpenAi
-        && accounts.iter().any(|account| {
-            account.id == route.account_id
-                && account.enabled
-                && !account.api_key.trim().is_empty()
-                && account.credential_status == ACCOUNT_CREDENTIAL_HEALTHY
-        })
-        && channels.iter().any(|channel| {
-            channel.id == route.channel_id
-                && channel.enabled
-                && channel.supported_protocols.contains(&ProtocolType::OpenAi)
-                && channel
-                    .supported_protocols
-                    .contains(&ProtocolType::Anthropic)
-        })
-}
-
-/// Agent 模型配置只声明 Flowlet 当前支持的 text / image。文本始终声明；只要聚合模型
-/// 存在一个可用图片候选，就声明 image，代理会在实际图片请求时再次按候选能力过滤。
-pub(crate) fn aggregate_model_inputs(
-    snapshot: &RuntimeConfigSnapshot,
-) -> BTreeMap<String, Vec<String>> {
-    let index = current_index();
-    ["flowlet-pro", "flowlet-flash"]
-        .into_iter()
-        .map(|aggregate| {
-            let supports_image = snapshot.routes.iter().any(|route| {
-                route.virtual_model_id == aggregate
-                    && route_is_usable_for_aggregate(route, &snapshot.accounts, &snapshot.channels)
-                    && index.supports(&route.upstream_model, IMAGE_MODALITY)
-            });
-            let mut modalities = vec![TEXT_MODALITY.to_string()];
-            if supports_image {
-                modalities.push(IMAGE_MODALITY.to_string());
-            }
-            (aggregate.to_string(), modalities)
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -331,5 +326,42 @@ mod tests {
         assert_eq!(candidates[0].id, "vision");
         assert_eq!(skipped.len(), 1);
         assert_eq!(skipped[0].id, "text-only");
+    }
+}
+
+#[cfg(test)]
+mod openai_api_tests {
+    use super::*;
+
+    #[test]
+    fn openai_api_capabilities_use_official_catalog_and_keep_unknown_models_closed() {
+        let raw = r#"{"openai":{"models":{"gpt-6.1-sol":{"modalities":{"input":["text","image"]}},"not-supported":{"modalities":{"input":["image"]}}}},"openrouter":{"models":{"openai/gpt-6.1-sol":{"modalities":{"input":["text"]}}}}}"#;
+        let index = ModelInputCapabilityIndex::from_catalogs(None, Some(raw));
+        assert!(index.supports("openai/gpt-6.1-sol", "image"));
+        assert!(!index.supports("not-supported", "image"));
+    }
+}
+
+#[cfg(test)]
+mod scoped_catalog_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn mock_catalogs_stay_isolated_between_concurrent_tasks() {
+        let text = r#"{"openai":{"models":{"gpt-6.1-sol":{"modalities":{"input":["text"]}}}}}"#;
+        let image =
+            r#"{"openai":{"models":{"gpt-6.1-sol":{"modalities":{"input":["text","image"]}}}}}"#;
+        let (text_supports_image, image_supports_image) = tokio::join!(
+            with_test_catalogs(None, Some(text), async {
+                tokio::task::yield_now().await;
+                current_index().supports("gpt-6.1-sol", IMAGE_MODALITY)
+            }),
+            with_test_catalogs(None, Some(image), async {
+                tokio::task::yield_now().await;
+                current_index().supports("gpt-6.1-sol", IMAGE_MODALITY)
+            }),
+        );
+        assert!(!text_supports_image);
+        assert!(image_supports_image);
     }
 }

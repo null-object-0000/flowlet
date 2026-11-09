@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Button, Modal, Select, Toast } from "@douyinfe/semi-ui-19";
+import { Button, Modal, Toast } from "@douyinfe/semi-ui-19";
 import { IconCopy, IconInfoCircle } from "@douyinfe/semi-icons";
-import { ModelsServiceCapabilityListView, ModelsServiceDetailView, ModelsServiceInfoBannerView, ModelsServiceMetricGridView, ModelsServiceRefreshActionView, ModelsServiceRelationListView, ModelsServiceRouteListView, ModelsServiceRouteOverviewView, ModelsServiceSectionView, ModelsServiceTabContentView, ModelsServiceToolbarView, ModelsServiceView, type ModelsServiceItemModel, type ModelsServiceRouteModel } from "@flowlet/product-ui";
+import { ModelsServiceCapabilityListView, ModelsServiceDetailView, ModelsServiceInfoBannerView, ModelsServiceMetricGridView, ModelsServiceRefreshActionView, ModelsServiceRouteOverviewView, ModelsServiceSectionView, ModelsServiceTabContentView, ModelsServiceToolbarView, ModelsServiceView, type ModelsServiceItemModel, type ModelsServiceRouteModel } from "@flowlet/product-ui";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { useAccounts, useChannelPresets } from "../../features/channel-accounts";
 import { ChannelBrandLogo } from "../../features/channel-accounts/ChannelBrandLogo";
@@ -11,38 +11,27 @@ import { useRouteCandidates } from "../../features/exposed-models/useModels";
 import { PageHeader } from "../../shared/ui/PageHeader";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import {
-  buildAggregateRelations,
   buildModelServiceItems,
-  type ModelAggregateRelation,
   type ModelRouteGroup,
   type ModelServiceItem,
 } from "./modelServiceView";
 import {
-  addAggregateRouteGroup,
-  buildAggregateRouteOptions,
   buildChannelFilterOptions,
   filterModelServiceItems,
-  removeAggregateRouteGroup,
+  removeModelRouteGroup,
   reorderModelRouteGroups,
 } from "./modelServiceInteractions";
 import type { ChannelAccount } from "../../domains/account/types";
 import type { ChannelPreset } from "../../domains/channel/types";
-import type { RouteCandidate } from "../../domains/model/types";
 import { formatTokenCapacity, type NumberLanguage } from "../../shared/formatters/number";
 import { formatCostAmount } from "../../shared/formatters/cost";
 import { formatFullTimestamp } from "../../shared/formatters/datetime";
-import { FlowletLogo } from "../../shared/ui/FlowletLogo";
 import {
   useLocalModelsCnCatalog,
   useLocalModelsDevCatalog,
-  resolveChannelModel,
   resolveModelSpecification,
   parseCatalogJson,
   parseModelsDevCatalogJson,
-  aggregateMinLimits,
-  aggregateCapabilitiesIntersection,
-  aggregateMaxPrice,
-  aggregateMaxStandardPrice,
   buildPricingStrategyRows,
   effectiveWindowPricesAt,
   groupDailyTimeRangeIntervals,
@@ -53,32 +42,10 @@ import {
   officialOwnerNameForModel,
   weekdayRunGroups,
 } from "../../domains/modelCatalog";
-import type { ModelsCnDailyTimeRangeInterval, ModelsCnDayOfWeek, ModelsCnPrice, PricingStrategyRow, ResolvedModel, ResolvedPrice } from "../../domains/modelCatalog";
+import type { ModelsCnDailyTimeRangeInterval, ModelsCnDayOfWeek, ModelsCnPrice, PricingStrategyRow, ResolvedModel } from "../../domains/modelCatalog";
 import { useModelCatalogsSync } from "../../features/background-tasks/useBackgroundTasks";
 import { channelCommands, type PresetSyncPreview } from "../../domains/channel/commands";
 import styles from "./ModelServicesPage.module.css";
-
-/** 把聚合模型 helper 产出的 ResolvedPrice（扁平 input* 字段）转回 ModelsCnPrice 形态，
- *  方便 UI 统一按 input.standard / input.cacheHit 访问。sourceUrl 仅作兜底。 */
-function priceFromResolvedStandard(p: ResolvedPrice): ModelsCnPrice {
-  return {
-    market: p.market,
-    currency: p.currency,
-    unit: p.unit,
-    rateType: "standard",
-    dailyTimeRange: p.dailyTimeRange ?? undefined,
-    effectiveFrom: p.effectiveFrom ?? undefined,
-    effectiveTo: p.effectiveTo ?? undefined,
-    input: {
-      standard: p.inputUncached,
-      cacheHit: p.inputCached ?? undefined,
-      explicitCacheCreation: p.inputCacheWrite ?? undefined,
-      explicitCacheHit: p.inputCacheHit ?? undefined,
-    },
-    output: p.output,
-    sourceUrl: p.sourceUrl,
-  };
-}
 
 /** 单条区间的时间段文本：整日区间显示「全天」，end=00:00 按次日午夜显示 24:00。 */
 function formatTimeInterval(interval: ModelsCnDailyTimeRangeInterval): string {
@@ -208,20 +175,17 @@ export function ModelServicesPage() {
   const [searchParams] = useSearchParams();
   const [search, setSearch] = useState("");
   const [channelFilter, setChannelFilter] = useState("all");
-  // 支持从概览页聚合模型入口跳转并自动选中对应模型（?model=flowlet-pro / flowlet-flash）。
+  // 支持从概览页「开放模型」入口跳转并自动选中对应模型（?model=<规范模型 ID>）。
   const [selectedModel, setSelectedModel] = useState<string | null>(() => searchParams.get("model"));
 
   const models = useMemo(
     () => buildModelServiceItems(routes.data ?? [], accounts.data ?? [], channels.data ?? []),
     [accounts.data, channels.data, routes.data],
   );
-  const relations = useMemo(() => buildAggregateRelations(models), [models]);
   const filtered = useMemo(
     () => filterModelServiceItems(models, search, channelFilter),
     [channelFilter, models, search],
   );
-  const aggregateModels = useMemo(() => filtered.filter((model) => model.kind === "aggregate"), [filtered]);
-  const directModels = useMemo(() => filtered.filter((model) => model.kind === "direct"), [filtered]);
 
   useEffect(() => {
     if (filtered.length === 0) setSelectedModel(null);
@@ -239,7 +203,6 @@ export function ModelServicesPage() {
         ? actions.updateRoutes.variables?.modelId
         : undefined;
   const enabledCount = models.filter((model) => model.enabled).length;
-  const aggregateCount = models.filter((model) => model.kind === "aggregate").length;
   const connectedChannelCount = useMemo(
     () => new Set((accounts.data ?? []).map((account) => account.channel_id)).size,
     [accounts.data],
@@ -299,27 +262,10 @@ export function ModelServicesPage() {
     if (nextRoutes === currentRoutes) return;
     actions.reorderRoutes.mutate({ routes: currentRoutes, nextRoutes, modelId });
   };
-  const addAggregateRoute = (modelId: string, sourceKey: string) => {
+  const removeRoute = (modelId: string, routeGroup: ModelRouteGroup) => {
     const currentRoutes = routes.data ?? [];
-    const now = new Date().toISOString();
-    const nextRoutes = addAggregateRouteGroup(
-      currentRoutes,
-      modelId,
-      sourceKey,
-      now,
-      () => `route-${crypto.randomUUID()}`,
-    );
+    const nextRoutes = removeModelRouteGroup(currentRoutes, modelId, routeGroup.routeIds);
     if (nextRoutes === currentRoutes) return;
-    actions.updateRoutes.mutate({
-      routes: currentRoutes,
-      nextRoutes,
-      modelId,
-      message: t("已添加到 {model}", { model: modelId }),
-    });
-  };
-  const removeAggregateRoute = (modelId: string, routeGroup: ModelRouteGroup) => {
-    const currentRoutes = routes.data ?? [];
-    const nextRoutes = removeAggregateRouteGroup(currentRoutes, modelId, routeGroup.routeIds);
     actions.updateRoutes.mutate({
       routes: currentRoutes,
       nextRoutes,
@@ -329,22 +275,16 @@ export function ModelServicesPage() {
   };
 
   const toViewModel = (model: ModelServiceItem): ModelsServiceItemModel => {
-    const modelRelations = relations.get(model.publicModel.toLowerCase()) ?? [];
-    const relatedAggregateCount = new Set(modelRelations.map((relation) => relation.aggregateModel)).size;
-    const summary = model.kind === "aggregate"
-      ? (model.availableAccountCount > 0 ? t("{count} 个可用账号", { count: model.availableAccountCount }) : t("无可用账号"))
-      : (relatedAggregateCount > 0 ? t("已加入 {count} 个聚合模型", { count: relatedAggregateCount }) : t("尚未加入路由"));
-    const summaryMuted = model.kind === "aggregate" ? model.availableAccountCount === 0 : relatedAggregateCount === 0;
-    const typeLabel = model.kind === "aggregate"
-      ? t("Flowlet · 聚合模型")
-      : t("{channel} · 渠道模型", { channel: model.channelName ?? model.channelId ?? "—" });
+    const summary = model.availableAccountCount > 0
+      ? t("{count} 个可用账号", { count: model.availableAccountCount })
+      : t("无可用账号");
+    const typeLabel = t("{channel} · 渠道模型", { channel: model.channelName ?? model.channelId ?? "—" });
     return {
       id: model.publicModel,
-      kind: model.kind,
       name: model.publicModel,
       typeLabel,
       summary,
-      summaryMuted,
+      summaryMuted: model.availableAccountCount === 0,
       enabled: model.enabled,
       logo: <ModelLogo model={model} />,
       toggleLabel: t("{model} 对外开放", { model: model.publicModel }),
@@ -352,12 +292,12 @@ export function ModelServicesPage() {
       toggleDisabled: busyModel != null || model.routeIds.length === 0,
     };
   };
-  const viewGroups = { aggregate: aggregateModels.map(toViewModel), direct: directModels.map(toViewModel) };
+  const viewModels = filtered.map(toViewModel);
 
   return (
     <main className={styles.page}>
       <PageHeader title={t("模型服务")} subtitle={t("管理对外模型、渠道能力与请求路由")}>
-        <ModelsServiceRefreshActionView label={t("刷新模型")} onClick={openSyncPresets} loading={syncPending} />
+        <ModelsServiceRefreshActionView label={t("刷新模型")} onClick={import.meta.env.MODE === "web" ? refresh : openSyncPresets} loading={syncPending} />
       </PageHeader>
 
       {error ? <div className={styles.state}><strong>{t("模型服务加载失败")}</strong><span>{error.message}</span><Button onClick={refresh}>{t("重试")}</Button></div> : null}
@@ -367,19 +307,16 @@ export function ModelServicesPage() {
           { key: "enabled", label: t("已启用"), value: String(enabledCount), tone: "success" },
           { key: "channels", label: t("已接入渠道"), value: String(connectedChannelCount) },
         ]}
-        groups={viewGroups}
+        models={viewModels}
         labels={{
           stats: {},
           statsAria: t("模型服务统计"),
-          aggregateGroup: t("聚合模型"),
-          directGroup: t("渠道模型"),
           currentVisible: t("当前显示 {visible} / 共 {total} 个模型", { visible: filtered.length, total: models.length }),
           hint: t("选择模型后在右侧查看详情"),
           ready: t("可用"),
           off: t("关闭"),
           empty: loading ? t("正在加载模型…") : (models.length ? t("没有匹配的模型") : t("暂无模型，请先添加渠道账号")),
         }}
-        kindSummary={t("聚合模型 {aggregate} · 渠道模型 {direct}", { aggregate: aggregateCount, direct: models.length - aggregateCount })}
         loading={loading}
         selectedId={selectedModel}
         onSelect={setSelectedModel}
@@ -399,10 +336,8 @@ export function ModelServicesPage() {
         />}
         detail={<ModelDetail
           model={selected}
-          relations={relations}
           accounts={accounts.data ?? []}
           channels={channels.data ?? []}
-          allRoutes={routes.data ?? []}
           catalogJson={catalogEntry.data ?? null}
           modelsDevCatalogJson={modelsDevCatalogEntry.data ?? null}
           modelsDevCatalogLoading={modelsDevCatalogEntry.isLoading}
@@ -413,8 +348,7 @@ export function ModelServicesPage() {
           pendingModel={busyModel}
           onToggleRoute={toggleRoute}
           onReorderRoute={reorderRoute}
-          onAddAggregateRoute={addAggregateRoute}
-          onRemoveAggregateRoute={removeAggregateRoute}
+          onRemoveRoute={removeRoute}
           t={t}
         />}
       /> : null}
@@ -529,16 +463,13 @@ function PresetSyncModal({ t, preview, applying, onCancel, onConfirm }: {
 }
 
 function ModelLogo({ model }: { model: ModelServiceItem }) {
-  if (model.kind === "direct") return <ChannelBrandLogo channelId={model.channelId ?? "flowlet"} name={model.channelName ?? model.publicModel} />;
-  return <FlowletLogo variant="model" />;
+  return <ChannelBrandLogo channelId={model.channelId ?? "flowlet"} name={model.channelName ?? model.publicModel} />;
 }
 
-function ModelDetail({ model, relations, accounts, channels, allRoutes, catalogJson, modelsDevCatalogJson, catalogLoading, modelsDevCatalogLoading, syncCatalogsPending, onSyncCatalogs, language, pendingModel, onToggleRoute, onReorderRoute, onAddAggregateRoute, onRemoveAggregateRoute, t }: {
+function ModelDetail({ model, accounts, channels, catalogJson, modelsDevCatalogJson, catalogLoading, modelsDevCatalogLoading, syncCatalogsPending, onSyncCatalogs, language, pendingModel, onToggleRoute, onReorderRoute, onRemoveRoute, t }: {
   model: ModelServiceItem | null;
-  relations: Map<string, ModelAggregateRelation[]>;
   accounts: ChannelAccount[];
   channels: ChannelPreset[];
-  allRoutes: RouteCandidate[];
   catalogJson: string | null;
   modelsDevCatalogJson: string | null;
   catalogLoading: boolean;
@@ -549,12 +480,9 @@ function ModelDetail({ model, relations, accounts, channels, allRoutes, catalogJ
   pendingModel: string | undefined;
   onToggleRoute: (modelId: string, routeGroup: ModelRouteGroup, enabled: boolean) => void;
   onReorderRoute: (modelId: string, sourceKey: string, targetKey: string) => void;
-  onAddAggregateRoute: (modelId: string, sourceKey: string) => void;
-  onRemoveAggregateRoute: (modelId: string, routeGroup: ModelRouteGroup) => void;
+  onRemoveRoute: (modelId: string, routeGroup: ModelRouteGroup) => void;
   t: (source: string, values?: Record<string, string | number>) => string;
 }) {
-  const [addRouteVisible, setAddRouteVisible] = useState(false);
-  const [selectedRouteKey, setSelectedRouteKey] = useState<string>();
   const [activeTab, setActiveTab] = useState("basic");
   const [pricingNow, setPricingNow] = useState(() => new Date());
 
@@ -573,11 +501,11 @@ function ModelDetail({ model, relations, accounts, channels, allRoutes, catalogJ
     [modelsDevCatalogJson],
   );
 
-  // 直接模型规格按 models-cn → models.dev 回退。
-  const directResolved: ResolvedModel | null = useMemo(() => {
-    if (!model || model.kind !== "direct") return null;
+  // 模型规格按路由候选的 (渠道, 上游模型) 从 models-cn → models.dev 回退解析。
+  const resolved: ResolvedModel | null = useMemo(() => {
+    if (!model) return null;
     for (const route of model.routeGroups) {
-      const resolved = resolveModelSpecification(
+      const resolvedModel = resolveModelSpecification(
         catalog,
         modelsDevCatalog,
         route.channelId,
@@ -585,7 +513,7 @@ function ModelDetail({ model, relations, accounts, channels, allRoutes, catalogJ
         pricingNow,
         !catalogLoading && !modelsDevCatalogLoading,
       );
-      if (resolved) return resolved;
+      if (resolvedModel) return resolvedModel;
     }
     return model.channelId
       ? resolveModelSpecification(
@@ -599,77 +527,14 @@ function ModelDetail({ model, relations, accounts, channels, allRoutes, catalogJ
       : null;
   }, [catalog, catalogLoading, model, modelsDevCatalog, modelsDevCatalogLoading, pricingNow]);
 
-  // 聚合模型（flowlet-pro/flowlet-flash）：只汇总已启用子路由的 limits/caps/prices。
-  // limits 取最小值（木桶效应）、caps 取交集（只承诺所有子模型都支持的能力）、
-  // prices 取最大值（展示最坏情况下的成本上限）。
-  const aggregateResolved: ResolvedModel | null = useMemo(() => {
-    if (!model || model.kind !== "aggregate") return null;
-    const subModels: ResolvedModel[] = [];
-    for (const route of model.routeGroups) {
-      if (!route.enabled) continue;
-      const resolved = resolveModelSpecification(
-        catalog,
-        modelsDevCatalog,
-        route.channelId,
-        route.upstreamModel,
-        pricingNow,
-        !catalogLoading && !modelsDevCatalogLoading,
-      );
-      if (resolved) subModels.push(resolved);
-    }
-    if (subModels.length === 0) return null;
-    const officialPrice = aggregateMaxPrice(subModels);
-    const limits = aggregateMinLimits(subModels);
-    const capabilities = aggregateCapabilitiesIntersection(subModels);
-    const sources = new Set(subModels.map((subModel) => subModel.specificationSource));
-    return {
-      providerId: "flowlet",
-      providerName: "Flowlet",
-      modelId: model.publicModel,
-      modelName: model.publicModel,
-      description: null,
-      tokenizer: null,
-      specificationSource: sources.size === 1 ? subModels[0].specificationSource : "mixed",
-      limits,
-      capabilities,
-      aliases: [],
-      officialPrice,
-      allPrices: [],
-      supplementedFromModelsDev: false,
-      modelsDevReferenceUrl: null,
-    };
-  }, [catalog, catalogLoading, model, modelsDevCatalog, modelsDevCatalogLoading, pricingNow]);
-
-  // 当前模型实际使用的 resolved 数据源。
-  const resolved = model?.kind === "aggregate" ? aggregateResolved : directResolved;
-
-  // 聚合模型的划价展示：用旗下已启用子模型的 standard 价格取最大值，与当前（promotional）对比。
-  const aggregateStandardPrice = useMemo(() => {
-    if (!model || model.kind !== "aggregate" || !catalog || !resolved?.officialPrice) return null;
-    const subModels: ResolvedModel[] = [];
-    for (const route of model.routeGroups) {
-      if (!route.enabled) continue;
-      const resolvedSub = resolveChannelModel(catalog, route.channelId, route.upstreamModel, pricingNow);
-      if (resolvedSub) subModels.push(resolvedSub);
-    }
-    if (subModels.length === 0) return null;
-    return aggregateMaxStandardPrice(subModels, pricingNow);
-  }, [catalog, model, pricingNow, resolved?.officialPrice]);
-
   // 基础信息：优先 models-cn 官方值，缺失降级到渠道同步。
   if (!model) return <ModelsServiceDetailView empty={t("选择一个模型查看路由配置")} />;
 
   const busy = pendingModel != null;
-  const modelRelations = relations.get(model.publicModel.toLowerCase()) ?? [];
-  const relatedAggregateCount = new Set(modelRelations.map((relation) => relation.aggregateModel)).size;
-  const kindLabel = model.kind === "aggregate" ? t("聚合模型") : t("渠道模型");
   const accountLabel = model.availableAccountCount > 0
     ? t("{count} 个可用账号", { count: model.availableAccountCount })
     : t("无可用账号");
   const enabledRouteCount = model.routeGroups.filter((routeGroup) => routeGroup.enabled).length;
-  const aggregateRouteOptions = model.kind === "aggregate"
-    ? buildAggregateRouteOptions(allRoutes, model.publicModel)
-    : [];
   const accountById = new Map(accounts.map((account) => [account.id, account]));
   const channelById = new Map(channels.map((channel) => [channel.id, channel]));
   const routeViewModels: ModelsServiceRouteModel[] = model.routeGroups.map((routeGroup) => {
@@ -697,11 +562,9 @@ function ModelDetail({ model, relations, accounts, channels, allRoutes, catalogJ
   };
   const removeViewRoute = (key: string) => {
     const routeGroup = model.routeGroups.find((route) => route.key === key);
-    if (routeGroup) onRemoveAggregateRoute(model.publicModel, routeGroup);
+    if (routeGroup) onRemoveRoute(model.publicModel, routeGroup);
   };
 
-  // 聚合模型（flowlet-pro/flowlet-flash）没有厂商官方价格，不展示"立即同步"。
-  const showPricingSync = model.kind === "direct";
   const copyModelName = async () => {
     try {
       await navigator.clipboard.writeText(model.publicModel);
@@ -714,7 +577,7 @@ function ModelDetail({ model, relations, accounts, channels, allRoutes, catalogJ
   return <ModelsServiceDetailView
     logo={<ModelLogo model={model} />}
     title={model.publicModel}
-    subtitle={`${kindLabel} · ${accountLabel}`}
+    subtitle={`${t("渠道模型")} · ${accountLabel}`}
     headerAction={<Button aria-label={t("复制模型名称")} title={t("复制模型名称")} icon={<IconCopy />} theme="borderless" size="small" onClick={() => void copyModelName()} />}
     activeKey={activeTab}
     onTabChange={setActiveTab}
@@ -722,7 +585,6 @@ function ModelDetail({ model, relations, accounts, channels, allRoutes, catalogJ
       { key: "basic", label: t("基础信息"), content: <>
           <ModelBasicInfoTab
             resolved={resolved}
-            isAggregate={model.kind === "aggregate"}
             channelName={model.channelName}
             officialOwnerName={officialOwnerNameForModel(model.publicModel)}
             language={language}
@@ -732,11 +594,9 @@ function ModelDetail({ model, relations, accounts, channels, allRoutes, catalogJ
       { key: "pricing", label: t("价格信息"), content: <>
           <ModelPricingTab
             resolved={resolved}
-            standardPrice={model.kind === "direct" ? undefined : aggregateStandardPrice}
             hasCatalog={catalog !== null}
             catalogLoading={catalogLoading}
-            showSyncButton={showPricingSync}
-            isAggregate={model.kind === "aggregate"}
+            showSyncButton
             syncPending={syncCatalogsPending}
             onSync={onSyncCatalogs}
             at={pricingNow}
@@ -745,84 +605,20 @@ function ModelDetail({ model, relations, accounts, channels, allRoutes, catalogJ
           />
         </> },
       { key: "routing", label: t("渠道路由"), content: <>
-          {model.kind === "aggregate" ? (
-            <ModelsServiceTabContentView>
-              <ModelsServiceRouteOverviewView
-                title={t("渠道路由")}
-                summary={t("{enabled} / {total} 条已启用", { enabled: enabledRouteCount, total: model.routeGroups.length })}
-                description={t("从已有渠道模型中自由添加候选，并拖动调整请求优先级。")}
-                addLabel={t("添加渠道模型")}
-                addDisabled={aggregateRouteOptions.length === 0}
-                onAdd={() => setAddRouteVisible(true)}
-                routes={routeViewModels}
-                busy={busy}
-                removable
-                empty={t("尚未添加渠道模型。添加后，Flowlet 会按这里的顺序选择候选。")}
-                onToggle={toggleViewRoute}
-                onReorder={(sourceKey, targetKey) => onReorderRoute(model.publicModel, sourceKey, targetKey)}
-                onRemove={removeViewRoute}
-              />
-              <Modal
-                title={t("添加渠道模型到 {model}", { model: model.publicModel })}
-                visible={addRouteVisible}
-                zIndex={APP_OVERLAY_Z_INDEX.modal}
-                onCancel={() => { setAddRouteVisible(false); setSelectedRouteKey(undefined); }}
-                onOk={() => {
-                  if (!selectedRouteKey) return;
-                  onAddAggregateRoute(model.publicModel, selectedRouteKey);
-                  setAddRouteVisible(false);
-                  setSelectedRouteKey(undefined);
-                }}
-                okButtonProps={{ disabled: !selectedRouteKey, loading: busy }}
-                okText={t("添加")}
-                cancelText={t("取消")}
-              >
-                <div className={styles.addRouteForm}>
-                  <span>{t("选择已有渠道模型")}</span>
-                  <Select
-                    value={selectedRouteKey}
-                    zIndex={APP_OVERLAY_Z_INDEX.modal + 1}
-                    onChange={(value) => setSelectedRouteKey(String(value))}
-                    placeholder={t("选择渠道、账号和模型")}
-                    filter
-                    optionList={aggregateRouteOptions.map((option) => ({
-                      value: option.key,
-                      label: `${channelById.get(option.channelId)?.name ?? option.channelId} · ${accountById.get(option.accountId)?.name ?? option.accountId} · ${option.upstreamModel}`,
-                    }))}
-                  />
-                  <small>{t("同一渠道模型支持的协议会一起加入；之后仍可单独停用或移除。")}</small>
-                </div>
-              </Modal>
-            </ModelsServiceTabContentView>
-          ) : (
-            <ModelsServiceTabContentView>
-              <ModelsServiceRouteOverviewView
-                title={t("路由关系")}
-                summary={t("{count} 个聚合模型", { count: relatedAggregateCount })}
-                description={t("展示当前渠道模型被哪些聚合模型引用。")}
-              />
-              {modelRelations.length > 0 ? (
-                <ModelsServiceRelationListView relations={modelRelations.map((relation) => ({
-                  key: `${relation.aggregateModel}-${relation.routeGroupKey}`,
-                  logo: <FlowletLogo variant="model" />,
-                  title: relation.aggregateModel,
-                  subtitle: t("优先级 {priority}", { priority: relation.priority }),
-                  enabled: relation.enabled,
-                  activeLabel: t("正在参与路由"),
-                  idleLabel: t("已配置 · 未启用"),
-                }))} />
-              ) : (
-                <ModelsServiceInfoBannerView icon={<IconInfoCircle />}>
-                  {t("该渠道模型尚未加入任何聚合模型。可在聚合模型的「渠道路由」中添加。")}
-                </ModelsServiceInfoBannerView>
-              )}
-              {model.routeGroups.length > 1 ? (
-                <ModelsServiceSectionView title={t("直连路由")} note={t("按账号启停或拖动调整优先级")}>
-                  <ModelsServiceRouteListView routes={routeViewModels} busy={busy} framed={false} onToggle={toggleViewRoute} onReorder={(sourceKey, targetKey) => onReorderRoute(model.publicModel, sourceKey, targetKey)} />
-                </ModelsServiceSectionView>
-              ) : null}
-            </ModelsServiceTabContentView>
-          )}
+          <ModelsServiceTabContentView>
+            <ModelsServiceRouteOverviewView
+              title={t("渠道路由")}
+              summary={t("{enabled} / {total} 条已启用", { enabled: enabledRouteCount, total: model.routeGroups.length })}
+              description={t("同一模型的多个渠道候选按这里的顺序尝试；可单独启停、拖动排序或删除不再使用的候选。")}
+              routes={routeViewModels}
+              busy={busy}
+              removable
+              empty={t("尚无路由候选。请先在渠道账号中勾选并保存要开放的模型。")}
+              onToggle={toggleViewRoute}
+              onReorder={(sourceKey, targetKey) => onReorderRoute(model.publicModel, sourceKey, targetKey)}
+              onRemove={removeViewRoute}
+            />
+          </ModelsServiceTabContentView>
         </> },
     ]}
     footer={<><span>{t("配置变更会立即保存并热更新到本地代理")}</span><span>{t("本地配置")}</span></>}
@@ -851,10 +647,8 @@ function formatModelModalities(
 
 function modelSpecificationSourceLabel(
   resolved: ResolvedModel | null,
-  isAggregate: boolean,
   t: (source: string, values?: Record<string, string | number>) => string,
 ): string {
-  if (isAggregate) return t("聚合计算");
   if (resolved?.specificationSource === "models-cn") return "models-cn";
   if (resolved?.specificationSource === "models.dev") return "models.dev";
   return "—";
@@ -862,21 +656,16 @@ function modelSpecificationSourceLabel(
 
 function modelSpecificationDescription(
   resolved: ResolvedModel | null,
-  isAggregate: boolean,
   t: (source: string, values?: Record<string, string | number>) => string,
 ): string {
-  if (isAggregate) return t("参数与能力按当前已启用路由的最低值计算。");
   if (resolved?.specificationSource === "models-cn") return t("当前展示 models-cn 收录的模型规格。");
   if (resolved?.specificationSource === "models.dev") return t("models-cn 暂未收录，当前展示 models.dev 的模型规格。");
   return t("暂无可用的模型规格。");
 }
 
-/** 基础信息 Tab：顶部说明 banner + 2×2 参数网格 + 能力清单。优先展示 models-cn 官方值。
- *  聚合模型（flowlet-pro/flowlet-flash）：limits 取已启用子模型最小值（木桶效应），
- *  capabilities 取交集（只承诺所有子模型都支持的能力）。 */
-function ModelBasicInfoTab({ resolved, isAggregate, channelName, officialOwnerName, language, t }: {
+/** 基础信息 Tab：顶部说明 banner + 2×2 参数网格 + 能力清单。优先展示 models-cn 官方值。 */
+function ModelBasicInfoTab({ resolved, channelName, officialOwnerName, language, t }: {
   resolved: ResolvedModel | null;
-  isAggregate: boolean;
   channelName?: string;
   officialOwnerName?: string | null;
   language: NumberLanguage;
@@ -888,13 +677,13 @@ function ModelBasicInfoTab({ resolved, isAggregate, channelName, officialOwnerNa
   return (
     <ModelsServiceTabContentView>
       <ModelsServiceInfoBannerView icon={<IconInfoCircle />}>
-        {modelSpecificationDescription(resolved, isAggregate, t)}
+        {modelSpecificationDescription(resolved, t)}
       </ModelsServiceInfoBannerView>
       <ModelsServiceSectionView title={t("模型参数")}><ModelsServiceMetricGridView items={[
         { key: "context", label: t("上下文窗口"), value: formatTokenCapacity(contextTokens, language) },
         { key: "output", label: t("最大输出"), value: formatTokenCapacity(maxOutputTokens, language) },
-        { key: "owner", label: t("官方归属"), value: isAggregate ? "Flowlet" : officialOwnerName ?? resolved?.providerName ?? channelName ?? "—" },
-        { key: "source", label: t("规格来源"), value: modelSpecificationSourceLabel(resolved, isAggregate, t) },
+        { key: "owner", label: t("官方归属"), value: officialOwnerName ?? resolved?.providerName ?? channelName ?? "—" },
+        { key: "source", label: t("规格来源"), value: modelSpecificationSourceLabel(resolved, t) },
       ]} /></ModelsServiceSectionView>
       {caps ? (
         <ModelsServiceSectionView title={t("模型能力")}><ModelsServiceCapabilityListView items={[
@@ -928,16 +717,12 @@ function ModelBasicInfoTab({ resolved, isAggregate, channelName, officialOwnerNa
 }
 
 /** 价格信息 Tab：展示 models-cn 官方价格（与渠道账号无关的厂商直销价）。
- *  数据完全来自 models-cn，不再有 config.json 降级。
- *  聚合模型（flowlet-pro/flowlet-flash）：价格取已启用子模型的最大值（展示最坏情况
- *  下的成本上限），standard 价格也取最大值用于划价展示。 */
-function ModelPricingTab({ resolved, standardPrice: standardPriceOverride, hasCatalog, catalogLoading, showSyncButton, isAggregate, syncPending, onSync, at, language, t }: {
+ *  数据完全来自 models-cn，不再有 config.json 降级。 */
+function ModelPricingTab({ resolved, hasCatalog, catalogLoading, showSyncButton, syncPending, onSync, at, language, t }: {
   resolved: ResolvedModel | null;
-  standardPrice?: ResolvedPrice | null;
   hasCatalog: boolean;
   catalogLoading: boolean;
   showSyncButton: boolean;
-  isAggregate: boolean;
   syncPending: boolean;
   onSync: () => void;
   at: Date;
@@ -963,21 +748,16 @@ function ModelPricingTab({ resolved, standardPrice: standardPriceOverride, hasCa
     );
   }
 
-  // 划价展示用的 standard 价格：聚合模型用外部传入（子模型 standard 最大值），
-  // 直接模型从 allPrices 中取同市场同币种的 standard。统一按 ModelsCnPrice 形态
-  // 处理，便于直接访问 input.standard / input.cacheHit。
+  // 划价展示用的 standard 价格：从 allPrices 中取同市场同币种的 standard。
   const matchingPrices = (resolved?.allPrices ?? []).filter(
     (candidate) => candidate.market === price.market && candidate.currency === price.currency,
   );
   const currentWindowPrices = effectiveWindowPricesAt(matchingPrices, at);
   const upcomingPrices = nextEffectivePricesAt(matchingPrices, at);
-  const standardPrice: ModelsCnPrice | null = standardPriceOverride
-    ? priceFromResolvedStandard(standardPriceOverride)
-    : currentWindowPrices.find((candidate) => candidate.rateType === "standard") ?? null;
-  const strategyRows = !isAggregate
-    ? buildPricingStrategyRows(currentWindowPrices, price.market, price.currency)
-    : [];
-  const upcomingStrategyRows = !isAggregate && upcomingPrices.length > 0
+  const standardPrice: ModelsCnPrice | null =
+    currentWindowPrices.find((candidate) => candidate.rateType === "standard") ?? null;
+  const strategyRows = buildPricingStrategyRows(currentWindowPrices, price.market, price.currency);
+  const upcomingStrategyRows = upcomingPrices.length > 0
     ? buildPricingStrategyRows(upcomingPrices, price.market, price.currency)
     : [];
   const hasDailyTimeRanges = strategyRows.some((row) => row.current.dailyTimeRange != null);
@@ -1006,9 +786,6 @@ function ModelPricingTab({ resolved, standardPrice: standardPriceOverride, hasCa
 
   return (
     <ModelsServiceTabContentView>
-      {isAggregate ? (
-        <ModelsServiceInfoBannerView icon={<IconInfoCircle />}>{t("聚合模型按当前已启用路由中的最高成本展示，避免低估调用成本。")}</ModelsServiceInfoBannerView>
-      ) : null}
       <ModelsServiceSectionView title={t("官方价格")}>
         {showDetailedStrategy ? (
           <>

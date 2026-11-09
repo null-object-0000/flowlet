@@ -228,7 +228,15 @@ function AttemptSelector({ rows, selectedRow, onSelect, compact = false }: { row
               <strong>{row.channel_name || row.channel_id || t("未路由")} · {row.account_name || row.account_id || "-"}</strong>
               <small title={attemptDetail(row, t)}>{attemptDetail(row, t)}</small>
             </span>
-            <span className={styles.attemptMeta}><StatusTag row={row} /><small>{isLocalSkip(row) ? t("未请求上游") : formatDuration(row.duration_ms ?? row.latency_ms)}</small></span>
+            <span className={styles.attemptMeta}>
+              <StatusTag row={row} />
+              {!isLocalSkip(row) && row.upstream_url && (
+                <Tag size="small" color={row.upstream_proxy_used ? "blue" : "grey"}>
+                  {row.upstream_proxy_used == null ? t("出口未记录") : row.upstream_proxy_used ? t("经代理") : t("直连")}
+                </Tag>
+              )}
+              <small>{isLocalSkip(row) ? t("未请求上游") : formatDuration(row.duration_ms ?? row.latency_ms)}</small>
+            </span>
           </button>
         ))}
       </div>

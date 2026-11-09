@@ -46,16 +46,15 @@ impl AgentGlobalConfigAdapter for DeepSeekHarnessAdapter {
         client_token: &str,
         options: Option<&AgentGlobalConfigOptions>,
     ) -> Result<AgentGlobalConfigReport, String> {
+        // DSH 只使用主模型；聚合模型移除后不再声明 contextWindow / 模型 input。
+        let (primary_model, _fast_model) = resolve_model_choices(options)?;
         apply_dsh(
             expected_base_url,
             client_token,
             options
                 .and_then(|options| options.session_extension)
                 .unwrap_or(false),
-            options
-                .and_then(|options| options.model_specs)
-                .unwrap_or(false),
-            options.and_then(|options| options.model_input_modalities.as_ref()),
+            &primary_model,
             options.and_then(|options| options.mcp_servers.as_deref()),
         )
     }
@@ -367,15 +366,20 @@ fn yaml_plain_safe(value: &str) -> bool {
     if value.contains(": ") || value.contains(" #") || value.ends_with(':') {
         return false;
     }
-    if value
-        .chars()
-        .any(|c| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '/' | ':' | '\\' | '@' | '+' | '=' | '%' | '~' | '^' | '(' | ')')))
-    {
+    if value.chars().any(|c| {
+        !(c.is_ascii_alphanumeric()
+            || matches!(
+                c,
+                '_' | '-' | '.' | '/' | ':' | '\\' | '@' | '+' | '=' | '%' | '~' | '^' | '(' | ')'
+            ))
+    }) {
         return false;
     }
     let lower = value.to_ascii_lowercase();
-    if matches!(lower.as_str(), "true" | "false" | "null" | "yes" | "no" | "on" | "off" | "~")
-    {
+    if matches!(
+        lower.as_str(),
+        "true" | "false" | "null" | "yes" | "no" | "on" | "off" | "~"
+    ) {
         return false;
     }
     if value.parse::<i64>().is_ok() || value.parse::<f64>().is_ok() {
@@ -464,7 +468,10 @@ fn mcp_servers_block(servers: &[McpServerSpec]) -> String {
                 if !args.is_empty() {
                     block.push_str(&format!(
                         "        args: [{}]\n",
-                        args.iter().map(|arg| yaml_quote(arg)).collect::<Vec<_>>().join(", ")
+                        args.iter()
+                            .map(|arg| yaml_quote(arg))
+                            .collect::<Vec<_>>()
+                            .join(", ")
                     ));
                 }
             }
@@ -475,7 +482,11 @@ fn mcp_servers_block(servers: &[McpServerSpec]) -> String {
                 if !env.is_empty() {
                     block.push_str("        env:\n");
                     for (key, value) in env {
-                        block.push_str(&format!("          {}: {}\n", yaml_quote(key), yaml_quote(value)));
+                        block.push_str(&format!(
+                            "          {}: {}\n",
+                            yaml_quote(key),
+                            yaml_quote(value)
+                        ));
                     }
                 }
             }
@@ -487,7 +498,11 @@ fn mcp_servers_block(servers: &[McpServerSpec]) -> String {
                 if !headers.is_empty() {
                     block.push_str("        headers:\n");
                     for (key, value) in headers {
-                        block.push_str(&format!("          {}: {}\n", yaml_quote(key), yaml_quote(value)));
+                        block.push_str(&format!(
+                            "          {}: {}\n",
+                            yaml_quote(key),
+                            yaml_quote(value)
+                        ));
                     }
                 }
             }
@@ -559,9 +574,7 @@ fn remove_mcp_servers(text: &str) -> Result<Vec<u8>, String> {
 fn string_map_from(mapping: &serde_yaml::Mapping) -> BTreeMap<String, String> {
     mapping
         .iter()
-        .filter_map(|(key, value)| {
-            Some((key.as_str()?.to_string(), value.as_str()?.to_string()))
-        })
+        .filter_map(|(key, value)| Some((key.as_str()?.to_string(), value.as_str()?.to_string())))
         .collect()
 }
 
@@ -627,8 +640,8 @@ fn parse_mcp_servers(text: &str) -> Result<Vec<McpServerSpec>, String> {
     if body.is_empty() {
         return Ok(Vec::new());
     }
-    let entries: Vec<serde_yaml::Value> = serde_yaml::from_str(body)
-        .map_err(|error| format!("解析 DSH MCP 受管块失败：{error}"))?;
+    let entries: Vec<serde_yaml::Value> =
+        serde_yaml::from_str(body).map_err(|error| format!("解析 DSH MCP 受管块失败：{error}"))?;
     Ok(entries
         .iter()
         .filter_map(|entry| {
@@ -669,18 +682,6 @@ fn inspect_dsh_at(home: &Path, expected_base_url: &str) -> Result<AgentGlobalCon
             .all(|(_, root)| profile_bridge_matches(root, expected_base_url));
     // MCP 服务器：跨全部 base Profile 合并受管列表（按 id 去重）。
     let mcp_servers = collect_mcp_servers(&profiles)?;
-    // 聚合模型规格声明：settings.yaml 中 flowlet-pro 模型条目携带 contextWindow。
-    let model_specs = yaml_at(
-        &read_yaml_value(&settings_path).unwrap_or_else(|_| serde_yaml::Value::Null),
-        &[LLM_NAMESPACE, "providers", PROVIDER_ID, "models"],
-    )
-    .and_then(serde_yaml::Value::as_sequence)
-    .is_some_and(|models| {
-        models.iter().any(|entry| {
-            entry.get("id").and_then(serde_yaml::Value::as_str) == Some("flowlet-pro")
-                && entry.get("contextWindow").is_some()
-        })
-    });
     let report = |state, base_url, token, model, error| AgentGlobalConfigReport {
         agent_id: "deepseek-harness".to_string(),
         settings_path: display_path(&settings_path),
@@ -695,17 +696,12 @@ fn inspect_dsh_at(home: &Path, expected_base_url: &str) -> Result<AgentGlobalCon
         subagent_model: None,
         model_catalog_path: None,
         model_catalog_configured: false,
-        primary_long_context: false,
-        fast_long_context: false,
-        long_context: false,
         backup_available,
         external_environment_overrides: std::env::var_os(TOKEN_REF)
             .map(|_| vec![TOKEN_REF.to_string()])
             .unwrap_or_default(),
         error,
         session_extension,
-        model_specs,
-        model_input_modalities: BTreeMap::new(),
         mcp_servers: mcp_servers.clone(),
         opencode_permission_bridge: false,
     };
@@ -752,9 +748,12 @@ fn inspect_dsh_at(home: &Path, expected_base_url: &str) -> Result<AgentGlobalCon
         || read_credential_value(&credentials_path)?.is_some();
     let base_matches = base_url.as_deref().map(normalize_url).as_deref()
         == Some(normalize_url(expected_base_url).as_str());
-    let state = if base_matches && key_ref_matches && api_matches && token
+    let state = if base_matches
+        && key_ref_matches
+        && api_matches
+        && token
         && default_provider == Some(PROVIDER_ID)
-        && model.as_deref() == Some("flowlet-pro")
+        && model.as_deref().is_some_and(is_known_catalog_model)
     {
         AgentGlobalConfigState::Flowlet
     } else if base_url
@@ -762,12 +761,7 @@ fn inspect_dsh_at(home: &Path, expected_base_url: &str) -> Result<AgentGlobalCon
         .is_some_and(|value| normalize_url(value) != normalize_url(expected_base_url))
     {
         AgentGlobalConfigState::OtherGateway
-    } else if provider.is_some()
-        || default_provider == Some(PROVIDER_ID)
-        || model
-            .as_deref()
-            .is_some_and(|value| value.starts_with("flowlet"))
-    {
+    } else if provider.is_some() || default_provider == Some(PROVIDER_ID) {
         AgentGlobalConfigState::Partial
     } else {
         AgentGlobalConfigState::NotConfigured
@@ -1094,53 +1088,24 @@ pub(in crate::core::agent_global_config) fn patch_yaml_entry(
     Ok(output.into_bytes())
 }
 
-#[cfg(test)]
-fn provider_profile(expected_base_url: &str, model_specs: bool) -> Value {
-    provider_profile_with_inputs(expected_base_url, model_specs, None)
-}
-
-fn provider_profile_with_inputs(
-    expected_base_url: &str,
-    model_specs: bool,
-    model_inputs: Option<&std::collections::BTreeMap<String, Vec<String>>>,
-) -> Value {
-    let input_for = |model: &str| {
-        let requested = model_inputs
-            .and_then(|inputs| inputs.get(model))
-            .cloned()
-            .unwrap_or_default();
-        let mut normalized = vec!["text".to_string()];
-        if requested.iter().any(|value| value == "image") {
-            normalized.push("image".to_string());
-        }
-        normalized
-    };
-    let pro = if model_specs {
-        json!({ "id": "flowlet-pro", "contextWindow": 1048576, "input": input_for("flowlet-pro") })
-    } else {
-        json!({ "id": "flowlet-pro" })
-    };
-    let flash = if model_specs {
-        json!({ "id": "flowlet-flash", "contextWindow": 1048576, "input": input_for("flowlet-flash") })
-    } else {
-        json!({ "id": "flowlet-flash" })
-    };
+/// 构造 DSH 的 Flowlet Provider 段：只声明用户选择的单个模型，不写 contextWindow /
+/// input（聚合模型已移除，客户端按所选单一模型的真实能力转发）。
+fn provider_profile(expected_base_url: &str, model: &str) -> Value {
     json!({
         "displayName": "Flowlet",
         "apiKeyEnv": TOKEN_REF,
         "api": "openai-completions",
         "baseURL": normalize_url(expected_base_url),
-        "models": [pro, flash],
+        "models": [{ "id": model }],
     })
 }
 
 fn apply_settings_text(
     text: &str,
     expected_base_url: &str,
-    model_specs: bool,
-    model_inputs: Option<&std::collections::BTreeMap<String, Vec<String>>>,
+    model: &str,
 ) -> Result<Vec<u8>, String> {
-    let provider = provider_profile_with_inputs(expected_base_url, model_specs, model_inputs);
+    let provider = provider_profile(expected_base_url, model);
     let text = String::from_utf8(patch_yaml_entry(
         text,
         "settings.yaml",
@@ -1158,7 +1123,7 @@ fn apply_settings_text(
         Some(&default_provider),
     )?)
     .map_err(|error| format!("生成 settings.yaml 失败：{error}"))?;
-    let default_model = Value::String("flowlet-pro".to_string());
+    let default_model = Value::String(model.to_string());
     patch_yaml_entry(
         &text,
         "settings.yaml",
@@ -1255,48 +1220,26 @@ fn apply_dsh(
     expected_base_url: &str,
     client_token: &str,
     session_extension: bool,
-    model_specs: bool,
-    model_inputs: Option<&std::collections::BTreeMap<String, Vec<String>>>,
+    primary_model: &str,
     mcp_servers: Option<&[McpServerSpec]>,
 ) -> Result<AgentGlobalConfigReport, String> {
     let home = dsh_home()?;
-    apply_dsh_at_with_inputs(
+    apply_dsh_at(
         &home,
         expected_base_url,
         client_token,
         session_extension,
-        model_specs,
-        model_inputs,
+        primary_model,
         mcp_servers,
     )
 }
 
-#[cfg(test)]
-fn apply_dsh_at(
+pub(in crate::core::agent_global_config) fn apply_dsh_at(
     home: &Path,
     expected_base_url: &str,
     client_token: &str,
     session_extension: bool,
-    model_specs: bool,
-) -> Result<AgentGlobalConfigReport, String> {
-    apply_dsh_at_with_inputs(
-        home,
-        expected_base_url,
-        client_token,
-        session_extension,
-        model_specs,
-        None,
-        None,
-    )
-}
-
-fn apply_dsh_at_with_inputs(
-    home: &Path,
-    expected_base_url: &str,
-    client_token: &str,
-    session_extension: bool,
-    model_specs: bool,
-    model_inputs: Option<&std::collections::BTreeMap<String, Vec<String>>>,
+    primary_model: &str,
     mcp_servers: Option<&[McpServerSpec]>,
 ) -> Result<AgentGlobalConfigReport, String> {
     // 服务器列表校验是纯函数，先于任何锁与文件操作执行。
@@ -1313,12 +1256,7 @@ fn apply_dsh_at_with_inputs(
     let settings_text = read_yaml_text(&settings_path)?;
     let credentials_text = read_yaml_text(&credentials_path)?;
     let current = capture_snapshot(&settings_path, &credentials_path)?;
-    let settings_output = apply_settings_text(
-        &settings_text,
-        expected_base_url,
-        model_specs,
-        model_inputs,
-    )?;
+    let settings_output = apply_settings_text(&settings_text, expected_base_url, primary_model)?;
     let credentials_output = apply_credentials_text(&credentials_text, client_token)?;
     let profiles = dsh_profiles(&home)?;
     if session_extension && profiles.is_empty() {
@@ -1516,116 +1454,80 @@ mod tests {
     #[test]
     fn builds_the_documented_flowlet_custom_provider() {
         assert_eq!(
-            provider_profile("http://127.0.0.1:18640/v1/", false),
+            provider_profile("http://127.0.0.1:18640/v1/", "LongCat-2.5"),
             json!({
                 "displayName": "Flowlet",
                 "apiKeyEnv": "FLOWLET_CLIENT_TOKEN",
                 "api": "openai-completions",
                 "baseURL": "http://127.0.0.1:18640/v1",
-                "models": [{ "id": "flowlet-pro" }, { "id": "flowlet-flash" }],
+                "models": [{ "id": "LongCat-2.5" }],
             })
         );
     }
 
     #[test]
-    fn model_specs_declares_context_window_on_both_aggregate_models() {
-        let model_inputs = std::collections::BTreeMap::from([
-            (
-                "flowlet-pro".to_string(),
-                vec!["text".to_string(), "image".to_string()],
-            ),
-            ("flowlet-flash".to_string(), vec!["text".to_string()]),
-        ]);
-        let value = provider_profile_with_inputs(
-            "http://127.0.0.1:18640/v1",
-            true,
-            Some(&model_inputs),
-        );
-        let models = value["models"].as_array().unwrap();
-        assert_eq!(models.len(), 2);
-        for entry in models {
-            assert_eq!(
-                entry["contextWindow"].as_i64(),
-                Some(1_048_576),
-                "每个聚合模型条目都应声明 1M 上下文窗口：{entry}"
-            );
-        }
-        assert_eq!(models[0]["input"], json!(["text", "image"]));
-        assert_eq!(models[1]["input"], json!(["text"]));
+    fn provider_declares_single_selected_model_without_context_window_or_input() {
         let text = String::from_utf8(
-            apply_settings_text(
-                "unrelated: keep\n",
-                "http://127.0.0.1:18640/v1",
-                true,
-                Some(&model_inputs),
-            )
-            .unwrap(),
+            apply_settings_text("unrelated: keep\n", "http://127.0.0.1:18640/v1", "glm-5.3")
+                .unwrap(),
         )
         .unwrap();
         let parsed: serde_yaml::Value = serde_yaml::from_str(&text).unwrap();
         assert_eq!(
-            yaml_at(
-                &parsed,
-                &[
-                    LLM_NAMESPACE,
-                    "providers",
-                    PROVIDER_ID,
-                    "models",
-                    "0",
-                    "contextWindow"
-                ]
-            )
-            .and_then(serde_yaml::Value::as_i64),
-            Some(1_048_576)
+            yaml_at(&parsed, &[DEFAULT_MODEL_NAMESPACE, "model"])
+                .and_then(serde_yaml::Value::as_str),
+            Some("glm-5.3")
         );
+        let models = yaml_at(
+            &parsed,
+            &[LLM_NAMESPACE, "providers", PROVIDER_ID, "models"],
+        )
+        .and_then(serde_yaml::Value::as_sequence)
+        .unwrap();
+        assert_eq!(models.len(), 1, "只声明用户选择的单个模型");
         assert_eq!(
-            yaml_at(
-                &parsed,
-                &[LLM_NAMESPACE, "providers", PROVIDER_ID, "models", "0", "input"]
-            )
-            .and_then(serde_yaml::Value::as_sequence)
-            .map(Vec::len),
-            Some(2)
+            models[0].get("id").and_then(serde_yaml::Value::as_str),
+            Some("glm-5.3")
         );
-        // 关闭规格声明后重新写入应移除 contextWindow（不残留旧声明）。
-        let disabled = String::from_utf8(
-            apply_settings_text(&text, "http://127.0.0.1:18640/v1", false, None).unwrap(),
+        assert!(
+            models[0].get("contextWindow").is_none(),
+            "不再声明 contextWindow"
+        );
+        assert!(models[0].get("input").is_none(), "不再声明输入模态");
+
+        // 切换默认模型重新写入时，受管 models 列表整体替换，不残留旧模型条目。
+        let switched = String::from_utf8(
+            apply_settings_text(&text, "http://127.0.0.1:18640/v1", "kimi-k3").unwrap(),
         )
         .unwrap();
-        let reparsed: serde_yaml::Value = serde_yaml::from_str(&disabled).unwrap();
-        for index in ["0", "1"] {
-            assert!(
-                yaml_at(
-                    &reparsed,
-                    &[
-                        LLM_NAMESPACE,
-                        "providers",
-                        PROVIDER_ID,
-                        "models",
-                        index,
-                        "contextWindow"
-                    ]
-                )
-                .is_none(),
-                "关闭后模型条目 {index} 不应残留 contextWindow"
-            );
-            assert!(
-                yaml_at(
-                    &reparsed,
-                    &[LLM_NAMESPACE, "providers", PROVIDER_ID, "models", index, "input"]
-                )
-                .is_none(),
-                "关闭后模型条目 {index} 不应残留 input"
-            );
-        }
+        let reparsed: serde_yaml::Value = serde_yaml::from_str(&switched).unwrap();
+        assert_eq!(
+            yaml_at(&reparsed, &[DEFAULT_MODEL_NAMESPACE, "model"])
+                .and_then(serde_yaml::Value::as_str),
+            Some("kimi-k3")
+        );
+        let switched_models = yaml_at(
+            &reparsed,
+            &[LLM_NAMESPACE, "providers", PROVIDER_ID, "models"],
+        )
+        .and_then(serde_yaml::Value::as_sequence)
+        .unwrap();
+        assert_eq!(switched_models.len(), 1);
+        assert_eq!(
+            switched_models[0]
+                .get("id")
+                .and_then(serde_yaml::Value::as_str),
+            Some("kimi-k3")
+        );
     }
 
     #[test]
     fn lossless_edit_preserves_unmanaged_yaml_and_comments() {
         let before = "# keep root\nui-theme:\n  mode: dark # keep inline\nllm-pi-ai:\n  providers:\n    other:\n      baseURL: https://other.example/v1\n";
-        let output =
-            String::from_utf8(apply_settings_text(before, "http://127.0.0.1:18640/v1", false, None).unwrap())
-                .unwrap();
+        let output = String::from_utf8(
+            apply_settings_text(before, "http://127.0.0.1:18640/v1", "LongCat-2.5").unwrap(),
+        )
+        .unwrap();
         assert!(output.contains("# keep root"));
         assert!(output.contains("mode: dark # keep inline"));
         assert!(output.contains("https://other.example/v1"));
@@ -1641,7 +1543,7 @@ mod tests {
         assert_eq!(
             yaml_at(&parsed, &[DEFAULT_MODEL_NAMESPACE, "model"])
                 .and_then(serde_yaml::Value::as_str),
-            Some("flowlet-pro")
+            Some("LongCat-2.5")
         );
     }
 
@@ -1664,7 +1566,12 @@ mod tests {
             credential: BackedUpValue::default(),
         };
         let managed = String::from_utf8(
-            apply_settings_text("unrelated: keep\n", "http://127.0.0.1:18640/v1", false, None).unwrap(),
+            apply_settings_text(
+                "unrelated: keep\n",
+                "http://127.0.0.1:18640/v1",
+                "LongCat-2.5",
+            )
+            .unwrap(),
         )
         .unwrap();
         let restored =
@@ -1691,8 +1598,7 @@ mod tests {
         let error = apply_settings_text(
             "llm-pi-ai: { providers: { other: { baseURL: https://other.example/v1 } } }\n",
             "http://127.0.0.1:18640/v1",
-            false,
-            None,
+            "LongCat-2.5",
         )
         .unwrap_err();
         assert!(error.contains("行内或复杂 YAML"));
@@ -1702,9 +1608,10 @@ mod tests {
     fn updates_quoted_managed_key_without_adding_a_duplicate() {
         let before =
             "llm-pi-ai:\n  providers:\n    'flowlet':\n      baseURL: https://old.example/v1\n";
-        let output =
-            String::from_utf8(apply_settings_text(before, "http://127.0.0.1:18640/v1", false, None).unwrap())
-                .unwrap();
+        let output = String::from_utf8(
+            apply_settings_text(before, "http://127.0.0.1:18640/v1", "LongCat-2.5").unwrap(),
+        )
+        .unwrap();
         let parsed: serde_yaml::Value = serde_yaml::from_str(&output).unwrap();
         assert_eq!(
             yaml_at(
@@ -1765,8 +1672,7 @@ mod tests {
             "凭据不能落在新版文档根节点"
         );
         assert_eq!(
-            yaml_at(&parsed, &[CREDENTIAL_REFS, TOKEN_REF])
-                .and_then(serde_yaml::Value::as_str),
+            yaml_at(&parsed, &[CREDENTIAL_REFS, TOKEN_REF]).and_then(serde_yaml::Value::as_str),
             flowlet_token
         );
         assert_eq!(
@@ -1778,7 +1684,8 @@ mod tests {
 
     #[test]
     fn repairs_mixed_versioned_credentials_created_by_legacy_flowlet_writer() {
-        let before = "version: 1\nrefs:\n  EXISTING_TOKEN: keep-me\nFLOWLET_CLIENT_TOKEN: stale-token\n";
+        let before =
+            "version: 1\nrefs:\n  EXISTING_TOKEN: keep-me\nFLOWLET_CLIENT_TOKEN: stale-token\n";
         let applied =
             String::from_utf8(apply_credentials_text(before, "fresh-token").unwrap()).unwrap();
         assert_versioned_credentials(&applied, Some("fresh-token"));
@@ -1831,12 +1738,13 @@ mod tests {
             "http://127.0.0.1:18640/v1",
             "flowlet-client-token",
             true,
-            false,
+            "glm-5.3",
+            None,
         )
         .unwrap();
         assert_eq!(report.state, AgentGlobalConfigState::Flowlet);
         assert!(report.session_extension);
-        assert!(!report.model_specs);
+        assert_eq!(report.primary_model.as_deref(), Some("glm-5.3"));
         assert_versioned_credentials(
             &std::fs::read_to_string(home.join(".credentials.yaml")).unwrap(),
             Some("flowlet-client-token"),
@@ -1856,7 +1764,8 @@ mod tests {
             "http://127.0.0.1:18640/v1",
             "flowlet-client-token",
             true,
-            false,
+            "glm-5.3",
+            None,
         )
         .unwrap();
         assert_versioned_credentials(
@@ -1874,7 +1783,8 @@ mod tests {
             "http://127.0.0.1:18640/v1",
             "flowlet-client-token",
             false,
-            false,
+            "glm-5.3",
+            None,
         )
         .unwrap();
         assert!(!disabled.session_extension);
@@ -1910,11 +1820,11 @@ mod tests {
     }
 
     #[test]
-    fn real_upstream_fixture_model_specs_passes_apply_disable_restore_contract() {
+    fn real_upstream_fixture_default_model_passes_apply_reapply_switch_restore_contract() {
         const UPSTREAM_PATCH: &str =
             include_str!("../../../../tests/fixtures/deepseek-harness/web/cordis.patch.yml");
         let home = std::env::temp_dir().join(format!(
-            "flowlet-dsh-model-specs-contract-{}",
+            "flowlet-dsh-default-model-contract-{}",
             uuid::Uuid::new_v4()
         ));
         let settings = "# keep user settings\nllm-pi-ai:\n  providers:\n    existing:\n      baseURL: https://example.com/v1\nagent-default-model:\n  provider: existing\n  model: existing-model\n";
@@ -1928,45 +1838,38 @@ mod tests {
         )
         .unwrap();
 
-        let model_inputs = std::collections::BTreeMap::from([
-            (
-                "flowlet-pro".to_string(),
-                vec!["text".to_string(), "image".to_string()],
-            ),
-            ("flowlet-flash".to_string(), vec!["text".to_string()]),
-        ]);
-
-        let report = apply_dsh_at_with_inputs(
+        let report = apply_dsh_at(
             &home,
             "http://127.0.0.1:18640/v1",
             "flowlet-client-token",
             false,
-            true,
-            Some(&model_inputs),
+            "kimi-k3",
             None,
         )
         .unwrap();
         assert_eq!(report.state, AgentGlobalConfigState::Flowlet);
-        assert!(report.model_specs);
+        assert_eq!(report.primary_model.as_deref(), Some("kimi-k3"));
         assert!(!report.session_extension);
         let managed = std::fs::read_to_string(home.join("settings.yaml")).unwrap();
         let parsed: serde_yaml::Value = serde_yaml::from_str(&managed).unwrap();
+        assert_eq!(
+            yaml_at(&parsed, &[DEFAULT_MODEL_NAMESPACE, "model"])
+                .and_then(serde_yaml::Value::as_str),
+            Some("kimi-k3")
+        );
         let models = yaml_at(
             &parsed,
             &[LLM_NAMESPACE, "providers", PROVIDER_ID, "models"],
         )
         .and_then(serde_yaml::Value::as_sequence)
         .unwrap();
-        assert_eq!(models.len(), 2);
-        for entry in models {
-            assert_eq!(
-                entry["contextWindow"].as_i64(),
-                Some(1_048_576),
-                "每个聚合模型条目都应声明 1M 上下文窗口：{entry:?}"
-            );
-        }
-        assert_eq!(models[0]["input"], serde_yaml::to_value(["text", "image"]).unwrap());
-        assert_eq!(models[1]["input"], serde_yaml::to_value(["text"]).unwrap());
+        assert_eq!(models.len(), 1);
+        assert_eq!(
+            models[0].get("id").and_then(serde_yaml::Value::as_str),
+            Some("kimi-k3")
+        );
+        assert!(models[0].get("contextWindow").is_none());
+        assert!(models[0].get("input").is_none());
         // 非受管 Provider 原样保留。
         assert_eq!(
             yaml_at(
@@ -1977,49 +1880,53 @@ mod tests {
             Some("https://example.com/v1")
         );
 
-        let reapplied = apply_dsh_at_with_inputs(
+        // reapply：幂等，默认模型与受管 models 列表保持不变。
+        let reapplied = apply_dsh_at(
             &home,
             "http://127.0.0.1:18640/v1",
             "flowlet-client-token",
             false,
-            true,
-            Some(&model_inputs),
+            "kimi-k3",
             None,
         )
         .unwrap();
-        assert!(reapplied.model_specs, "reapply must preserve model specs");
+        assert_eq!(reapplied.state, AgentGlobalConfigState::Flowlet);
+        assert_eq!(
+            std::fs::read_to_string(home.join("settings.yaml")).unwrap(),
+            managed,
+            "reapply must be idempotent"
+        );
 
-        let disabled = apply_dsh_at(
+        // 切换默认模型：重新写入后受管 models 只剩新模型，旧模型不残留。
+        let switched = apply_dsh_at(
             &home,
             "http://127.0.0.1:18640/v1",
             "flowlet-client-token",
             false,
-            false,
+            "glm-5.3",
+            None,
         )
         .unwrap();
-        assert!(!disabled.model_specs, "disable must clear model specs");
-        let disabled_text = std::fs::read_to_string(home.join("settings.yaml")).unwrap();
-        let reparsed: serde_yaml::Value = serde_yaml::from_str(&disabled_text).unwrap();
-        let disabled_models = yaml_at(
-            &reparsed,
+        assert_eq!(switched.state, AgentGlobalConfigState::Flowlet);
+        assert_eq!(switched.primary_model.as_deref(), Some("glm-5.3"));
+        let switched_text = std::fs::read_to_string(home.join("settings.yaml")).unwrap();
+        let switched_yaml: serde_yaml::Value = serde_yaml::from_str(&switched_text).unwrap();
+        let switched_models = yaml_at(
+            &switched_yaml,
             &[LLM_NAMESPACE, "providers", PROVIDER_ID, "models"],
         )
         .and_then(serde_yaml::Value::as_sequence)
         .unwrap();
-        for entry in disabled_models {
-            assert!(
-                entry.get("contextWindow").is_none(),
-                "关闭后模型条目不应残留 contextWindow：{entry:?}"
-            );
-            assert!(
-                entry.get("input").is_none(),
-                "关闭后模型条目不应残留 input：{entry:?}"
-            );
-        }
+        assert_eq!(switched_models.len(), 1);
+        assert_eq!(
+            switched_models[0]
+                .get("id")
+                .and_then(serde_yaml::Value::as_str),
+            Some("glm-5.3")
+        );
 
         let restored = restore_dsh_at(&home, "http://127.0.0.1:18640/v1").unwrap();
         assert_eq!(restored.state, AgentGlobalConfigState::NotConfigured);
-        assert!(!restored.model_specs);
         assert_eq!(
             std::fs::read_to_string(home.join("settings.yaml")).unwrap(),
             settings
@@ -2164,9 +2071,12 @@ mod tests {
             transport: "streamable-http".to_string(),
             url: Some("http://127.0.0.1:9222/mcp".to_string()),
             headers: Some(
-                [("Authorization".to_string(), "Bearer secret token".to_string())]
-                    .into_iter()
-                    .collect(),
+                [(
+                    "Authorization".to_string(),
+                    "Bearer secret token".to_string(),
+                )]
+                .into_iter()
+                .collect(),
             ),
             ..McpServerSpec::default()
         }
@@ -2201,7 +2111,10 @@ mod tests {
             yaml_quote("C:\\Program Files\\node\\npx.cmd"),
             "'C:\\Program Files\\node\\npx.cmd'"
         );
-        assert_eq!(yaml_quote("@modelcontextprotocol/server-github"), "'@modelcontextprotocol/server-github'");
+        assert_eq!(
+            yaml_quote("@modelcontextprotocol/server-github"),
+            "'@modelcontextprotocol/server-github'"
+        );
         assert_eq!(yaml_quote("true"), "'true'");
         assert_eq!(yaml_quote("42"), "'42'");
         assert_eq!(yaml_quote("it's"), "'it''s'");
@@ -2253,8 +2166,7 @@ mod tests {
         assert!(!output.lines().any(|line| line.trim() == "[]"));
 
         // 移除后回退为合法的空数组文档。
-        let removed =
-            String::from_utf8(remove_mcp_servers(&output).unwrap()).unwrap();
+        let removed = String::from_utf8(remove_mcp_servers(&output).unwrap()).unwrap();
         let parsed: serde_yaml::Value = serde_yaml::from_str(&removed).unwrap();
         assert!(parsed.as_sequence().is_some_and(Vec::is_empty));
         assert!(removed.contains("# keep this comment"));
@@ -2265,8 +2177,7 @@ mod tests {
 
     #[test]
     fn mcp_patch_and_parse_refuse_broken_managed_markers() {
-        let error =
-            patch_mcp_servers(MCP_SERVERS_START, &[mcp_chrome(&["-y", "x"])]).unwrap_err();
+        let error = patch_mcp_servers(MCP_SERVERS_START, &[mcp_chrome(&["-y", "x"])]).unwrap_err();
         assert!(error.contains("标记不完整"));
         let parse_error = parse_mcp_servers(MCP_SERVERS_START).unwrap_err();
         assert!(parse_error.contains("标记不完整"));
@@ -2294,12 +2205,48 @@ mod tests {
 
         let long_name = "a".repeat(33);
         for (label, server) in [
-            ("bad-id", McpServerSpec { id: "has space".to_string(), ..mcp_chrome(&[]) }),
-            ("long-name", McpServerSpec { server_name: long_name, ..mcp_chrome(&[]) }),
-            ("no-command", McpServerSpec { command: None, ..mcp_chrome(&[]) }),
-            ("empty-command", McpServerSpec { command: Some(String::new()), ..mcp_chrome(&[]) }),
-            ("bad-transport", McpServerSpec { transport: "websocket".to_string(), ..mcp_chrome(&[]) }),
-            ("http-without-url", McpServerSpec { url: None, ..mcp_web_api() }),
+            (
+                "bad-id",
+                McpServerSpec {
+                    id: "has space".to_string(),
+                    ..mcp_chrome(&[])
+                },
+            ),
+            (
+                "long-name",
+                McpServerSpec {
+                    server_name: long_name,
+                    ..mcp_chrome(&[])
+                },
+            ),
+            (
+                "no-command",
+                McpServerSpec {
+                    command: None,
+                    ..mcp_chrome(&[])
+                },
+            ),
+            (
+                "empty-command",
+                McpServerSpec {
+                    command: Some(String::new()),
+                    ..mcp_chrome(&[])
+                },
+            ),
+            (
+                "bad-transport",
+                McpServerSpec {
+                    transport: "websocket".to_string(),
+                    ..mcp_chrome(&[])
+                },
+            ),
+            (
+                "http-without-url",
+                McpServerSpec {
+                    url: None,
+                    ..mcp_web_api()
+                },
+            ),
         ] {
             let error = validate_mcp_servers(std::slice::from_ref(&server)).unwrap_err();
             assert!(!error.is_empty(), "{label} 应当被拒绝");
@@ -2307,40 +2254,43 @@ mod tests {
         // 同列表内 serverName 重复（不同 id）必须拒绝。
         let duplicated = vec![
             mcp_chrome(&[]),
-            McpServerSpec { id: "alias".to_string(), ..mcp_chrome(&[]) },
+            McpServerSpec {
+                id: "alias".to_string(),
+                ..mcp_chrome(&[])
+            },
         ];
         assert!(validate_mcp_servers(&duplicated).is_err());
     }
 
     #[test]
     fn mcp_apply_requires_an_initialized_profile_for_nonempty_lists() {
-        let home =
-            std::env::temp_dir().join(format!("flowlet-dsh-mcp-noprofile-{}", uuid::Uuid::new_v4()));
+        let home = std::env::temp_dir().join(format!(
+            "flowlet-dsh-mcp-noprofile-{}",
+            uuid::Uuid::new_v4()
+        ));
         std::fs::create_dir_all(&home).unwrap();
         std::fs::write(home.join("settings.yaml"), "unrelated: keep\n").unwrap();
         std::fs::write(home.join(".credentials.yaml"), "EXISTING_TOKEN: keep-me\n").unwrap();
 
         let servers = [mcp_chrome(&["-y", "chrome-devtools-mcp@latest"])];
-        let error = apply_dsh_at_with_inputs(
+        let error = apply_dsh_at(
             &home,
             "http://127.0.0.1:18640/v1",
             "token",
             false,
-            false,
-            None,
+            "glm-5.3",
             Some(&servers),
         )
         .unwrap_err();
         assert!(error.contains("尚未发现可部署 MCP 服务器的 DSH Profile"));
 
         // 空列表只是移除受管块，不应因没有 Profile 而失败。
-        apply_dsh_at_with_inputs(
+        apply_dsh_at(
             &home,
             "http://127.0.0.1:18640/v1",
             "token",
             false,
-            false,
-            None,
+            "glm-5.3",
             Some(&[]),
         )
         .unwrap();
@@ -2373,16 +2323,20 @@ mod tests {
 
         // apply：同时部署会话桥与两个 MCP 服务器（stdio + streamable-http）。
         let servers = vec![
-            mcp_chrome(&["-y", "chrome-devtools-mcp@latest", "--headless", "--isolated"]),
+            mcp_chrome(&[
+                "-y",
+                "chrome-devtools-mcp@latest",
+                "--headless",
+                "--isolated",
+            ]),
             mcp_web_api(),
         ];
-        let report = apply_dsh_at_with_inputs(
+        let report = apply_dsh_at(
             &home,
             "http://127.0.0.1:18640/v1",
             "flowlet-client-token",
             true,
-            false,
-            None,
+            "glm-5.3",
             Some(&servers),
         )
         .unwrap();
@@ -2409,13 +2363,12 @@ mod tests {
         assert_eq!(parse_mcp_servers(&managed_patch).unwrap(), servers);
 
         // reapply：幂等。
-        apply_dsh_at_with_inputs(
+        apply_dsh_at(
             &home,
             "http://127.0.0.1:18640/v1",
             "flowlet-client-token",
             true,
-            false,
-            None,
+            "glm-5.3",
             Some(&servers),
         )
         .unwrap();
@@ -2426,13 +2379,12 @@ mod tests {
         );
 
         // disable：Some(空) 只移除 MCP 块，保留会话桥。
-        let disabled = apply_dsh_at_with_inputs(
+        let disabled = apply_dsh_at(
             &home,
             "http://127.0.0.1:18640/v1",
             "flowlet-client-token",
             true,
-            false,
-            None,
+            "glm-5.3",
             Some(&[]),
         )
         .unwrap();

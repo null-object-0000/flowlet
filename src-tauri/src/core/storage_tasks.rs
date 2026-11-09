@@ -5,7 +5,6 @@ use crate::core::agent_session_timeline::{
 };
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
-#[cfg(desktop)]
 use sha2::Digest;
 use std::time::{Duration, Instant};
 
@@ -263,7 +262,6 @@ impl Storage {
         config_path: &std::path::Path,
         jobs: &crate::core::job_runtime::JobRuntime,
     ) -> Result<(String, usize, usize, i64, i64), StorageError> {
-        use crate::core::proxy::extract_log_capture;
         use crate::core::proxy::read_config_raw;
 
         let definition = crate::core::job_runtime::BODY_CLEANUP;
@@ -279,7 +277,10 @@ impl Storage {
         let config_value = read_config_raw(config_path)
             .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
             .unwrap_or(serde_json::Value::Null);
-        let capture = extract_log_capture(&config_value);
+        // 设置页把捕获配置写入 SQLite app_meta（桌面与 Web 共用同一写入路径），
+        // 因此定时清理必须以 app_meta 为准；缺失时才回退 config.json 的 `log_capture`
+        // （手改文件或首次启动）。否则设置页改了保留策略、清理仍按旧文件执行。
+        let capture = scheduled_capture_config(self, &config_value);
         // 同一个定时任务同时负责派生存量数据（余额/资源快照）的保留策略：
         // 它每 5 分钟被渠道资源同步写入一行，是数据库体积的最大来源。
         let usage_retention =
@@ -1403,7 +1404,6 @@ pub struct CatalogSyncResult {
 }
 
 /// 一个模型目录的同步规格：本地文件名、后台任务身份与统计方式。
-#[cfg(desktop)]
 struct CatalogSpec {
     /// 来源标识，写入同步结果与任务日志。
     source: &'static str,
@@ -1415,7 +1415,6 @@ struct CatalogSpec {
     count: fn(&serde_json::Value) -> (usize, usize),
 }
 
-#[cfg(desktop)]
 const MODELS_CN_SPEC: CatalogSpec = CatalogSpec {
     source: "models-cn",
     job_definition: &crate::core::job_runtime::MODELS_CN_SYNC,
@@ -1424,7 +1423,6 @@ const MODELS_CN_SPEC: CatalogSpec = CatalogSpec {
     count: count_models_cn_catalog,
 };
 
-#[cfg(desktop)]
 const MODELS_DEV_SPEC: CatalogSpec = CatalogSpec {
     source: "models.dev",
     job_definition: &crate::core::job_runtime::MODELS_DEV_SYNC,
@@ -1435,6 +1433,9 @@ const MODELS_DEV_SPEC: CatalogSpec = CatalogSpec {
 
 /// 模型目录本地文件所在目录（exe 同级）。
 fn catalog_dir() -> std::path::PathBuf {
+    if let Some(path) = std::env::var_os("FLOWLET_CATALOG_DIR") {
+        return std::path::PathBuf::from(path);
+    }
     std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(|d| d.to_path_buf()))
@@ -1447,7 +1448,6 @@ pub fn models_cn_file_path() -> std::path::PathBuf {
 }
 
 /// models.dev 本地文件路径（exe 同级目录）。
-#[cfg(desktop)]
 pub fn models_dev_file_path() -> std::path::PathBuf {
     catalog_dir().join(MODELS_DEV_SPEC.file_name)
 }
@@ -1458,13 +1458,11 @@ pub fn read_models_cn_file() -> Option<String> {
 }
 
 /// 读取本地 models.dev 目录文件。返回 None 表示文件不存在。
-#[cfg(desktop)]
 pub fn read_models_dev_file() -> Option<String> {
     std::fs::read_to_string(models_dev_file_path()).ok()
 }
 
 /// models-cn 目录结构：{ "providers": [{ "models": [...] }] }。
-#[cfg(desktop)]
 fn count_models_cn_catalog(json: &serde_json::Value) -> (usize, usize) {
     let providers = json
         .get("providers")
@@ -1485,7 +1483,6 @@ fn count_models_cn_catalog(json: &serde_json::Value) -> (usize, usize) {
 }
 
 /// models.dev 目录结构：{ "<providerId>": { "models": { "<modelId>": {...} } } }。
-#[cfg(desktop)]
 fn count_models_dev_catalog(json: &serde_json::Value) -> (usize, usize) {
     let Some(providers) = json.as_object() else {
         return (0, 0);
@@ -1504,7 +1501,6 @@ fn count_models_dev_catalog(json: &serde_json::Value) -> (usize, usize) {
 /// 拉取 models-cn 目录并保存为本地 JSON 文件，成功后重建内存价格表。
 /// 若内容与上次一致（content_hash 相同）则跳过保存，返回 skipped=true。
 /// 所有运行信息写入后台任务日志。
-#[cfg(desktop)]
 pub async fn sync_models_cn_catalog(
     storage: &Storage,
     jobs: &crate::core::job_runtime::JobRuntime,
@@ -1525,7 +1521,6 @@ pub async fn sync_models_cn_catalog(
 
 /// 拉取 models.dev 目录并保存为本地 JSON 文件，成功后重建内存价格表。
 /// 语义与 models-cn 同步一致。
-#[cfg(desktop)]
 pub async fn sync_models_dev_catalog(
     storage: &Storage,
     jobs: &crate::core::job_runtime::JobRuntime,
@@ -1544,7 +1539,6 @@ pub async fn sync_models_dev_catalog(
     .await
 }
 
-#[cfg(desktop)]
 async fn sync_catalog_file(
     storage: &Storage,
     jobs: &crate::core::job_runtime::JobRuntime,
@@ -1708,7 +1702,6 @@ async fn sync_catalog_file(
 /// 重建内存价格表。合并语义：目录派生优先，config.json 仅补充目录未覆盖的
 /// (channel_id, upstream_model)（例如自定义渠道的显式价格）。
 /// 各来源失败互不影响，仅记录日志；返回最终价格条数。
-#[cfg(desktop)]
 pub fn rebuild_price_table(storage: &Storage, config_path: &std::path::Path) -> usize {
     let mut catalog_prices = Vec::new();
     if let Some(catalog_json) = read_models_cn_file() {
@@ -1746,7 +1739,6 @@ pub fn rebuild_price_table(storage: &Storage, config_path: &std::path::Path) -> 
 
 /// 合并目录派生价格与 config.json 价格：目录优先，config 仅补充未覆盖的 key。
 /// key 为 (channel_id, upstream_model)，大小写不敏感。
-#[cfg(desktop)]
 fn merge_price_tables(
     catalog_prices: Vec<crate::core::config::ModelPrice>,
     config_prices: Vec<crate::core::config::ModelPrice>,
@@ -1773,7 +1765,6 @@ fn merge_price_tables(
 // ─── models-cn → ModelPrice 转换 ──────────────────────────────────────────
 
 /// models-cn providerId → Flowlet channel_id 映射（仅覆盖有官方价格的国内厂商）。
-#[cfg(desktop)]
 fn provider_id_to_channel_id(provider_id: &str) -> Option<&'static str> {
     crate::core::model_catalog::model_catalog().owner_channel_for_models_cn_provider(provider_id)
 }
@@ -1781,7 +1772,6 @@ fn provider_id_to_channel_id(provider_id: &str) -> Option<&'static str> {
 /// 从 models-cn 目录 JSON 解析出 ModelPrice 列表，用于成本估算。
 /// 优先提取中国大陆官方价（market=china, currency=CNY），并保留促销、输入分档、
 /// 绝对生效窗口及每日峰谷时段。
-#[cfg(desktop)]
 pub fn build_prices_from_models_cn_catalog(
     catalog_json: &str,
 ) -> Result<Vec<crate::core::config::ModelPrice>, String> {
@@ -1836,7 +1826,6 @@ pub fn build_prices_from_models_cn_catalog(
 }
 
 /// 从本地 models-cn 目录提取 channel_id → currency 映射，用于用量页币种显示。
-#[cfg(desktop)]
 pub fn get_models_cn_currencies() -> Result<Vec<(String, String)>, String> {
     let Some(catalog_json) = read_models_cn_file() else {
         return Ok(Vec::new());
@@ -1892,7 +1881,6 @@ pub fn get_models_cn_currencies() -> Result<Vec<(String, String)>, String> {
     Ok(result)
 }
 
-#[cfg(desktop)]
 struct BestModelPrice {
     market: String,
     currency: String,
@@ -1908,7 +1896,6 @@ struct BestModelPrice {
 /// promotional 优先：厂商当前生效的是促销价，standard 仅作兜底参考
 /// （与前端 domains/modelCatalog/pricing.ts 的 priceScore 语义一致）。
 /// 缓存命中价仅在 input.cacheHit 存在时使用。
-#[cfg(desktop)]
 fn select_best_model_cn_price(model: &serde_json::Value) -> Option<BestModelPrice> {
     let prices = model.get("prices")?.as_array()?;
     // 优先级：china+CNY+promotional > china+CNY+standard > 其他
@@ -1936,7 +1923,6 @@ fn select_best_model_cn_price(model: &serde_json::Value) -> Option<BestModelPric
     parse_model_cn_price(best?)
 }
 
-#[cfg(desktop)]
 fn parse_model_cn_price(price: &serde_json::Value) -> Option<BestModelPrice> {
     let input = price.get("input")?;
     let input_standard = input.get("standard").and_then(|v| v.as_f64())?;
@@ -1978,7 +1964,6 @@ fn parse_model_cn_price(price: &serde_json::Value) -> Option<BestModelPrice> {
 /// 将同一个 market/currency 下的生效窗口与每日时段价格保留为运行时变体。
 /// 分组键包含 rateType、effectiveFrom/effectiveTo 与 dailyTimeRange，避免峰谷价格
 /// 或新旧价格互相覆盖；同组内仍可按 inputTokenRange 生成分级。
-#[cfg(desktop)]
 fn build_price_schedules(
     model: &serde_json::Value,
     best: &BestModelPrice,
@@ -2049,7 +2034,6 @@ fn build_price_schedules(
         .collect()
 }
 
-#[cfg(desktop)]
 fn build_price_tiers_from_rows(
     prices: &[&serde_json::Value],
 ) -> Vec<crate::core::config::ModelPriceTier> {
@@ -2117,7 +2101,6 @@ fn build_price_tiers_from_rows(
 /// 用与最优价同 (market, currency, rateType) 的 inputTokenRange 行构建分级价格。
 /// 至少两行区间数据才视为分级；按区间下限升序，最后一档 up_to=None 兜底。
 /// 无区间数据时返回空（使用扁平单价）。
-#[cfg(desktop)]
 fn build_price_tiers(
     model: &serde_json::Value,
     best: &BestModelPrice,
@@ -2141,7 +2124,6 @@ fn build_price_tiers(
 
 /// models.dev providerId → Flowlet channel_id 映射。
 /// 目前仅 OpenAI 官方 API 价用于 Codex 会话的 USD 等值估算。
-#[cfg(desktop)]
 fn models_dev_provider_to_channel_id(provider_id: &str) -> Option<&'static str> {
     match provider_id {
         "openai" => Some("openai-api"),
@@ -2151,7 +2133,6 @@ fn models_dev_provider_to_channel_id(provider_id: &str) -> Option<&'static str> 
 
 /// 从 models.dev 目录 JSON 解析出 ModelPrice 列表，用于成本估算。
 /// 每个 OpenAI 模型仅产出 openai-api（USD，官方 API 原价）。
-#[cfg(desktop)]
 pub fn build_prices_from_models_dev_catalog(
     catalog_json: &str,
 ) -> Result<Vec<crate::core::config::ModelPrice>, String> {
@@ -2215,7 +2196,6 @@ pub fn build_prices_from_models_dev_catalog(
 
 /// models.dev cost.tiers 转 Flowlet 分级：base 价覆盖 ≤ 第一个 context size，
 /// 每个 tier 条目覆盖 > 其 size 的区间，最后一档 up_to=None 兜底。
-#[cfg(desktop)]
 fn build_models_dev_tiers(
     cost: &serde_json::Value,
     base_input: f64,
@@ -2272,6 +2252,24 @@ fn build_models_dev_tiers(
         });
     }
     tiers
+}
+
+/// 定时清理使用的捕获配置来源。
+///
+/// 设置页（桌面与 Web）把 `log_capture_config` 写入 SQLite app_meta；手改 `config.json`
+/// 的 `log_capture` 是首次启动/高级用法。两者同时存在时以 app_meta 为准，保证界面里
+/// 调整的保留天数与上限真正作用于定时清理。
+fn scheduled_capture_config(
+    storage: &Storage,
+    config_value: &serde_json::Value,
+) -> crate::core::config::LogCaptureConfig {
+    use crate::core::proxy::extract_log_capture;
+    storage
+        .get_app_meta("log_capture_config")
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str::<crate::core::config::LogCaptureConfig>(&raw).ok())
+        .unwrap_or_else(|| extract_log_capture(config_value))
 }
 
 #[cfg(test)]
@@ -3229,5 +3227,37 @@ mod tests {
             (find_price(&merged, "custom", "my-relay-model").input_uncached_price - 1.0).abs()
                 < 1e-9
         );
+    }
+
+    #[test]
+    fn scheduled_capture_config_prefers_app_meta_over_config_json() {
+        let storage = Storage::from_connection_for_test(Connection::open_in_memory().unwrap());
+        storage.migrate().unwrap();
+
+        let config_value = serde_json::json!({
+            "log_capture": { "body_retention_days": 30 }
+        });
+        assert_eq!(
+            scheduled_capture_config(&storage, &config_value).body_retention_days,
+            30,
+            "没有 app_meta 时回退 config.json"
+        );
+
+        let mut app_meta = crate::core::config::LogCaptureConfig::default();
+        app_meta.body_retention_days = 1;
+        app_meta.capture_req_body = false;
+        storage
+            .set_app_meta(
+                "log_capture_config",
+                &serde_json::to_string(&app_meta).unwrap(),
+            )
+            .unwrap();
+
+        let effective = scheduled_capture_config(&storage, &config_value);
+        assert_eq!(
+            effective.body_retention_days, 1,
+            "设置页写入的 app_meta 优先"
+        );
+        assert!(!effective.capture_req_body);
     }
 }

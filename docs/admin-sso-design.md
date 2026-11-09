@@ -1,6 +1,6 @@
 # 管理端 OAuth / OIDC 单点登录设计
 
-状态：**v0.4 已实现并待真机联调**；首个 IdP = GitLab，v1 准入使用单用户 `sub`
+状态：**v0.5 已实现并完成真实 GitLab 登录验证（2026-11-09）**；首个 IdP = GitLab，v1 准入使用单用户 `sub`
 日期：2026-11-09（v0.2 纳入了规范、各 IdP 与 Rust crate 的实机核验；v0.3 收窄首个 IdP 落地细节）
 范围：headless / Docker Web Host 的浏览器管理台（`FLOWLET_WEB_ADDR` 暴露的 Web UI 与
 `/api/*` 管理接口）
@@ -905,6 +905,20 @@ Logging 的最小集：
 - HTTP 部署下确认 Cookie 名为 `flowlet-admin`、无 `Secure`、HttpOnly、SameSite=Lax；
   将来上 HTTPS 时再验证 `__Host-` + `Secure`；
 - break-glass：关闭 OIDC 变量、设置随机 token、重启后可用，再切回。
+
+## 11.5 实现与验证记录（2026-11-09）
+
+- 后端：`src-tauri/src/core/web/auth.rs` 实现 token/oidc 双模式、内存会话、HttpOnly Cookie、
+  CSRF + Origin 校验、OIDC discovery/授权码/PKCE（按 discovery 声明）/JWKS RS256 验签/
+  nonce/iss/aud/azp/exp 校验、UserInfo 与 `ALLOWED_SUBS/GROUPS/EMAILS/DOMAINS` 准入；
+  `headless.rs` 支持 `FLOWLET_ADMIN_AUTH_MODE` 与 `FLOWLET_OIDC_*` 环境变量；
+- 前端：`WebApp.tsx` / `platform/web/client.ts` 支持 SSO 登录按钮、Cookie 会话、CSRF
+  Header、身份展示与登出；token 模式保持原有行为；
+- 部署：镜像 `flowlet:docker-20261109-gitlab-sso`，stack 环境使用目标 GitLab
+  `issuer=http://git.17usoft.com` + https discovery + `ALLOWED_SUBS`；
+- 真机验证：容器 healthy；`/api/auth/config` 返回 `mode=oidc`；登录 302 到 GitLab 授权页
+  且回调地址为 `http://10.100.217.60:20134/api/auth/callback`；容器日志记录
+  `OIDC login succeeded sub=dbb2245a…`；未认证 `/api/session` 返回 401。
 
 ## 12. 里程碑与落地顺序
 

@@ -4,6 +4,7 @@ use crate::core::{
     config::{ChannelAccount, RequestLogInput, RouteCandidate, UsageRecordInput},
     device_identity::DeviceIdentity,
 };
+use axum::http::{header, HeaderMap};
 const ADMIN: &str = "test-admin-token-only-for-management";
 struct Fixture {
     state: WebState,
@@ -22,7 +23,7 @@ impl Fixture {
             services: FlowletServices::open(dir.join("test.sqlite"), config)
                 .unwrap()
                 .with_client_auth(),
-            admin_token: ADMIN.into(),
+            auth: AdminAuth::from_config(AdminAuthConfig::token_for_tests(ADMIN)).unwrap(),
             static_dir: dir,
             public_proxy_url: "http://localhost:18640".into(),
             device_identity: Arc::new(Mutex::new(device_identity)),

@@ -1,6 +1,6 @@
 [package]
 name = "flowlet"
-version = "0.1.2"
+version = "0.2.0"
 description = "本地 AI 请求路由客户端"
 authors = ["Flowlet"]
 edition = "2021"
@@ -48,6 +48,7 @@ keyring = "4.1.5"
 # Linux / macOS 单例锁使用 BSD flock（见 main.rs 的 single_instance 模块）。
 libc = "0.2"
 regex = "1"
+ring = "0.17"
 hyper-util = { version = "0.1", features = ["client-proxy"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 rusty-s3 = "0.10.1"

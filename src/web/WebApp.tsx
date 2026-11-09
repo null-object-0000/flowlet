@@ -35,9 +35,16 @@ import { useAppPreferences } from "../app/preferences/AppPreferences";
 import { AppProviders } from "../app/providers";
 import {
   adminToken,
+  fetchAuthConfig,
+  fetchWebSession,
+  logoutWebSession,
   setAdminToken,
   verifyAdminToken,
   invokeWebCommand,
+  type WebAuthConfig,
+  type WebAuthMode,
+  type WebIdentity,
+  type WebSession as WebSessionState,
 } from "../platform/web/client";
 import {
   useAccounts,
@@ -83,30 +90,76 @@ export function WebApp() {
     </AppProviders>
   );
 }
+const AUTH_ERROR_TEXT: Record<string, string> = {
+  access_denied: "你取消了 GitLab 授权",
+  allowlist_denied: "当前 GitLab 账号不在允许名单中",
+  state_invalid: "登录状态已过期，请重新登录",
+  provider_unavailable: "GitLab 暂时不可用，请稍后重试",
+  login_failed: "登录失败，请重新尝试",
+  session_expired: "登录已过期，请重新登录",
+};
+
+function identityLabel(identity?: WebIdentity | null) {
+  return identity?.email || identity?.username || identity?.name || "";
+}
+
 function WebSession() {
   const qc = useQueryClient();
+  const [authConfig, setAuthConfig] = useState<WebAuthConfig | null>(null);
+  const [session, setSession] = useState<WebSessionState | null>(null);
   const [authenticated, setAuthenticated] = useState(false);
   const [token, setToken] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
-  const logout = () => {
-    setAdminToken("");
+  const logout = async () => {
+    if (authConfig?.mode === "oidc") await logoutWebSession();
+    else setAdminToken("");
+    setSession(null);
     setAuthenticated(false);
     qc.clear();
   };
   useEffect(() => {
     let active = true;
-    const existing = adminToken();
-    if (existing)
-      void verifyAdminToken(existing)
-        .then(() => {
-          if (active) setAuthenticated(true);
-        })
-        .catch(() => {
-          if (active) setAdminToken("");
-        });
+    void (async () => {
+      try {
+        const config = await fetchAuthConfig();
+        if (!active) return;
+        setAuthConfig(config);
+        const params = new URLSearchParams(window.location.search);
+        const authError = params.get("auth_error");
+        if (authError) {
+          setError(AUTH_ERROR_TEXT[authError] ?? "登录失败，请重试");
+          window.history.replaceState(null, "", "/");
+        }
+        if (config.mode === "token") {
+          const existing = adminToken();
+          if (existing) {
+            try {
+              await verifyAdminToken(existing);
+              if (active) {
+                setSession({ authenticated: true, mode: "token" });
+                setAuthenticated(true);
+              }
+            } catch {
+              if (active) setAdminToken("");
+            }
+          }
+        } else {
+          const current = await fetchWebSession();
+          if (active && current?.authenticated) {
+            setSession(current);
+            setAuthenticated(true);
+          }
+        }
+      } catch (e) {
+        if (active) setError(e instanceof Error ? e.message : "无法连接管理端");
+      } finally {
+        if (active) setBusy(false);
+      }
+    })();
     const expired = () => {
       setAuthenticated(false);
+      setSession(null);
       qc.clear();
     };
     window.addEventListener("flowlet-web-unauthorized", expired);
@@ -122,6 +175,7 @@ function WebSession() {
       await verifyAdminToken(token);
       setAdminToken(token);
       setToken("");
+      setSession({ authenticated: true, mode: "token" });
       setAuthenticated(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "登录失败");
@@ -129,34 +183,62 @@ function WebSession() {
       setBusy(false);
     }
   };
-  if (!authenticated)
+  const loginWithSso = () => {
+    if (authConfig) window.location.assign(authConfig.login_path);
+  };
+  if (busy && !authConfig)
     return (
       <main className={styles.login}>
         <Card title="登录 Flowlet">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              void login();
-            }}
-          >
-            <Space vertical align="start" style={{ width: "100%" }}>
-              <Typography.Text>输入部署时设置的管理凭据</Typography.Text>
-              <Input
-                mode="password"
-                value={token}
-                onChange={setToken}
-                aria-label="管理凭据"
-                autoComplete="current-password"
-              />
-              {error && <Banner type="danger" description={error} />}
-              <Button htmlType="submit" theme="solid" loading={busy}>
-                登录
-              </Button>
-            </Space>
-          </form>
+          <Typography.Text>正在读取登录配置…</Typography.Text>
         </Card>
       </main>
     );
+  if (!authenticated) {
+    const oidc = authConfig?.mode === "oidc";
+    const providerName = authConfig?.provider.display_name ?? "GitLab";
+    return (
+      <main className={styles.login}>
+        <Card title="登录 Flowlet">
+          <Space vertical align="start" style={{ width: "100%" }}>
+            {error && <Banner type="danger" description={error} />}
+            {oidc && (
+              <>
+                <Typography.Text>使用 {providerName} 账号登录 Flowlet 管理台。</Typography.Text>
+                <Button theme="solid" onClick={loginWithSso}>
+                  使用 {providerName} 登录
+                </Button>
+              </>
+            )}
+            {(!oidc || authConfig?.token_login) && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void login();
+                }}
+              >
+                <Space vertical align="start" style={{ width: "100%" }}>
+                  <Typography.Text>
+                    {oidc ? "或使用部署时设置的管理凭据" : "输入部署时设置的管理凭据"}
+                  </Typography.Text>
+                  <Input
+                    mode="password"
+                    value={token}
+                    onChange={setToken}
+                    aria-label="管理凭据"
+                    autoComplete="current-password"
+                  />
+                  <Button htmlType="submit" theme={oidc ? "borderless" : "solid"} loading={busy}>
+                    登录
+                  </Button>
+                </Space>
+              </form>
+            )}
+          </Space>
+        </Card>
+      </main>
+    );
+  }
   return (
     <DesktopAppFrameView
       sidebar={
@@ -202,18 +284,37 @@ function WebSession() {
             </Suspense>
           )}
         />
-        <Route path="settings" element={<WebSettings onLogout={logout} />} />
+        <Route
+          path="settings"
+          element={
+            <WebSettings
+              onLogout={() => void logout()}
+              identity={session?.identity}
+              mode={authConfig?.mode ?? "token"}
+            />
+          }
+        />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </DesktopAppFrameView>
   );
 }
 
-function WebSettings({ onLogout }: { onLogout: () => void }) {
+function WebSettings({
+  onLogout,
+  identity,
+  mode,
+}: {
+  onLogout: () => void;
+  identity?: WebIdentity | null;
+  mode: WebAuthMode;
+}) {
   const { language, setLanguage, theme, setTheme, t } = useAppPreferences();
+  const label = identityLabel(identity);
   return (
     <>
     <Card title={t("应用设置")}>
+      <Space vertical align="start" style={{ width: "100%" }}>
       <Space wrap>
         <Select
           aria-label="界面语言"
@@ -235,6 +336,12 @@ function WebSettings({ onLogout }: { onLogout: () => void }) {
           ]}
         />
         <Button onClick={onLogout}>退出登录</Button>
+      </Space>
+      {mode === "oidc" && label ? (
+        <Typography.Text type="tertiary">
+          当前登录：{label}（{identity?.provider ?? "企业 SSO"}）
+        </Typography.Text>
+      ) : null}
       </Space>
     </Card>
     <CaptureSettings />

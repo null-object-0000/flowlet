@@ -6,7 +6,7 @@ use flowlet_lib::core::{
     device_identity::DeviceIdentity,
     host_scheduler,
     services::FlowletServices,
-    web::{create_web_router, WebState},
+    web::{create_web_router, AdminAuth, WebState},
 };
 use std::{
     path::PathBuf,
@@ -26,10 +26,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
-    let admin_token = std::env::var("FLOWLET_ADMIN_TOKEN").unwrap_or_default();
-    if admin_token.trim().len() < 24 {
-        return Err("FLOWLET_ADMIN_TOKEN 必须至少包含 24 个字符".into());
-    }
+    let auth = AdminAuth::from_env()?;
     let db_path = PathBuf::from(
         std::env::var("FLOWLET_DB_PATH").unwrap_or_else(|_| "flowlet-data/flowlet.sqlite".into()),
     );
@@ -78,7 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 current
             }
         });
-    if client_token == admin_token {
+    if auth.static_token() == Some(client_token.as_str()) {
         return Err("管理凭据与模型调用密钥必须不同".into());
     }
     let config = ProxyBindConfig {
@@ -101,7 +98,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let public_proxy_url = std::env::var("FLOWLET_PUBLIC_PROXY_URL").unwrap_or_default();
     let app = create_web_router(WebState {
         services: services.clone(),
-        admin_token,
+        auth,
         static_dir,
         public_proxy_url,
         device_identity: Arc::new(Mutex::new(device_identity)),

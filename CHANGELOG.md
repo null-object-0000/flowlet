@@ -2,6 +2,22 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.2.0] - 2026-11-09
+
+### 管理端 GitLab OIDC SSO
+
+- Web 管理台新增 OIDC 登录模式：浏览器走 GitLab 授权码登录，服务端 HttpOnly 会话 Cookie，
+  不再需要把静态管理凭据保存在 `sessionStorage`；
+- 登录回调校验 state/nonce/PKCE（按 IdP 能力）、RS256 签名、iss/aud/azp 与有效期，
+  并通过 UserInfo 获取 `sub`、`email`、`groups`；
+- 准入支持 `ALLOWED_SUBS` / `ALLOWED_GROUPS` / `ALLOWED_EMAILS` / `ALLOWED_DOMAINS`，
+  默认 fail-closed；目标 GitLab 实例使用单用户 `sub` 名单；
+- 新增 CSRF token + Origin 校验、空闲/绝对会话超时、登录审计日志与 break-glass token 兜底；
+- 新增 `FLOWLET_ADMIN_AUTH_MODE`、`FLOWLET_OIDC_*` 环境变量；未配置 OIDC 时保持原有
+  `FLOWLET_ADMIN_TOKEN` 行为不变；实现说明见 `docs/admin-sso-design.md` 与 `docs/docker.md`；
+- 注意：Antigravity 授权不再内置公共 OAuth client，桌面端新授权需成对设置
+  `ANTIGRAVITY_OAUTH_CLIENT_ID` / `ANTIGRAVITY_OAUTH_CLIENT_SECRET`。
+
 ## [0.1.2] - 2026-11-09
 
 ### 移除
@@ -147,3 +163,4 @@ Flowlet 的首个正式公开版本。
 [0.1.1]: https://github.com/null-object-0000/flowlet/releases/tag/v0.1.1
 [0.1.0]: https://github.com/null-object-0000/flowlet/releases/tag/v0.1.0
 [0.1.2]: https://github.com/null-object-0000/flowlet/releases/tag/v0.1.2
+[0.2.0]: https://github.com/null-object-0000/flowlet/releases/tag/v0.2.0

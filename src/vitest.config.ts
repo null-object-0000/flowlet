@@ -22,7 +22,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     include: ["**/*.test.ts", "**/*.test.tsx"],
-    exclude: [...configDefaults.exclude, "src-tauri/target/**"],
+    exclude: [...configDefaults.exclude, "src-tauri/target/**", ".worktrees/**", "poc/**", ".agents/**"],
     setupFiles: [fileURLToPath(new URL("./shared/testing/setup.ts", import.meta.url))],
     globals: true,
   },

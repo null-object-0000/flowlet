@@ -1,7 +1,7 @@
 # Docker 与浏览器部署
 
 Docker 版由独立 Rust 服务和 React 管理界面组成，不需要 Tauri、GTK、显示服务或桌面登录会话。
-使用与桌面端相同的渠道适配器、模型白名单、SQLite 存储和运行时路由。当前支持 API Key 渠道账号的新增、编辑、启停、删除、模型列表拉取、模型及候选路由启停/优先级调整、请求日志、「会话管理」，以及与桌面端一致的「用量统计」「用量洞察」页面（设备切换、日/周/月热力图、Token 明细、费用折算和未识别 Token 请求明细）。
+使用与桌面端相同的渠道适配器、模型白名单、SQLite 存储和运行时路由。管理台支持静态管理凭据（token 模式）或 GitLab OIDC 单点登录（oidc 模式，见下文）。当前支持 API Key 渠道账号的新增、编辑、启停、删除、模型列表拉取、模型及候选路由启停/优先级调整、请求日志、「会话管理」，以及与桌面端一致的「用量统计」「用量洞察」页面（设备切换、日/周/月热力图、Token 明细、费用折算和未识别 Token 请求明细）。
 
 用量统计只读取本服务自己的 SQLite：Web Host 在数据目录生成并复用与桌面端同格式的 `flowlet-device.json` 设备身份，「用量统计」中的「本机」就是该 Docker 实例，不扫描服务器上的个人数据，也不运行局域网直连或 S3 设备同步。费用展示设置（统一货币折算、目标币种、固定汇率和备注）保存在 SQLite `app_meta`，由「设置 → 费用展示」维护，不写入容器内的 `config.json`；`config.json` 的 `usage_cost` 仍只影响桌面端。
 
@@ -24,22 +24,70 @@ docker compose up -d --build
 docker compose logs -f flowlet
 ```
 
-默认管理界面为 `http://服务器地址:20134`，输入 `FLOWLET_ADMIN_TOKEN` 登录。
+默认管理界面为 `http://服务器地址:20134`。默认 token 模式输入 `FLOWLET_ADMIN_TOKEN` 登录；
+配置 `FLOWLET_ADMIN_AUTH_MODE=oidc` 后改为 GitLab 授权登录（见「管理端 GitLab OIDC SSO」）。
 模型调用的 OpenAI Base URL 为 `http://服务器地址:20135/v1`，Anthropic Base URL 为 `http://服务器地址:20135/anthropic`，Responses 使用 `/v1/responses`。
 调用密钥可在「渠道账号 → 显示调用密钥」查看。先添加渠道账号、拉取并勾选需要开放的模型，再到「模型服务」调整候选渠道/账号的启停和优先级。
 
 服务启动 30 秒后会自动同步一轮官方余额，之后每 5 分钟一轮：DeepSeek、Kimi、OpenRouter、VibeToken 等提供官方余额 API 的渠道由服务端直接查询并写入余额快照，不依赖管理页面是否打开，账号与渠道改动在下一轮生效、无需重启。LongCat、Qwen、Z.AI 与自定义渠道依赖桌面端隐藏 WebView 抓取控制台，Web Host 不支持该能力，需要在桌面端同步或手动维护余额。
 
 管理凭据与模型调用密钥分别鉴权。管理凭据不能调用模型，调用密钥不能访问管理接口。未设置 `FLOWLET_CLIENT_TOKEN` 时，首次启动随机生成调用密钥并保存到数据卷，后续重启继续使用。
-Web 登录凭据仅保存在当前标签页的 sessionStorage 中；退出会清除凭据与查询缓存。需要在公网使用时，请在入口配置 HTTPS；服务本身提供 HTTP。
+token 模式的浏览器凭据仅保存在当前标签页的 sessionStorage 中；OIDC 模式改用 HttpOnly 会话 Cookie，
+重启容器会使所有管理会话失效，需要重新登录。HTTP 部署下 Cookie 不带 `Secure`，只应在可信内网使用；
+需要公网访问时请在入口配置 HTTPS。
 
 构建时若 Debian 官方源较慢，可在 `.env` 中设置 `DEBIAN_MIRROR=http://mirrors.tuna.tsinghua.edu.cn` 后重新构建。替换范围仅限构建容器的软件源，仍使用 Debian 仓库签名验证；参见 [TUNA Debian 镜像说明](https://mirrors.tuna.tsinghua.edu.cn/help/debian/)。Docker Hub 基础镜像需要由宿主机拉取，`DEBIAN_MIRROR` 不替代 Docker 镜像仓库。
+
+## 管理端 GitLab OIDC SSO
+
+目标实例：公司 GitLab（`https://git.17usoft.com`，GitLab CE 10.8.7 + 定制 OIDC）。
+完整方案、M0 验证结果与安全边界见 [`admin-sso-design.md`](./admin-sso-design.md)。
+
+1. 在 GitLab 创建 OAuth 应用（个人应用即可）：Redirect URI 填
+   `http://10.100.217.60:20134/api/auth/callback`；Scopes **只勾 `openid`**；
+2. 在 `.env` 配置：
+
+```bash
+FLOWLET_ADMIN_AUTH_MODE=oidc
+FLOWLET_PUBLIC_WEB_URL=http://10.100.217.60:20134
+FLOWLET_OIDC_ISSUER=http://git.17usoft.com
+FLOWLET_OIDC_DISCOVERY_URL=https://git.17usoft.com/.well-known/openid-configuration
+FLOWLET_OIDC_ALLOW_HTTP_ISSUER=1
+FLOWLET_OIDC_CLIENT_ID=<Application ID>
+FLOWLET_OIDC_CLIENT_SECRET=<Secret>
+FLOWLET_OIDC_SCOPES=openid
+FLOWLET_OIDC_DISPLAY_NAME=GitLab
+FLOWLET_OIDC_ALLOWED_SUBS=<你的 GitLab sub>
+FLOWLET_OIDC_PKCE=auto
+FLOWLET_OIDC_NONCE=required
+```
+
+3. `docker compose up -d` 重启容器；打开管理台应显示「使用 GitLab 登录」。
+   访问地址必须与 `FLOWLET_PUBLIC_WEB_URL` 完全一致（含 scheme/端口），否则 CSRF Origin 校验会拒绝。
+4. 回退：把 `FLOWLET_ADMIN_AUTH_MODE` 改回 `token` 并设置随机 `FLOWLET_ADMIN_TOKEN`，重启即可；
+   `ALLOW_TOKEN_LOGIN=1` 可在 OIDC 故障时保留 Bearer 兜底登录。
+
+OIDC 模式不内置任何 client secret；GitLab 应用 Secret 只放在 `.env`/部署密钥中，不要提交仓库。
+会话保存在进程内存，容器重启后所有人需要重新登录；当前为单管理员/单实例设计。
 
 ## 配置与数据
 
 | 环境变量 | 默认值 / 用途 |
 | --- | --- |
-| `FLOWLET_ADMIN_TOKEN` | 必填，至少 24 字符；Web 管理凭据 |
+| `FLOWLET_ADMIN_AUTH_MODE` | `token`（默认）或 `oidc` |
+| `FLOWLET_ADMIN_TOKEN` | token 模式必填（至少 24 字符）；oidc 模式仅在 `ALLOW_TOKEN_LOGIN=1` 时需要 |
+| `FLOWLET_ADMIN_ALLOW_TOKEN_LOGIN` | OIDC 模式下是否允许 Bearer token 兜底，默认 `0` |
+| `FLOWLET_PUBLIC_WEB_URL` | OIDC 模式必填；浏览器访问管理台的绝对地址，如 `http://10.100.217.60:20134` |
+| `FLOWLET_OIDC_ISSUER` | OIDC issuer；目标 GitLab 为 `http://git.17usoft.com` |
+| `FLOWLET_OIDC_DISCOVERY_URL` | 可选；issuer 为 http 时必填且必须 https |
+| `FLOWLET_OIDC_ALLOW_HTTP_ISSUER` | 允许 issuer 为 http（旧自建 GitLab），需同时提供 https discovery |
+| `FLOWLET_OIDC_CLIENT_ID` / `FLOWLET_OIDC_CLIENT_SECRET` | GitLab OAuth 应用凭据 |
+| `FLOWLET_OIDC_SCOPES` | 默认 `openid`；目标 GitLab 不支持请求 profile/email |
+| `FLOWLET_OIDC_ALLOWED_SUBS` | 单用户准入：GitLab 用户 `sub`，v1 目标实例使用此项 |
+| `FLOWLET_OIDC_ALLOWED_GROUPS` | 可选；多人时用 GitLab 组完整路径 |
+| `FLOWLET_OIDC_PKCE` | `auto`（默认）/`required`/`off` |
+| `FLOWLET_OIDC_NONCE` | `required`（默认）/`best_effort`/`off` |
+| `FLOWLET_ADMIN_SESSION_IDLE_MINUTES` / `FLOWLET_ADMIN_SESSION_TTL_HOURS` | 会话空闲/绝对超时，默认 30 分钟 / 8 小时 |
 | `FLOWLET_CLIENT_TOKEN` | 可选；提供时覆盖已保存的调用密钥 |
 | `FLOWLET_WEB_PORT` | Compose 宿主机 Web 端口，默认 `20134` |
 | `FLOWLET_PROXY_PORT` | Compose 宿主机模型入口端口，默认 `20135` |

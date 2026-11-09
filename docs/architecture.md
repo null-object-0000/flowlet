@@ -117,7 +117,7 @@ Tauri、WebKitGTK、窗口和控制台抓取模块。`build:web` 复用 React �
 `core::host_scheduler` 的周期任务：每 15 分钟执行一次存储清理（Body 过期/超限 + 余额快照保留），
 每 1 小时同步 models-cn 与 models.dev 目录；设置页保存的 `log_capture` 通过共享
 `Arc<Mutex<LogCaptureConfig>>` 立即作用于运行中的代理，定时清理也读取同一份配置。
-管理 API 强制 Bearer 管理凭据并禁止缓存；模型入口单独校验调用密钥，含 `/models` 在内的
+管理 API 支持静态 Bearer 管理凭据或 OIDC 会话 Cookie 两种模式（默认 token，配置后启用 OIDC），并禁止缓存；模型入口单独校验调用密钥，含 `/models` 在内的
 模型端点都需要凭据。`/health` 仅作为公开存活检查。桌面和 Web 余额同步共用
 `core::account_balance`，保持余额快照、凭证状态和运行时同步一致。
 Docker 使用非 root 用户与 `/data` 命名卷保存 SQLite、配置与价格目录；详见 [Docker 部署](docker.md)。

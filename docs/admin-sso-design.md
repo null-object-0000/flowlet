@@ -1,6 +1,6 @@
 # 管理端 OAuth / OIDC 单点登录设计
 
-状态：设计草案（未实现，待评审）；**v0.3 已确定首个 IdP = GitLab + 组名单**
+状态：**v0.4 已实现并待真机联调**；首个 IdP = GitLab，v1 准入使用单用户 `sub`
 日期：2026-11-09（v0.2 纳入了规范、各 IdP 与 Rust crate 的实机核验；v0.3 收窄首个 IdP 落地细节）
 范围：headless / Docker Web Host 的浏览器管理台（`FLOWLET_WEB_ADDR` 暴露的 Web UI 与
 `/api/*` 管理接口）
@@ -821,21 +821,15 @@ Logging 的最小集：
 | `src-tauri/src/core/web/auth/oidc/tests.rs`（新） | mock IdP（discovery/JWKS/token/userinfo）+ 回调端到端 + 负例 |
 | `src-tauri/Cargo.toml` | 新增依赖（见 10.1 依赖决定） |
 
-依赖决定（2026-11-09 实机核验；实现时再复核版本与 feature）：
+实现决定（2026-11-09 落地时调整）：
 
-- **`openidconnect` 4.1（2026-10-31 发布，MSRV 1.88；项目 rustc 1.97.1 与 Docker
-  `rust:1.97-slim` 满足）**：默认 features `reqwest` + `rustls-tls`，与现有 reqwest 0.12 /
-  rustls 构建一致；负责 discovery、PKCE、令牌交换与 ID token 验签。已知边界：
-  **不做 `azp` 校验、不支持 JWE、不带 JWKS 缓存**，这三项由 Flowlet 补齐（见 6.4）。
-  自定义 CA / 禁止重定向 / 超时通过实现它的 `AsyncHttpClient` trait（自建 reqwest 适配层）
-  控制，不使用其默认客户端。**不额外引入 `jsonwebtoken`**（11.1.0 为 passively-maintained，
-  且 openidconnect 已内置验签）。
-- `axum-extra`（`cookie` feature，与 axum 0.8 配套）用于 Cookie 解析与写入。
-- `rand`（会话/state/nonce 随机源；锁文件中已有传递依赖，补为直接依赖）。
-- `subtle`（常数时间比较 state/CSRF/会话摘要；已在依赖树中）。
-- `openidconnect` 会引入 `oauth2 5`、`rsa`、`p256/p384`、`ed25519-dalek`（纯 Rust，
-  无 OpenSSL）；`core::web` 对桌面与 headless 都无条件编译，桌面二进制体积会小幅增加。
-  若体积不可接受，后续再考虑给 Web 鉴权单独加 Cargo feature。
+- 没有引入 `openidconnect`/`jsonwebtoken`：实现环境无法写入全局 Cargo registry 缓存，
+  改为**复用已锁定的 `reqwest` + `ring` + `base64` + `sha2`** 手写轻量 OIDC 客户端：
+  discovery、授权码交换、JWKS/RS256 验签、nonce/iss/aud/azp/exp 校验、UserInfo、
+  PKCE（按 discovery 声明自动启用）与 CSRF/会话逻辑全部收敛在
+  `src-tauri/src/core/web/auth.rs`，不新增外部 crate。
+- Cookie 用 `HeaderMap` 手工解析/写入，不引入 `axum-extra`；会话/state/nonce 随机源复用
+  `uuid`，不新增 `rand`。
 - 不新增 SQLite 迁移；不改 `config.json` 反序列化结构。
 
 ### 10.2 前端

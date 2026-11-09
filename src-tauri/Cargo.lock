@@ -1325,7 +1325,7 @@ dependencies = [
 
 [[package]]
 name = "flowlet"
-version = "0.1.2"
+version = "0.2.0"
 dependencies = [
  "android-native-keyring-store",
  "axum",
@@ -1349,6 +1349,7 @@ dependencies = [
  "notify",
  "regex",
  "reqwest 0.12.28",
+ "ring",
  "rusqlite",
  "rusty-s3",
  "serde",

@@ -1177,6 +1177,9 @@ impl StreamUsageDecoder {
         };
         if failed {
             // 只停用观测解压：已解压出的前缀仍然有效，转发字节不受影响。
+            tracing::debug!(
+                "流式响应观测解压失败或单块明文超限，已停用观测解压（转发与请求日志不受影响）"
+            );
             self.kind = StreamDecodeKind::Disabled;
         }
         StreamDecodedChunk::Decoded
@@ -1188,6 +1191,7 @@ impl StreamUsageDecoder {
     /// zstd 无错误）；`false` 表示已停用或压缩流被截断/损坏——此时已解压前缀
     /// 仍然有效，由 usage 完整性判定按 partial 语义处理。
     pub(super) fn finish(&mut self, out: &mut Vec<u8>) -> bool {
+        let was_disabled = matches!(self.kind, StreamDecodeKind::Disabled);
         let clean = match &mut self.kind {
             StreamDecodeKind::Identity => true,
             StreamDecodeKind::Disabled => false,
@@ -1215,6 +1219,11 @@ impl StreamUsageDecoder {
         // finish 结束后不允许再写入：flate2 的 try_finish 之后继续 write 可能 panic，
         // 这里统一切换到 Disabled 让后续块直接跳过观测解压（幂等）。
         self.kind = StreamDecodeKind::Disabled;
+        if !clean && !was_disabled {
+            tracing::debug!(
+                "流式响应压缩体被截断或损坏，观测按 partial 语义处理（转发与请求日志不受影响）"
+            );
+        }
         clean
     }
 }

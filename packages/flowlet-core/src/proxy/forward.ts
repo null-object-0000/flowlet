@@ -5,7 +5,8 @@
 // 不使用客户端入站报文（AGENTS.md §9 硬指标）。
 import { readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { Readable } from "node:stream";
+import type { Readable, Transform } from "node:stream";
+import zlib from "node:zlib";
 import type { ProxyBindConfig } from "../types.ts";
 import { AnthropicContentBlockRepair } from "./anthropic-compat.ts";
 import type { ModelIdentityIndex } from "./catalog.ts";
@@ -46,6 +47,7 @@ import {
   recordRequestLogAndWait,
   recordUsage,
   updateStreamLog,
+  warn,
   type LogCaptureConfig,
   type ProxyStorage,
 } from "./log.ts";
@@ -103,6 +105,12 @@ export const DEFAULT_UPSTREAM_TIMEOUT_SECONDS = 120;
 const MAX_USAGE_CAPTURE_BYTES = 1024 * 1024;
 const MAX_TTFT_PROBE_BYTES = 64 * 1024;
 const MAX_TERMINAL_PROBE_BYTES = 512;
+/** 单块上游字节解压后的明文上限（防压缩炸弹 / 异常分块导致无界内存）。 */
+const MAX_DECODED_CHUNK_BYTES = 8 * 1024 * 1024;
+/** `content-encoding: deflate` 可能是原始 deflate（无 zlib 头）：为回退保留的有限前缀缓冲。 */
+const MAX_DEFLATE_RAW_RETRY_BYTES = 1024 * 1024;
+/** flush 观测解压器的等待上限：超时只放弃观测尾巴，绝不阻塞请求。 */
+const OBSERVATION_FLUSH_TIMEOUT_MS = 10_000;
 const FILES_UPLOAD_LIMIT_BYTES = 128 * 1024 * 1024 + 1024 * 1024;
 /** Node 模型路径沿用 Rust 的"无上限缓冲"（usize::MAX），仅给出实际保护上限。 */
 const MODEL_BODY_HARD_LIMIT_BYTES = 1024 * 1024 * 1024;
@@ -1431,6 +1439,258 @@ function usageRecordRow(
   };
 }
 
+// ─── Streaming observation decode ──────────────────────────────────────────
+//
+// 上游 SSE 若带 `content-encoding: gzip/deflate/br/zstd`，转发字节是压缩体：TTFT
+// 探针、`StreamUsageAccumulator` 与终止事件追踪都解析不到事件，usage_records 随之缺失。
+// 这里把同一份上游字节增量解压出一份**只读观测副本**喂观测链路；转发给客户端的原始
+// 字节、`content-encoding` 头与响应体捕获（`captureResponseBody` 自行解压）完全不变。
+// 逐段对照 Rust `proxy_http::StreamUsageDecoder`。
+//
+// identity / null / 未知编码不建解压器，观测链路继续直接吃原始字节（既有行为）。
+// 解压出错、单块明文超限或运行时缺少 zstd 支持时只把自身切换成 disabled，绝不影响
+// 请求本身。
+
+type ObservationDecodeKind = "gzip" | "deflate" | "br" | "zstd";
+
+type ObservationDecodeMode = "passthrough" | "decoding" | "disabled";
+
+function observationDecodeKind(contentEncoding: string | null): ObservationDecodeKind | null {
+  switch (contentEncoding) {
+    case "gzip":
+    case "x-gzip":
+      return "gzip";
+    case "deflate":
+      return "deflate";
+    case "br":
+      return "br";
+    case "zstd":
+      return "zstd";
+    default:
+      return null;
+  }
+}
+
+function createObservationTransform(kind: ObservationDecodeKind): Transform | null {
+  try {
+    switch (kind) {
+      case "gzip":
+        return zlib.createGunzip();
+      case "deflate":
+        return zlib.createInflate();
+      case "br":
+        return zlib.createBrotliDecompress();
+      case "zstd": {
+        // 运行时能力守卫：Node 未提供 zstd 解压时降级为「只停用观测解压」，不影响转发。
+        const factory = (
+          zlib as unknown as { createZstdDecompress?: () => Transform }
+        ).createZstdDecompress;
+        if (typeof factory !== "function") return null;
+        return factory.call(zlib);
+      }
+      default:
+        return null;
+    }
+  } catch {
+    return null;
+  }
+}
+
+class StreamObservationDecoder {
+  #mode: ObservationDecodeMode = "passthrough";
+  #kind: ObservationDecodeKind | null;
+  #decoder: Transform | null = null;
+  /** finish 之后不再接收上游字节，但仍要等解压器把尾部明文吐给观测链路。 */
+  #closed = false;
+  #warned = false;
+  #plainBytes = 0;
+  #deflateRetryChunks: Buffer[] = [];
+  #deflateRetryBytes = 0;
+  #deflateRetried = false;
+  #deliver: (plain: Buffer) => void;
+
+  constructor(contentEncoding: string | null, deliver: (plain: Buffer) => void) {
+    this.#deliver = deliver;
+    this.#kind = observationDecodeKind(contentEncoding);
+    if (this.#kind === null) return;
+    const decoder = createObservationTransform(this.#kind);
+    if (decoder === null) {
+      this.#mode = "disabled";
+      return;
+    }
+    this.#attach(decoder);
+  }
+
+  get mode(): ObservationDecodeMode {
+    return this.#mode;
+  }
+
+  /** 上游原始字节入口：只有 decoding 模式会做增量解压。 */
+  push(chunk: Buffer): void {
+    if (this.#closed || this.#mode !== "decoding") return;
+    const decoder = this.#decoder;
+    if (decoder === null) return;
+    if (
+      this.#kind === "deflate" &&
+      !this.#deflateRetried &&
+      this.#plainBytes === 0 &&
+      this.#deflateRetryBytes + chunk.length <= MAX_DEFLATE_RAW_RETRY_BYTES
+    ) {
+      // 兼容把原始 deflate（无 zlib 头）标成 `content-encoding: deflate` 的上游：
+      // 在解出明文前保留有限前缀，出错时用它重建 inflateRaw（见 #fail）。
+      this.#deflateRetryChunks.push(Buffer.from(chunk));
+      this.#deflateRetryBytes += chunk.length;
+    }
+    try {
+      decoder.write(chunk);
+    } catch (error) {
+      this.#fail(error);
+    }
+  }
+
+  /**
+   * 流结束前 flush：`end()` 之后 zlib 的尾部明文（含 gzip CRC/长度校验）才异步产出，
+   * 必须等 `end`/`error` 之后才能判定 usage 完整性，否则尾部 usage 事件会丢。
+   */
+  async finish(): Promise<void> {
+    this.#closed = true;
+    const decoder = this.#decoder;
+    this.#decoder = null;
+    this.#deflateRetryChunks = [];
+    this.#deflateRetryBytes = 0;
+    if (decoder === null) return;
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const settle = (): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        decoder.off("end", settle);
+        decoder.off("close", settle);
+        decoder.off("error", settle);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        if (settled) return;
+        warn("流式响应观测解压收尾超时，已放弃观测尾巴（不影响转发）");
+        try {
+          decoder.destroy();
+        } catch {
+          /* 已销毁 */
+        }
+        settle();
+      }, OBSERVATION_FLUSH_TIMEOUT_MS);
+      decoder.on("end", settle);
+      decoder.on("close", settle);
+      decoder.on("error", settle);
+      try {
+        decoder.end();
+      } catch (error) {
+        warn("流式响应观测解压收尾失败，已停用观测解压（不影响转发）", error);
+        settle();
+      }
+    });
+    this.#mode = "disabled";
+  }
+
+  #attach(decoder: Transform): void {
+    this.#decoder = decoder;
+    this.#mode = "decoding";
+    decoder.on("data", (chunk: Buffer) => {
+      this.#onDecoded(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    });
+    decoder.on("error", (error: unknown) => {
+      this.#fail(error);
+    });
+  }
+
+  #onDecoded(chunk: Buffer): void {
+    if (this.#mode !== "decoding" || chunk.length === 0) return;
+    this.#plainBytes += chunk.length;
+    if (this.#deflateRetryBytes > 0) {
+      // 已解出明文，说明 zlib 头是对的，不再需要原始 deflate 回退缓冲。
+      this.#deflateRetryChunks = [];
+      this.#deflateRetryBytes = 0;
+    }
+    if (chunk.length > MAX_DECODED_CHUNK_BYTES) {
+      this.#emit(chunk.subarray(0, MAX_DECODED_CHUNK_BYTES));
+      this.#disable(new Error(`单块解压输出超过 ${MAX_DECODED_CHUNK_BYTES} 字节上限`));
+      return;
+    }
+    this.#emit(chunk);
+  }
+
+  #emit(plain: Buffer): void {
+    try {
+      this.#deliver(plain);
+    } catch (error) {
+      this.#disable(error);
+    }
+  }
+
+  #fail(error: unknown): void {
+    if (this.#mode !== "decoding") return;
+    if (this.#closed) {
+      this.#disable(error);
+      return;
+    }
+    if (
+      this.#kind === "deflate" &&
+      !this.#deflateRetried &&
+      this.#plainBytes === 0 &&
+      this.#deflateRetryBytes > 0
+    ) {
+      this.#deflateRetried = true;
+      const replay = this.#deflateRetryChunks;
+      this.#deflateRetryChunks = [];
+      this.#deflateRetryBytes = 0;
+      this.#destroyDecoder();
+      let fallback: Transform | null = null;
+      try {
+        fallback = zlib.createInflateRaw();
+      } catch {
+        fallback = null;
+      }
+      if (fallback !== null) {
+        this.#attach(fallback);
+        for (const buffered of replay) {
+          try {
+            fallback.write(buffered);
+          } catch (retryError) {
+            this.#disable(retryError);
+            return;
+          }
+        }
+        return;
+      }
+    }
+    this.#disable(error);
+  }
+
+  #disable(error: unknown): void {
+    if (this.#mode === "disabled") return;
+    this.#mode = "disabled";
+    if (!this.#warned) {
+      this.#warned = true;
+      warn("流式响应观测解压失败，已停用该响应的 usage/TTFT 解压观测（不影响转发）", error);
+    }
+    this.#destroyDecoder();
+    this.#deflateRetryChunks = [];
+    this.#deflateRetryBytes = 0;
+  }
+
+  #destroyDecoder(): void {
+    const decoder = this.#decoder;
+    this.#decoder = null;
+    if (decoder === null) return;
+    try {
+      decoder.destroy();
+    } catch {
+      /* 已销毁 */
+    }
+  }
+}
+
 // ─── Streaming pump ─────────────────────────────────────────────────────────
 
 interface StreamDone {
@@ -1449,6 +1709,7 @@ class TimedStreamState {
   #requestStartedAt: number;
   #resContentEncoding: string | null;
   #repair: AnthropicContentBlockRepair | null;
+  #observation: StreamObservationDecoder;
   #ttftMs: number | null = null;
   #ttftProbe: Buffer[] = [];
   #ttftProbeLength = 0;
@@ -1471,19 +1732,23 @@ class TimedStreamState {
     this.#requestStartedAt = options.requestStartedAt;
     this.#resContentEncoding = options.resContentEncoding;
     this.#repair = options.repairEnabled ? new AnthropicContentBlockRepair() : null;
+    this.#observation = new StreamObservationDecoder(options.resContentEncoding, (plain) => {
+      this.#observePlaintext(plain);
+    });
   }
 
-  /** 观察原始上游字节，返回应写给客户端的字节（可能经过 Anthropic 修复）。 */
+  /**
+   * 观察原始上游字节，返回应写给客户端的字节（可能经过 Anthropic 修复）。
+   *
+   * 观测链路（TTFT 探针 / usage / 终止标记）吃按 content-encoding 解压后的明文；
+   * 响应体捕获与写给客户端的字节继续使用原始压缩字节（必须与上游逐字节一致）。
+   */
   observe(chunk: Buffer): Buffer {
-    if (this.#ttftMs === null && this.#ttftProbeLength + chunk.length <= MAX_TTFT_PROBE_BYTES) {
-      this.#ttftProbe.push(Buffer.from(chunk));
-      this.#ttftProbeLength += chunk.length;
-      const probe = Buffer.concat(this.#ttftProbe, this.#ttftProbeLength);
-      if (containsSseOutputToken(probe)) {
-        this.#ttftMs = elapsedMs(this.#requestStartedAt);
-        this.#ttftProbe = [];
-        this.#ttftProbeLength = 0;
-      }
+    const mode = this.#observation.mode;
+    if (mode === "passthrough") {
+      this.#observePlaintext(chunk);
+    } else if (mode === "decoding") {
+      this.#observation.push(chunk);
     }
     if (
       this.#capture.capture_res_body &&
@@ -1492,21 +1757,37 @@ class TimedStreamState {
       this.#resBody.push(Buffer.from(chunk));
       this.#resBodyLength += chunk.length;
     }
+
+    if (this.#repair !== null) return this.#repair.push(chunk);
+    return chunk;
+  }
+
+  /** 观测链路统一入口：只接收明文（identity / 未知编码时即原始字节）。 */
+  #observePlaintext(plain: Buffer): void {
+    if (plain.length === 0) return;
+    // 解压后的字节计入既有内存上限。
+    if (this.#ttftMs === null && this.#ttftProbeLength + plain.length <= MAX_TTFT_PROBE_BYTES) {
+      this.#ttftProbe.push(Buffer.from(plain));
+      this.#ttftProbeLength += plain.length;
+      const probe = Buffer.concat(this.#ttftProbe, this.#ttftProbeLength);
+      if (containsSseOutputToken(probe)) {
+        this.#ttftMs = elapsedMs(this.#requestStartedAt);
+        this.#ttftProbe = [];
+        this.#ttftProbeLength = 0;
+      }
+    }
     if (this.#usageBodyEnabled) {
-      if (this.#usageBodyLength + chunk.length > MAX_USAGE_CAPTURE_BYTES) {
+      if (this.#usageBodyLength + plain.length > MAX_USAGE_CAPTURE_BYTES) {
         this.#usageBodyEnabled = false;
         this.#usageBody = [];
         this.#usageBodyLength = 0;
       } else {
-        this.#usageBody.push(Buffer.from(chunk));
-        this.#usageBodyLength += chunk.length;
+        this.#usageBody.push(Buffer.from(plain));
+        this.#usageBodyLength += plain.length;
       }
     }
-    this.#accumulator.push(chunk);
-    this.#trackTerminal(chunk);
-
-    if (this.#repair !== null) return this.#repair.push(chunk);
-    return chunk;
+    this.#accumulator.push(plain);
+    this.#trackTerminal(plain);
   }
 
   /** 流结束时的兼容尾巴（不完整行原样透传，不修复）。 */
@@ -1518,8 +1799,16 @@ class TimedStreamState {
     return this.#terminalSeen;
   }
 
-  summarize(success: boolean, errorMessage: string | null, routeReason: string | null): StreamDone {
+  async summarize(
+    success: boolean,
+    errorMessage: string | null,
+    routeReason: string | null,
+  ): Promise<StreamDone> {
     const durationMs = elapsedMs(this.#requestStartedAt);
+    // 先 flush 观测解压器再判定 usage 完整性：gzip/br 的尾部输出（常见于
+    // `message_delta` 的 output usage）与 zstd 内部缓冲都可能在最后一块之后才产出。
+    // 解压失败/截断只影响观测解压（已解析部分保留），不影响转发、日志与连接。
+    await this.#observation.finish();
     const resBodyB64 = this.#capture.capture_res_body
       ? captureResponseBody(
           Buffer.concat(this.#resBody, this.#resBodyLength),
@@ -1659,24 +1948,24 @@ async function pumpStream(options: {
     if (tail.length > 0 && !downstreamClosed && !idleTimedOut) res.write(tail);
 
     if (completed) {
-      const done = state.summarize(true, null, null);
+      const done = await state.summarize(true, null, null);
       res.end();
       return done;
     }
     if (idleTimedOut) {
       const message = `上游流连续 ${Math.floor(idleTimeoutMs / 1000)} 秒未返回数据，已中止`;
-      const done = state.summarize(false, message, "stream_timeout");
+      const done = await state.summarize(false, message, "stream_timeout");
       discardResponseBody(upstream.body);
       res.destroy(new Error(message));
       return done;
     }
     if (downstreamClosed) {
-      if (state.terminalSeen) return state.summarize(true, null, null);
-      return state.summarize(false, "下游客户端在流结束前断开连接", "stream_cancelled");
+      if (state.terminalSeen) return await state.summarize(true, null, null);
+      return await state.summarize(false, "下游客户端在流结束前断开连接", "stream_cancelled");
     }
     const errorMessage =
       streamError instanceof Error ? streamError.message : String(streamError ?? "stream error");
-    const done = state.summarize(false, errorMessage, "stream_error");
+    const done = await state.summarize(false, errorMessage, "stream_error");
     res.destroy(streamError instanceof Error ? streamError : undefined);
     return done;
   } finally {

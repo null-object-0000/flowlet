@@ -270,6 +270,9 @@
 3. Anthropic 兼容修复（`proxy_anthropic_compat::normalize_content_block_starts`，`proxy.rs:1797-1800`）：仅 `protocol==Anthropic` 且响应 `content-encoding` 缺失或为 `identity` 时启用；按 `\r`/`\n` 分行处理，`data:` 后 JSON 中 `type=content_block_start` 的 `content_block` 若 `type=thinking` 缺 `thinking` → 补 `""`、`type=tool_use` 缺 `input` → 补 `{}`；**超过 64KiB 的行整行原样透传**；流末尾不完整行原样透传不修复；错误照常传播。捕获发生在此修复之前 → 日志保留上游原文（`AGENTS.md` §5）。
 4. 返回给客户端前，若启用修复则删除 `content-length`（长度可能变化）。
 5. `tx_done` 的 `StreamDone` 汇总：`duration_ms`、`ttft_ms`、`res_body_b64`、`usage`、`usage_status`、`usage_source`、`error_message`、`route_reason`。
+
+   **压缩流观测解压（2026-11-10 修复）**：响应带 `content-encoding: gzip / x-gzip / deflate / br / zstd` 时，上面第 2 步的 TTFT 探针、`usage_body_buf`、`StreamUsageAccumulator` 与终止事件追踪吃**解压后的明文**（`proxy_http::StreamUsageDecoder` 增量解压，单块明文上限 8 MiB，解压失败/截断只停用观测解压并保留已解出前缀，按 `partial` 语义处理）；转发给客户端的原始压缩字节、`content-encoding` 头与 `res_body_buf`（由 `prepare_captured_res_body` 解压）完全不变，`normalize_content_block_starts` 仍只对无编码/`identity` 启用。Node Host 对等实现为 `proxy::StreamObservationDecoder`。历史问题：DeepSeek 官方 Anthropic 端点对 SSE 返回 gzip 时，流式请求的 usage 全部丢失（请求日志 Token 显示 `—`、用量统计不计入）。
+
 6. 流结束/断开：`Drop for TimedStreamState`（`proxy.rs:2391-2409`）——已发终止事件视为完整（`success`），否则记 `stream_cancelled`；`send_stream_done`（`proxy.rs:2294-2360`）做 usage 完整性判定：
    - `complete = success || 已见终止标记 || 出现过正 output_tokens 的 usage`；不完整时清空 `output_tokens`/`total_tokens` 并标记 `partial`；
    - `usage_source`：`upstream_response`（正常结束）/ `upstream_stream_recovered`（截断但有完成证据）/ `upstream_stream_partial`。

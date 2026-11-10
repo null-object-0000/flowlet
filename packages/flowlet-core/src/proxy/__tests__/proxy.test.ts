@@ -1303,6 +1303,7 @@ test("P0-4b: SSE 原样透传（分块 + [DONE]），首块在流结束前到达
     await upstream.close();
   });
 
+  const requestStartedAt = Date.now();
   const response = await request(proxy.port, {
     method: "POST",
     path: "/v1/chat/completions",
@@ -1312,8 +1313,13 @@ test("P0-4b: SSE 原样透传（分块 + [DONE]），首块在流结束前到达
   assert.equal(response.status, 200);
   assert.equal(response.body.toString("utf8"), full);
   assert.ok(response.chunks.length >= 2, "SSE 必须逐块透传");
-  const firstClientChunkAt = Date.now() - (response.firstChunkDelayMs);
-  assert.ok(firstClientChunkAt < finishedAt, "首块必须在流结束前到达客户端");
+  // firstChunkDelayMs 是「请求开始 → 首块到达客户端」的耗时；直接和「上游结束时刻」比较，
+  // 不要再用响应结束时刻反推首块时刻——高负载下毫秒抖动会让原写法退化成 0ms 级误判。
+  assert.ok(
+    response.firstChunkDelayMs >= 0 &&
+      response.firstChunkDelayMs < finishedAt - requestStartedAt,
+    "首块必须在流结束前到达客户端",
+  );
 
   // 首条流式日志在开始转发前已写入（duration=null），结束后回填。
   const initial = findLog(proxy.storage, (row) => row.is_stream === true && row.duration_ms === null);
@@ -1643,4 +1649,359 @@ test("P1: /models 过滤规则（enabled/健康账号/规范身份/去重/排序
   assert.equal(anthropicPayload.data[0].type, "model");
   assert.equal(anthropicPayload.first_id, "deepseek-v4-pro");
   assert.equal(anthropicPayload.last_id, "deepseek-v4-pro");
+});
+
+// ─── 流式压缩 SSE 的观测解压（usage / TTFT） ────────────────────────────────
+
+/** 按给定偏移切分 buffer（落在多字节 UTF-8 / data 行中间的切点由调用方给出）。 */
+function splitBufferAt(buffer: Buffer, cuts: number[]): Buffer[] {
+  const sorted = [...new Set(cuts)]
+    .filter((cut) => cut > 0 && cut < buffer.length)
+    .sort((left, right) => left - right);
+  const pieces: Buffer[] = [];
+  let start = 0;
+  for (const cut of sorted) {
+    pieces.push(buffer.subarray(start, cut));
+    start = cut;
+  }
+  pieces.push(buffer.subarray(start));
+  return pieces.filter((piece) => piece.length > 0);
+}
+
+/** 布局与 SSE payload 一致，但把整体 gzip 拆成多块（可跨块切在行/多字节字符中间）。 */
+function streamingGzipChunks(plain: Buffer, cuts: number[]): Buffer[] {
+  return splitBufferAt(plain, cuts).map((piece) => zlib.gzipSync(piece));
+}
+
+const streamingUsagePayload = (): string =>
+  sseData(
+    [
+      JSON.stringify({ id: "chatcmpl-stream", choices: [{ delta: { content: "你好" } }] }),
+      JSON.stringify({ choices: [{ delta: { content: "，世界" } }] }),
+      JSON.stringify({
+        choices: [],
+        usage: { prompt_tokens: 11, completion_tokens: 22, total_tokens: 33 },
+      }),
+    ],
+    true,
+  );
+
+test("P0-15b: 流式 gzip SSE 分块观测解压 → usage 完整且客户端压缩字节逐字节一致", async () => {
+  const plaintext = streamingUsagePayload();
+  const plain = Buffer.from(plaintext, "utf8");
+  // 一处切在“你好”的多字节 UTF-8 中间，一处切在 usage 的 data 行中间。
+  const multibyteCut = plain.indexOf(Buffer.from("你", "utf8")) + 1;
+  const usageLineCut = plain.indexOf(Buffer.from('"usage"', "utf8")) + 4;
+  const chunks = streamingGzipChunks(plain, [multibyteCut, usageLineCut]);
+  const upstreamCompressed = Buffer.concat(chunks);
+  assert.ok(chunks.length >= 2, "上游应该分多块写出压缩体");
+
+  const upstream = await startMockUpstream(async (_req, res) => {
+    res.writeHead(200, {
+      "content-type": "text/event-stream",
+      "content-encoding": "gzip",
+      "cache-control": "no-cache",
+    });
+    res.flushHeaders();
+    for (const chunk of chunks) {
+      res.write(chunk);
+      await delay(15);
+    }
+    res.end();
+  });
+  const proxy = await startProxy({ upstreamPort: upstream.port });
+  cleanups.push(async () => {
+    await proxy.controller.stop();
+    await upstream.close();
+  });
+
+  const response = await request(proxy.port, {
+    method: "POST",
+    path: "/v1/chat/completions",
+    headers: { "content-type": "application/json" },
+    body: baseChatBody(),
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers["content-encoding"], "gzip");
+  assert.ok(
+    response.body.equals(upstreamCompressed),
+    "客户端收到的压缩字节必须与上游逐字节一致",
+  );
+
+  await waitFor(() => proxy.storage.usage.length > 0);
+  const usage = proxy.storage.usage[0];
+  assert.equal(usage.usage_status, "complete");
+  assert.equal(usage.input_tokens, 11);
+  assert.equal(usage.output_tokens, 22);
+  assert.equal(usage.total_tokens, 33);
+
+  await waitFor(() => proxy.storage.updates.length > 0);
+  const patch = proxy.storage.updates[0].patch;
+  assert.equal(typeof patch.ttft_ms, "number", "TTFT 必须从解压后的明文里测到");
+  assert.ok((patch.ttft_ms as number) >= 0);
+  assert.equal(patch.route_reason ?? null, null);
+  assert.equal(patch.error_message ?? null, null);
+  // 日志捕获仍是解压后的 SSE 原文（捕获层自行解压，不改变既有语义）。
+  assert.equal(decodedBase64(patch.res_body_b64 as string), plaintext);
+});
+
+const zstdCompressSync = (
+  zlib as unknown as { zstdCompressSync?: (input: Buffer) => Buffer }
+).zstdCompressSync;
+const zstdSupported =
+  typeof zstdCompressSync === "function" &&
+  typeof (zlib as unknown as { createZstdDecompress?: unknown }).createZstdDecompress === "function";
+
+test(
+  "P0-15c: 流式 zstd SSE 分块观测解压 → usage 完整且字节逐字节一致",
+  { skip: zstdSupported ? false : "当前 Node 运行时没有 zstd 支持" },
+  async () => {
+    const compressZstd = zstdCompressSync as (input: Buffer) => Buffer;
+    const plaintext = streamingUsagePayload();
+    const plain = Buffer.from(plaintext, "utf8");
+    const cuts = [plain.indexOf(Buffer.from("你", "utf8")) + 1, plain.indexOf(Buffer.from('"usage"', "utf8")) + 4];
+    const chunks = splitBufferAt(plain, cuts).map((piece) => compressZstd(piece));
+    const upstreamCompressed = Buffer.concat(chunks);
+
+    const upstream = await startMockUpstream(async (_req, res) => {
+      res.writeHead(200, {
+        "content-type": "text/event-stream",
+        "content-encoding": "zstd",
+      });
+      res.flushHeaders();
+      for (const chunk of chunks) {
+        res.write(chunk);
+        await delay(15);
+      }
+      res.end();
+    });
+    const proxy = await startProxy({ upstreamPort: upstream.port });
+    cleanups.push(async () => {
+      await proxy.controller.stop();
+      await upstream.close();
+    });
+
+    const response = await request(proxy.port, {
+      method: "POST",
+      path: "/v1/chat/completions",
+      headers: { "content-type": "application/json" },
+      body: baseChatBody(),
+    });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers["content-encoding"], "zstd");
+    assert.ok(response.body.equals(upstreamCompressed));
+
+    await waitFor(() => proxy.storage.usage.length > 0);
+    const usage = proxy.storage.usage[0];
+    assert.equal(usage.usage_status, "complete");
+    assert.equal(usage.input_tokens, 11);
+    assert.equal(usage.output_tokens, 22);
+    assert.equal(usage.total_tokens, 33);
+
+    await waitFor(() => proxy.storage.updates.length > 0);
+    const patch = proxy.storage.updates[0].patch;
+    assert.equal(typeof patch.ttft_ms, "number");
+    assert.equal(patch.route_reason ?? null, null);
+  },
+);
+
+test("P0-15d: 截断的 gzip 流不崩溃，已转发字节一致且不伪造 usage", async () => {
+  const events: string[] = [];
+  for (let index = 0; index < 40; index += 1) {
+    events.push(JSON.stringify({ choices: [{ delta: { content: `t${index}` } }] }));
+  }
+  // usage 事件只在流末尾：截断后解不出它。
+  events.push(
+    JSON.stringify({
+      choices: [],
+      usage: { prompt_tokens: 7, completion_tokens: 8, total_tokens: 15 },
+    }),
+  );
+  const plaintext = sseData(events, true);
+  const compressed = zlib.gzipSync(Buffer.from(plaintext, "utf8"));
+  const truncated = compressed.subarray(0, Math.floor(compressed.length * 0.4));
+
+  const upstream = await startMockUpstream((_req, res) => {
+    res.writeHead(200, {
+      "content-type": "text/event-stream",
+      "content-encoding": "gzip",
+    });
+    res.write(truncated);
+    res.end();
+  });
+  const proxy = await startProxy({ upstreamPort: upstream.port });
+  cleanups.push(async () => {
+    await proxy.controller.stop();
+    await upstream.close();
+  });
+
+  const response = await request(proxy.port, {
+    method: "POST",
+    path: "/v1/chat/completions",
+    headers: { "content-type": "application/json" },
+    body: baseChatBody(),
+  });
+  assert.equal(response.status, 200, "截断压缩体不能让请求失败");
+  assert.equal(response.headers["content-encoding"], "gzip");
+  assert.ok(response.body.equals(truncated), "已转发的压缩字节必须与上游一致");
+
+  await waitFor(() => proxy.storage.updates.length > 0);
+  const patch = proxy.storage.updates[0].patch;
+  assert.equal(patch.route_reason ?? null, null, "上游干净结束，流本身不是 stream_error");
+  assert.equal(typeof patch.duration_ms, "number");
+  // 解压失败只停用观测解压：解不出终态 usage 时不写 usage 行（不伪造 complete）。
+  assert.equal(proxy.storage.usage.length, 0);
+});
+
+test("P0-15e: 未知 content-encoding 不崩溃、不产生 usage，字节原样透传", async () => {
+  const plaintext = streamingUsagePayload();
+  // 用不被支持的算法编码，模拟上游真实发来的 `content-encoding: compress` 压缩体。
+  const opaque = zlib.gzipSync(Buffer.from(plaintext, "utf8"));
+  const chunks = splitBufferAt(opaque, [Math.floor(opaque.length / 2)]);
+
+  const upstream = await startMockUpstream(async (_req, res) => {
+    res.writeHead(200, {
+      "content-type": "text/event-stream",
+      "content-encoding": "compress",
+    });
+    res.flushHeaders();
+    for (const chunk of chunks) {
+      res.write(chunk);
+      await delay(10);
+    }
+    res.end();
+  });
+  const proxy = await startProxy({ upstreamPort: upstream.port });
+  cleanups.push(async () => {
+    await proxy.controller.stop();
+    await upstream.close();
+  });
+
+  const response = await request(proxy.port, {
+    method: "POST",
+    path: "/v1/chat/completions",
+    headers: { "content-type": "application/json" },
+    body: baseChatBody(),
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers["content-encoding"], "compress");
+  assert.ok(response.body.equals(opaque), "未知编码时字节必须原样透传");
+
+  await waitFor(() => proxy.storage.updates.length > 0);
+  const patch = proxy.storage.updates[0].patch;
+  assert.equal(patch.route_reason ?? null, null);
+  assert.equal(typeof patch.duration_ms, "number");
+  // 未知编码不解压：观测链路看到的是压缩字节，解析不到 usage（与修复前行为一致）。
+  assert.equal(proxy.storage.usage.length, 0);
+});
+
+test("P0-15f: 流式 deflate / br 同样解析 usage 且字节逐字节一致", async () => {
+  const cases: { encoding: string; compress: (input: Buffer) => Buffer }[] = [
+    { encoding: "deflate", compress: (input) => zlib.deflateSync(input) },
+    { encoding: "br", compress: (input) => zlib.brotliCompressSync(input) },
+  ];
+  for (const { encoding, compress } of cases) {
+    const plaintext = sseData(
+      [
+        JSON.stringify({ choices: [{ delta: { content: `hello ${encoding}` } }] }),
+        JSON.stringify({
+          choices: [],
+          usage: { prompt_tokens: 5, completion_tokens: 6, total_tokens: 11 },
+        }),
+      ],
+      true,
+    );
+    const plain = Buffer.from(plaintext, "utf8");
+    // 单一压缩流按任意字节切块写出：解压器必须容忍跨块的多字节 UTF-8 / data 行。
+    const compressed = compress(plain);
+    const chunks = splitBufferAt(compressed, [
+      Math.floor(compressed.length / 3),
+      Math.floor((compressed.length * 2) / 3),
+    ]);
+    const upstreamCompressed = Buffer.concat(chunks);
+
+    const upstream = await startMockUpstream(async (_req, res) => {
+      res.writeHead(200, {
+        "content-type": "text/event-stream",
+        "content-encoding": encoding,
+      });
+      res.flushHeaders();
+      for (const chunk of chunks) {
+        res.write(chunk);
+        await delay(10);
+      }
+      res.end();
+    });
+    const proxy = await startProxy({ upstreamPort: upstream.port });
+    cleanups.push(async () => {
+      await proxy.controller.stop();
+      await upstream.close();
+    });
+
+    const response = await request(proxy.port, {
+      method: "POST",
+      path: "/v1/chat/completions",
+      headers: { "content-type": "application/json" },
+      body: baseChatBody(),
+    });
+    assert.equal(response.status, 200, `${encoding} 流式响应必须成功`);
+    assert.equal(response.headers["content-encoding"], encoding);
+    assert.ok(response.body.equals(upstreamCompressed), `${encoding} 字节必须原样透传`);
+
+    await waitFor(() => proxy.storage.usage.length > 0);
+    const usage = proxy.storage.usage[0];
+    assert.equal(usage.usage_status, "complete", `${encoding} usage 必须完整`);
+    assert.equal(usage.input_tokens, 5);
+    assert.equal(usage.output_tokens, 6);
+    assert.equal(usage.total_tokens, 11);
+  }
+});
+
+test("P0-15g: 标成 deflate 的原始 deflate（无 zlib 头）流也能解析 usage", async () => {
+  const plaintext = sseData(
+    [
+      JSON.stringify({ choices: [{ delta: { content: "raw deflate" } }] }),
+      JSON.stringify({
+        choices: [],
+        usage: { prompt_tokens: 2, completion_tokens: 3, total_tokens: 5 },
+      }),
+    ],
+    true,
+  );
+  const compressed = zlib.deflateRawSync(Buffer.from(plaintext, "utf8"));
+  const chunks = splitBufferAt(compressed, [Math.floor(compressed.length / 2)]);
+
+  const upstream = await startMockUpstream(async (_req, res) => {
+    res.writeHead(200, {
+      "content-type": "text/event-stream",
+      "content-encoding": "deflate",
+    });
+    res.flushHeaders();
+    for (const chunk of chunks) {
+      res.write(chunk);
+      await delay(10);
+    }
+    res.end();
+  });
+  const proxy = await startProxy({ upstreamPort: upstream.port });
+  cleanups.push(async () => {
+    await proxy.controller.stop();
+    await upstream.close();
+  });
+
+  const response = await request(proxy.port, {
+    method: "POST",
+    path: "/v1/chat/completions",
+    headers: { "content-type": "application/json" },
+    body: baseChatBody(),
+  });
+  assert.equal(response.status, 200);
+  assert.ok(response.body.equals(Buffer.concat(chunks)), "原始 deflate 字节必须原样透传");
+
+  await waitFor(() => proxy.storage.usage.length > 0);
+  const usage = proxy.storage.usage[0];
+  assert.equal(usage.usage_status, "complete");
+  assert.equal(usage.input_tokens, 2);
+  assert.equal(usage.output_tokens, 3);
+  assert.equal(usage.total_tokens, 5);
 });

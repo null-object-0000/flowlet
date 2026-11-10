@@ -2,6 +2,18 @@
 
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 修复
+
+- 修复流式响应带 `content-encoding: gzip / deflate / br / zstd` 时用量丢失：代理此前把压缩
+  字节直接交给 TTFT 探针与 usage 累加器，解析不到 `usage` 事件，导致请求日志 Token / 费用
+  显示 `—`、用量统计不计入（DeepSeek 官方 Anthropic 端点对 SSE 返回 gzip 时必现，历史日志中
+  该账号 1,923 条请求全部无 usage）。现在 Rust（`proxy_http::StreamUsageDecoder`）与
+  Node Host（`proxy::StreamObservationDecoder`）都在**观测侧**做增量解压：转发的原始压缩字节、
+  `content-encoding` 头不变，响应体捕获仍按原逻辑解压；解压失败 / 截断只停用观测解压并按
+  `partial` 语义处理，不影响转发、日志与连接。非流式 buffered 解压路径不变。
+
 ## [0.2.0] - 2026-11-09
 
 ### 管理端 GitLab OIDC SSO

@@ -6111,7 +6111,10 @@ fn reassemble_with_stream_decoder(
         index += 1;
     }
     let mut tail = Vec::new();
-    assert!(decoder.finish(&mut tail), "{encoding}: 完整压缩流 flush 应成功");
+    assert!(
+        decoder.finish(&mut tail),
+        "{encoding}: 完整压缩流 flush 应成功"
+    );
     assembled.extend_from_slice(&tail);
     assembled
 }
@@ -6314,13 +6317,11 @@ async fn streaming_brotli_sse_produces_complete_usage() {
 async fn streaming_corrupt_compressed_body_never_fabricates_usage() {
     for encoding in ["gzip", "deflate", "zstd", "br"] {
         let garbage = vec![0xABu8; 128];
-        let (forwarded, done) = run_compressed_stream_capture(&garbage, &[5, 7, 13], encoding).await;
+        let (forwarded, done) =
+            run_compressed_stream_capture(&garbage, &[5, 7, 13], encoding).await;
         assert_eq!(forwarded, garbage, "{encoding}: 转发字节必须原样");
         assert_eq!(done.error_message, None, "{encoding}: 解压失败不得影响连接");
-        assert!(
-            done.usage.is_none(),
-            "{encoding}: 损坏压缩流不得产出 usage"
-        );
+        assert!(done.usage.is_none(), "{encoding}: 损坏压缩流不得产出 usage");
         assert!(done.usage_status.is_none());
     }
 }
@@ -6409,7 +6410,11 @@ async fn e2e_gzip_streaming_sse_records_usage_and_keeps_wire_bytes_raw() {
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
-    assert_eq!(body.as_ref(), compressed.as_slice(), "压缩 SSE 必须原样透传");
+    assert_eq!(
+        body.as_ref(),
+        compressed.as_slice(),
+        "压缩 SSE 必须原样透传"
+    );
 
     // 流结束后异步落库：轮询 usage_records（本机行 request_count >= 1）。
     let rows = tokio::time::timeout(Duration::from_secs(3), async {

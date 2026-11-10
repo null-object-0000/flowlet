@@ -63,13 +63,20 @@ export type CliAuthToken = {
   lastUsedAt: string | null;
 };
 
+/** 「AI 生成环境前缀」的返回：模型给出的大写片段与所用模型。 */
+export type EnvPrefixAiSuggestion = {
+  /** 如 `NA_PROD`；拼接 provider 默认前缀与冲突避让由前端规则完成。 */
+  segment: string;
+  model: string;
+};
+
 /** 管理台「查看原始 token」的返回（仅已鉴权的管理调用可见，勿缓存/落库）。 */
 export type ServiceCredentialReveal = {
   id: string;
   name: string;
   provider: string;
   envPrefix: string;
-  /** Basic 认证用户名（仅 Jenkins）。 */
+  /** Basic 认证用户名（Jenkins）或登录邮箱（Beszel）。 */
   username?: string | null;
   token: string;
 };

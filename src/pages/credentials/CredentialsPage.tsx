@@ -17,6 +17,7 @@ import {
   Typography,
 } from "@douyinfe/semi-ui-19";
 import {
+  IconAIWandLevel1,
   IconCopy,
   IconDelete,
   IconDownload,
@@ -201,6 +202,8 @@ export function CredentialsPage() {
    * 一旦手动输入就不再覆盖（编辑已有凭据时也视为已手动设置，避免悄悄改名）。
    */
   const [envPrefixTouched, setEnvPrefixTouched] = useState(false);
+  /** 「AI 生成」按钮的进行中状态（一次点击 = 一次模型调用）。 */
+  const [aiPrefixLoading, setAiPrefixLoading] = useState(false);
 
   const providers = useQuery({
     queryKey: queryKeys.credentials.providers(),
@@ -257,27 +260,72 @@ export function CredentialsPage() {
       Toast.error(t("无法查看原始 token：{message}", { message: errorMessage(error) })),
   });
 
+  /** provider 默认前缀（服务端元数据缺失时按 id 兜底）。 */
+  const defaultPrefixOf = (providerId: CredentialProviderId): string => {
+    const provider = providerOptions.find((option) => option.id === providerId);
+    return provider ? providerDefaultEnvPrefix(provider) : providerId.toUpperCase();
+  };
+
+  /** 其它凭据已占用的前缀（排除当前编辑项），用于自动避让。 */
+  const usedEnvPrefixes = (currentId?: string): string[] =>
+    (list.data ?? [])
+      .filter((credential) => credential.id !== currentId)
+      .map((credential) =>
+        resolveEnvPrefix(credential.envPrefix, defaultPrefixOf(credential.provider as CredentialProviderId)),
+      );
+
   /** 自动生成前缀所需上下文：provider 默认前缀 + 其它凭据已占用的前缀。 */
   const autoEnvPrefix = (
     providerId: CredentialProviderId,
     name: string,
     note: string,
     currentId?: string,
-  ): string => {
-    const providerDefault = (() => {
-      const provider = providerOptions.find((option) => option.id === providerId);
-      return provider ? providerDefaultEnvPrefix(provider) : providerId.toUpperCase();
-    })();
-    const used = (list.data ?? [])
-      .filter((credential) => credential.id !== currentId)
-      .map((credential) => {
-        const fallback = (() => {
-          const provider = providerOptions.find((option) => option.id === credential.provider);
-          return provider ? providerDefaultEnvPrefix(provider) : credential.provider.toUpperCase();
-        })();
-        return resolveEnvPrefix(credential.envPrefix, fallback);
+  ): string =>
+    suggestEnvPrefix({
+      providerDefault: defaultPrefixOf(providerId),
+      name,
+      note,
+      used: usedEnvPrefixes(currentId),
+    });
+
+  /**
+   * 让已开放模型根据名称/备注生成前缀片段（显式点击才调用，会计一次模型调用）。
+   * 失败时回退规则建议，并在 Toast 里说明原因。
+   */
+  const aiSuggestEnvPrefix = async () => {
+    if (!draft || aiPrefixLoading) return;
+    const providerDefault = defaultPrefixOf(draft.provider);
+    const used = usedEnvPrefixes(draft.id);
+    setAiPrefixLoading(true);
+    try {
+      const suggestion = await credentialCommands.suggestEnvPrefixSegment({
+        provider: draft.provider,
+        providerDefault,
+        name: draft.name,
+        note: draft.note,
+        used,
       });
-    return suggestEnvPrefix({ providerDefault, name, note, used });
+      // 片段走与手写/规则同一套拼接与冲突避让，保证格式一致。
+      const prefix = suggestEnvPrefix({
+        providerDefault,
+        name: suggestion.segment,
+        used,
+      });
+      setEnvPrefixTouched(true);
+      setDraft((current) => (current ? { ...current, envPrefix: prefix } : current));
+      Toast.success(
+        t("已用 {model} 生成：{prefix}", { model: suggestion.model, prefix }),
+      );
+    } catch (error) {
+      const fallback = autoEnvPrefix(draft.provider, draft.name, draft.note, draft.id);
+      setEnvPrefixTouched(true);
+      setDraft((current) => (current ? { ...current, envPrefix: fallback } : current));
+      Toast.warning(
+        t("AI 生成失败，已使用规则建议：{message}", { message: errorMessage(error) }),
+      );
+    } finally {
+      setAiPrefixLoading(false);
+    }
   };
 
   const openCreate = () => {
@@ -697,28 +745,40 @@ export function CredentialsPage() {
             <div className={styles.field}>
               <div className={styles.fieldLabelRow}>
                 <label>{t("环境别名（Env 前缀）")}</label>
-                <Button
-                  size="small"
-                  theme="borderless"
-                  onClick={() => {
-                    setEnvPrefixTouched(false);
-                    setDraft((current) =>
-                      current
-                        ? {
-                            ...current,
-                            envPrefix: autoEnvPrefix(
-                              current.provider,
-                              current.name,
-                              current.note,
-                              current.id,
-                            ),
-                          }
-                        : current,
-                    );
-                  }}
-                >
-                  {t("自动生成")}
-                </Button>
+                <div className={styles.fieldLabelActions}>
+                  <Button
+                    size="small"
+                    theme="borderless"
+                    icon={<IconAIWandLevel1 />}
+                    loading={aiPrefixLoading}
+                    disabled={!draft.name.trim()}
+                    onClick={() => void aiSuggestEnvPrefix()}
+                  >
+                    {t("AI 生成")}
+                  </Button>
+                  <Button
+                    size="small"
+                    theme="borderless"
+                    onClick={() => {
+                      setEnvPrefixTouched(false);
+                      setDraft((current) =>
+                        current
+                          ? {
+                              ...current,
+                              envPrefix: autoEnvPrefix(
+                                current.provider,
+                                current.name,
+                                current.note,
+                                current.id,
+                              ),
+                            }
+                          : current,
+                      );
+                    }}
+                  >
+                    {t("自动生成")}
+                  </Button>
+                </div>
               </div>
               <Input
                 value={draft.envPrefix}

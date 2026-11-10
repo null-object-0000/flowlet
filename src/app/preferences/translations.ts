@@ -1106,6 +1106,13 @@ const english: Record<string, string> = {
   "正在读取登录状态…": "Loading sign-in status…",
   "正在同步余额与免费额度…": "Syncing balance and free quota…",
   "已通过 HTTP 同步余额与免费额度": "Balance and free quota synced over HTTP",
+  // Token Plan 订阅账号复用同一套平台登录 + HTTP 同步
+  "通过千问平台登录后，订阅额度与重置卡由官方 HTTP 接口同步，无需打开 WebView。":
+    "Sign in to the Qwen platform to sync the subscription quota and reset cards over the official HTTP API without a WebView.",
+  "订阅额度与重置卡由官方 HTTP 接口同步，无需打开 WebView。":
+    "The subscription quota and reset cards are synced over the official HTTP API without a WebView.",
+  "正在同步订阅额度…": "Syncing subscription quota…",
+  "已通过 HTTP 同步订阅额度": "Subscription quota synced over HTTP",
   "HTTP 同步": "HTTP sync",
   "WebView 抓取": "WebView scraping",
   "套餐已过期": "Plan expired",
@@ -1890,6 +1897,9 @@ const english: Record<string, string> = {
   "留空使用默认 {prefix}，也可点「自动生成」由名称/备注生成":
     "Leave blank for the default {prefix}, or click \"Auto-generate\" to derive it from the name/note",
   "自动生成": "Auto-generate",
+  "AI 生成": "AI generate",
+  "已用 {model} 生成：{prefix}": "Generated with {model}: {prefix}",
+  "AI 生成失败，已使用规则建议：{message}": "AI generation failed; rule-based suggestion applied: {message}",
   "已按名称与备注自动生成，可直接修改；生成的环境变量：{keys}。":
     "Generated from the name and note; you can edit it. Environment variables: {keys}.",
   "生成的环境变量：{keys}；同一服务的多实例需使用不同前缀（如 {example}）。":

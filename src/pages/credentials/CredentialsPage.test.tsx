@@ -11,6 +11,7 @@ const commands = vi.hoisted(() => ({
   test: vi.fn(),
   remove: vi.fn(),
   reveal: vi.fn(),
+  suggestEnvPrefixSegment: vi.fn(),
   listCliAuthTokens: vi.fn(),
   revokeCliAuthToken: vi.fn(),
 }));
@@ -50,6 +51,15 @@ const providers = [
     usernameLabel: "用户名",
     available: true,
     defaultEnvPrefix: "JENKINS",
+  },
+  {
+    id: "beszel",
+    label: "Beszel",
+    baseUrlHint: "http://beszel.example.com:8090",
+    tokenLabel: "登录密码（Beszel 用户密码）",
+    usernameLabel: "邮箱",
+    available: true,
+    defaultEnvPrefix: "BESZEL",
   },
 ];
 
@@ -95,6 +105,23 @@ const credentials = [
     enabled: true,
     envPrefix: "GITLAB",
     secretHint: "••••3c4d",
+    createdAt: "2026-11-01T00:00:00Z",
+    updatedAt: "2026-11-01T00:00:00Z",
+    lastVerifiedAt: null,
+    lastError: null,
+  },
+  {
+    id: "cred-beszel",
+    name: "公司 Beszel",
+    provider: "beszel",
+    baseUrl: "http://beszel.example.com:8090",
+    // Beszel 没有长期 API Token：username 存登录邮箱，token 存密码。
+    username: "ops@example.com",
+    kind: "cli_token",
+    note: null,
+    enabled: true,
+    envPrefix: "BESZEL",
+    secretHint: "••••7g8h",
     createdAt: "2026-11-01T00:00:00Z",
     updatedAt: "2026-11-01T00:00:00Z",
     lastVerifiedAt: null,
@@ -210,6 +237,53 @@ describe("CredentialsPage env prefix auto-generation", () => {
   });
 });
 
+describe("CredentialsPage AI env prefix", () => {
+  it("uses the model suggestion when clicked, and stays disabled until a name is filled", async () => {
+    commands.suggestEnvPrefixSegment.mockResolvedValue({
+      segment: "NA_PROD",
+      model: "deepseek-v4.1-flash",
+    });
+    renderPage();
+    await screen.findByText("公司-北美-线上");
+    fireEvent.click(await screen.findByRole("button", { name: /Add credential/ }));
+
+    const aiButton = screen.getByRole("button", { name: /AI generate/ });
+    expect(aiButton).toBeDisabled();
+
+    const nameInput = (await screen.findByPlaceholderText(/For example: Company/)) as HTMLInputElement;
+    fireEvent.change(nameInput, { target: { value: "公司北美 Dockhand 正式" } });
+    await waitFor(() => expect(aiButton).not.toBeDisabled());
+
+    fireEvent.click(aiButton);
+    await waitFor(() => expect(commands.suggestEnvPrefixSegment).toHaveBeenCalledTimes(1));
+    const prefixInput = (await screen.findByPlaceholderText(
+      /Leave blank for the default GITLAB/,
+    )) as HTMLInputElement;
+    await waitFor(() => expect(prefixInput.value).toBe("GITLAB_NA_PROD"));
+    // 请求里带上名称、备注与已占用的前缀，且不泄露 token
+    const payload = commands.suggestEnvPrefixSegment.mock.calls[0]![0] as Record<string, unknown>;
+    expect(payload.name).toBe("公司北美 Dockhand 正式");
+    expect(payload.providerDefault).toBe("GITLAB");
+    expect(Array.isArray(payload.used)).toBe(true);
+    expect(JSON.stringify(payload)).not.toMatch(/token/i);
+  });
+
+  it("falls back to the rule-based suggestion when AI generation fails", async () => {
+    commands.suggestEnvPrefixSegment.mockRejectedValue(new Error("没有可用的开放模型"));
+    renderPage();
+    await screen.findByText("公司-北美-线上");
+    fireEvent.click(await screen.findByRole("button", { name: /Add credential/ }));
+    const nameInput = (await screen.findByPlaceholderText(/For example: Company/)) as HTMLInputElement;
+    fireEvent.change(nameInput, { target: { value: "campus sz box" } });
+    fireEvent.click(await screen.findByRole("button", { name: /AI generate/ }));
+    await waitFor(() => expect(commands.suggestEnvPrefixSegment).toHaveBeenCalled());
+    const prefixInput = (await screen.findByPlaceholderText(
+      /Leave blank for the default GITLAB/,
+    )) as HTMLInputElement;
+    await waitFor(() => expect(prefixInput.value).toBe("GITLAB_CAMPUS_SZ_BOX"));
+  });
+});
+
 describe("CredentialsPage raw token reveal", () => {
   it("reveals the saved token on demand while the table keeps only the mask", async () => {
     commands.reveal.mockResolvedValue({
@@ -249,6 +323,9 @@ describe("CredentialsPage local access guide", () => {
     expect(await screen.findByText(/install-flowlet\.sh \| sh -s -- --base=/)).toBeInTheDocument();
     expect(screen.getByText("flowlet-skills.tar.gz", { exact: false })).toBeInTheDocument();
     expect(screen.getByText(/DOCKHAND_NA_URL/)).toBeInTheDocument();
+    // Beszel 的环境变量名同步展示 URL / EMAIL / PASSWORD。
+    expect(screen.getByText(/BESZEL_EMAIL/)).toBeInTheDocument();
+    expect(screen.getByText(/BESZEL_PASSWORD/)).toBeInTheDocument();
     expect(await screen.findByText("0.2.0")).toBeInTheDocument();
     expect(screen.getByText(/sha256 aaaaaaaaaaaaaaaa/)).toBeInTheDocument();
   });
@@ -353,5 +430,98 @@ describe("CredentialsPage jenkins provider", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /Save and verify/ })).toBeDisabled(),
     );
+  });
+});
+
+describe("CredentialsPage beszel provider", () => {
+  const sheet = () => document.querySelector(".semi-sidesheet") as HTMLElement;
+
+  it("shows the BESZEL prefix and the login email in the table", async () => {
+    renderPage();
+    expect(await screen.findByText("BESZEL_*")).toBeInTheDocument();
+    expect(screen.getByText("Beszel")).toBeInTheDocument();
+    // beszel 的 username 存登录邮箱，表格与 jenkins 一样展示 @email。
+    expect(screen.getByText("@ops@example.com")).toBeInTheDocument();
+  });
+
+  it("prefills the email and previews URL / EMAIL / PASSWORD when editing", async () => {
+    renderPage();
+    const name = await screen.findByText("公司 Beszel");
+    const row = name.closest("tr");
+    expect(row).not.toBeNull();
+    fireEvent.click(within(row as HTMLElement).getByRole("button", { name: /Edit/ }));
+
+    // 用户名输入框由 usernameLabel 驱动：beszel 显示「邮箱」并回填登录邮箱。
+    const username = (await screen.findByPlaceholderText("e.g. you@example.com")) as HTMLInputElement;
+    expect(username.value).toBe("ops@example.com");
+    expect(screen.getByText("Email")).toBeInTheDocument();
+    expect(
+      screen.getByText(/BESZEL_URL \/ BESZEL_EMAIL \/ BESZEL_PASSWORD/),
+    ).toBeInTheDocument();
+    // 校验端点提示与「留空保留密码」placeholder。
+    expect(screen.getAllByText((content) => content.includes("auth-with-password")).length).toBeGreaterThan(0);
+    expect(screen.getByPlaceholderText(/Leave blank to keep the current password/)).toBeInTheDocument();
+  });
+
+  it("requires both email and password when creating a beszel credential", async () => {
+    commands.save.mockResolvedValue({ ...credentials[3] });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: /Add credential/ }));
+
+    // 切换服务类型到 Beszel（Semi Select 的选项渲染在 portal 里）。
+    fireEvent.click(within(sheet()).getByText("GitLab"));
+    fireEvent.click(await screen.findByRole("option", { name: /Beszel/ }));
+    await waitFor(() => expect(within(sheet()).getAllByText("Beszel").length).toBeGreaterThan(0));
+
+    const email = (await screen.findByPlaceholderText("e.g. you@example.com")) as HTMLInputElement;
+    const password = screen.getByPlaceholderText(/Paste the Beszel login password/) as HTMLInputElement;
+    const baseUrl = screen.getByPlaceholderText("http://beszel.example.com:8090") as HTMLInputElement;
+    const saveButton = screen.getByRole("button", { name: /Save and verify/ });
+
+    // 新建 beszel：邮箱 + 密码都是必填，自动前缀避让已有 BESZEL。
+    expect(saveButton).toBeDisabled();
+    expect(
+      screen.getByText(/BESZEL_2_URL \/ BESZEL_2_EMAIL \/ BESZEL_2_PASSWORD/),
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText(/For example: Company Beszel/), {
+      target: { value: "公司 Beszel 监控" },
+    });
+    fireEvent.change(baseUrl, { target: { value: "http://beszel.example.com:8090" } });
+    expect(saveButton).toBeDisabled();
+    fireEvent.change(email, { target: { value: "ops@example.com" } });
+    expect(saveButton).toBeDisabled();
+    fireEvent.change(password, { target: { value: "beszel-password" } });
+    await waitFor(() => expect(saveButton).not.toBeDisabled());
+
+    fireEvent.click(saveButton);
+    await waitFor(() =>
+      expect(commands.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: "beszel",
+          username: "ops@example.com",
+          token: "beszel-password",
+        }),
+      ),
+    );
+  });
+
+  it("allows keeping the current email when editing a beszel credential", async () => {
+    commands.save.mockResolvedValue({ ...credentials[3] });
+    renderPage();
+    const name = await screen.findByText("公司 Beszel");
+    const row = name.closest("tr");
+    fireEvent.click(within(row as HTMLElement).getByRole("button", { name: /Edit/ }));
+
+    const username = (await screen.findByPlaceholderText("e.g. you@example.com")) as HTMLInputElement;
+    fireEvent.change(username, { target: { value: "  " } });
+    // 编辑时留空表示保持原邮箱：保存按钮仍可用，payload 不带 username。
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Save and verify/ })).not.toBeDisabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Save and verify/ }));
+    await waitFor(() => expect(commands.save).toHaveBeenCalled());
+    const payload = commands.save.mock.calls[0]![0] as { username?: string };
+    expect(payload.username).toBeUndefined();
   });
 });

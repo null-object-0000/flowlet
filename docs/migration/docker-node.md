@@ -319,3 +319,16 @@ node scripts/e2e-node-host.mjs            # 端到端冒烟（含 mock 上游流
 | 镜像/部署 | `flowlet:node-20261110-aiprefix2`（169s，`sha256:6f01a3cd…`）从 `2363ffa` 的干净 HEAD 构建（含 concurrent 流已提交的 Beszel provider）；15:03 蓝绿切换，回滚点 `flowlet:node-20261110-beszel` |
 | 生产验证 | healthy；`/api/auth/config` 仍 oidc + `token_login=false`；未鉴权 `suggest_env_prefix_segment` 401；UI 含「AI 生成」「AI 生成失败」；服务端含 `exposedModelNames` 路由派生逻辑；启用路由 18 条（含 `deepseek-v4.1-flash`）；重启后 0 请求错误 |
 | 单测 | 服务端 `env-prefix-ai.test.ts` 6 条（模型选择/清洗/失败回退/无模型/CLI token 403/请求形状）；前端 `envPrefix` 15 条（含 AI 片段拼接去重）+ 凭据页 20 条（含 AI 成功与回退） |
+
+## 环境前缀「AI 生成」流式进度 + 移除规则生成（2026-11-10 15:28）
+
+| 项 | 值 |
+| --- | --- |
+| 需求 | ① 生成时不要只有一个 loading，要显示 tok/s、已生成 token 数等真实进度；② 去掉本地规则「自动生成」，只保留 AI 生成 |
+| 服务端 | 删除命令 `suggest_env_prefix_segment`，改为 **SSE 路由** `POST /api/ai/env-prefix`（管理鉴权 + CSRF）：先在写响应头前完成入参/模型校验（失败仍返回 JSON 400/409），随后流式调本机模型入口，逐条下发 `start` / `progress`（tokens、elapsedMs）/ `done`（segment、completionTokens、tokPerSec）/ `error`；`stream_options.include_usage=true` 取上游真实 completion_tokens 作为完成态数字；进度阶段的 token 数为上游 delta 片段的增量计数（推理模型会持续增长，正好作为等待反馈） |
+| 健壮性 | 推理模型可能把预算耗在 `reasoning_content` 导致 `content` 为空：预算 512→768、超时 20s→45s，并在 `content` 为空时从推理文本末尾兜底提炼片段；仍失败则 `error` 事件提示重试 |
+| 前端 | 移除「自动生成」按钮与「随名称/备注自动填充」逻辑（输入框默认留空 = Host 默认前缀，手动输入始终保留）；「AI 生成」按钮改为消费 SSE：生成中显示「AI 生成中 · 模型 · 已生成 N tokens · X tok/s · 用时」，完成后显示「AI 已生成 · N tokens · X tok/s · 用时」并填入前缀；失败只 Toast，不改动输入。AI 生成仅 Web Host 渲染（桌面 Host 无该端点）。片段拼接与冲突避让仍复用原规则函数 |
+| canary 实测（真实模型 `deepseek-v4.1-flash`） | 三次流式生成：`公司北美 Dockhand 正式` → `NA_PROD`（2.4s，9 tokens，3.8 tok/s，1 个 progress）、`个人自建 GitLab` → `SELF_TEST`（2.9s，60 tokens，20.8 tok/s，10 个 progress）、`新加坡 CI 集群` → `SG_STAGING`（1.2s，12 tokens，10 tok/s）；事件顺序 start→progress*→done |
+| 镜像/部署 | `flowlet:node-20261110-aistream`（首版）→ `flowlet:node-20261110-aistream2`（含健壮性修复，226s，`sha256:e7486782…`）；15:28:35 蓝绿切换，回滚点 `flowlet:node-20261110-qwenmerge` |
+| 生产验证 | healthy；`/api/auth/config` 仍 oidc + `token_login=false`；未鉴权 `POST /api/ai/env-prefix` 401；UI bundle 含「AI 生成」「已生成 {tokens} tokens」「tok/s」；服务端含 `streamEnvPrefixSegment` 与推理兜底；自重启起请求无错误 |
+| 单测 | 服务端 `env-prefix-ai.test.ts` 6 条（SSE 事件序列与 token 统计、上游错误、无模型、缺名称、未鉴权/CLI token 拒绝、请求形状含 `stream`/`include_usage`）；前端凭据页 23 条（AI 流式进度/失败不改值、无自动生成、reveal、CLI 授权、providers） |

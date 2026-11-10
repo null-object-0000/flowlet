@@ -126,6 +126,23 @@ function prettyJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
+/** serde_json::Value 的对象键是 BTreeMap（字典序）；透传端点输出必须按此排序。 */
+function prettyJsonSorted(value: unknown): string {
+  return JSON.stringify(sortJson(value), null, 2);
+}
+
+function sortJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((item) => sortJson(item));
+  if (value !== null && typeof value === "object") {
+    const sorted: Record<string, unknown> = {};
+    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+      sorted[key] = sortJson((value as Record<string, unknown>)[key]);
+    }
+    return sorted;
+  }
+  return value;
+}
+
 // ─── 入口 ───────────────────────────────────────────────────────────────────
 
 async function run(argv: string[]): Promise<number> {
@@ -544,7 +561,7 @@ async function gitlabApi(args: string[], insecure: boolean): Promise<number> {
   }
   const client = storedGitlabClient(insecure);
   const { value, pagination } = await client.request(method, path, body);
-  outLine(prettyJson(value));
+  outLine(prettyJsonSorted(value));
   if (pagination.nextPage !== null || pagination.total !== null) {
     errLine(
       `分页：page=${debugOption(pagination.page)} next=${debugOption(pagination.nextPage)} total=${debugOption(pagination.total)}`,

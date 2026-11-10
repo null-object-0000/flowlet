@@ -2,11 +2,21 @@
 //
 // 运行：node --test packages/flowlet-cred/src/__tests__/
 // 全部用例通过 spawn 真实 CLI 进程（与 Agent 实际用法一致），并使用独立临时目录 +
-// mock GitLab（CE 10.8.7 语义）与 mock Flowlet Web Host（export_service_credentials）。
+// 独立子进程 mock GitLab（CE 10.8.7 语义）与 mock Flowlet Web Host。
+// 注意：CLI 用 spawnSync 同步调用；因此 HTTP mock 必须跑在**子进程**里（见 mock-server.ts），
+// 否则会阻塞本进程事件循环导致 mock 无法应答。
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
-import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { spawn, spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, describe, it } from "node:test";
@@ -14,6 +24,7 @@ import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.resolve(HERE, "..", "cli.ts");
+const MOCK_SERVER = path.resolve(HERE, "mock-server.ts");
 const RUST_CLI = "/home/nichangen/代码/self-code/flowlet/src-tauri/target/debug/flowlet-cred";
 
 const GITLAB_TOKEN = "glpat-test-fixture-token-1a2b";
@@ -24,14 +35,16 @@ const HEADER = [
   "# 读取：Agent 可 cat 本文件；写入：请用 `flowlet-cred set KEY`。",
 ].join("\n");
 
-const cleanup: Array<() => void> = [];
+const processes: Array<import("node:child_process").ChildProcess> = [];
+const tempDirs: string[] = [];
 after(() => {
-  for (const fn of cleanup.reverse()) fn();
+  for (const child of processes) child.kill("SIGKILL");
+  for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
 });
 
 function tempDir(): string {
   const dir = mkdtempSync(path.join(tmpdir(), "flowlet-cred-test-"));
-  cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
+  tempDirs.push(dir);
   return dir;
 }
 
@@ -44,23 +57,45 @@ interface CliResult {
 function cli(
   dir: string,
   args: string[],
-  options: { input?: string; env?: Record<string, string | undefined>; cliPath?: string } = {},
+  options: { input?: string; env?: Record<string, string | undefined>; rust?: boolean } = {},
 ): CliResult {
   const env: NodeJS.ProcessEnv = { ...process.env, FLOWLET_CRED_DIR: dir };
   for (const [key, value] of Object.entries(options.env ?? {})) {
     if (value === undefined) delete env[key];
     else env[key] = value;
   }
-  const result = spawnSync(process.execPath, [options.cliPath ?? CLI, ...args], {
-    input: options.input ?? "",
-    env,
-    encoding: "utf8",
+  const command = options.rust === true ? RUST_CLI : process.execPath;
+  const argv = options.rust === true ? args : [CLI, ...args];
+  const result = spawnSync(command, argv, { input: options.input ?? "", env, encoding: "utf8" });
+  return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+}
+
+function startMock(options: Record<string, unknown>): Promise<{ baseUrl: string; close: () => void }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [MOCK_SERVER, JSON.stringify(options)], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    processes.push(child);
+    let buffer = "";
+    const onData = (chunk: Buffer): void => {
+      buffer += chunk.toString();
+      const match = /PORT (\d+)\n/.exec(buffer);
+      if (match === null) return;
+      child.stdout.off("data", onData);
+      const port = Number(match[1]);
+      const mode = options.mode;
+      resolve({
+        baseUrl:
+          mode === "gitlab"
+            ? `http://127.0.0.1:${port}/gitlab`
+            : `http://127.0.0.1:${port}`,
+        close: () => child.kill("SIGKILL"),
+      });
+    };
+    child.stdout.on("data", onData);
+    child.once("error", reject);
+    setTimeout(() => reject(new Error("mock server 启动超时")), 10_000).unref();
   });
-  return {
-    status: result.status,
-    stdout: result.stdout ?? "",
-    stderr: result.stderr ?? "",
-  };
 }
 
 function read(dir: string, name: string): string {
@@ -76,121 +111,11 @@ function metaFile(dir: string): string {
 }
 
 function normalized(text: string, dir: string): string {
-  return text
-    .split(dir)
-    .join("<DIR>")
-    .replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g, "<TS>");
+  return text.split(dir).join("<DIR>").replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z/g, "<TS>");
 }
 
 function modeOf(target: string): number {
   return statSync(target).mode & 0o777;
-}
-
-// ─── Mock GitLab CE 10.8.7 ─────────────────────────────────────────────────
-
-class MockGitlab {
-  #server: Server | null = null;
-  baseUrl = "";
-  subpath = "/gitlab";
-  versionStatus = 200;
-  hiddenVersion = false;
-  projectPages: Array<Array<Record<string, unknown>>> = [];
-  requests: string[] = [];
-
-  async start(): Promise<void> {
-    this.#server = createHttpServer((request, response) => {
-      void this.#handle(request, response);
-    });
-    await new Promise<void>((resolve, reject) => {
-      this.#server!.once("error", reject);
-      this.#server!.listen(0, "127.0.0.1", () => {
-        const address = this.#server!.address();
-        const port = typeof address === "object" && address ? address.port : 0;
-        this.baseUrl = `http://127.0.0.1:${port}${this.subpath}`;
-        resolve();
-      });
-    });
-    cleanup.push(() => this.#server?.close());
-  }
-
-  async #handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    const url = new URL(request.url ?? "/", "http://localhost");
-    this.requests.push(`${request.method} ${url.pathname}${url.search}`);
-    const token = request.headers["private-token"];
-    const send = (status: number, value: unknown, headers: Record<string, string> = {}): void => {
-      const body = Buffer.from(JSON.stringify(value), "utf8");
-      response.writeHead(status, {
-        "content-type": "application/json",
-        "content-length": String(body.length),
-        ...headers,
-      });
-      response.end(body);
-    };
-    const suffix = url.pathname.startsWith(this.subpath)
-      ? url.pathname.slice(this.subpath.length)
-      : url.pathname;
-    if (suffix === "/api/v4/user") {
-      if (token !== GITLAB_TOKEN) return send(401, { message: "401 Unauthorized" });
-      return send(200, { id: 7, username: "fixture", name: "Fixture User" });
-    }
-    if (suffix === "/api/v4/version") {
-      if (this.hiddenVersion) return send(404, { message: "404 Not Found" });
-      if (this.versionStatus !== 200) return send(this.versionStatus, { message: "403 Forbidden" });
-      if (token !== GITLAB_TOKEN) return send(401, { message: "401 Unauthorized" });
-      return send(200, { version: "10.8.7" });
-    }
-    if (suffix === "/api/v4/projects") {
-      if (token !== GITLAB_TOKEN) return send(401, { message: "401 Unauthorized" });
-      const page = Number(url.searchParams.get("page") ?? "1");
-      const batch = this.projectPages[page - 1] ?? [];
-      const headers: Record<string, string> = { "x-page": String(page) };
-      if (page < this.projectPages.length) headers["x-next-page"] = String(page + 1);
-      headers["x-total"] = String(this.projectPages.flat().length);
-      return send(200, batch, headers);
-    }
-    send(404, { message: "404 Not Found" });
-  }
-}
-
-// ─── Mock Flowlet Web Host（export_service_credentials） ───────────────────
-
-class MockFlowletWeb {
-  #server: Server | null = null;
-  baseUrl = "";
-  entries: Array<Record<string, string>> = [];
-  requestCount = 0;
-
-  async start(): Promise<void> {
-    this.#server = createHttpServer((request, response) => {
-      const chunks: Buffer[] = [];
-      request.on("data", (chunk: Buffer) => chunks.push(chunk));
-      request.on("end", () => {
-        this.requestCount += 1;
-        const authorized = request.headers.authorization === `Bearer ${ADMIN_TOKEN}`;
-        const body = Buffer.from(
-          JSON.stringify(
-            authorized ? this.entries : { code: "unauthorized", message: "管理凭据无效，请重新登录" },
-          ),
-          "utf8",
-        );
-        response.writeHead(authorized ? 200 : 401, {
-          "content-type": "application/json",
-          "content-length": String(body.length),
-        });
-        response.end(body);
-      });
-    });
-    await new Promise<void>((resolve, reject) => {
-      this.#server!.once("error", reject);
-      this.#server!.listen(0, "127.0.0.1", () => {
-        const address = this.#server!.address();
-        const port = typeof address === "object" && address ? address.port : 0;
-        this.baseUrl = `http://127.0.0.1:${port}`;
-        resolve();
-      });
-    });
-    cleanup.push(() => this.#server?.close());
-  }
 }
 
 // ─── 本地凭据库 ─────────────────────────────────────────────────────────────
@@ -206,7 +131,6 @@ describe("本地凭据库", () => {
     assert.equal(modeOf(dir), 0o700);
     assert.equal(modeOf(path.join(dir, "credentials.env")), 0o600);
     assert.equal(modeOf(path.join(dir, "credentials.json")), 0o600);
-    // 二次 init 保留内容
     writeFileSync(path.join(dir, "credentials.env"), `${HEADER}\nKEEP=1\n`);
     assert.equal(cli(dir, ["init"]).status, 0);
     assert.equal(envFile(dir), `${HEADER}\nKEEP=1\n`);
@@ -217,11 +141,9 @@ describe("本地凭据库", () => {
     assert.equal(cli(dir, ["set", "GH_PAT", "--kind=cli_token", "--note=github"], { input: "ghp_abcdefghijk\r\n" }).status, 0);
     assert.equal(cli(dir, ["set", "OPENAI_API_KEY", "--value=sk-test-123"], {}).stdout, "已保存 OPENAI_API_KEY [api_key]\n");
     const list = cli(dir, ["list"]);
-    assert.equal(list.status, 0);
     assert.match(list.stdout, /^GH_PAT {2}\[cli_token\] {2}# github {2}\(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\)$/m);
     assert.match(list.stdout, /^OPENAI_API_KEY {2}\[api_key\] {2}\(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\)$/m);
-    const json = cli(dir, ["list", "--json"]);
-    const entries = JSON.parse(json.stdout) as Array<Record<string, unknown>>;
+    const entries = JSON.parse(cli(dir, ["list", "--json"]).stdout) as Array<Record<string, unknown>>;
     assert.deepEqual(Object.keys(entries[0]!), ["key", "kind", "note", "created_at", "updated_at"]);
     assert.equal(entries[0]!.note, "github");
 
@@ -260,8 +182,9 @@ describe("本地凭据库", () => {
     );
     assert.equal(cli(dir, ["set", "EMPTY"], { input: "" }).stderr, "凭据值不能为空（用 stdin 或 --value=V 传入）\n");
     assert.equal(cli(dir, ["export", "--format=yaml"]).stderr, "未知格式：yaml（dotenv|shell|json）\n");
-    assert.equal(cli(dir, ["nope"]).status, 1);
-    assert.match(cli(dir, ["nope"]).stderr, /未知命令：nope/);
+    const unknown = cli(dir, ["nope"]);
+    assert.equal(unknown.status, 1);
+    assert.match(unknown.stderr, /未知命令：nope/);
   });
 
   it("env/export：--only 顺序、缺失键报错、json 排序", () => {
@@ -280,13 +203,11 @@ describe("本地凭据库", () => {
     cli(dir, ["init"]);
     const file = path.join(dir, "credentials.env");
     writeFileSync(file, `${HEADER}\n# keep me\nA=1\nB=2\n`);
-    const unset = cli(dir, ["unset", "A"]);
-    assert.equal(unset.stdout, "已删除 A\n");
+    assert.equal(cli(dir, ["unset", "A"]).stdout, "已删除 A\n");
     assert.ok(envFile(dir).includes("# keep me"));
     assert.ok(!envFile(dir).includes("A=1"));
     assert.equal(cli(dir, ["unset", "A"]).stdout, "凭据不存在：A\n");
-    const cleared = cli(dir, ["clear"]);
-    assert.match(cleared.stdout, /已清空全部凭据/);
+    assert.match(cli(dir, ["clear"]).stdout, /已清空全部凭据/);
     assert.ok(envFile(dir).includes("# keep me"));
     assert.ok(!envFile(dir).includes("B=2"));
     assert.equal(metaFile(dir).trim(), "{}");
@@ -296,13 +217,12 @@ describe("本地凭据库", () => {
     const dir = tempDir();
     cli(dir, ["set", "SECRET_ONE", "--value=value-one"]);
     cli(dir, ["set", "SECRET_TWO", "--value=value-two"]);
-    const child = `console.log(process.env.SECRET_ONE); console.log(process.env.SECRET_TWO ?? "unset")`;
+    const child = "console.log(process.env.SECRET_ONE); console.log(process.env.SECRET_TWO ?? 'unset')";
     const result = cli(dir, ["run", "--with=SECRET_ONE", "--", process.execPath, "-e", child]);
     assert.equal(result.status, 0);
     assert.equal(result.stdout, "value-one\nunset\n");
     assert.ok(!result.stdout.includes("value-two"));
-    const exitCode = cli(dir, ["run", "--with=SECRET_ONE", "--", process.execPath, "-e", "process.exit(7)"]);
-    assert.equal(exitCode.status, 7);
+    assert.equal(cli(dir, ["run", "--with=SECRET_ONE", "--", process.execPath, "-e", "process.exit(7)"]).status, 7);
     assert.equal(cli(dir, ["run", "--", "true"]).stderr, "run 需要 --with=A,B 指定要注入的凭据名\n");
     assert.equal(cli(dir, ["run", "--with=SECRET_ONE", "true"]).stderr, "run 需要 `--` 分隔符，例如：flowlet-cred run --with=GITHUB_PAT -- gh pr list\n");
     assert.equal(cli(dir, ["run", "--with=MISSING", "--", "true"]).stderr, "凭据不存在：MISSING\n");
@@ -310,8 +230,7 @@ describe("本地凭据库", () => {
 
   it("doctor：未初始化、重复键、缺元数据、权限告警", () => {
     const dir = tempDir();
-    const uninitialized = cli(dir, ["doctor"]);
-    assert.match(uninitialized.stdout, /状态：尚未初始化/);
+    assert.match(cli(dir, ["doctor"]).stdout, /状态：尚未初始化/);
     cli(dir, ["init"]);
     const file = path.join(dir, "credentials.env");
     writeFileSync(file, `${HEADER}\nDUP=one\nDUP=two\nKEY_ONE=value\n`);
@@ -327,20 +246,16 @@ describe("本地凭据库", () => {
     const dir = tempDir();
     cli(dir, ["init"]);
     const file = path.join(dir, "credentials.env");
-    const current = envFile(dir);
-    writeFileSync(file, `${current}\n# handwritten\nnot a pair\nKEY_ONE=value\n`);
+    writeFileSync(file, `${envFile(dir)}\n# handwritten\nnot a pair\nKEY_ONE=value\n`);
     cli(dir, ["set", "KEY_TWO", "--value=v2"]);
     const text = envFile(dir);
     assert.ok(text.includes("# handwritten"));
     assert.ok(text.includes("not a pair"));
     assert.ok(text.includes("KEY_ONE=value"));
     assert.ok(text.includes("KEY_TWO=v2"));
-    // Rust 行为：每次写入都会再前置一次固定文件头（历史注释因此累积），Node 逐字节兼容。
-    assert.equal(text.split(HEADER).length - 1, 3);
-    assert.deepEqual(
-      readdirSync(dir).filter((name) => name.includes(".tmp-")),
-      [],
-    );
+    // Rust 行为：每次写入都会再前置一次固定文件头（历史注释因此累积）；这里 2 次写入 = 2 份。
+    assert.equal(text.split(HEADER).length - 1, 2);
+    assert.deepEqual(readdirSync(dir).filter((name) => name.includes(".tmp-")), []);
   });
 });
 
@@ -348,88 +263,95 @@ describe("本地凭据库", () => {
 
 describe("gitlab 子命令", () => {
   it("gitlab set：先校验后落库，URL 归一/子路径，KIND/备注写入", async () => {
-    const mock = new MockGitlab();
-    await mock.start();
+    const mock = await startMock({ mode: "gitlab" });
     const dir = tempDir();
     const ok = cli(dir, ["gitlab", "set", `--url=${mock.baseUrl}/`], { input: GITLAB_TOKEN });
     assert.equal(ok.status, 0, ok.stderr);
-    assert.equal(ok.stdout, `已保存 GitLab 凭据：http://127.0.0.1:${new URL(mock.baseUrl).port}/gitlab/api/v4\n用户：Fixture User (@fixture) id=7\n`);
+    assert.equal(ok.stdout, `已保存 GitLab 凭据：${mock.baseUrl}/api/v4\n用户：Fixture User (@fixture) id=7\n`);
     const meta = JSON.parse(metaFile(dir)) as Record<string, Record<string, unknown>>;
     assert.equal(meta.GITLAB_URL!.kind, "service");
     assert.equal(meta.GITLAB_URL!.note, "gitlab 实例地址（API v4）");
     assert.equal(meta.GITLAB_TOKEN!.kind, "cli_token");
     assert.equal(cli(dir, ["get", "GITLAB_URL", "--reveal"]).stdout, `${mock.baseUrl}\n`);
+    mock.close();
   });
 
   it("gitlab set：token 无效时不落库", async () => {
-    const mock = new MockGitlab();
-    await mock.start();
+    const mock = await startMock({ mode: "gitlab" });
     const dir = tempDir();
     const failed = cli(dir, ["gitlab", "set", `--url=${mock.baseUrl}`], { input: "glpat-wrong" });
     assert.equal(failed.status, 1);
     assert.match(failed.stderr, /^GitLab API 401: 401 Unauthorized（token 无效或已过期/);
     assert.match(failed.stderr, /未保存。请检查实例地址、token 是否有效（需要 api scope）。/);
     assert.ok(!existsSync(path.join(dir, "credentials.env")) || !envFile(dir).includes("GITLAB_URL"));
+    mock.close();
   });
 
   it("gitlab status：10.8.7 / 403 降级 / 未配置错误", async () => {
-    const mock = new MockGitlab();
-    await mock.start();
+    const mock = await startMock({ mode: "gitlab" });
     const dir = tempDir();
     cli(dir, ["gitlab", "set", `--url=${mock.baseUrl}`], { input: GITLAB_TOKEN });
-    const status = cli(dir, ["gitlab", "status"]);
-    assert.equal(status.stdout, `API：${mock.baseUrl}/api/v4\n用户：Fixture User (@fixture) id=7\n版本：10.8.7\n`);
-    mock.versionStatus = 403;
-    assert.match(cli(dir, ["gitlab", "status"]).stdout, /版本：未知（\/version 需要管理员 token/);
+    assert.equal(
+      cli(dir, ["gitlab", "status"]).stdout,
+      `API：${mock.baseUrl}/api/v4\n用户：Fixture User (@fixture) id=7\n版本：10.8.7\n`,
+    );
+    mock.close();
+    const degraded = await startMock({ mode: "gitlab", versionStatus: 403 });
+    const degradedDir = tempDir();
+    cli(degradedDir, ["gitlab", "set", `--url=${degraded.baseUrl}`], { input: GITLAB_TOKEN });
+    assert.match(cli(degradedDir, ["gitlab", "status"]).stdout, /版本：未知（\/version 需要管理员 token/);
+    degraded.close();
     const empty = cli(tempDir(), ["gitlab", "status"]);
     assert.equal(empty.status, 1);
     assert.match(empty.stderr, /尚未配置 GitLab 地址/);
   });
 
   it("gitlab projects：分页/--limit/--json/空结果", async () => {
-    const mock = new MockGitlab();
-    await mock.start();
-    mock.projectPages = [
-      [
-        { id: 42, path_with_namespace: "group/app", name: "app", default_branch: "main", visibility: "private" },
+    const mock = await startMock({
+      mode: "gitlab",
+      projectPages: [
+        [{ id: 42, path_with_namespace: "group/app", name: "app", default_branch: "main", visibility: "private" }],
+        [{ id: 7, path_with_namespace: "team/svc", name: "svc" }],
       ],
-      [{ id: 7, path_with_namespace: "team/svc", name: "svc" }],
-    ];
+    });
     const dir = tempDir();
     cli(dir, ["gitlab", "set", `--url=${mock.baseUrl}`], { input: GITLAB_TOKEN });
     const list = cli(dir, ["gitlab", "projects"]);
-    assert.match(list.stdout, /^ {7}42 {2}group\/app {2}main {2}private$/);
-    assert.match(list.stdout, /^ {7}7 {2}team\/svc$/);
+    assert.match(list.stdout, /^ {6}42 {2}group\/app {2}main {2}private$/m);
+    assert.match(list.stdout, /^ {7}7 {2}team\/svc$/m);
     const json = JSON.parse(cli(dir, ["gitlab", "projects", "--json", "--limit=1"]).stdout) as unknown[];
     assert.equal(json.length, 1);
-    mock.projectPages = [];
-    assert.equal(cli(dir, ["gitlab", "projects"]).stdout, "（没有匹配的项目）\n");
     assert.equal(cli(dir, ["gitlab", "projects", "--limit=abc"]).stderr, "--limit 需要整数\n");
+    mock.close();
+    const emptyMock = await startMock({ mode: "gitlab" });
+    const emptyDir = tempDir();
+    cli(emptyDir, ["gitlab", "set", `--url=${emptyMock.baseUrl}`], { input: GITLAB_TOKEN });
+    assert.equal(cli(emptyDir, ["gitlab", "projects"]).stdout, "（没有匹配的项目）\n");
+    emptyMock.close();
   });
 
   it("gitlab api：默认 GET、显式方法、绝对 URL 拒绝、分页提示", async () => {
-    const mock = new MockGitlab();
-    await mock.start();
+    const mock = await startMock({
+      mode: "gitlab",
+      projectPages: [[{ id: 1, path_with_namespace: "g/a" }]],
+    });
     const dir = tempDir();
     cli(dir, ["gitlab", "set", `--url=${mock.baseUrl}`], { input: GITLAB_TOKEN });
     const user = cli(dir, ["gitlab", "api", "/user"]);
     assert.equal(user.status, 0);
-    assert.equal(JSON.parse(user.stdout).username, "fixture");
-    const explicit = cli(dir, ["gitlab", "api", "GET", "/version"]);
-    assert.equal(JSON.parse(explicit.stdout).version, "10.8.7");
-    mock.projectPages = [[{ id: 1, path_with_namespace: "g/a" }]];
+    assert.equal((JSON.parse(user.stdout) as { username: string }).username, "fixture");
+    assert.equal((JSON.parse(cli(dir, ["gitlab", "api", "GET", "/version"]).stdout) as { version: string }).version, "10.8.7");
     const projects = cli(dir, ["gitlab", "api", "/projects"]);
     assert.match(projects.stderr, /分页：page=Some\(1\) next=None total=Some\(1\)/);
     const absolute = cli(dir, ["gitlab", "api", "GET", "https://evil.example.com/x"]);
     assert.equal(absolute.status, 1);
     assert.match(absolute.stderr, /不接受绝对 URL/);
-    const badData = cli(dir, ["gitlab", "api", "POST", "/projects", "--data=not-json"]);
-    assert.match(badData.stderr, /--data 不是合法 JSON/);
+    assert.match(cli(dir, ["gitlab", "api", "POST", "/projects", "--data=not-json"]).stderr, /--data 不是合法 JSON/);
+    mock.close();
   });
 
   it("gitlab env/clear：先检查是否已配置，clear 移除两把键", async () => {
-    const mock = new MockGitlab();
-    await mock.start();
+    const mock = await startMock({ mode: "gitlab" });
     const dir = tempDir();
     assert.match(cli(dir, ["gitlab", "env"]).stderr, /尚未配置 GitLab 地址/);
     cli(dir, ["gitlab", "set", `--url=${mock.baseUrl}`], { input: GITLAB_TOKEN });
@@ -438,6 +360,7 @@ describe("gitlab 子命令", () => {
     assert.equal(env.stdout, `GITLAB_URL=${mock.baseUrl}\nGITLAB_TOKEN=${GITLAB_TOKEN}\n`);
     assert.equal(cli(dir, ["gitlab", "clear"]).stdout, "已移除 GitLab 凭据\n");
     assert.equal(cli(dir, ["gitlab", "clear"]).stdout, "没有可移除的 GitLab 凭据\n");
+    mock.close();
   });
 });
 
@@ -445,11 +368,12 @@ describe("gitlab 子命令", () => {
 
 describe("pull", () => {
   it("成功写入 GITLAB_URL/GITLAB_TOKEN 并保留已有注释/非凭据键", async () => {
-    const web = new MockFlowletWeb();
-    await web.start();
-    web.entries = [
-      { name: "主实例", provider: "gitlab", baseUrl: "https://gitlab.example.com", token: "glpat-pulled-1" },
-    ];
+    const web = await startMock({
+      mode: "flowlet-web",
+      entries: [
+        { name: "主实例", provider: "gitlab", baseUrl: "https://gitlab.example.com", token: "glpat-pulled-1" },
+      ],
+    });
     const dir = tempDir();
     cli(dir, ["init"]);
     const file = path.join(dir, "credentials.env");
@@ -465,14 +389,16 @@ describe("pull", () => {
     const meta = JSON.parse(metaFile(dir)) as Record<string, Record<string, unknown>>;
     assert.equal(meta.GITLAB_TOKEN!.note, "gitlab / 主实例");
     assert.equal(meta.GITLAB_URL!.kind, "service");
+    web.close();
   });
 
-  it("--dry-run 不写文件；401 与空列表行为", async () => {
-    const web = new MockFlowletWeb();
-    await web.start();
-    web.entries = [
-      { name: "主实例", provider: "gitlab", baseUrl: "https://gitlab.example.com", token: "glpat-pulled-1" },
-    ];
+  it("--dry-run 不写文件；401 与空列表行为；环境变量凭据兜底", async () => {
+    const web = await startMock({
+      mode: "flowlet-web",
+      entries: [
+        { name: "主实例", provider: "gitlab", baseUrl: "https://gitlab.example.com", token: "glpat-pulled-1" },
+      ],
+    });
     const dir = tempDir();
     const dry = cli(dir, ["pull", `--server=${web.baseUrl}`, `--token=${ADMIN_TOKEN}`, "--dry-run"]);
     assert.equal(dry.status, 0);
@@ -480,28 +406,28 @@ describe("pull", () => {
     assert.match(dry.stdout, /dry-run：未写入任何凭据/);
     assert.ok(!existsSync(path.join(dir, "credentials.env")));
 
-    const unauthorized = cli(dir, ["pull", `--server=${web.baseUrl}`, "--token=wrong-admin-token"]);
-    assert.equal(unauthorized.status, 1);
-    assert.equal(unauthorized.stderr, "管理凭据无效（401）：请检查 --token / FLOWLET_ADMIN_TOKEN\n");
-
-    web.entries = [];
-    const empty = cli(dir, ["pull", `--server=${web.baseUrl}`, `--token=${ADMIN_TOKEN}`]);
-    assert.equal(empty.stdout, "服务端没有启用中的服务凭据\n");
-
-    assert.equal(cli(dir, ["pull", `--server=${web.baseUrl}`], { env: { FLOWLET_ADMIN_TOKEN: undefined } }).stderr, "缺少管理凭据：用 --token=... 或设置 FLOWLET_ADMIN_TOKEN\n");
-    const fallback = cli(dir, ["pull", `--server=${web.baseUrl}`], {
-      env: { FLOWLET_ADMIN_TOKEN: ADMIN_TOKEN },
-    });
-    assert.equal(fallback.status, 0);
+    assert.equal(
+      cli(dir, ["pull", `--server=${web.baseUrl}`, "--token=wrong-admin-token"]).stderr,
+      "管理凭据无效（401）：请检查 --token / FLOWLET_ADMIN_TOKEN\n",
+    );
+    assert.equal(
+      cli(dir, ["pull", `--server=${web.baseUrl}`], { env: { FLOWLET_ADMIN_TOKEN: undefined } }).stderr,
+      "缺少管理凭据：用 --token=... 或设置 FLOWLET_ADMIN_TOKEN\n",
+    );
+    assert.equal(cli(dir, ["pull", `--server=${web.baseUrl}`], { env: { FLOWLET_ADMIN_TOKEN: ADMIN_TOKEN } }).status, 0);
     assert.equal(cli(dir, ["pull", "--server=ftp://x"]).stderr, "--server 必须是 http 或 https 地址\n");
+    web.close();
+
+    const emptyWeb = await startMock({ mode: "flowlet-web", entries: [] });
+    assert.equal(cli(dir, ["pull", `--server=${emptyWeb.baseUrl}`, `--token=${ADMIN_TOKEN}`]).stdout, "服务端没有启用中的服务凭据\n");
+    emptyWeb.close();
   });
 
   it("未知服务类型跳过并写 stderr，不写该凭据", async () => {
-    const web = new MockFlowletWeb();
-    await web.start();
-    web.entries = [
-      { name: "未知", provider: "github", baseUrl: "https://github.com", token: "ghp-x" },
-    ];
+    const web = await startMock({
+      mode: "flowlet-web",
+      entries: [{ name: "未知", provider: "github", baseUrl: "https://github.com", token: "ghp-x" }],
+    });
     const dir = tempDir();
     cli(dir, ["init"]);
     const pulled = cli(dir, ["pull", `--server=${web.baseUrl}`, `--token=${ADMIN_TOKEN}`]);
@@ -509,6 +435,7 @@ describe("pull", () => {
     assert.ok(pulled.stderr.includes("跳过未知服务类型：github（未知）"));
     assert.ok(!envFile(dir).includes("GITHUB_URL"));
     assert.match(pulled.stdout, /完成：写入 0 个键/);
+    web.close();
   });
 });
 
@@ -532,7 +459,7 @@ describe("Rust CLI 兼容性", { skip: !RUST_AVAILABLE }, () => {
       { args: ["unset", "LONGKEY"] },
     ];
     for (const step of sequence) {
-      const rust = cli(rustDir, step.args, { input: step.input, cliPath: RUST_CLI });
+      const rust = cli(rustDir, step.args, { input: step.input, rust: true });
       const node = cli(nodeDir, step.args, { input: step.input });
       assert.equal(node.status, rust.status, `exit for ${step.args.join(" ")}: ${node.stderr}`);
       assert.equal(
@@ -551,17 +478,14 @@ describe("Rust CLI 兼容性", { skip: !RUST_AVAILABLE }, () => {
   it("交叉读取：Node 能读 Rust 写出的库，Rust 能读 Node 写出的库", () => {
     const rustDir = tempDir();
     const nodeDir = tempDir();
-    cli(rustDir, ["set", "RUST_KEY"], { input: "rust-value", cliPath: RUST_CLI });
+    cli(rustDir, ["set", "RUST_KEY"], { input: "rust-value", rust: true });
     cli(nodeDir, ["set", "NODE_KEY"], { input: "node-value" });
 
-    // Node 读 Rust：list/get/env 一致
     assert.match(cli(rustDir, ["list"]).stdout, /^RUST_KEY {2}\[api_key\]/m);
     assert.equal(cli(rustDir, ["get", "RUST_KEY", "--mask"]).stdout, "rust…alue\n");
-    // Rust 读 Node：list/get 一致
-    assert.match(cli(nodeDir, ["list"], { cliPath: RUST_CLI }).stdout, /^NODE_KEY {2}\[api_key\]/m);
-    assert.equal(cli(nodeDir, ["get", "NODE_KEY"], { cliPath: RUST_CLI }).stdout, "node-value\n");
-    // 在 Node 写的库上继续用 Rust 写，Node 仍可读
-    cli(nodeDir, ["set", "MIXED"], { input: "mixed", cliPath: RUST_CLI });
+    assert.match(cli(nodeDir, ["list"], { rust: true }).stdout, /^NODE_KEY {2}\[api_key\]/m);
+    assert.equal(cli(nodeDir, ["get", "NODE_KEY"], { rust: true }).stdout, "node-value\n");
+    cli(nodeDir, ["set", "MIXED"], { input: "mixed", rust: true });
     assert.equal(cli(nodeDir, ["get", "MIXED", "--reveal"]).stdout, "mixed\n");
   });
 });

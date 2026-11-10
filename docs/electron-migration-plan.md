@@ -22,7 +22,7 @@
 | **P3′** | **对齐线上新增能力：GitLab OIDC SSO / .flcap 捕获帧 / 目录派生价格表** | ✅ 完成：严格对拍命令 0 / HTTP 0；SSO 单测 22/22；跨语言帧互读/互写/互清通过；价格表 82 条与 Rust 一致 |
 | **P4′** | **三方服务凭据（服务凭据页/6 条命令/GitLab CE 10.8.7）同步到 Node Host** | ✅ 完成：secret_box 跨实现加解密通过；6 条命令对拍（mock GitLab）0 差异；单测 101/101；已合并进 `main` 并推送 origin |
 | **P5′** | **生产 Docker 切换为 Node Host** | ✅ 完成：`flowlet:docker-20261110-nodehost` 上线，14/14 验证通过，10 分钟真实流量 0 错误；回滚点 `flowlet:docker-20261109-gitlab-sso` |
-| **P6′** | **Node 版 `flowlet-cred` CLI（移除最后一个 Rust 运行时依赖）** | 🚧 进行中（`packages/flowlet-cred`） |
+| **P6′** | **Node 版 `flowlet-cred` CLI（移除最后一个 Rust 运行时依赖）** | ✅ 完成：`packages/flowlet-cred`，20/20 测试；与 Rust legacy CLI 20 步同序列 **0 差异**（输出+文件字节级）；服务器/Agent 侧不再需要 Rust 运行时（桌面端仍为 Rust，按约定延后） |
 | P2 | 批次 1–2（A 类命令） | 归入 P1′（Web Host 白名单仅 43 条，已全部实现） |
 | P3–P5 | 批次 3–10、代理核心 | 归入 P1′（代理 P0 已实现；thinking/reasoning 等受控例外见 `proxy-core.md`） |
 | P6 | Electron 桌面宿主（窗口/托盘/通知/凭据/无边框壳） | ⏸ 延后（用户要求先 Docker） |

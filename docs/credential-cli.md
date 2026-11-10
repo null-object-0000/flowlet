@@ -1,7 +1,7 @@
 # 全局凭据库与 `flowlet-cred`
 
-状态：v0（CLI + 存储已可用；类型语义、UI 与 Agent 接入注入尚未接入）
-日期：2026-11-10
+状态：v1（**Node 版 CLI 为默认实现**；Rust 版 `flowlet-cred` 标为 legacy，仅用于兼容性对拍）
+日期：2026-11-10（v1：Node 移植完成，Agent 机器不再需要 Rust 产物）
 
 ## 1. 定位
 
@@ -60,13 +60,39 @@ SQLite service_credentials 表       # id / name / provider / base_url /
 
 ## 3. CLI
 
+### 3.1 运行方式（Node 默认，Rust legacy）
+
+Node 版位于 `packages/flowlet-cred/`，Node 22+（本仓库 Node 26）直接跑 TS，无构建步骤：
+
+```bash
+# 推荐：从仓库根目录用 npm script（参数照常跟在 -- 后）
+npm run cred -- init
+npm run cred -- get KEY --reveal
+
+# 或直接运行入口（等价）
+node packages/flowlet-cred/src/cli.ts init
+
+# 需要全局命令时
+npm link ./packages/flowlet-cred && flowlet-cred init   # bin shim: bin/flowlet-cred.mjs
+```
+
+Rust legacy 版（仅兼容性对拍/回滚用，Agent 机器不再需要）：
+
+```bash
+cargo build --release --manifest-path src-tauri/Cargo.toml --no-default-features --bin flowlet-cred
+# 产物：src-tauri/target/release/flowlet-cred
+```
+
+### 3.2 命令
+
 ```bash
 flowlet-cred init                                # 初始化目录与空文件
 flowlet-cred path                                # 打印当前 .env 路径
 flowlet-cred list [--json]                       # 名字/类型/备注/更新时间，永不含值
-flowlet-cred get <KEY> [--mask]                  # 取单个值
+flowlet-cred get <KEY> [--reveal]                # 默认掩码；--reveal 才输出明文（--mask 兼容旧脚本）
 flowlet-cred set <KEY> [--kind=K] [--note=N]     # 值从 stdin 读，或 --value=V
 flowlet-cred unset <KEY>
+flowlet-cred clear                               # 清空全部凭据（保留注释与文件头；Node 新增）
 flowlet-cred env [--only=A,B]                    # 输出 dotenv
 flowlet-cred export [--only=A,B] --format=dotenv|shell|json
 flowlet-cred run --with=A,B -- <程序> [参数...]   # 只注入指定凭据到子进程
@@ -75,12 +101,20 @@ flowlet-cred pull --server=http://host:20134 --token=<管理凭据>
                                                  # 从服务端同步到本机 .env（--dry-run 只预览）
 ```
 
-构建（不依赖 Tauri）：
+### 3.3 Node 与 Rust legacy 的已知差异
 
-```bash
-cargo build --release --manifest-path src-tauri/Cargo.toml --no-default-features --bin flowlet-cred
-# 产物：src-tauri/target/release/flowlet-cred
-```
+- `get` 默认**掩码**，需显式 `--reveal` 才输出明文（Rust legacy 默认明文、`--mask` 掩码）；
+  `--mask` 在 Node 版继续可用，跨版本脚本不受影响。
+- Node 版额外提供 `clear`（清空全部凭据，保留注释/文件头与权限）；Rust legacy 无此命令。
+- 其余命令的输出、错误文案、dotenv/JSON 文件字节、权限（0700/0600）、原子写行为一致；
+  `packages/flowlet-cred/scripts/compat.mjs` 用同一序列对 Rust legacy 与 Node CLI 做逐行对拍
+  （路径/RFC3339 时间戳归一化），并验证双向交叉读取：
+
+  ```bash
+  npm run cred:compat     # 期望：输出与文件字节级一致
+  npm run cred:test       # node:test 20 例（本地库/GitLab mock/pull/兼容性）
+  npm run cred:typecheck  # tsc --noEmit
+  ```
 
 ## 4. 安全约定
 

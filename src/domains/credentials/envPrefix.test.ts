@@ -20,6 +20,7 @@ describe("providerDefaultEnvPrefix", () => {
     expect(providerDefaultEnvPrefix({ id: "dockhand" })).toBe("DOCKHAND");
     expect(providerDefaultEnvPrefix({ id: "jenkins" })).toBe("JENKINS");
     expect(providerDefaultEnvPrefix({ id: "beszel" })).toBe("BESZEL");
+    expect(providerDefaultEnvPrefix({ id: "registry" })).toBe("REGISTRY");
     expect(providerDefaultEnvPrefix({ id: "custom" })).toBe("CUSTOM");
   });
 });
@@ -61,6 +62,17 @@ describe("envKeysForProvider", () => {
       user: "BESZEL_NA_EMAIL",
       token: "BESZEL_NA_PASSWORD",
     });
+    // OCI 镜像仓库：地址槽位是 host[:port]，键名用 `_HOST`（默认前缀 REGISTRY 时不会出现 REGISTRY_REGISTRY）。
+    expect(envKeysForProvider("REGISTRY", "registry")).toEqual({
+      url: "REGISTRY_HOST",
+      user: "REGISTRY_USER",
+      token: "REGISTRY_TOKEN",
+    });
+    expect(envKeysForProvider("REGISTRY_NA", "registry")).toEqual({
+      url: "REGISTRY_NA_HOST",
+      user: "REGISTRY_NA_USER",
+      token: "REGISTRY_NA_TOKEN",
+    });
     expect(envKeysForProvider("DOCKHAND_NA", "dockhand")).toEqual({
       url: "DOCKHAND_NA_URL",
       user: null,
@@ -89,6 +101,11 @@ describe("envKeyList", () => {
     expect(envKeyList(envKeysForProvider("DOCKHAND_NA", "dockhand"))).toEqual([
       "DOCKHAND_NA_URL",
       "DOCKHAND_NA_TOKEN",
+    ]);
+    expect(envKeyList(envKeysForProvider("REGISTRY_NA", "registry"))).toEqual([
+      "REGISTRY_NA_HOST",
+      "REGISTRY_NA_USER",
+      "REGISTRY_NA_TOKEN",
     ]);
   });
 });
@@ -146,6 +163,14 @@ describe("suggestEnvPrefix", () => {
     expect(
       suggestEnvPrefix({ providerDefault: "GITLAB", name: "NA", used: ["GITLAB_NA"] }),
     ).toBe("GITLAB_NA_2");
+  });
+
+  it("composes AI segments without duplicating the provider word", () => {
+    // 模型可能把 provider 也写进片段（如 DOCKHAND_NA_PROD）；拼接时与默认前缀同名的词会被剔除。
+    expect(suggestEnvPrefix({ providerDefault: "DOCKHAND", name: "DOCKHAND_NA_PROD" })).toBe(
+      "DOCKHAND_NA_PROD",
+    );
+    expect(suggestEnvPrefix({ providerDefault: "GITLAB", name: "SELF_TEST" })).toBe("GITLAB_SELF_TEST");
   });
 
   it("keeps the result within 24 chars and always valid", () => {

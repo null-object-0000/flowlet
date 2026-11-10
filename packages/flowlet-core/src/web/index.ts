@@ -23,7 +23,7 @@ import { CommandError } from "../types.ts";
 import type { SqliteStorage } from "../storage/index.ts";
 import { AdminAuth, type AuthResponse } from "./auth.ts";
 import { dispatch } from "./commands.ts";
-import type { WebContext } from "./context.ts";
+import type { SecretBoxLike, WebContext } from "./context.ts";
 import {
   readChannelsConfig,
   readConfigJson,
@@ -44,6 +44,8 @@ export interface WebHostOptions {
   adminToken: string;
   /** index.ts 在打开 DB 之前创建的 AdminAuth（fail-fast）；缺省时自己 fromEnv。 */
   auth?: AdminAuth;
+  /** index.ts 传入的三方服务凭据静态加密（数据卷 secret.key）。 */
+  secrets: SecretBoxLike;
   clientToken: string;
   staticDir: string;
   publicProxyUrl: string;
@@ -202,6 +204,7 @@ export function createWebHost(options: WebHostOptions): WebHost {
     logCapture: resolveLogCaptureConfig(options.storage, config),
     upstreamProxy: resolveUpstreamProxyConfig(options.storage, config),
     customScrapeChannels: null,
+    secrets: options.secrets,
   };
 
   let server: Server | null = null;

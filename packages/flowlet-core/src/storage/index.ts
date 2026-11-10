@@ -22,6 +22,13 @@ import {
 } from "./maintenance.ts";
 import { buildPriceTable } from "./prices.ts";
 import {
+  deleteServiceCredential,
+  getServiceCredential,
+  listServiceCredentials,
+  updateServiceCredentialVerification,
+  upsertServiceCredential,
+} from "./credentials.ts";
+import {
   cleanupOrphanBalanceSnapshots,
   ensureMissingPresets,
   ensurePresetBalanceQuery,
@@ -160,6 +167,37 @@ export class SqliteStorage {
 
   setAppMeta(key: string, value: string): void {
     setAppMeta(this.#db, key, value);
+  }
+
+  // ─── service credentials（Rust storage_credentials.rs） ---------------------
+
+  /** Rust `list_service_credentials`：ORDER BY created_at ASC, name ASC。 */
+  listServiceCredentials(): JsonRow[] {
+    return listServiceCredentials(this.#db);
+  }
+
+  /** Rust `get_service_credential`。 */
+  getServiceCredential(id: string): JsonRow | null {
+    return getServiceCredential(this.#db, id);
+  }
+
+  /** Rust `upsert_service_credential`（ON CONFLICT(id) DO UPDATE，不覆盖 created_at）。 */
+  upsertServiceCredential(row: JsonRow): void {
+    upsertServiceCredential(this.#db, row);
+  }
+
+  /** Rust `update_service_credential_verification`。 */
+  updateServiceCredentialVerification(
+    id: string,
+    verifiedAt: string | null,
+    lastError: string | null,
+  ): void {
+    updateServiceCredentialVerification(this.#db, id, verifiedAt, lastError);
+  }
+
+  /** Rust `delete_service_credential`：返回是否删除成功。 */
+  deleteServiceCredential(id: string): boolean {
+    return deleteServiceCredential(this.#db, id);
   }
 
   // ─── channels / accounts / routes / models ----------------------------------

@@ -21,6 +21,7 @@ import { createProxyController } from "./proxy/index.ts";
 import { createWebHost } from "./web/index.ts";
 import { AdminAuth } from "./web/auth.ts";
 import { createHostScheduler } from "./host/scheduler.ts";
+import { SecretBox } from "./storage/secret-box.ts";
 import {
   currentOsFamily,
   detectPlatform,
@@ -155,6 +156,8 @@ export async function startHost(options: HostOptions): Promise<{ close(): Promis
   const auth = AdminAuth.fromEnv();
   const dataDir = dirname(options.dbPath);
   const deviceIdentity = loadOrCreateDeviceIdentity(dataDir);
+  // 三方服务凭据的静态加密密钥：secret.key 随数据卷（Docker /data）持久化。
+  const secrets = SecretBox.loadOrCreate(dataDir);
   const configJson = loadOrCreateConfig(options.configPath, join(REPO_ROOT, "config.json"));
   const channelsConfig = loadChannelsConfig(configJson);
 
@@ -213,6 +216,7 @@ export async function startHost(options: HostOptions): Promise<{ close(): Promis
     configPath: options.configPath,
     adminToken: options.adminToken,
     auth,
+    secrets,
     clientToken,
     staticDir: options.staticDir,
     publicProxyUrl: options.publicProxyUrl,

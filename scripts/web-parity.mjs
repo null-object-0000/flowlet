@@ -6,6 +6,9 @@
 //   FLOWLET_RUST_HEADLESS=<二进制>      默认 <主仓库>/src-tauri/target/release/headless
 //   FLOWLET_PARITY_KEEP=1               保留两侧数据库副本（默认保留，便于排查）
 //
+// 服务凭据对拍：脚本内启动 mock GitLab（CE 10.8.7 语义：/api/v4/user、/api/v4/version），
+// 两侧以 insecure + http 指向它，验证 providers/list/save/test/export/delete 与错误文案。
+//
 // 规则（docs/migration/node-host.md §6.2）：
 // - 两侧使用**不同的** DB 副本文件，绝不复用同一个文件；
 // - 同一命令序列分别在两侧执行，再逐条深比较 JSON；时间戳/端口/设备标识归一化；
@@ -15,7 +18,8 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
+import { createServer as createHttpServer } from "node:http";
+import { createServer as createNetServer } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -26,12 +30,20 @@ const SOURCE_DB =
   "/home/nichangen/.local/state/flowlet-docker-migration-20261109/flowlet.sqlite";
 const RUST_HEADLESS =
   process.env.FLOWLET_RUST_HEADLESS ??
-  // REPO 是 .worktrees/electron；仓库主树在其上两级（Rust 二进制属于主树）。
-  path.resolve(REPO, "..", "..", "src-tauri", "target", "release", "headless");
+  (() => {
+    // REPO 是 .worktrees/electron；仓库主树在其上两级（Rust 二进制属于主树）。
+    // 优先 debug（包含 SSO + 服务凭据的最新全功能构建），缺失再回退 release。
+    const mainRepo = path.resolve(REPO, "..", "..");
+    const debug = path.join(mainRepo, "src-tauri", "target", "debug", "headless");
+    if (existsSync(debug)) return debug;
+    return path.join(mainRepo, "src-tauri", "target", "release", "headless");
+  })();
 const NODE_ENTRY =
   process.env.FLOWLET_NODE_ENTRY ?? path.join(REPO, "packages", "flowlet-core", "src", "index.ts");
 const STATIC_DIR = path.join(REPO, "dist-web");
 const ADMIN_TOKEN = "flowlet-parity-admin-token-0123456789";
+const PARITY_GITLAB_TOKEN = "glpat-parity-valid-token";
+const PARITY_GITLAB_BAD_TOKEN = "glpat-parity-invalid-token";
 const CLIENT_TOKEN = "flowlet-parity-client-token-0123456789";
 const PUBLIC_PROXY_URL = "https://flowlet.example.test";
 const PARITY_DEVICE_ID = "11111111-1111-4111-8111-111111111111";
@@ -71,7 +83,13 @@ function normalize(value, side) {
           continue;
         }
         // 启动期写入的时间戳 / 当前设备元数据 / 本侧监听端口：两侧进程天然不同，归一化。
-        if (key === "updated_at" || key === "lastSeenAt") {
+        if (
+          key === "updated_at" ||
+          key === "lastSeenAt" ||
+          key === "createdAt" ||
+          key === "updatedAt" ||
+          key === "lastVerifiedAt"
+        ) {
           out[key] = item === null ? null : "<runtime_written>";
           continue;
         }
@@ -89,6 +107,10 @@ function normalize(value, side) {
     }
     if (typeof node === "string") {
       let text = node;
+      // 两侧独立生成的 UUID（如服务凭据 id）必然不同；掩码后再比较其余字段。
+      if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(text)) {
+        return "<uuid>";
+      }
       // proxy_status.bind_addr / app_meta 中的 bind JSON 都带本侧监听端口。
       text = text.replace(new RegExp(`:${ports.bind}\\b`, "g"), ":<bind_port>");
       text = text.replace(new RegExp(`:${ports.web}\\b`, "g"), ":<web_port>");
@@ -196,7 +218,7 @@ async function callCommand(side, command, args, expectError = false) {
 
 function freePort() {
   return new Promise((resolve, reject) => {
-    const server = createServer();
+    const server = createNetServer();
     server.once("error", reject);
     server.listen(0, "127.0.0.1", () => {
       const address = server.address();
@@ -291,7 +313,7 @@ function parseConfigForFilter(side) {
   return { page: 1, page_size: 25, status: "all", client_id: "", channel_id: "", search: "" };
 }
 
-function buildSteps() {
+function buildSteps(options = {}) {
   const steps = [];
   const add = (command, args, options = {}) => steps.push({ command, args, ...options });
   const addError = (command, args) => steps.push({ command, args, expectError: true });
@@ -383,13 +405,68 @@ function buildSteps() {
   addError("cleanup_old_logs", { keepDays: -1 });
   addError("definitely_not_a_command", {});
 
+  // ── 三方服务凭据（依赖脚本内 mock GitLab；Rust oracle 不支持时整体跳过） ──
+  if (options.includeCredentials && options.gitlabBaseUrl) {
+    const gitlabBaseUrl = options.gitlabBaseUrl;
+    add("list_credential_providers", {});
+    add("list_service_credentials", {});
+    add(
+      "save_service_credential",
+      {
+        input: {
+          name: "parity-gitlab",
+          provider: "gitlab",
+          baseUrl: gitlabBaseUrl,
+          token: PARITY_GITLAB_TOKEN,
+          note: "parity",
+        },
+        insecure: true,
+      },
+      {
+        capture: (state, response) => {
+          state.credentialId = response.json?.id;
+          if (process.env.FLOWLET_PARITY_DEBUG === "1") {
+            console.error(
+              `[debug] save capture: status=${response.status} keys=${Object.keys(response.json ?? {}).join(",")} idLen=${String(
+                state.credentialId ?? "",
+              ).length}`,
+            );
+          }
+        },
+      },
+    );
+    add("list_service_credentials", {});
+    add(
+      "test_service_credential",
+      {},
+      { prepare: (state) => ({ id: state.credentialId, insecure: true }) },
+    );
+    add("export_service_credentials", {});
+    addError("save_service_credential", {
+      input: {
+        name: "parity-gitlab",
+        provider: "gitlab",
+        baseUrl: gitlabBaseUrl,
+        token: PARITY_GITLAB_BAD_TOKEN,
+      },
+      insecure: true,
+    });
+    add("list_service_credentials", {});
+    add(
+      "delete_service_credential",
+      {},
+      { prepare: (state) => ({ id: state.credentialId }) },
+    );
+    add("list_service_credentials", {});
+  }
+
   add("ipc_ping", {});
   return steps;
 }
 
-async function runSideSteps(side) {
+async function runSideSteps(side, options = {}) {
   const state = {};
-  const steps = buildSteps();
+  const steps = buildSteps(options);
   const results = [];
   for (const step of steps) {
     const args = step.prepare ? step.prepare(state) : (step.args ?? {});
@@ -408,6 +485,20 @@ async function runSideSteps(side) {
   return results;
 }
 
+/** 凭据 id 是各侧保存时随机生成的 UUID；对拍时归一化（其余字段仍严格比较）。 */
+function maskCredentialIds(command, value) {
+  if (!command.includes("credential")) return value;
+  const clone = JSON.parse(JSON.stringify(value ?? null));
+  const mask = (item) => {
+    if (item !== null && typeof item === "object" && !Array.isArray(item) && typeof item.id === "string") {
+      item.id = "<credential_id>";
+    }
+  };
+  if (Array.isArray(clone)) clone.forEach(mask);
+  else mask(clone);
+  return clone;
+}
+
 function compareCommandResults(rustResults, nodeResults, sides) {
   const diffs = [];
   for (let index = 0; index < Math.min(rustResults.length, nodeResults.length); index += 1) {
@@ -419,8 +510,8 @@ function compareCommandResults(rustResults, nodeResults, sides) {
       continue;
     }
     try {
-      const expected = normalize(rust.response.json, sides.rust);
-      const actual = normalize(node.response.json, sides.node);
+      const expected = normalize(maskCredentialIds(rust.step.command, rust.response.json), sides.rust);
+      const actual = normalize(maskCredentialIds(node.step.command, node.response.json), sides.node);
       const commandDiffs = [];
       collectDiffs(actual, expected, [], commandDiffs);
       for (const diff of commandDiffs) diffs.push({ command: label, ...diff });
@@ -559,6 +650,55 @@ async function runHttpChecks(side, options = {}) {
   return checks;
 }
 
+// ─── Mock GitLab CE 10.8.7（服务凭据对拍） ──────────────────────────────────
+
+class MockGitlab {
+  server = null;
+  baseUrl = "";
+  subpath = "/gitlab";
+
+  async start() {
+    this.server = createHttpServer((request, response) => {
+      void this.#handle(request, response);
+    });
+    await new Promise((resolve, reject) => {
+      this.server.once("error", reject);
+      this.server.listen(0, "127.0.0.1", () => {
+        const address = this.server.address();
+        const port = typeof address === "object" && address ? address.port : 0;
+        this.baseUrl = `http://127.0.0.1:${port}${this.subpath}`;
+        resolve();
+      });
+    });
+  }
+
+  async close() {
+    await new Promise((resolve) => this.server?.close(() => resolve()));
+  }
+
+  async #handle(request, response) {
+    const url = new URL(request.url ?? "/", "http://localhost");
+    const token = request.headers["private-token"];
+    const send = (status, value) => {
+      const body = Buffer.from(JSON.stringify(value), "utf8");
+      response.writeHead(status, { "content-type": "application/json", "content-length": String(body.length) });
+      response.end(body);
+    };
+    const suffix = url.pathname.startsWith(this.subpath)
+      ? url.pathname.slice(this.subpath.length)
+      : url.pathname;
+    if (suffix === "/api/v4/user") {
+      if (token !== PARITY_GITLAB_TOKEN) return send(401, { message: "401 Unauthorized" });
+      return send(200, { id: 1, username: "parity-user", name: "Parity User" });
+    }
+    if (suffix === "/api/v4/version") {
+      if (token !== PARITY_GITLAB_TOKEN) return send(401, { message: "401 Unauthorized" });
+      return send(200, { version: "10.8.7" });
+    }
+    send(404, { message: "404 Not Found" });
+  }
+}
+
 async function main() {
   if (!existsSync(STATIC_DIR)) throw new Error(`找不到静态界面目录：${STATIC_DIR}`);
   if (!existsSync(RUST_HEADLESS)) throw new Error(`找不到 Rust headless 二进制：${RUST_HEADLESS}（可用 FLOWLET_RUST_HEADLESS 指定）`);
@@ -568,6 +708,10 @@ async function main() {
 
   const rustDir = prepareSideData("rust", SOURCE_DB);
   const nodeDir = prepareSideData("node", SOURCE_DB);
+
+  // mock GitLab：服务凭据命令需要真实 HTTP 上游（10.8.7 语义）。
+  const gitlab = new MockGitlab();
+  await gitlab.start();
 
   const rustPorts = { web: await freePort(), bind: await freePort() };
   const nodePorts = { web: await freePort(), bind: await freePort() };
@@ -606,6 +750,7 @@ async function main() {
   let diffs = [];
   let httpDiffs = [];
   let oracleHasSso = null;
+  let oracleHasCredentials = null;
   let rustResults = [];
   let nodeResults = [];
   try {
@@ -627,8 +772,28 @@ async function main() {
       );
     }
 
-    rustResults = await runSideSteps({ ...sides.rust });
-    nodeResults = await runSideSteps({ ...sides.node });
+    // oracle 能力探测：旧 Rust 二进制没有服务凭据白名单命令（→ 501）。
+    const credentialProbe = await request(sides.rust.baseUrl, "/api/commands/list_credential_providers", {
+      method: "POST",
+      headers: { authorization: `Bearer ${ADMIN_TOKEN}`, "content-type": "application/json" },
+      body: "{}",
+    });
+    oracleHasCredentials = credentialProbe.status === 200;
+    if (!oracleHasCredentials) {
+      console.warn(
+        "[warn] Rust oracle 未包含服务凭据命令（list_credential_providers → " +
+          credentialProbe.status +
+          "）；跳过凭据命令对拍。" +
+          "如需覆盖请用包含 credentials 的 Rust headless（FLOWLET_RUST_HEADLESS=...）。",
+      );
+    }
+    const stepOptions = {
+      includeCredentials: oracleHasCredentials,
+      gitlabBaseUrl: gitlab.baseUrl,
+    };
+
+    rustResults = await runSideSteps({ ...sides.rust }, stepOptions);
+    nodeResults = await runSideSteps({ ...sides.node }, stepOptions);
     diffs = compareCommandResults(rustResults, nodeResults, sides);
 
     const rustChecks = await runHttpChecks(sides.rust, { includeSso: oracleHasSso });
@@ -656,6 +821,7 @@ async function main() {
     for (const processHandle of [rustProcess, nodeProcess]) {
       if (processHandle.isRunning()) processHandle.child.kill("SIGKILL");
     }
+    await gitlab.close();
     if (process.env.FLOWLET_PARITY_KEEP !== "1") {
       try {
         rmSync(path.join(RUN_DIR, "rust", "flowlet.sqlite-wal"), { force: true });
@@ -691,6 +857,11 @@ async function main() {
   const total = diffs.length + httpDiffs.length;
   if (typeof oracleHasSso === "boolean") {
     console.log(`Rust oracle SSO 能力：${oracleHasSso ? "有（严格对拍）" : "无（SSO 检查已跳过）"}`);
+  }
+  if (typeof oracleHasCredentials === "boolean") {
+    console.log(
+      `Rust oracle 服务凭据能力：${oracleHasCredentials ? "有（含 mock GitLab 对拍）" : "无（凭据命令已跳过）"}`,
+    );
   }
   console.log(`\n结论：命令差异 ${diffs.length}，HTTP 差异 ${httpDiffs.length}，合计 ${total}`);
   console.log(`日志：${path.join(RUN_DIR, "rust.log")} / ${path.join(RUN_DIR, "node.log")}`);

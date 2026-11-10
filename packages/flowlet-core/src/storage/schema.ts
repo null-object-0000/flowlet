@@ -221,6 +221,26 @@ CREATE TABLE IF NOT EXISTS app_meta (
     updated_at TEXT NOT NULL
 );
 
+-- 三方服务凭据（Rust credentials 提交新增；旧库由 IF NOT EXISTS 直接补表）。
+CREATE TABLE IF NOT EXISTS service_credentials (
+    id                 TEXT PRIMARY KEY,
+    name               TEXT NOT NULL,
+    provider           TEXT NOT NULL,
+    base_url           TEXT NOT NULL,
+    secret_ciphertext  TEXT NOT NULL,
+    secret_hint        TEXT NOT NULL,
+    kind               TEXT NOT NULL DEFAULT 'cli_token',
+    note               TEXT,
+    enabled            INTEGER NOT NULL DEFAULT 1,
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL,
+    last_verified_at   TEXT,
+    last_error         TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_service_credentials_provider
+    ON service_credentials(provider, enabled);
+
 CREATE TABLE IF NOT EXISTS known_devices (
     device_id               TEXT PRIMARY KEY,
     device_created_at       TEXT NOT NULL,

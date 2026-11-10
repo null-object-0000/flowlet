@@ -37,6 +37,15 @@ import {
   readModelsDevProviderCatalog,
 } from "./catalog-files.ts";
 import { queryBalance } from "./balance.ts";
+import {
+  deleteCredential,
+  exportCredentials,
+  list as listCredentials,
+  providers as credentialProviders,
+  save as saveCredential,
+  test as testCredential,
+  type ServiceCredentialInput,
+} from "./credentials.ts";
 import { fetchChannelModels, testChannelConnection, transientAccount } from "./model-sync.ts";
 import { getUpstream, requestErrorDetail } from "./upstream.ts";
 
@@ -314,6 +323,33 @@ function countCatalog(source: "models-cn" | "models.dev", parsed: unknown): [num
   return [providers.length, models];
 }
 
+/** `save_service_credential` 的 input 结构校验（serde camelCase 必填字段）。 */
+function parseServiceCredentialInput(args: JsonRow): ServiceCredentialInput {
+  const value = argObject(args, "input", "ServiceCredentialInput");
+  requireFields(value, "input", ["name", "provider", "baseUrl"]);
+  for (const field of ["name", "provider", "baseUrl"]) {
+    if (typeof value[field] !== "string") {
+      throw CommandError.badRequest(
+        `参数 input: field \`${field}\`: invalid type: ${describe(value[field])}, expected a string`,
+      );
+    }
+  }
+  for (const field of ["id", "token", "kind", "note"]) {
+    const item = value[field];
+    if (item !== undefined && item !== null && typeof item !== "string") {
+      throw CommandError.badRequest(
+        `参数 input: field \`${field}\`: invalid type: ${describe(item)}, expected a string`,
+      );
+    }
+  }
+  if (value.enabled !== undefined && value.enabled !== null && typeof value.enabled !== "boolean") {
+    throw CommandError.badRequest(
+      `参数 input: field \`enabled\`: invalid type: ${describe(value.enabled)}, expected a boolean`,
+    );
+  }
+  return value as unknown as ServiceCredentialInput;
+}
+
 // ─── dispatch ───────────────────────────────────────────────────────────────
 
 export async function dispatch(ctx: WebContext, command: string, rawArgs: unknown): Promise<unknown> {
@@ -493,6 +529,22 @@ export async function dispatch(ctx: WebContext, command: string, rawArgs: unknow
       return readModelsDevProviderCatalog(ctx.catalogDir, argString(args, "providerId"));
     case "get_models_cn_currencies":
       return readModelsCnCurrencies(ctx.catalogDir);
+
+    case "list_credential_providers":
+      return credentialProviders();
+    case "list_service_credentials":
+      return listCredentials(ctx);
+    case "save_service_credential": {
+      const input = parseServiceCredentialInput(args);
+      const insecure = argOptionalBool(args, "insecure");
+      return saveCredential(ctx, input, insecure ?? false);
+    }
+    case "test_service_credential":
+      return testCredential(ctx, argString(args, "id"), argOptionalBool(args, "insecure") ?? false);
+    case "delete_service_credential":
+      return deleteCredential(ctx, argString(args, "id"));
+    case "export_service_credentials":
+      return exportCredentials(ctx);
 
     case "get_upstream_proxy_config":
       return { ...ctx.upstreamProxy };

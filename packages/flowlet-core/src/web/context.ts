@@ -8,6 +8,12 @@ import type {
 import type { SqliteStorage } from "../storage/index.ts";
 import type { LogCaptureConfig, UpstreamProxyConfig } from "./config-state.ts";
 
+/** 与 node-storage `SecretBox` 结构兼容的静态加密接口（密文格式 v1:...）。 */
+export interface SecretBoxLike {
+  encrypt(plaintext: string): string;
+  decrypt(encoded: string): string;
+}
+
 export interface WebContext {
   storage: SqliteStorage;
   proxy: ProxyController;
@@ -29,4 +35,6 @@ export interface WebContext {
   upstreamProxy: UpstreamProxyConfig;
   /** 自定义抓取描述符缓存（Rust 侧 OnceLock 语义）。 */
   customScrapeChannels?: JsonRow[] | null;
+  /** 三方服务凭据的静态加密（index.ts 传入 SecretBox，数据卷 secret.key）。 */
+  secrets: SecretBoxLike;
 }

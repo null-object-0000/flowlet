@@ -135,6 +135,10 @@ async function startHost(env: Record<string, string>): Promise<TestHost> {
       update: (mutate: (draft: Record<string, unknown>) => void) => mutate(runtimeSnapshot),
     },
     bindConfig,
+    secrets: {
+      encrypt: (plaintext: string) => `v1:${Buffer.from(plaintext, "utf8").toString("base64")}`,
+      decrypt: (encoded: string) => Buffer.from(encoded.replace(/^v1:/, ""), "base64").toString("utf8"),
+    },
     catalogDir: workDir,
     configPath,
     adminToken: process.env.FLOWLET_ADMIN_TOKEN ?? "",

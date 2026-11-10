@@ -660,7 +660,7 @@ export function CredentialsPage() {
               },
               {
                 title: t("操作"),
-                width: 250,
+                width: 270,
                 render: (_, row) => (
                   <div className={styles.actions}>
                     <Button

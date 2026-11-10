@@ -23,7 +23,7 @@
 | 后台任务 | 余额同步（30s 后首次，每 5min）、存储清理（15min 后首次，每 15min）、目录同步（1h 后首次，每 1h）；已实现于 `host/scheduler.ts`（见 `docker-node.md` 的差异说明） |
 | 健康检查 | `GET /health` → 200 `{"status":"ok"}`（不经鉴权） |
 
-## 2. Web Host 命令契约（53 条逐条等价 + 7 条 Node 专有）
+## 2. Web Host 命令契约（Node Host 共 66 条：Rust 等价命令 + Node 专有命令）
 
 权威实现：`src-tauri/src/core/web/commands.rs` + `mod.rs`。
 - 鉴权：`Authorization: Bearer <admin_token>`，HMAC-SHA256 常量时间比较；失败 401 `{"code":"unauthorized","message":"管理凭据无效，请重新登录"}`；所有 API 响应 `Cache-Control: no-store`。
@@ -31,13 +31,22 @@
 - 错误：`(status, code, message)` → `{"code":..., "message":...}`；未知命令 501 `unsupported_in_web`。
 - 静态资源：SPA fallback 到 `index.html`；`/api/{*path}` 非命令路由必须 404，不能回退成功页面。
 
-53 条等价命令（46 条基础 + 7 条服务凭据）+ 3 条 Node Host 专有的 CLI 授权命令 + 4 条 Node Host 专有的数据完整性检查命令：`ipc_ping`、`list_channel_presets`、`list_channel_accounts`、`list_route_candidates`、`list_virtual_models`、`list_channel_models`、`save_channel_accounts`、`save_route_candidates`、`save_virtual_models`、`proxy_status`、`start_proxy`、`stop_proxy`、`get_proxy_bind_config`、`web_connection_info`、`set_proxy_bind_config`、`list_custom_scrape_channels`、`cleanup_old_logs`、`latest_balance_snapshots`、`save_balance_snapshot`、`query_balance`、`list_request_logs`、`list_known_devices`、`device_daily_usage`、`device_hourly_usage`、`list_request_log_clients`、`list_request_log_models`、`list_request_log_channel_accounts`、`get_request_log_detail`、`list_agent_sessions`、`list_agent_session_children`、`account_routing_scores`、`usage_summary`、`usage_today_tokens`、`get_log_capture_config`、`set_log_capture_config`、`read_app_meta`、`write_app_meta`、`get_models_cn_catalog`、`get_models_dev_provider_catalog`、`get_models_cn_currencies`、`get_upstream_proxy_config`、`set_upstream_proxy_config`、`list_credential_providers`、
+命令清单（`web/commands.ts` 的 66 个 `case`）：`ipc_ping`、`list_channel_presets`、`list_channel_accounts`、`list_route_candidates`、`list_virtual_models`、`list_channel_models`、`save_channel_accounts`、`save_route_candidates`、`save_virtual_models`、`proxy_status`、`start_proxy`、`stop_proxy`、`get_proxy_bind_config`、`web_connection_info`、`set_proxy_bind_config`、`list_custom_scrape_channels`、`cleanup_old_logs`、`latest_balance_snapshots`、`save_balance_snapshot`、`query_balance`、`list_request_logs`、`list_known_devices`、`device_daily_usage`、`device_hourly_usage`、`list_request_log_clients`、`list_request_log_models`、`list_request_log_channel_accounts`、`get_request_log_detail`、`list_agent_sessions`、`list_agent_session_children`、`account_routing_scores`、`usage_summary`、`usage_today_tokens`、`get_log_capture_config`、`set_log_capture_config`、`read_app_meta`、`write_app_meta`、`get_models_cn_catalog`、`get_models_dev_provider_catalog`、`get_models_cn_currencies`、`get_upstream_proxy_config`、`set_upstream_proxy_config`、`list_credential_providers`、
 `list_service_credentials`、`save_service_credential`、`test_service_credential`、
-`delete_service_credential`、`export_service_credentials`、`reveal_service_credential`、
-`suggest_env_prefix_segment`、
-`create_cli_auth_code` / `list_cli_auth_tokens` / `revoke_cli_auth_token`
-（另含 `web_connection_info`）；数据完整性检查：`repair_agent_sessions` / `repair_captured_usage` /
-`repair_unknown_usage` / `repair_usage_costs`（对应桌面端「设置 → 数据维护 → 数据完整性检查」；Rust headless 无这四条，Node Host 不含 Agent 原生 transcript 回退）。
+`delete_service_credential`、`export_service_credentials`
+（另含 `web_connection_info`）、`test_connection` / `fetch_channel_models` /
+`sync_models_cn_catalog` / `sync_models_dev_catalog`（依赖真实上游网络，对拍时跳过）。
+
+Node 专有（Rust headless 未实现，不参与对拍，由 Node 侧单测覆盖）：
+
+- CLI 浏览器授权：`create_cli_auth_code` / `list_cli_auth_tokens` / `revoke_cli_auth_token`；
+- 原始 token 查看：`reveal_service_credential`（管理鉴权；CLI token 403）；
+- AI 生成环境前缀：`suggest_env_prefix_segment`（管理鉴权；调本机模型入口，每次点击计一次模型调用）；
+- 千问平台登录：`qwen_platform_status` / `qwen_platform_login_start` / `qwen_platform_login_poll` /
+  `qwen_platform_logout` / `qwen_platform_sync`；
+- 数据完整性检查：`repair_agent_sessions` / `repair_captured_usage` / `repair_unknown_usage` /
+  `repair_usage_costs`（对应桌面端「设置 → 数据维护 → 数据完整性检查」；Rust headless 无这四条，
+  Node Host 不含 Agent 原生 transcript 回退）。
 
 ### 2.1 CLI 浏览器授权（`flowlet login`，Node Host 新增）
 
@@ -83,7 +92,7 @@ packages/flowlet-core/src/
                     prices.ts（目录派生价格表）、secret-box.ts（ChaCha20-Poly1305）、
                     credentials.ts（service_credentials 表 CRUD）
   web/              [web] HTTP 服务、鉴权（token + OIDC SSO，auth.ts）、CLI 授权
-                    （cli-auth.ts / env-prefix.ts）、静态资源、57 命令 dispatch；
+                    （cli-auth.ts / env-prefix.ts）、静态资源、66 命令 dispatch；
                     gitlab.ts / dockhand.ts / credentials.ts（服务凭据）
   proxy/            [proxy] 模型入口、路由、转发、SSE、日志/用量落库
 scripts/

@@ -94,6 +94,39 @@ Electron 侧解析（`packages/flowlet-desktop/src/paths.ts`）：
 > ⚠️ 便携版判定以 `portable.tag` 为准；Electron 的 `app.requestSingleInstanceLock()`
 > 锁按 userData 生效，因此不同数据目录的便携副本可以各自独立运行。
 
+### 便携版构建与更新（Electron）
+
+Tauri 时代的 `tauri:build:portable` / `tauri:update:portable` 只认 `src-tauri/target/release`
+和 `flowlet(.exe)`，**Electron 桌面端不走这套**。对应命令：
+
+```bash
+npm run desktop:portable           # 前端+host → electron-builder --dir → 组装便携目录 → 打 zip
+npm run desktop:update:portable    # 构建 → 停进程 → 覆盖程序文件（保留数据）→ 重启
+```
+
+产物（`scripts/build-desktop-portable.mjs`）：
+
+| 路径 | 内容 |
+| --- | --- |
+| `packages/flowlet-desktop/release/<platform>-unpacked/` | electron-builder `--dir` 原始产物 |
+| `packages/flowlet-desktop/release/portable/Flowlet_<ver>_<platform>_<arch>_portable/` | 便携目录：可执行文件 + `resources/` + `portable.tag` + 仓库 `config.json` |
+| `…/Flowlet_<ver>_<platform>_<arch>_portable.zip` | 便携版压缩包 |
+
+- 可执行文件会被统一改名成 `Flowlet.exe`（Windows）/ `flowlet`（Linux）；electron-builder
+  按 `package.json` 的 name/productName 命名，构建脚本会自己认出来再改名。
+- **Linux** 额外生成 `Flowlet.sh` 启动器（带 `--no-sandbox`）：便携目录里的
+  `chrome-sandbox` 没有 root+setuid，直接双击会因为 sandbox 校验失败 abort。
+- 首次打包需要能访问 `github.com/electron/electron/releases` 下 electron 二进制，
+  受限网络先 `export HTTPS_PROXY=http://127.0.0.1:7890`。
+
+`scripts/update-portable.mjs` 现在**两种布局都认**（`--layout auto|tauri|electron`，
+按目录里的 `resources/app.asar` 或 `flowlet_lib.*` 判断）：
+
+- `npm run desktop:update:portable` → `--layout electron`
+- `npm run tauri:update:portable` → `--layout tauri --replace-config`（保持旧行为）
+- 覆盖时保留：`config.json`、`portable.tag`、`flowlet.sqlite*`、`data/`、`logs/`、`desktop-config.json`
+- `--skip-build` 可跳过构建直接用现有产物；`--dry-run` 只打印识别结果
+
 ---
 
 ## 3. Host channel 契约

@@ -19,7 +19,7 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "node scripts/fetch-models-cn.mjs && node scripts/fetch-models-dev.mjs && tauri build && node scripts/build-portable.mjs",
     "tauri:build:portable": "node scripts/fetch-models-cn.mjs && node scripts/fetch-models-dev.mjs && tauri build --no-bundle && node scripts/build-portable.mjs",
-    "tauri:update:portable": "node scripts/update-portable.mjs --replace-config",
+    "tauri:update:portable": "node scripts/update-portable.mjs --layout tauri --replace-config",
     "tauri:android:init": "node scripts/tauri-android.mjs init",
     "tauri:android:dev": "node scripts/tauri-android.mjs dev",
     "tauri:android:build": "node scripts/tauri-android.mjs build --apk --target aarch64",
@@ -50,7 +50,9 @@
     "desktop:typecheck": "tsc -p packages/flowlet-desktop/tsconfig.json",
     "desktop:smoke": "node scripts/smoke-desktop.mjs",
     "desktop:smoke:pages": "node scripts/smoke-desktop-pages.mjs",
-    "desktop:smoke:client": "node scripts/smoke-desktop-client.mjs"
+    "desktop:smoke:client": "node scripts/smoke-desktop-client.mjs",
+    "desktop:portable": "node scripts/build-desktop-portable.mjs",
+    "desktop:update:portable": "node scripts/update-portable.mjs --layout electron"
   },
   "dependencies": {
     "@douyinfe/semi-icons": "^2.101.0",

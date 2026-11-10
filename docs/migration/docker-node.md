@@ -291,3 +291,16 @@ node scripts/e2e-node-host.mjs            # 端到端冒烟（含 mock 上游流
 | 验证 | 生产 healthy；UI 包含「自动生成」「已按名称与备注自动生成」与既有「查看原始 token」「flowlet login」；`service_credentials` 3 条（`GITLAB` / `DOCKHAND_SELF` / `DOCKHAND_NA_PROD`）保留；重启后仅 Hermes `/v1/props` 404 噪声，无真实错误 |
 | 并发说明 | 14:19 并行会话又部署了 `flowlet:node-20261110-fastshutdown6`（含其快速退出/会话持久化）。核对其 UI 包仍包含「自动生成」「查看原始 token」「flowlet login」，本次功能未被覆盖；当前线上 = `flowlet:node-20261110-fastshutdown6` |
 | 遗留 | 并行会话的 `89733c1`（快速退出 + 管理端会话持久化）已提交，但同一时刻其 Beszel/Uptime Kuma/Jenkins provider 仍为未提交 WIP，导致该 HEAD 自身 `tsc` 不通过（页面已引用未提交的 provider 类型）。因此本次镜像**未包含** `89733c1`；待该功能提交、HEAD 恢复可构建后，重新从 HEAD 构建即可同时带上两者 |
+
+## 服务凭据 Jenkins provider 发布记录（2026-11-10 14:31）
+
+| 项 | 值 |
+| --- | --- |
+| 内容 | 服务凭据新增 Jenkins provider（用户名 + API Token 的 HTTP Basic 认证）：`service_credentials` 新增可空 `username` 列（Rust/Node 双 Host `ALTER TABLE` 迁移），保存时请求 `GET {base}/me/api/json` 校验、版本取 `X-Jenkins`；UI 表单按 `usernameLabel` 渲染用户名字段，`flowlet pull` 为 Jenkins 生成 `{PREFIX}_URL` / `{PREFIX}_USER` / `{PREFIX}_TOKEN`；CLI 新增 `flowlet jenkins set/status/api/env/clear`（`--profile` 多实例） |
+| 镜像 | `flowlet:node-20261110-jenkins`（`sha256:9a0edca49b29b…`，248 MB）；从工作树（含并行会话当时未提交的 provider 扩展）完整构建，构建内 `tsc` 与 `build:web` 通过 |
+| 部署 | 14:31:26 经 Dockhand stack 仅替换 `services.flowlet.image`；本次为蓝绿切换（新容器 `c2c88a68eda4` 先过 `/health` 与 `/v1/models`，旧容器优雅退出），切换 ≈2.9s、`/health` 最长不可用 2.70s；egress 未重建 |
+| compose 备份 | `.agents/skills/flowlet-docker-deploy/.work/compose.before-20261110-143126.yaml` |
+| 回滚 | `flowlet_deploy.py deploy --tag flowlet:node-20261110-fastshutdown6` |
+| 验证（canary 9/9） | 新镜像临时容器（token 模式 + 空卷）：provider 列表含 jenkins 且元数据 exact（`usernameLabel` = 用户名、默认前缀 `JENKINS`）；缺用户名被拒；不可达实例返回 `校验失败，未保存：Jenkins API` 且不落库；`username` 列迁移成功；UI chunk 含 `Jenkins 用户设置` / `粘贴 API Token（与用户名一起使用）` / `_USER`；SPA 与 `/v1/models` 正常 |
+| 验证（生产 9/9） | 容器镜像 = 新 tag、healthy；`/health` 200；`/api/auth/config` 仍 `mode=oidc` 且 `token_login=false`；容器内存在 `packages/flowlet-core/src/web/jenkins.ts`；UI chunk 含 Jenkins 文案；生产库 `service_credentials` 已有 `username` 列；`/v1/models` 200；SPA 200 |
+| 并发说明 | 同一工作树有并行会话在开发 Beszel / Uptime Kuma provider（当时未提交）。本镜像包含其 Node 侧改动（`tsc` 通过），生产 provider 列表为 gitlab/dockhand/jenkins/uptime-kuma/beszel；并行会话后续若按「HEAD + 自身文件」隔离构建并部署，可能覆盖本镜像，需重新部署或提交后重建 |

@@ -13,7 +13,8 @@ impl Storage {
             .map_err(|_| StorageError::LockFailed)?;
         let mut statement = connection.prepare(
             "SELECT id, name, provider, base_url, secret_ciphertext, secret_hint, kind, note,
-                    env_prefix, enabled, created_at, updated_at, last_verified_at, last_error
+                    env_prefix, username, enabled, created_at, updated_at, last_verified_at,
+                    last_error
              FROM service_credentials
              ORDER BY created_at ASC, name ASC",
         )?;
@@ -29,11 +30,12 @@ impl Storage {
                     kind: row.get(6)?,
                     note: row.get(7)?,
                     env_prefix: row.get(8)?,
-                    enabled: row.get::<_, i64>(9)? != 0,
-                    created_at: row.get(10)?,
-                    updated_at: row.get(11)?,
-                    last_verified_at: row.get(12)?,
-                    last_error: row.get(13)?,
+                    username: row.get(9)?,
+                    enabled: row.get::<_, i64>(10)? != 0,
+                    created_at: row.get(11)?,
+                    updated_at: row.get(12)?,
+                    last_verified_at: row.get(13)?,
+                    last_error: row.get(14)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -51,7 +53,8 @@ impl Storage {
         let row = connection
             .query_row(
                 "SELECT id, name, provider, base_url, secret_ciphertext, secret_hint, kind, note,
-                        env_prefix, enabled, created_at, updated_at, last_verified_at, last_error
+                        env_prefix, username, enabled, created_at, updated_at, last_verified_at,
+                        last_error
                  FROM service_credentials WHERE id = ?1",
                 params![id],
                 |row| {
@@ -65,11 +68,12 @@ impl Storage {
                         kind: row.get(6)?,
                         note: row.get(7)?,
                         env_prefix: row.get(8)?,
-                        enabled: row.get::<_, i64>(9)? != 0,
-                        created_at: row.get(10)?,
-                        updated_at: row.get(11)?,
-                        last_verified_at: row.get(12)?,
-                        last_error: row.get(13)?,
+                        username: row.get(9)?,
+                        enabled: row.get::<_, i64>(10)? != 0,
+                        created_at: row.get(11)?,
+                        updated_at: row.get(12)?,
+                        last_verified_at: row.get(13)?,
+                        last_error: row.get(14)?,
                     })
                 },
             )
@@ -88,8 +92,9 @@ impl Storage {
         connection.execute(
             "INSERT INTO service_credentials (
                 id, name, provider, base_url, secret_ciphertext, secret_hint, kind, note,
-                env_prefix, enabled, created_at, updated_at, last_verified_at, last_error
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                env_prefix, username, enabled, created_at, updated_at, last_verified_at,
+                last_error
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
              ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 provider = excluded.provider,
@@ -99,6 +104,7 @@ impl Storage {
                 kind = excluded.kind,
                 note = excluded.note,
                 env_prefix = excluded.env_prefix,
+                username = excluded.username,
                 enabled = excluded.enabled,
                 updated_at = excluded.updated_at,
                 last_verified_at = excluded.last_verified_at,
@@ -113,6 +119,7 @@ impl Storage {
                 row.kind,
                 row.note,
                 row.env_prefix,
+                row.username,
                 if row.enabled { 1 } else { 0 },
                 row.created_at,
                 row.updated_at,
@@ -175,6 +182,7 @@ mod tests {
             kind: "cli_token".to_string(),
             note: Some("公司实例".to_string()),
             env_prefix: None,
+            username: None,
             enabled: true,
             created_at: "2026-11-10T00:00:00Z".to_string(),
             updated_at: "2026-11-10T00:00:00Z".to_string(),
@@ -259,6 +267,42 @@ mod tests {
     }
 
     #[test]
+    fn persists_username_and_upserts_it() {
+        let (storage, dir) = temp_storage("username");
+        storage
+            .upsert_service_credential(&sample("cred-j"))
+            .unwrap();
+        assert_eq!(
+            storage
+                .get_service_credential("cred-j")
+                .unwrap()
+                .unwrap()
+                .username,
+            None
+        );
+
+        // Jenkins 行：username 明文落库，UPSERT 必须同步覆盖改名后的用户名。
+        let mut jenkins = sample("cred-j");
+        jenkins.provider = "jenkins".to_string();
+        jenkins.username = Some("alice".to_string());
+        storage.upsert_service_credential(&jenkins).unwrap();
+        let stored = storage.get_service_credential("cred-j").unwrap().unwrap();
+        assert_eq!(stored.username.as_deref(), Some("alice"));
+        assert_eq!(
+            storage.list_service_credentials().unwrap()[0]
+                .username
+                .as_deref(),
+            Some("alice")
+        );
+
+        jenkins.username = Some("bob".to_string());
+        storage.upsert_service_credential(&jenkins).unwrap();
+        let stored = storage.get_service_credential("cred-j").unwrap().unwrap();
+        assert_eq!(stored.username.as_deref(), Some("bob"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn migrates_legacy_table_without_recreating_it() {
         let dir = std::env::temp_dir().join(format!(
             "flowlet-cred-migrate-{}-{}",
@@ -308,6 +352,8 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].id, "legacy-1");
         assert_eq!(rows[0].env_prefix, None);
+        // 第三期新增的列在旧库上补出后必须是 NULL，旧行不受影响。
+        assert_eq!(rows[0].username, None);
         drop(storage);
 
         // 重复打开（迁移再次执行）必须幂等。

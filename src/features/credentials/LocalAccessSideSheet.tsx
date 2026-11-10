@@ -21,7 +21,12 @@ import {
   type LocalAccessArtifact,
 } from "../../domains/credentials/localAccess";
 import { credentialCommands } from "../../domains/credentials/commands";
-import { envKeysForPrefix, providerDefaultEnvPrefix, resolveEnvPrefix } from "../../domains/credentials/envPrefix";
+import {
+  envKeyList,
+  envKeysForProvider,
+  providerDefaultEnvPrefix,
+  resolveEnvPrefix,
+} from "../../domains/credentials/envPrefix";
 import type {
   CliAuthToken,
   CredentialProvider,
@@ -334,7 +339,7 @@ export function LocalAccessSideSheet({
             <div className={styles.envList}>
               {enabledCredentials.map((credential) => {
                 const prefix = resolveEnvPrefix(credential.envPrefix, defaultPrefixFor(credential.provider));
-                const keys = envKeysForPrefix(prefix);
+                const keys = envKeysForProvider(prefix, credential.provider);
                 return (
                   <div className={styles.envCard} key={credential.id}>
                     <div className={styles.envHead}>
@@ -347,8 +352,9 @@ export function LocalAccessSideSheet({
                       </Text>
                     </div>
                     <div className={styles.envKeys}>
-                      <code>{keys.url}</code>
-                      <code>{keys.token}</code>
+                      {envKeyList(keys).map((key) => (
+                        <code key={key}>{key}</code>
+                      ))}
                     </div>
                   </div>
                 );

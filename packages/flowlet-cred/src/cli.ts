@@ -8,7 +8,9 @@
 // 与 Rust 的刻意差异（docs/credential-cli.md §3）：
 // - `get` 默认掩码，`--reveal` 才输出明文（安全默认）；`--mask` 仍兼容；
 // - 额外提供 `clear` 清空全部凭据（保留注释与文件头）；
-// - `gitlab` / `dockhand` 子命令支持 `--profile` 多实例（键名 {PREFIX}_URL/{PREFIX}_TOKEN）。
+// - `gitlab` / `dockhand` / `jenkins` / `beszel` / `uptime-kuma` 子命令支持 `--profile` 多实例
+//   （键名 {PREFIX}_URL/{PREFIX}_TOKEN，jenkins 额外有 {PREFIX}_USER，beszel 用 _EMAIL/_PASSWORD，
+//   uptime-kuma 用 _API_KEY）。
 import { spawn, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { hostname } from "node:os";
@@ -28,10 +30,34 @@ import {
   type DockhandEnvironment,
 } from "./dockhand.ts";
 import { GitlabClient, GitlabError, normalizeBaseUrl, type ProjectSummary } from "./gitlab.ts";
+import {
+  JenkinsClient,
+  JenkinsError,
+  normalizeBaseUrl as normalizeJenkinsBaseUrl,
+  type JenkinsIdentity,
+} from "./jenkins.ts";
+import {
+  BeszelClient,
+  BeszelError,
+  normalizeBaseUrl as normalizeBeszelBaseUrl,
+  type BeszelAuth,
+  type BeszelSystem,
+  type BeszelSystems,
+} from "./beszel.ts";
+import {
+  UptimeKumaClient,
+  UptimeKumaError,
+  normalizeBaseUrl as normalizeUptimeKumaBaseUrl,
+  summarizeMetrics,
+  type KumaMetrics,
+} from "./uptime-kuma.ts";
 import { CredentialStore, nowRfc3339, type ExportFormat } from "./store.ts";
 
 const GITLAB_DEFAULT_PREFIX = "GITLAB";
 const DOCKHAND_DEFAULT_PREFIX = "DOCKHAND";
+const JENKINS_DEFAULT_PREFIX = "JENKINS";
+const BESZEL_DEFAULT_PREFIX = "BESZEL";
+const UPTIME_KUMA_DEFAULT_PREFIX = "UPTIME_KUMA";
 
 const USAGE = `flowlet — Flowlet 全局凭据库
 
@@ -65,6 +91,30 @@ Dockhand（Docker 管理面板，Bearer API Token）：
   flowlet dockhand env [--profile=NA]                                  输出 {PREFIX}_URL / {PREFIX}_TOKEN
   flowlet dockhand clear [--profile=NA]                                移除对应前缀的 Dockhand 凭据
 
+Jenkins（REST API，Basic 用户名 + API Token）：
+  flowlet jenkins set --url=https://jenkins.example.com --user=NAME [--profile=CI]  token 从 stdin 读取并校验
+  flowlet jenkins status [--insecure] [--profile=CI]                   URL、版本（X-Jenkins）、当前用户
+  flowlet jenkins api <METHOD> <PATH> [--data=JSON] [--profile=CI]     透传（只接受相对路径，不自动加 /api）
+  flowlet jenkins env [--profile=CI]                                   输出 {PREFIX}_URL / {PREFIX}_USER / {PREFIX}_TOKEN
+  flowlet jenkins clear [--profile=CI]                                 移除对应前缀的 Jenkins 凭据
+
+Beszel（服务器监控 Hub，邮箱 + 密码换短期 token）：
+  flowlet beszel set --url=http://beszel.example.com:8090 --email=you@example.com [--profile=MON]
+                                           密码从 stdin 读取；先认证校验通过才落库
+  flowlet beszel status [--insecure] [--profile=MON]        URL、版本、登录邮箱、系统数量
+  flowlet beszel systems [--json] [--profile=MON]           系统列表（id/name/host/status/port）
+  flowlet beszel api <METHOD> <PATH> [--data=JSON] [--profile=MON]  透传（PATH 可带 /api 前缀/query）
+  flowlet beszel env [--profile=MON]                        输出 {PREFIX}_URL / _EMAIL / _PASSWORD
+  flowlet beszel clear [--profile=MON]                      移除对应前缀的 Beszel 凭据
+
+Uptime Kuma（Prometheus /metrics 只读，Basic 空用户名 + API Key）：
+  flowlet uptime-kuma set --url=https://host/uptime-kuma [--profile=TW]  token 从 stdin 读取并校验
+  flowlet uptime-kuma status [--insecure] [--profile=TW]                指标/版本/监控 up-down 数量
+  flowlet uptime-kuma monitors [--json] [--insecure] [--profile=TW]     从 /metrics 解析监控项状态（只读）
+  flowlet uptime-kuma env [--profile=TW]                                输出 {PREFIX}_URL / {PREFIX}_API_KEY
+  flowlet uptime-kuma clear [--profile=TW]                              移除对应前缀的 Uptime Kuma 凭据
+  （2.x 没有监控管理 REST API：API Key 只用于指标鉴权，不能创建/暂停监控）
+
 远程同步（Docker / 服务端管理的凭据 → 本机 .env）：
   flowlet login --server=http://10.100.217.60:20134 [--name=机器名] [--no-browser] [--insecure] [--timeout=180]
                                             浏览器授权（登录管理台后确认），只保存仅能读服务凭据的本机授权
@@ -77,7 +127,8 @@ Dockhand（Docker 管理面板，Bearer API Token）：
   - 值永远不会被 list 打印；set 时建议通过 stdin 传值，避免出现在进程列表里。
   - \`run\` 是推荐用法：Agent 不需要看到明文，只要让命令用上凭据。
   - 凭据类型（--kind）目前只是标签，默认 api_key。
-  - --profile 生成 {PREFIX}_URL / {PREFIX}_TOKEN；省略时用 provider 默认前缀（GITLAB / DOCKHAND）。
+  - --profile 生成 {PREFIX}_URL / {PREFIX}_TOKEN；省略时用 provider 默认前缀（GITLAB / DOCKHAND / JENKINS / BESZEL / UPTIME_KUMA）。
+    jenkins 额外生成 {PREFIX}_USER；beszel 生成 {PREFIX}_EMAIL / {PREFIX}_PASSWORD；uptime-kuma 的 token 键是 {PREFIX}_API_KEY。
     同一 provider 多实例必须使用不同 --profile（如 --profile=na / --profile=sz / --profile=self）。
   - pull 的凭据优先级：--token > FLOWLET_ADMIN_TOKEN > 本机授权（flowlet login 保存的 auth.json）。
     OIDC-only 实例不开启管理 Bearer，请先用 flowlet login 登录；本机授权过期/被撤销时重新执行 login。
@@ -137,7 +188,7 @@ interface ProfileContext {
 
 /**
  * 解析 `--profile=<alias>`（phase2 契约 §2.2）：
- * - 未传/空 → provider 默认前缀（GITLAB / DOCKHAND，与第一期完全兼容）；
+ * - 未传/空 → provider 默认前缀（GITLAB / DOCKHAND / JENKINS，与第一期完全兼容）；
  * - 否则转大写并按环境变量前缀规则校验，再组合成 `{默认前缀}_{ALIAS}`：
  *   `--profile=work`（gitlab）→ 键 `GITLAB_WORK_URL` / `GITLAB_WORK_TOKEN`。
  */
@@ -152,9 +203,42 @@ function resolveProfile(args: string[], defaultPrefix: string): ProfileContext {
   return { prefix: `${defaultPrefix}_${alias}`, profile: alias };
 }
 
-/** 前缀决定本机存储键与 pull 写入的变量名。 */
-function profileKeys(prefix: string): { urlKey: string; tokenKey: string } {
-  return { urlKey: `${prefix}_URL`, tokenKey: `${prefix}_TOKEN` };
+type CredentialProvider = "gitlab" | "dockhand" | "jenkins" | "beszel" | "uptime-kuma";
+
+interface ProfileKeys {
+  /** 地址键：所有 provider 都是 `{prefix}_URL`。 */
+  urlKey: string;
+  /** 用户名/邮箱键：jenkins → `{prefix}_USER`，beszel → `{prefix}_EMAIL`；其它 provider 空串。 */
+  userKey: string;
+  /** 令牌/密码键：默认 `{prefix}_TOKEN`，beszel → `{prefix}_PASSWORD`，uptime-kuma → `{prefix}_API_KEY`。 */
+  tokenKey: string;
+}
+
+/**
+ * 前缀决定本机存储键与 pull 写入的变量名（按 provider 泛化）：
+ * - gitlab / dockhand：`_URL` / `_TOKEN`；
+ * - jenkins：`_URL` / `_USER` / `_TOKEN`；
+ * - beszel：`_URL` / `_EMAIL` / `_PASSWORD`；
+ * - uptime-kuma：`_URL` / `_API_KEY`。
+ * 不传 provider 时保持旧行为（URL/USER/TOKEN）：GitLab/Dockhand 只读 urlKey/tokenKey，
+ * Jenkins 读三把，与第一~三期逐字节兼容。
+ */
+function profileKeys(prefix: string, provider?: CredentialProvider): ProfileKeys {
+  switch (provider) {
+    case "gitlab":
+    case "dockhand":
+      return { urlKey: `${prefix}_URL`, userKey: "", tokenKey: `${prefix}_TOKEN` };
+    case "jenkins":
+      return { urlKey: `${prefix}_URL`, userKey: `${prefix}_USER`, tokenKey: `${prefix}_TOKEN` };
+    case "beszel":
+      return { urlKey: `${prefix}_URL`, userKey: `${prefix}_EMAIL`, tokenKey: `${prefix}_PASSWORD` };
+    case "uptime-kuma":
+      return { urlKey: `${prefix}_URL`, userKey: "", tokenKey: `${prefix}_API_KEY` };
+    default:
+      // 不传 provider 时保持旧行为（URL/USER/TOKEN）；GitLab/Dockhand 只读 urlKey/tokenKey，
+      // Jenkins 读三把，与第一~三期逐字节兼容。
+      return { urlKey: `${prefix}_URL`, userKey: `${prefix}_USER`, tokenKey: `${prefix}_TOKEN` };
+  }
 }
 
 /**
@@ -283,6 +367,12 @@ async function run(argv: string[]): Promise<number> {
       return gitlabCommand(rest);
     case "dockhand":
       return dockhandCommand(rest);
+    case "jenkins":
+      return jenkinsCommand(rest);
+    case "beszel":
+      return beszelCommand(rest);
+    case "uptime-kuma":
+      return uptimeKumaCommand(rest);
     default:
       throw new Error(`未知命令：${command}\n\n${USAGE}`);
   }
@@ -497,6 +587,8 @@ interface ServiceCredentialExport {
   provider: string;
   baseUrl: string;
   token: string;
+  /** 第三期新增：Jenkins 的用户名（其它 provider 恒为 null / 缺失）。 */
+  username?: string | null;
   /** 第二期新增：服务端解析后的环境前缀；旧服务端没有该字段。 */
   envPrefix?: string | null;
 }
@@ -504,6 +596,9 @@ interface ServiceCredentialExport {
 const PROVIDER_DEFAULT_PREFIX: Record<string, string> = {
   gitlab: "GITLAB",
   dockhand: "DOCKHAND",
+  jenkins: "JENKINS",
+  beszel: "BESZEL",
+  "uptime-kuma": "UPTIME_KUMA",
 };
 
 function envKeys(entry: ServiceCredentialExport): Array<[string, string, string]> {
@@ -511,9 +606,31 @@ function envKeys(entry: ServiceCredentialExport): Array<[string, string, string]
   const raw = typeof entry.envPrefix === "string" ? entry.envPrefix.trim() : "";
   // 旧服务端 export 无 envPrefix：回退 provider 大写（与 Rust/Node Host 的默认前缀一致）。
   const prefix = raw === "" ? entry.provider.toUpperCase() : raw.toUpperCase();
+  if (entry.provider === "beszel") {
+    // 契约 §7：Beszel 是「邮箱 + 密码」（每次现场换短期 token），三把键顺序固定。
+    // 旧服务端 export 无 username 时 EMAIL 写空串（与 Jenkins 期策略一致）。
+    const email = typeof entry.username === "string" ? entry.username : "";
+    return [
+      [`${prefix}_URL`, entry.baseUrl, "service"],
+      [`${prefix}_EMAIL`, email, "service"],
+      [`${prefix}_PASSWORD`, entry.token, "cli_token"],
+    ];
+  }
+  if (entry.provider === "jenkins") {
+    // 契约 §6：Jenkins 必须带上用户名（API Token 与用户名成对认证）。
+    // 缺失时按空串写入，保持三个键的固定顺序。
+    const username = typeof entry.username === "string" ? entry.username : "";
+    return [
+      [`${prefix}_URL`, entry.baseUrl, "service"],
+      [`${prefix}_USER`, username, "service"],
+      [`${prefix}_TOKEN`, entry.token, "cli_token"],
+    ];
+  }
+  // Uptime Kuma 的 Key 只用于 /metrics 鉴权，沿用公司 infra skill 的 `_API_KEY` 命名。
+  const tokenKey = entry.provider === "uptime-kuma" ? `${prefix}_API_KEY` : `${prefix}_TOKEN`;
   return [
     [`${prefix}_URL`, entry.baseUrl, "service"],
-    [`${prefix}_TOKEN`, entry.token, "cli_token"],
+    [tokenKey, entry.token, "cli_token"],
   ];
 }
 
@@ -1040,6 +1157,536 @@ function describeStack(value: unknown): string {
   const name = typeof row.name === "string" && row.name !== "" ? row.name : "（未命名）";
   const containers = Array.isArray(row.containers) ? row.containers.length : 0;
   return `${name}  ${containers} 个容器`;
+}
+
+// ─── Jenkins 子命令 ────────────────────────────────────────────────────────
+
+async function jenkinsCommand(args: string[]): Promise<number> {
+  const sub = positional(args, 0);
+  const insecure = flagPresent(args, "--insecure");
+  const profile = resolveProfile(args, JENKINS_DEFAULT_PREFIX);
+  switch (sub) {
+    case "set":
+      return jenkinsSet(args, insecure, profile);
+    case "status":
+      return jenkinsStatus(args, insecure, profile);
+    case "api":
+      return jenkinsApi(args, insecure, profile);
+    case "env": {
+      const keys = profileKeys(profile.prefix);
+      const store = openStore();
+      const url = storedValue(store, keys.urlKey);
+      if (url === null) {
+        throw new Error(
+          `尚未配置 Jenkins 地址，先运行 flowlet jenkins set --url=https://jenkins.example.com --user=NAME${profileHint(profile)}`,
+        );
+      }
+      const username = storedValue(store, keys.userKey);
+      if (username === null) {
+        throw new Error(
+          `尚未保存 Jenkins 用户名，先运行 flowlet jenkins set --url=https://jenkins.example.com --user=NAME${profileHint(profile)}`,
+        );
+      }
+      const token = storedValue(store, keys.tokenKey);
+      if (token === null) {
+        throw new Error(
+          `尚未保存 Jenkins token，先运行 flowlet jenkins set --url=https://jenkins.example.com --user=NAME${profileHint(profile)}`,
+        );
+      }
+      errLine("注意：下面输出包含明文 token，只应在可信 shell 中使用。");
+      outLine(`${keys.urlKey}=${url}`);
+      outLine(`${keys.userKey}=${username}`);
+      outLine(`${keys.tokenKey}=${token}`);
+      return 0;
+    }
+    case "clear": {
+      const keys = profileKeys(profile.prefix);
+      const store = openStore();
+      const urlRemoved = store.unset(keys.urlKey);
+      const userRemoved = store.unset(keys.userKey);
+      const tokenRemoved = store.unset(keys.tokenKey);
+      const suffix = profileDescription(profile);
+      outLine(
+        urlRemoved || userRemoved || tokenRemoved
+          ? `已移除 Jenkins 凭据${suffix}`
+          : `没有可移除的 Jenkins 凭据${suffix}`,
+      );
+      return 0;
+    }
+    default:
+      throw new Error(`未知的 jenkins 子命令：${sub}（set|status|api|env|clear）`);
+  }
+}
+
+/** `--url` / `--user` 必填（Jenkins 的 API Token 必须与用户名成对使用）。 */
+async function jenkinsSet(args: string[], insecure: boolean, profile: ProfileContext): Promise<number> {
+  const store = openStore();
+  const keys = profileKeys(profile.prefix);
+  const url = optionValue(args, "--url");
+  if (url === null) {
+    throw new Error(
+      `缺少 --url，例如：flowlet jenkins set --url=https://jenkins.example.com --user=NAME${profileHint(profile)}`,
+    );
+  }
+  const rawUsername = optionValue(args, "--user");
+  if (rawUsername === null) {
+    throw new Error(
+      `缺少 --user，例如：flowlet jenkins set --url=https://jenkins.example.com --user=NAME${profileHint(profile)}`,
+    );
+  }
+  const username = rawUsername.trim();
+  if (username === "") throw new Error("Jenkins 用户名不能为空");
+  const token = readStdinValue();
+  if (token === "") {
+    throw new Error(
+      "Jenkins token 不能为空：用 `printf '%s' \"$TOKEN\" | flowlet jenkins set ...`",
+    );
+  }
+  const client = new JenkinsClient(url, username, token, { insecure });
+  let identity: JenkinsIdentity;
+  try {
+    // 与 GitLab / Dockhand 一致：先用一个需要认证的接口验证，再落库。
+    identity = await client.identity();
+  } catch (error) {
+    const detail = error instanceof JenkinsError ? error.toString() : errorMessage(error);
+    throw new Error(
+      `${detail}\n未保存。请检查实例地址、用户名与 API Token 是否有效（Jenkins 用户设置 → API Token）。`,
+    );
+  }
+  const base = normalizeJenkinsBaseUrl(url);
+  store.set(keys.urlKey, base, "service", "jenkins 实例地址");
+  store.set(keys.userKey, username, "service", "jenkins 用户名");
+  store.set(keys.tokenKey, token, "cli_token", "jenkins API token");
+  outLine(`已保存 Jenkins 凭据${profileDescription(profile)}：${base}`);
+  const version = identity.version === null ? "" : `（Jenkins ${identity.version}）`;
+  outLine(`用户：${identity.username ?? username}${version}`);
+  return 0;
+}
+
+async function jenkinsStatus(args: string[], insecure: boolean, profile: ProfileContext): Promise<number> {
+  const client = storedJenkinsClient(args, insecure, profile);
+  const identity = await client.identity();
+  outLine(`URL：${client.base()}`);
+  outLine(`版本：${identity.version ?? "未知"}`);
+  outLine(`用户：${identity.username ?? "未知"}`);
+  return 0;
+}
+
+async function jenkinsApi(args: string[], insecure: boolean, profile: ProfileContext): Promise<number> {
+  const first = positional(args, 1);
+  // `jenkins api /me/api/json` 与 `jenkins api GET /me/api/json` 都接受。
+  const method = first.startsWith("/") ? "GET" : first.toUpperCase();
+  const path = first.startsWith("/") ? first : positional(args, 2);
+  const rawData = optionValue(args, "--data");
+  let body: unknown;
+  if (rawData !== null) {
+    try {
+      body = JSON.parse(rawData);
+    } catch (error) {
+      throw new Error(`--data 不是合法 JSON：${errorMessage(error)}`);
+    }
+  }
+  const client = storedJenkinsClient(args, insecure, profile);
+  outLine(prettyJsonSorted(await client.request(method, path, body)));
+  return 0;
+}
+
+function storedJenkinsClient(args: string[], insecure: boolean, profile: ProfileContext): JenkinsClient {
+  const store = openStore();
+  const keys = profileKeys(profile.prefix);
+  const hint = profileHint(profile);
+  const url = storedValue(store, keys.urlKey);
+  if (url === null) {
+    throw new Error(
+      `尚未配置 Jenkins 地址，先运行 flowlet jenkins set --url=https://jenkins.example.com --user=NAME${hint}`,
+    );
+  }
+  const username = storedValue(store, keys.userKey);
+  if (username === null) {
+    throw new Error(
+      `尚未保存 Jenkins 用户名，先运行 flowlet jenkins set --url=https://jenkins.example.com --user=NAME${hint}`,
+    );
+  }
+  const token = storedValue(store, keys.tokenKey);
+  if (token === null) {
+    throw new Error(
+      `尚未保存 Jenkins token，先运行 flowlet jenkins set --url=https://jenkins.example.com --user=NAME${hint}`,
+    );
+  }
+  return new JenkinsClient(url, username, token, { insecure });
+}
+
+// ─── Beszel 子命令（PocketBase 底座，邮箱 + 密码换短期 token） ─────────────
+
+async function beszelCommand(args: string[]): Promise<number> {
+  const sub = positional(args, 0);
+  const insecure = flagPresent(args, "--insecure");
+  const profile = resolveProfile(args, BESZEL_DEFAULT_PREFIX);
+  switch (sub) {
+    case "set":
+      return beszelSet(args, insecure, profile);
+    case "status":
+      return beszelStatus(args, insecure, profile);
+    case "systems":
+      return beszelSystems(args, insecure, profile);
+    case "api":
+      return beszelApi(args, insecure, profile);
+    case "env": {
+      const keys = profileKeys(profile.prefix, "beszel");
+      const store = openStore();
+      const url = storedValue(store, keys.urlKey);
+      if (url === null) {
+        throw new Error(
+          `尚未配置 Beszel 地址，先运行 flowlet beszel set --url=http://beszel.example.com:8090 --email=you@example.com${profileHint(profile)}`,
+        );
+      }
+      const email = storedValue(store, keys.userKey);
+      if (email === null) {
+        throw new Error(
+          `尚未保存 Beszel 邮箱，先运行 flowlet beszel set --url=http://beszel.example.com:8090 --email=you@example.com${profileHint(profile)}`,
+        );
+      }
+      const password = storedValue(store, keys.tokenKey);
+      if (password === null) {
+        throw new Error(
+          `尚未保存 Beszel 密码，先运行 flowlet beszel set --url=http://beszel.example.com:8090 --email=you@example.com${profileHint(profile)}`,
+        );
+      }
+      errLine("注意：下面输出包含明文密码，只应在可信 shell 中使用。");
+      outLine(`${keys.urlKey}=${url}`);
+      outLine(`${keys.userKey}=${email}`);
+      outLine(`${keys.tokenKey}=${password}`);
+      return 0;
+    }
+    case "clear": {
+      const keys = profileKeys(profile.prefix, "beszel");
+      const store = openStore();
+      const urlRemoved = store.unset(keys.urlKey);
+      const emailRemoved = store.unset(keys.userKey);
+      const passwordRemoved = store.unset(keys.tokenKey);
+      const suffix = profileDescription(profile);
+      outLine(
+        urlRemoved || emailRemoved || passwordRemoved
+          ? `已移除 Beszel 凭据${suffix}`
+          : `没有可移除的 Beszel 凭据${suffix}`,
+      );
+      return 0;
+    }
+    default:
+      throw new Error(`未知的 beszel 子命令：${sub}（set|status|systems|api|env|clear）`);
+  }
+}
+
+/** `--url` / `--email` 必填（Beszel 只能用邮箱 + 密码换 token）。 */
+async function beszelSet(
+  args: string[],
+  insecure: boolean,
+  profile: ProfileContext,
+): Promise<number> {
+  const store = openStore();
+  const keys = profileKeys(profile.prefix, "beszel");
+  const url = optionValue(args, "--url");
+  if (url === null) {
+    throw new Error(
+      `缺少 --url，例如：flowlet beszel set --url=http://beszel.example.com:8090 --email=you@example.com${profileHint(profile)}`,
+    );
+  }
+  const rawEmail = optionValue(args, "--email");
+  if (rawEmail === null) {
+    throw new Error(
+      `缺少 --email，例如：flowlet beszel set --url=http://beszel.example.com:8090 --email=you@example.com${profileHint(profile)}`,
+    );
+  }
+  const email = rawEmail.trim();
+  if (email === "") throw new Error("Beszel 邮箱不能为空");
+  const password = readStdinValue();
+  if (password === "") {
+    throw new Error(
+      "Beszel 密码不能为空：用 `printf '%s' \"$PASSWORD\" | flowlet beszel set ...`",
+    );
+  }
+  const client = new BeszelClient(url, email, password, { insecure });
+  let auth: BeszelAuth;
+  let version: string | null = null;
+  let totalItems: number;
+  try {
+    // 与其它 provider 一致：先认证再落库。info 失败不致命（版本显示未知）。
+    auth = await client.auth();
+    try {
+      version = await client.info();
+    } catch {
+      version = null;
+    }
+    totalItems = (await client.systems(1)).totalItems;
+  } catch (error) {
+    const detail = error instanceof BeszelError ? error.toString() : errorMessage(error);
+    throw new Error(
+      `${detail}\n未保存。请检查实例地址、邮箱与密码是否有效（Beszel 用户账号，不是 PocketBase 超级管理员）。`,
+    );
+  }
+  const base = normalizeBeszelBaseUrl(url);
+  const savedEmail = auth.email ?? email;
+  store.set(keys.urlKey, base, "service", "beszel 实例地址");
+  store.set(keys.userKey, savedEmail, "service", "beszel 登录邮箱");
+  store.set(keys.tokenKey, password, "cli_token", "beszel 登录密码");
+  outLine(`已保存 Beszel 凭据${profileDescription(profile)}：${base}`);
+  const versionText = version === null ? "" : `（Beszel ${version}）`;
+  outLine(`邮箱：${savedEmail}${versionText}`);
+  outLine(`系统：${totalItems} 台`);
+  return 0;
+}
+
+async function beszelStatus(
+  args: string[],
+  insecure: boolean,
+  profile: ProfileContext,
+): Promise<number> {
+  const client = storedBeszelClient(args, insecure, profile);
+  const auth = await client.auth();
+  let version: string | null = null;
+  try {
+    // info 失败不致命：与校验语义一致，版本未知不影响主体状态。
+    version = await client.info();
+  } catch {
+    version = null;
+  }
+  const systems = await client.systems(1);
+  outLine(`URL：${client.base()}`);
+  outLine(`版本：${version ?? "未知"}`);
+  outLine(`邮箱：${auth.email ?? "未知"}`);
+  outLine(`系统：${systems.totalItems} 台`);
+  return 0;
+}
+
+async function beszelSystems(
+  args: string[],
+  insecure: boolean,
+  profile: ProfileContext,
+): Promise<number> {
+  const client = storedBeszelClient(args, insecure, profile);
+  const systems: BeszelSystems = await client.systems();
+  if (flagPresent(args, "--json")) {
+    outLine(prettyJson(systems.items));
+    return 0;
+  }
+  if (systems.items.length === 0) {
+    outLine("（没有系统）");
+    return 0;
+  }
+  for (const system of systems.items) outLine(describeBeszelSystem(system));
+  return 0;
+}
+
+async function beszelApi(args: string[], insecure: boolean, profile: ProfileContext): Promise<number> {
+  const first = positional(args, 1);
+  // `beszel api /collections/systems/records` 与 `beszel api GET /api/...` 都接受。
+  const method = first.startsWith("/") ? "GET" : first.toUpperCase();
+  const path = first.startsWith("/") ? first : positional(args, 2);
+  const rawData = optionValue(args, "--data");
+  let body: unknown;
+  if (rawData !== null) {
+    try {
+      body = JSON.parse(rawData);
+    } catch (error) {
+      throw new Error(`--data 不是合法 JSON：${errorMessage(error)}`);
+    }
+  }
+  const client = storedBeszelClient(args, insecure, profile);
+  outLine(prettyJsonSorted(await client.request(method, path, body)));
+  return 0;
+}
+
+function storedBeszelClient(
+  args: string[],
+  insecure: boolean,
+  profile: ProfileContext,
+): BeszelClient {
+  const store = openStore();
+  const keys = profileKeys(profile.prefix, "beszel");
+  const hint = profileHint(profile);
+  const url = storedValue(store, keys.urlKey);
+  if (url === null) {
+    throw new Error(
+      `尚未配置 Beszel 地址，先运行 flowlet beszel set --url=http://beszel.example.com:8090 --email=you@example.com${hint}`,
+    );
+  }
+  const email = storedValue(store, keys.userKey);
+  if (email === null) {
+    throw new Error(
+      `尚未保存 Beszel 邮箱，先运行 flowlet beszel set --url=http://beszel.example.com:8090 --email=you@example.com${hint}`,
+    );
+  }
+  const password = storedValue(store, keys.tokenKey);
+  if (password === null) {
+    throw new Error(
+      `尚未保存 Beszel 密码，先运行 flowlet beszel set --url=http://beszel.example.com:8090 --email=you@example.com${hint}`,
+    );
+  }
+  return new BeszelClient(url, email, password, { insecure });
+}
+
+function describeBeszelSystem(system: BeszelSystem): string {
+  const endpoint =
+    system.host === "" ? "" : system.port === "" ? system.host : `${system.host}:${system.port}`;
+  const status = system.status === "" ? "未知" : system.status;
+  const name = system.name === "" ? "（未命名）" : system.name;
+  const id = system.id === "" ? "?" : system.id;
+  return `${id.padStart(8)}  ${name}  ${status}${endpoint === "" ? "" : `  ${endpoint}`}`;
+}
+
+// ─── Uptime Kuma 子命令（Prometheus /metrics 只读） ────────────────────────
+
+/** Uptime Kuma 的 token 键是 `{PREFIX}_API_KEY`（不是其它 provider 的 `_TOKEN`）。 */
+function kumaKeys(prefix: string): { urlKey: string; tokenKey: string } {
+  return { urlKey: `${prefix}_URL`, tokenKey: `${prefix}_API_KEY` };
+}
+
+async function uptimeKumaCommand(args: string[]): Promise<number> {
+  const sub = positional(args, 0);
+  const insecure = flagPresent(args, "--insecure");
+  const profile = resolveProfile(args, UPTIME_KUMA_DEFAULT_PREFIX);
+  switch (sub) {
+    case "set":
+      return uptimeKumaSet(args, insecure, profile);
+    case "status":
+      return uptimeKumaStatus(args, insecure, profile);
+    case "monitors":
+      return uptimeKumaMonitors(args, insecure, profile);
+    case "env": {
+      const keys = kumaKeys(profile.prefix);
+      const store = openStore();
+      const url = storedValue(store, keys.urlKey);
+      if (url === null) {
+        throw new Error(
+          `尚未配置 Uptime Kuma 地址，先运行 flowlet uptime-kuma set --url=https://host/uptime-kuma${profileHint(profile)}`,
+        );
+      }
+      const token = storedValue(store, keys.tokenKey);
+      if (token === null) {
+        throw new Error(
+          `尚未保存 Uptime Kuma API Key，先运行 flowlet uptime-kuma set --url=https://host/uptime-kuma${profileHint(profile)}`,
+        );
+      }
+      errLine("注意：下面输出包含明文 API Key，只应在可信 shell 中使用。");
+      outLine(`${keys.urlKey}=${url}`);
+      outLine(`${keys.tokenKey}=${token}`);
+      return 0;
+    }
+    case "clear": {
+      const keys = kumaKeys(profile.prefix);
+      const store = openStore();
+      const urlRemoved = store.unset(keys.urlKey);
+      const tokenRemoved = store.unset(keys.tokenKey);
+      const suffix = profileDescription(profile);
+      outLine(
+        urlRemoved || tokenRemoved
+          ? `已移除 Uptime Kuma 凭据${suffix}`
+          : `没有可移除的 Uptime Kuma 凭据${suffix}`,
+      );
+      return 0;
+    }
+    default:
+      throw new Error(`未知的 uptime-kuma 子命令：${sub}（set|status|monitors|env|clear）`);
+  }
+}
+
+async function uptimeKumaSet(
+  args: string[],
+  insecure: boolean,
+  profile: ProfileContext,
+): Promise<number> {
+  const store = openStore();
+  const keys = kumaKeys(profile.prefix);
+  const url = optionValue(args, "--url");
+  if (url === null) {
+    throw new Error(
+      `缺少 --url，例如：flowlet uptime-kuma set --url=https://host/uptime-kuma${profileHint(profile)}`,
+    );
+  }
+  const token = readStdinValue();
+  if (token === "") {
+    throw new Error(
+      "Uptime Kuma API Key 不能为空：用 `printf '%s' \"$API_KEY\" | flowlet uptime-kuma set ...`",
+    );
+  }
+  const client = new UptimeKumaClient(url, token, { insecure });
+  let metrics: KumaMetrics;
+  try {
+    // 与其它 provider 一致：先用需要认证的 `/metrics` 验证，再落库。
+    metrics = await client.metrics();
+  } catch (error) {
+    const detail = error instanceof UptimeKumaError ? error.toString() : errorMessage(error);
+    throw new Error(
+      `${detail}\n未保存。请检查实例地址与 API Key 是否有效（设置 → API 密钥）。`,
+    );
+  }
+  const base = normalizeUptimeKumaBaseUrl(url);
+  store.set(keys.urlKey, base, "service", "uptime kuma 面板地址");
+  store.set(keys.tokenKey, token, "cli_token", "uptime kuma API key（仅 /metrics 鉴权）");
+  outLine(`已保存 Uptime Kuma 凭据${profileDescription(profile)}：${base}`);
+  outLine(`监控：${summarizeMetrics(metrics)}`);
+  if (metrics.version !== null) outLine(`版本：${metrics.version}`);
+  return 0;
+}
+
+async function uptimeKumaStatus(
+  args: string[],
+  insecure: boolean,
+  profile: ProfileContext,
+): Promise<number> {
+  const client = storedUptimeKumaClient(args, insecure, profile);
+  const metrics = await client.metrics();
+  outLine(`地址：${client.base()}`);
+  outLine(`指标：Prometheus 文本，${metrics.samples} 个样本`);
+  outLine(`版本：${metrics.version ?? "未知"}`);
+  outLine(`监控：${summarizeMetrics(metrics)}`);
+  outLine("说明：API Key 只用于 /metrics 指标鉴权，不能管理监控项或通知");
+  return 0;
+}
+
+async function uptimeKumaMonitors(
+  args: string[],
+  insecure: boolean,
+  profile: ProfileContext,
+): Promise<number> {
+  const client = storedUptimeKumaClient(args, insecure, profile);
+  const metrics = await client.metrics();
+  if (flagPresent(args, "--json")) {
+    outLine(prettyJsonSorted(metrics.monitors));
+    return 0;
+  }
+  if (metrics.monitors.length === 0) {
+    outLine("（没有监控项）");
+    return 0;
+  }
+  for (const monitor of metrics.monitors) {
+    const status = monitor.up ? "UP  " : "DOWN";
+    outLine(`${status}  ${monitor.id}  ${monitor.name}  (${monitor.type})`);
+  }
+  return 0;
+}
+
+function storedUptimeKumaClient(
+  args: string[],
+  insecure: boolean,
+  profile: ProfileContext,
+): UptimeKumaClient {
+  const store = openStore();
+  const keys = kumaKeys(profile.prefix);
+  const hint = profileHint(profile);
+  const url = storedValue(store, keys.urlKey);
+  if (url === null) {
+    throw new Error(
+      `尚未配置 Uptime Kuma 地址，先运行 flowlet uptime-kuma set --url=https://host/uptime-kuma${hint}`,
+    );
+  }
+  const token = storedValue(store, keys.tokenKey);
+  if (token === null) {
+    throw new Error(
+      `尚未保存 Uptime Kuma API Key，先运行 flowlet uptime-kuma set --url=https://host/uptime-kuma${hint}`,
+    );
+  }
+  return new UptimeKumaClient(url, token, { insecure });
 }
 
 // ─── main ───────────────────────────────────────────────────────────────────

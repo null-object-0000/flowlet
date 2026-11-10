@@ -12,6 +12,7 @@ mod device_sync;
 mod maintenance;
 mod observability;
 mod proxy;
+mod qwen_platform;
 mod scrape;
 mod usage;
 
@@ -23,5 +24,6 @@ pub(super) use device_sync::*;
 pub(super) use maintenance::*;
 pub(super) use observability::*;
 pub(super) use proxy::*;
+pub(super) use qwen_platform::*;
 pub(super) use scrape::*;
 pub(super) use usage::*;

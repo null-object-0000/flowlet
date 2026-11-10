@@ -236,6 +236,7 @@ CREATE TABLE IF NOT EXISTS service_credentials (
     kind               TEXT NOT NULL DEFAULT 'cli_token',
     note               TEXT,
     env_prefix         TEXT,
+    username           TEXT,
     enabled            INTEGER NOT NULL DEFAULT 1,
     created_at         TEXT NOT NULL,
     updated_at         TEXT NOT NULL,
@@ -599,6 +600,7 @@ const ADDED_COLUMNS: ReadonlyArray<readonly [string, string, string]> = [
   ["channel_presets", "enabled", "INTEGER NOT NULL DEFAULT 1"],
   ["usage_records", "created_at", "TEXT NOT NULL DEFAULT ''"],
   ["service_credentials", "env_prefix", "TEXT"],
+  ["service_credentials", "username", "TEXT"],
 ];
 
 /** Rust 里 `for column in [...]` 循环补的 device_daily_usage 原生列。 */

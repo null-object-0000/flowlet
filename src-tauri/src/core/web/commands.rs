@@ -150,6 +150,28 @@ pub async fn dispatch(state: &WebState, command: &str, args: Value) -> Result<Va
             value(result)
         }
         "list_custom_scrape_channels" => value(crate::core::custom_scrape::list_channels()),
+        // 千问平台 device-flow 登录与 HTTP 直连同步：Web Host 没有 WebView，
+        // 这条路径是它获取余额与免费额度的唯一方式。
+        "qwen_platform_status" => {
+            let account_id: String = arg(&args, "accountId")?;
+            value(crate::core::qwen_platform::status(s, &account_id))
+        }
+        "qwen_platform_login_start" => {
+            let account_id: String = arg(&args, "accountId")?;
+            read!(crate::core::qwen_platform::start_login(s, &account_id).await)
+        }
+        "qwen_platform_login_poll" => {
+            let account_id: String = arg(&args, "accountId")?;
+            read!(crate::core::qwen_platform::poll_login(s, &account_id).await)
+        }
+        "qwen_platform_logout" => {
+            let account_id: String = arg(&args, "accountId")?;
+            read!(crate::core::qwen_platform::logout(s, &account_id))
+        }
+        "qwen_platform_sync" => {
+            let account_id: String = arg(&args, "accountId")?;
+            read!(crate::core::qwen_platform::sync_account(s, &account_id).await)
+        }
         "cleanup_old_logs" => {
             let days: i64 = arg(&args, "keepDays")?;
             if days < 0 {

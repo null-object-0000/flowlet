@@ -38,6 +38,12 @@ import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import { DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
 import { useScrapeConsole } from "./useScrapeConsole";
+import { useQwenPlatformLogin } from "./useQwenPlatformLogin";
+import {
+  QwenPlatformFallbackHint,
+  QwenPlatformLoginCard,
+  QwenPlatformSyncModeTag,
+} from "./QwenPlatformLoginCard";
 import type { ScrapeBalanceResult } from "../../domains/account/commands";
 import { formatFullTimestamp, parseTimestamp } from "../../shared/formatters/datetime";
 import { formatCompactNumber } from "../../shared/formatters/number";
@@ -621,6 +627,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
                 <QwenTokenPlanPanel
                   account={draft}
                   enabled={isEdit}
+                  desktopCapabilities={desktopCapabilities}
                   snapshot={snapshot}
                   onScrape={onScrape}
                   language={language}
@@ -630,6 +637,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
                 <QwenFreeTierPanel
                   account={draft}
                   enabled={isEdit}
+                  desktopCapabilities={desktopCapabilities}
                   snapshot={snapshot}
                   onScrape={onScrape}
                   language={language}
@@ -1326,6 +1334,7 @@ function ScrapeConsolePanel({
 function QwenTokenPlanPanel({
   account,
   enabled,
+  desktopCapabilities = true,
   snapshot,
   onScrape,
   language,
@@ -1333,11 +1342,22 @@ function QwenTokenPlanPanel({
 }: {
   account: ChannelAccount;
   enabled: boolean;
+  desktopCapabilities?: boolean;
   snapshot?: AccountBalanceSnapshot;
   onScrape?: (accountId: string) => Promise<ScrapeBalanceResult>;
   language: "zh-CN" | "en-US";
   t: (k: string, params?: Record<string, string | number> | undefined) => string;
 }) {
+  const queryClient = useQueryClient();
+  const platform = useQwenPlatformLogin({
+    accountId: account.id,
+    enabled,
+    // 与 QwenFreeTierPanel / 余额抓取一致：刷新余额快照并失效账号列表。
+    onSynced: () => {
+      void queryClient.refetchQueries({ queryKey: queryKeys.usage.latestBalanceSnapshots(), exact: true });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.account.list() });
+    },
+  });
   const {
     startScrape,
     retryScrape,
@@ -1345,11 +1365,19 @@ function QwenTokenPlanPanel({
     isScraping,
     needLogin,
     consoleActionMessage,
-    error,
+    error: scrapeError,
     statusText,
   } = useScrapeConsole(onScrape);
-  const details = parseQwenTokenPlanDetails(lastResult?.raw_scraped_json ?? snapshot?.raw_scraped_json);
-  const syncedAt = lastResult?.synced_at ?? snapshot?.synced_at;
+
+  // 登录完成的自动同步期间也按已登录处理，避免瞬间闪回 WebView 兜底按钮。
+  const isLoggedIn = platform.isLoggedIn || platform.isSyncing;
+  // Token Plan 的 HTTP 同步返回与 WebView 抓取同构的 slot bundle，解析器无需区分来源。
+  const rawScrapedJson = platform.lastSync?.rawScrapedJson
+    ?? lastResult?.raw_scraped_json
+    ?? snapshot?.raw_scraped_json;
+  const details = parseQwenTokenPlanDetails(rawScrapedJson);
+  const syncedAt = platform.lastSync?.syncedAt ?? lastResult?.synced_at ?? snapshot?.synced_at;
+  const refreshLoading = isLoggedIn ? platform.isSyncing : isScraping;
   const planName = details
     ? `${details.specCode.charAt(0).toUpperCase()}${details.specCode.slice(1)}`
     : "";
@@ -1373,6 +1401,15 @@ function QwenTokenPlanPanel({
     await retryScrape(account.id);
   }
 
+  async function handleRefresh() {
+    if (isLoggedIn) {
+      const result = await platform.syncNow();
+      if (result) Toast.success(t("已通过 HTTP 同步订阅额度"));
+      return;
+    }
+    await startScrape(account.id);
+  }
+
   return (
     <div className={styles.longCatResourcePanel}>
       <div className={styles.longCatSummaryCard}>
@@ -1383,6 +1420,7 @@ function QwenTokenPlanPanel({
           ) : (
             <Tag size="small" color="red">{t(inactiveKind === "expired" ? "套餐已过期" : "未订阅套餐")}</Tag>
           )}
+          <QwenPlatformSyncModeTag platform={platform} t={t} />
         </div>
         <div className={`${styles.longCatSummaryGrid} ${styles.qwenSummaryGrid}`}>
           {subscriptionActive ? (
@@ -1447,37 +1485,70 @@ function QwenTokenPlanPanel({
         </div>
       ) : null}
 
+      <QwenPlatformLoginCard
+        platform={platform}
+        enabled={enabled}
+        language={language}
+        t={t}
+        loggedOutHint={t("通过千问平台登录后，订阅额度与重置卡由官方 HTTP 接口同步，无需打开 WebView。")}
+        loggedInHint={t("订阅额度与重置卡由官方 HTTP 接口同步，无需打开 WebView。")}
+      />
+
       <div className={styles.longCatSyncSection}>
         <div className={styles.longCatSyncControls}>
           <Button
             icon={<IconRefresh />}
-            loading={isScraping}
+            loading={refreshLoading}
             disabled={!enabled}
-            onClick={() => void handleScrape()}
+            onClick={() => void handleRefresh()}
           >
             {t("立即刷新")}
           </Button>
-          <ScrapeSyncFeedback
-            isScraping={isScraping}
-            statusText={statusText}
-            needLogin={needLogin}
-            consoleActionMessage={consoleActionMessage}
-            error={error}
-            onRetry={() => void handleRetry()}
-            showIdleHint={!details}
-            t={t}
-          />
+          {isLoggedIn ? (
+            <Text type="tertiary" size="small">
+              {platform.isSyncing
+                ? t("正在同步订阅额度…")
+                : platform.phase === "success"
+                  ? t("已通过 HTTP 同步订阅额度")
+                  : t("HTTP 同步")}
+            </Text>
+          ) : (
+            <ScrapeSyncFeedback
+              isScraping={isScraping}
+              statusText={statusText}
+              needLogin={needLogin}
+              consoleActionMessage={consoleActionMessage}
+              error={scrapeError}
+              onRetry={() => void handleRetry()}
+              showIdleHint={!details}
+              t={t}
+            />
+          )}
         </div>
+        {platform.error && platform.errorScope === "sync" ? (
+          <div className={styles.scrapeError}>{platform.error}</div>
+        ) : null}
+        <QwenPlatformFallbackHint
+          platform={platform}
+          desktopCapabilities={desktopCapabilities}
+          t={t}
+        />
       </div>
     </div>
   );
 }
 
-/** 千问 API 按量付费：福利页（权益）抓取结果面板——官方余额、本月账单与
- *  免费额度模型明细（仅展示；路由开放仍受全局白名单约束）。 */
+/** 千问 API 按量付费：福利页（权益）面板——官方余额、本月账单与免费额度模型明细
+ *  （仅展示；路由开放仍受全局白名单约束）。
+ *
+ *  数据来源有两条：
+ *  1. 千问平台登录（device flow）+ 官方 HTTP 接口同步（默认路径，Web Host 也可用）；
+ *  2. 未登录时退回原有隐藏 WebView 控制台抓取（仅桌面端可用）。
+ *  两条路径的 rawScrapedJson 同构，统一交给 parseQwenFreeTierDetails 解析。 */
 function QwenFreeTierPanel({
   account,
   enabled,
+  desktopCapabilities = true,
   snapshot,
   onScrape,
   language,
@@ -1485,11 +1556,22 @@ function QwenFreeTierPanel({
 }: {
   account: ChannelAccount;
   enabled: boolean;
+  desktopCapabilities?: boolean;
   snapshot?: AccountBalanceSnapshot;
   onScrape?: (accountId: string) => Promise<ScrapeBalanceResult>;
   language: "zh-CN" | "en-US";
   t: (k: string, params?: Record<string, string | number> | undefined) => string;
 }) {
+  const queryClient = useQueryClient();
+  const platform = useQwenPlatformLogin({
+    accountId: account.id,
+    enabled,
+    // 与余额抓取/账号保存后的失效方式一致：刷新余额快照并失效账号列表。
+    onSynced: () => {
+      void queryClient.refetchQueries({ queryKey: queryKeys.usage.latestBalanceSnapshots(), exact: true });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.account.list() });
+    },
+  });
   const {
     startScrape,
     retryScrape,
@@ -1497,11 +1579,18 @@ function QwenFreeTierPanel({
     isScraping,
     needLogin,
     consoleActionMessage,
-    error,
+    error: scrapeError,
     statusText,
   } = useScrapeConsole(onScrape);
-  const details = parseQwenFreeTierDetails(lastResult?.raw_scraped_json ?? snapshot?.raw_scraped_json);
-  const syncedAt = lastResult?.synced_at ?? snapshot?.synced_at;
+
+  // 登录完成的自动同步期间也按已登录处理，避免瞬间闪回 WebView 兜底按钮。
+  const isLoggedIn = platform.isLoggedIn || platform.isSyncing;
+  const rawScrapedJson = platform.lastSync?.rawScrapedJson
+    ?? lastResult?.raw_scraped_json
+    ?? snapshot?.raw_scraped_json;
+  const details = parseQwenFreeTierDetails(rawScrapedJson);
+  const syncedAt = platform.lastSync?.syncedAt ?? lastResult?.synced_at ?? snapshot?.synced_at;
+  const refreshLoading = isLoggedIn ? platform.isSyncing : isScraping;
 
   async function handleScrape() {
     await startScrape(account.id);
@@ -1511,12 +1600,21 @@ function QwenFreeTierPanel({
     await retryScrape(account.id);
   }
 
+  async function handleRefresh() {
+    if (isLoggedIn) {
+      const result = await platform.syncNow();
+      if (result) Toast.success(t("已通过 HTTP 同步余额与免费额度"));
+      return;
+    }
+    await startScrape(account.id);
+  }
+
   return (
     <div className={styles.longCatResourcePanel}>
       <div className={styles.longCatSummaryCard}>
         <div className={styles.longCatSummaryHeading}>
           <strong>{t("API 按量付费 · 免费额度")}</strong>
-          <Tag size="small" color="green">{t("自动同步")}</Tag>
+          <QwenPlatformSyncModeTag platform={platform} t={t} />
         </div>
         <div className={`${styles.longCatSummaryGrid} ${styles.qwenFreetierSummaryGrid}`}>
           <div>
@@ -1541,27 +1639,54 @@ function QwenFreeTierPanel({
         </div>
       </div>
 
+      <QwenPlatformLoginCard
+        platform={platform}
+        enabled={enabled}
+        language={language}
+        t={t}
+        loggedOutHint={t("通过千问平台登录后，余额与免费额度由官方 HTTP 接口同步，无需打开 WebView。")}
+        loggedInHint={t("余额与免费额度由官方 HTTP 接口同步，无需打开 WebView。")}
+      />
+
       <div className={styles.longCatSyncSection}>
         <div className={styles.longCatSyncControls}>
           <Button
             icon={<IconRefresh />}
-            loading={isScraping}
+            loading={refreshLoading}
             disabled={!enabled}
-            onClick={() => void handleScrape()}
+            onClick={() => void handleRefresh()}
           >
             {t("立即刷新")}
           </Button>
-          <ScrapeSyncFeedback
-            isScraping={isScraping}
-            statusText={statusText}
-            needLogin={needLogin}
-            consoleActionMessage={consoleActionMessage}
-            error={error}
-            onRetry={() => void handleRetry()}
-            showIdleHint={!details}
-            t={t}
-          />
+          {isLoggedIn ? (
+            <Text type="tertiary" size="small">
+              {platform.isSyncing
+                ? t("正在同步余额与免费额度…")
+                : platform.phase === "success"
+                  ? t("已通过 HTTP 同步余额与免费额度")
+                  : t("HTTP 同步")}
+            </Text>
+          ) : (
+            <ScrapeSyncFeedback
+              isScraping={isScraping}
+              statusText={statusText}
+              needLogin={needLogin}
+              consoleActionMessage={consoleActionMessage}
+              error={scrapeError}
+              onRetry={() => void handleRetry()}
+              showIdleHint={!details}
+              t={t}
+            />
+          )}
         </div>
+        {platform.error && platform.errorScope === "sync" ? (
+          <div className={styles.scrapeError}>{platform.error}</div>
+        ) : null}
+        <QwenPlatformFallbackHint
+          platform={platform}
+          desktopCapabilities={desktopCapabilities}
+          t={t}
+        />
       </div>
     </div>
   );

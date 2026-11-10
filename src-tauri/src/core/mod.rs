@@ -16,6 +16,7 @@ pub mod agent_source_watcher;
 pub mod agent_version;
 pub mod antigravity_account;
 pub mod antigravity_oauth;
+pub mod beszel;
 pub(crate) mod channel_capability_adapter;
 pub mod channels_config;
 pub mod codex_account;
@@ -30,6 +31,7 @@ pub mod device_usage;
 pub mod dockhand;
 pub mod gitlab;
 pub mod host_scheduler;
+pub mod jenkins;
 pub mod job_runtime;
 pub mod lan_sync;
 pub mod logging;
@@ -45,17 +47,21 @@ pub mod plugin_registry;
 pub mod power;
 pub mod presets;
 pub mod proxy;
+pub mod qwen_platform;
 pub mod rate_limiter;
 pub mod runtime_config;
-pub mod secret_box;
 #[cfg(feature = "desktop")]
 pub mod scrape_console;
+pub mod secret_box;
 pub mod service_credentials;
 pub mod services;
 pub mod storage;
 pub mod sync;
 pub mod upstream_proxy;
+pub mod uptime_kuma;
 pub mod usage;
+// Rust Web Host 命令白名单：生产由 Node Host 承载，仅供 legacy-server 对拍/回滚使用。
+#[cfg(feature = "legacy-server")]
 pub mod web;
 #[cfg(feature = "desktop")]
 pub mod webview_profile;
@@ -66,10 +72,12 @@ pub(crate) mod window_size;
 #[cfg(feature = "desktop")]
 pub(crate) mod window_visibility;
 
-// Re-export commonly used types for headless binary
+// Re-export commonly used types for host entry points (desktop / legacy headless)
 pub use metrics::Metrics;
 pub use proxy::ProxyController;
 pub use rate_limiter::RateLimiter;
 pub use storage::Storage;
+#[cfg(feature = "legacy-server")]
 pub use web::create_web_router;
+#[cfg(feature = "legacy-server")]
 pub use web::WebState;

@@ -3,6 +3,9 @@
 //
 // 用法：node packages/flowlet-cred/scripts/compat.mjs
 //   FLOWLET_RUST_CRED=<path>   覆盖 Rust CLI 路径（默认主仓库 debug 构建）
+//   Rust CLI 默认不参与构建（Cargo feature `legacy-cred`），先构建一次：
+//   cargo build --manifest-path src-tauri/Cargo.toml \
+//     --no-default-features --features legacy-cred --bin flowlet-cred
 //
 // 做法：同一命令序列分别在两个**独立临时目录**跑 Rust 与 Node CLI（同一 mock GitLab /
 // mock Flowlet Web），逐条比较 exit/stdout/stderr 与 credentials.env / credentials.json

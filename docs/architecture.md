@@ -108,8 +108,11 @@ Host 能力。设备身份属于 Host 级持久化状态：桌面 Host 与 headl
 稳定的本机设备 ID。headless 不再复制 Storage、快照和代理启动装配，也不再因没有账号或路由
 而拒绝监听；空配置下的代理启动语义与桌面端一致。
 
-独立服务使用 `--no-default-features --bin headless` 编译，Cargo 的 `desktop` feature 隔离
-Tauri、WebKitGTK、窗口和控制台抓取模块。`build:web` 复用 React 页面，域命令在 Web 模式下由
+独立服务使用 `--no-default-features --features legacy-server --bin headless` 编译，Cargo 的
+`desktop` feature 隔离 Tauri、WebKitGTK、窗口和控制台抓取模块。生产 Web Host 自 2026-11-10 起
+由 Node Host（`packages/flowlet-core`）承载，Rust `headless` 与 `core::web` 只在
+`legacy-server` feature 下编译，作为对拍 oracle 与回滚对照，默认不进入桌面产物。
+`build:web` 复用 React 页面，域命令在 Web 模式下由
 `platform/web/client.ts` 转成同源 HTTP POST，经 `core::web` 的显式命令白名单执行；未知命令
 返回 501，不能通过 HTTP 调用任意桌面命令。Web Host 挂载渠道、模型、请求日志、会话管理、用量统计
 与用量洞察页面；会话管理只聚合本实例请求日志的观测会话（不读取服务端本机 Agent 原生会话文件），

@@ -188,7 +188,8 @@ Electron 加载**未修改**的 `dist-web`，真实界面完整渲染；Node 服
 
 1. **契约快照 + 类型生成**：从 Rust 端导出全部命令的入参/返回 JSON 示例（真实库副本），
    作为 Node 实现的 golden 输入；TS 类型逐条对照（含 `snake_case`/`camelCase` 混用）。
-2. **双实现影子对拍**：同一 DB 副本，`cargo run --bin headless` 与 Node server 同时暴露
+2. **双实现影子对拍**：同一 DB 副本，`cargo run --no-default-features --features legacy-server --bin headless`
+   与 Node server 同时暴露
    `/api/commands/:command`，脚本逐命令 diff（忽略时间戳类字段），差异即回归。
 3. **测试移植清单**：`proxy_tests.rs`（5,699 行）与 `storage_tests.rs`（4,402 行）按测试名
    归类为验收场景，Node 侧用 `node:test` / vitest 一条条复刻；**不允许用"看起来一样"代替断言**。

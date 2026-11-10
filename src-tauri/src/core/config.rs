@@ -1509,9 +1509,11 @@ mod tests {
             "updated_at": "2026-11-10T00:00:00Z"
         }))
         .unwrap();
-        assert_eq!(explicit.raw_scraped_json.as_deref(), Some("{\"mode\":\"x\"}"));
+        assert_eq!(
+            explicit.raw_scraped_json.as_deref(),
+            Some("{\"mode\":\"x\"}")
+        );
     }
-
 
     /// `usage_retention` 的解析必须对缺失、部分缺失和显式取值都稳健：旧配置里没有
     /// 这一段，不能因此启动失败，也不能默默退化成「不清理」。
@@ -2172,5 +2174,4 @@ impl UsageRetentionConfig {
                 .unwrap_or(defaults.balance_snapshot_max_per_account),
         }
     }
-
 }

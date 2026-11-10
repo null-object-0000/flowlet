@@ -38,6 +38,13 @@ import {
 } from "./catalog-files.ts";
 import { queryBalance } from "./balance.ts";
 import {
+  logout as qwenPlatformLogout,
+  pollLogin as qwenPlatformPollLogin,
+  startLogin as qwenPlatformStartLogin,
+  status as qwenPlatformStatus,
+  syncAccount as qwenPlatformSyncAccount,
+} from "./qwen-platform.ts";
+import {
   deleteCredential,
   exportCredentials,
   revealCredential,
@@ -341,7 +348,7 @@ function parseServiceCredentialInput(args: JsonRow): ServiceCredentialInput {
       );
     }
   }
-  for (const field of ["id", "token", "kind", "note", "envPrefix"]) {
+  for (const field of ["id", "token", "kind", "note", "envPrefix", "username"]) {
     const item = value[field];
     if (item !== undefined && item !== null && typeof item !== "string") {
       throw CommandError.badRequest(
@@ -438,6 +445,20 @@ export async function dispatch(ctx: WebContext, command: string, rawArgs: unknow
         ctx.customScrapeChannels = listCustomScrapeChannels() as unknown as JsonRow[];
       }
       return ctx.customScrapeChannels;
+
+    // 千问平台 device-flow 登录与 HTTP 直连同步：Web Host 没有 WebView，这条路径是
+    // 它获取余额与免费额度的唯一方式（权威实现 src-tauri/src/core/qwen_platform.rs）。
+    case "qwen_platform_status":
+      return qwenPlatformStatus(ctx, argString(args, "accountId"));
+    case "qwen_platform_login_start":
+      return qwenPlatformStartLogin(ctx, argString(args, "accountId"));
+    case "qwen_platform_login_poll":
+      return qwenPlatformPollLogin(ctx, argString(args, "accountId"));
+    case "qwen_platform_logout":
+      qwenPlatformLogout(ctx, argString(args, "accountId"));
+      return null;
+    case "qwen_platform_sync":
+      return qwenPlatformSyncAccount(ctx, argString(args, "accountId"));
 
     case "cleanup_old_logs": {
       const days = argInteger(args, "keepDays");

@@ -1,9 +1,9 @@
-// 三方服务凭据（GitLab）测试。Owner: node-web.
+// 三方服务凭据（GitLab / Dockhand / Jenkins / Beszel）测试。Owner: node-web.
 //
 // 运行：node --test packages/flowlet-core/src/web/__tests__/credentials.test.ts
 // 覆盖：URL 归一/子路径/绝对 URL 拒绝、GitLab 10.8.7 /user+/version 语义（403 降级）、
 // save 先校验后落库、编辑空 token 保留原值、掩码不泄明文、test 写回验证时间/错误、
-// delete、export 仅 enabled 明文、envKeys、分页头。
+// delete、export 仅 enabled 明文、envKeys、分页头、服务和邮箱凭据的 username 列。
 import assert from "node:assert/strict";
 import { createServer as createHttpServer, type IncomingMessage, type Server } from "node:http";
 import { after, describe, it } from "node:test";
@@ -12,8 +12,10 @@ import type { JsonRow } from "../../types.ts";
 import type { WebContext } from "../context.ts";
 import type { SecretBoxLike } from "../context.ts";
 import {
+  checkBeszel,
   checkDockhand,
   checkGitlab,
+  checkJenkins,
   defaultEnvPrefix,
   deleteCredential,
   envKeys,
@@ -32,6 +34,11 @@ import { GitlabClient, normalizeBaseUrl, resolveApiPath } from "../gitlab.ts";
 const VALID_TOKEN = "glpat-valid-token-1a2b";
 const ADMIN_TOKEN = "glpat-admin-token-9z8y";
 const DOCKHAND_TOKEN = "dockhand-test-fixture-token-9x8y";
+const JENKINS_USERNAME = "ci-bot";
+const JENKINS_TOKEN = "jenkins-test-fixture-token-9q8w";
+const BESZEL_EMAIL = "ops@example.com";
+const BESZEL_PASSWORD = "beszel-test-fixture-password-9k7j";
+const BESZEL_TOKEN = "pb-fixture-token-4c5d";
 
 // ─── Fake storage（node-storage 最后提供真实实现；这里验证编排语义） ────────
 
@@ -297,6 +304,202 @@ class MockDockhand {
   }
 }
 
+// ─── Mock Jenkins LTS（`/me/api/json` 身份端点） ──────────────────────────
+
+class MockJenkins {
+  #server: Server | null = null;
+  baseUrl = "";
+  // Jenkins 上下文路径部署：所有端点都在 /jenkins/... 下。
+  subpath = "/jenkins";
+  version = "2.452.1";
+  fullName = "CI Bot";
+  id = "ci-bot";
+  authorizations: Array<string | undefined> = [];
+  requests: Array<{ method: string; path: string }> = [];
+
+  async start(): Promise<void> {
+    this.#server = createHttpServer((request, response) => {
+      void this.#handle(request, response);
+    });
+    await new Promise<void>((resolve, reject) => {
+      this.#server!.once("error", reject);
+      this.#server!.listen(0, "127.0.0.1", () => {
+        const address = this.#server!.address();
+        const port = typeof address === "object" && address ? address.port : 0;
+        this.baseUrl = `http://127.0.0.1:${port}`;
+        resolve();
+      });
+    });
+    cleanup.push(
+      () =>
+        new Promise<void>((resolve) => {
+          this.#server?.close(() => resolve());
+        }),
+    );
+  }
+
+  async #handle(request: IncomingMessage, response: ServerResponseLike): Promise<void> {
+    const url = new URL(request.url ?? "/", "http://localhost");
+    const authorization = request.headers.authorization;
+    this.requests.push({ method: request.method ?? "GET", path: `${url.pathname}${url.search}` });
+    this.authorizations.push(typeof authorization === "string" ? authorization : undefined);
+    const send = (
+      status: number,
+      value: unknown,
+      headers: Record<string, string> = {},
+    ): void => {
+      const body = Buffer.from(JSON.stringify(value), "utf8");
+      response.writeHead(status, {
+        "content-type": "application/json",
+        "content-length": String(body.length),
+        ...headers,
+      });
+      response.end(body);
+    };
+
+    const suffix = url.pathname.startsWith(this.subpath)
+      ? url.pathname.slice(this.subpath.length)
+      : url.pathname;
+    if (suffix === "/me/api/json") {
+      // Basic 认证：token 不匹配即 401，与真实 Jenkins 一致。
+      const encoded = typeof authorization === "string" ? authorization.replace(/^Basic /, "") : "";
+      const decoded = encoded === "" ? "" : Buffer.from(encoded, "base64").toString("utf8");
+      const separator = decoded.indexOf(":");
+      const username = separator < 0 ? "" : decoded.slice(0, separator);
+      const token = separator < 0 ? "" : decoded.slice(separator + 1);
+      if (token !== JENKINS_TOKEN || username.trim() === "") {
+        return send(401, { message: "Unauthorized" });
+      }
+      return send(
+        200,
+        { id: this.id, fullName: this.fullName },
+        { "x-jenkins": this.version },
+      );
+    }
+    send(404, { message: "404 Not Found" });
+  }
+}
+
+// ─── Mock Beszel Hub（PocketBase 邮箱+密码认证 / info / systems 集合） ──────
+
+class MockBeszel {
+  #server: Server | null = null;
+  baseUrl = "";
+  /** info 响应里的 v；null 表示响应体不含 v（info 失败不致命场景）。 */
+  version: string | null = "0.21.1";
+  totalItems = 3;
+  /** auth 端点强制失败时的状态；null 表示按邮箱/密码判断。 */
+  authStatus: number | null = null;
+  /** systems 端点强制失败时的状态。 */
+  systemsStatus: number | null = null;
+  /** auth 记录里的 email；undefined 表示回显 identity，空串用于测试回退入参邮箱。 */
+  recordEmail: string | undefined = undefined;
+  requests: Array<{
+    method: string;
+    path: string;
+    authorization: string | undefined;
+    userAgent: string | undefined;
+    body: string;
+  }> = [];
+
+  async start(): Promise<void> {
+    this.#server = createHttpServer((request, response) => {
+      void this.#handle(request, response);
+    });
+    await new Promise<void>((resolve, reject) => {
+      this.#server!.once("error", reject);
+      this.#server!.listen(0, "127.0.0.1", () => {
+        const address = this.#server!.address();
+        const port = typeof address === "object" && address ? address.port : 0;
+        this.baseUrl = `http://127.0.0.1:${port}`;
+        resolve();
+      });
+    });
+    cleanup.push(
+      () =>
+        new Promise<void>((resolve) => {
+          this.#server?.close(() => resolve());
+        }),
+    );
+  }
+
+  async #handle(request: IncomingMessage, response: ServerResponseLike): Promise<void> {
+    const url = new URL(request.url ?? "/", "http://localhost");
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk as Buffer));
+    const body = Buffer.concat(chunks).toString("utf8");
+    this.requests.push({
+      method: request.method ?? "GET",
+      path: `${url.pathname}${url.search}`,
+      authorization:
+        typeof request.headers.authorization === "string"
+          ? request.headers.authorization
+          : undefined,
+      userAgent:
+        typeof request.headers["user-agent"] === "string"
+          ? request.headers["user-agent"]
+          : undefined,
+      body,
+    });
+    const send = (status: number, value: unknown): void => {
+      const payload = Buffer.from(JSON.stringify(value), "utf8");
+      response.writeHead(status, {
+        "content-type": "application/json",
+        "content-length": String(payload.length),
+      });
+      response.end(payload);
+    };
+    const authorized = request.headers.authorization === BESZEL_TOKEN;
+
+    if (url.pathname === "/api/collections/users/auth-with-password") {
+      if (this.authStatus !== null) {
+        return send(this.authStatus, { code: this.authStatus, message: "Failed to authenticate." });
+      }
+      let parsed: JsonRow = {};
+      try {
+        parsed = JSON.parse(body) as JsonRow;
+      } catch {
+        parsed = {};
+      }
+      // 密码错误或 identity 不是邮箱 → PocketBase 返回 400（不是 401）。
+      if (
+        parsed.password !== BESZEL_PASSWORD ||
+        typeof parsed.identity !== "string" ||
+        !parsed.identity.includes("@")
+      ) {
+        return send(400, { code: 400, message: "Failed to authenticate." });
+      }
+      return send(200, {
+        token: BESZEL_TOKEN,
+        record: {
+          id: "user-1",
+          email: this.recordEmail === undefined ? parsed.identity : this.recordEmail,
+          name: "Ops",
+          role: "admin",
+        },
+      });
+    }
+    if (url.pathname === "/api/beszel/info") {
+      if (!authorized) return send(401, { code: 401, message: "Unauthorized" });
+      return send(200, this.version === null ? { publicKey: "x" } : { v: this.version });
+    }
+    if (url.pathname === "/api/collections/systems/records") {
+      if (!authorized) return send(401, { code: 401, message: "Unauthorized" });
+      if (this.systemsStatus !== null) {
+        return send(this.systemsStatus, { code: this.systemsStatus, message: "systems-boom" });
+      }
+      return send(200, {
+        page: 1,
+        perPage: Number(url.searchParams.get("perPage") ?? "0"),
+        totalItems: this.totalItems,
+        totalPages: 1,
+        items: [{ id: "sys-1", name: "prod-1", host: "10.0.0.1", status: "up", port: "45876" }],
+      });
+    }
+    send(404, { code: 404, message: "404 Not Found" });
+  }
+}
+
 const cleanup: Array<() => Promise<void>> = [];
 after(async () => {
   for (const fn of cleanup.reverse()) await fn();
@@ -311,6 +514,18 @@ async function startMock(options: GitlabMockOptions = {}): Promise<MockGitlab> {
 
 async function startMockDockhand(): Promise<MockDockhand> {
   const mock = new MockDockhand();
+  await mock.start();
+  return mock;
+}
+
+async function startMockJenkins(): Promise<MockJenkins> {
+  const mock = new MockJenkins();
+  await mock.start();
+  return mock;
+}
+
+async function startMockBeszel(): Promise<MockBeszel> {
+  const mock = new MockBeszel();
   await mock.start();
   return mock;
 }
@@ -369,6 +584,7 @@ describe("GitLab 客户端基础", () => {
         label: "GitLab",
         baseUrlHint: "https://gitlab.example.com",
         tokenLabel: "Personal Access Token（需要 api scope）",
+        usernameLabel: null,
         defaultEnvPrefix: "GITLAB",
         available: true,
       },
@@ -377,7 +593,35 @@ describe("GitLab 客户端基础", () => {
         label: "Dockhand",
         baseUrlHint: "http://dockhand.example.com:3000",
         tokenLabel: "API Token（Dockhand 设置 → API 令牌）",
+        usernameLabel: null,
         defaultEnvPrefix: "DOCKHAND",
+        available: true,
+      },
+      {
+        id: "jenkins",
+        label: "Jenkins",
+        baseUrlHint: "https://jenkins.example.com",
+        tokenLabel: "API Token（Jenkins 用户设置 → API Token）",
+        usernameLabel: "用户名",
+        defaultEnvPrefix: "JENKINS",
+        available: true,
+      },
+      {
+        id: "uptime-kuma",
+        label: "Uptime Kuma",
+        baseUrlHint: "https://uptime-kuma.example.com/uptime-kuma",
+        tokenLabel: "API Key（设置 → API 密钥；仅用于读取 /metrics 指标）",
+        usernameLabel: null,
+        defaultEnvPrefix: "UPTIME_KUMA",
+        available: true,
+      },
+      {
+        id: "beszel",
+        label: "Beszel",
+        baseUrlHint: "http://beszel.example.com:8090",
+        tokenLabel: "登录密码（Beszel 用户密码）",
+        usernameLabel: "邮箱",
+        defaultEnvPrefix: "BESZEL",
         available: true,
       },
     ]);
@@ -482,7 +726,7 @@ describe("服务凭据编排", () => {
     );
     await assert.rejects(
       () => save(ctx, inputFor(mock, { provider: "github" }) as never, false),
-      /暂不支持的服务类型：github（当前支持 gitlab、dockhand）/,
+      /暂不支持的服务类型：github（当前支持 gitlab、dockhand、jenkins、uptime-kuma、beszel）/,
     );
     await assert.rejects(
       () => save(ctx, inputFor(mock, { baseUrl: "ftp://example.com" }) as never, false),
@@ -644,6 +888,7 @@ describe("服务凭据编排", () => {
       name: enabled.name,
       provider: "gitlab",
       baseUrl: enabled.baseUrl,
+      username: null,
       envPrefix: "GITLAB",
       token: VALID_TOKEN,
     });
@@ -689,6 +934,7 @@ describe("服务凭据编排", () => {
       "provider",
       "secretHint",
       "updatedAt",
+      "username",
     ]);
     // 校验时间戳为秒级 RFC3339（无毫秒）
     assert.ok(!String(items[0]!.createdAt).includes("."));
@@ -847,6 +1093,7 @@ describe("Dockhand 凭据", () => {
         name: "面板",
         provider: "dockhand",
         baseUrl: "http://host:3000",
+        username: null,
         envPrefix: "DOCKHAND",
         token: DOCKHAND_TOKEN,
       }),
@@ -868,8 +1115,491 @@ describe("Dockhand 凭据", () => {
       /GitLab 地址必须是 http 或 https/,
     );
     await assert.rejects(
+      () => save(ctx, { name: "x", provider: "beszel", baseUrl: "ftp://host:8090", token: "t" } as never, false),
+      /Beszel 地址必须是 http 或 https/,
+    );
+    await assert.rejects(
       () => save(ctx, { name: "x", provider: "github", baseUrl: "http://host", token: "t" } as never, false),
-      /暂不支持的服务类型：github（当前支持 gitlab、dockhand）/,
+      /暂不支持的服务类型：github（当前支持 gitlab、dockhand、jenkins、uptime-kuma、beszel）/,
+    );
+  });
+});
+
+// ─── Jenkins provider（与 Rust `check_jenkins` / save/test 分发对齐） ──────
+
+function jenkinsInputFor(mock: MockJenkins, overrides: Partial<JsonRow> = {}): JsonRow {
+  return {
+    name: "Jenkins 主实例",
+    provider: "jenkins",
+    baseUrl: `${mock.baseUrl}${mock.subpath}`,
+    username: JENKINS_USERNAME,
+    token: JENKINS_TOKEN,
+    ...overrides,
+  };
+}
+
+function jenkinsAuthorization(username: string, token: string): string {
+  return `Basic ${Buffer.from(`${username}:${token}`, "utf8").toString("base64")}`;
+}
+
+describe("Jenkins 凭据", () => {
+  it("checkJenkins：成功返回 username/version 与 Basic 头；401/地址非法返回结构化错误", async () => {
+    const mock = await startMockJenkins();
+    const ok = await checkJenkins(
+      `${mock.baseUrl}${mock.subpath}`,
+      JENKINS_USERNAME,
+      JENKINS_TOKEN,
+      false,
+    );
+    assert.deepEqual(ok, {
+      ok: true,
+      username: "CI Bot",
+      version: "2.452.1",
+      detail: null,
+      error: null,
+    });
+    assert.equal(mock.requests[0]!.path, "/jenkins/me/api/json");
+    assert.equal(mock.authorizations[0], jenkinsAuthorization(JENKINS_USERNAME, JENKINS_TOKEN));
+
+    const denied = await checkJenkins(
+      `${mock.baseUrl}${mock.subpath}`,
+      JENKINS_USERNAME,
+      "wrong-token",
+      false,
+    );
+    assert.equal(denied.ok, false);
+    assert.equal(denied.username, null);
+    assert.equal(denied.version, null);
+    assert.equal(
+      denied.error,
+      "Jenkins API 401: Unauthorized（用户名或 API Token 无效，请到 Jenkins 用户设置页确认 API Token）",
+    );
+
+    // 地址非法/用户名为空时也返回结构化错误，不抛异常。
+    const invalid = await checkJenkins("ftp://host", JENKINS_USERNAME, JENKINS_TOKEN, false);
+    assert.equal(invalid.ok, false);
+    assert.match(String(invalid.error), /Jenkins 地址必须是 http 或 https/);
+    const missingUser = await checkJenkins(`${mock.baseUrl}${mock.subpath}`, "  ", JENKINS_TOKEN, false);
+    assert.equal(missingUser.ok, false);
+    assert.equal(missingUser.error, "Jenkins 用户名不能为空");
+  });
+
+  it("save(jenkins)：username 明文落库并回显，token 仍加密", async () => {
+    const mock = await startMockJenkins();
+    const storage = new FakeCredentialStorage();
+    const ctx = makeCtx(storage);
+    const view = await save(ctx, jenkinsInputFor(mock) as never, false);
+    assert.equal(view.provider, "jenkins");
+    assert.equal(view.username, JENKINS_USERNAME);
+    assert.equal(view.envPrefix, "JENKINS");
+    assert.equal(view.secretHint, "••••9q8w");
+    assert.equal(view.lastError, null);
+    assert.equal(storage.upserts, 1);
+    // 只有校验通过后才写库：请求确实打过 /me/api/json（Basic 认证）。
+    assert.equal(mock.requests.at(-1)!.path, "/jenkins/me/api/json");
+    assert.equal(mock.authorizations.at(-1), jenkinsAuthorization(JENKINS_USERNAME, JENKINS_TOKEN));
+
+    const row = storage.getServiceCredential(view.id)!;
+    assert.equal(row.username, JENKINS_USERNAME);
+    assert.notEqual(row.secret_ciphertext, JENKINS_TOKEN);
+    assert.equal(ctx.secrets.decrypt(String(row.secret_ciphertext)), JENKINS_TOKEN);
+    // 列表视图只给 username（明文）与 token 掩码，不含 token 明文。
+    const listed = list(ctx)[0]!;
+    assert.equal(listed.username, JENKINS_USERNAME);
+    assert.ok(!JSON.stringify(listed).includes(JENKINS_TOKEN));
+    // 导出（pull 用）带 username。
+    const exported = exportCredentials(ctx);
+    assert.equal(exported.length, 1);
+    assert.equal(exported[0]!.username, JENKINS_USERNAME);
+  });
+
+  it("save(jenkins)：username 必填/长度/冒号空格控制字符校验，失败不落库", async () => {
+    const mock = await startMockJenkins();
+    const storage = new FakeCredentialStorage();
+    const ctx = makeCtx(storage);
+    await assert.rejects(
+      () => save(ctx, jenkinsInputFor(mock, { username: undefined }) as never, false),
+      /Jenkins 需要填写用户名（API Token 必须与用户名一起认证）/,
+    );
+    await assert.rejects(
+      () => save(ctx, jenkinsInputFor(mock, { username: "   " }) as never, false),
+      /Jenkins 需要填写用户名（API Token 必须与用户名一起认证）/,
+    );
+    await assert.rejects(
+      () => save(ctx, jenkinsInputFor(mock, { username: "a".repeat(65) }) as never, false),
+      /Jenkins 用户名不能超过 64 个字符/,
+    );
+    for (const bad of ["al ice", "al:ice", "al\u0001ice"]) {
+      await assert.rejects(
+        () => save(ctx, jenkinsInputFor(mock, { username: bad }) as never, false),
+        /Jenkins 用户名不能包含冒号、空格或控制字符/,
+      );
+    }
+    assert.equal(storage.upserts, 0);
+    assert.equal(storage.listServiceCredentials().length, 0);
+  });
+
+  it("save(jenkins)：编辑时空 username 保留原值；显式传值更新；非 jenkins 忽略 username", async () => {
+    const mock = await startMockJenkins();
+    const storage = new FakeCredentialStorage();
+    const ctx = makeCtx(storage);
+    const created = await save(ctx, jenkinsInputFor(mock) as never, false);
+
+    const kept = await save(
+      ctx,
+      jenkinsInputFor(mock, { id: created.id, name: "改名了", username: "" }) as never,
+      false,
+    );
+    assert.equal(kept.id, created.id);
+    assert.equal(kept.username, JENKINS_USERNAME);
+    assert.equal(storage.getServiceCredential(created.id)!.username, JENKINS_USERNAME);
+
+    const updated = await save(
+      ctx,
+      jenkinsInputFor(mock, { id: created.id, username: "  ci-bot-2  " }) as never,
+      false,
+    );
+    assert.equal(updated.username, "ci-bot-2");
+    assert.equal(storage.getServiceCredential(created.id)!.username, "ci-bot-2");
+
+    // 非 jenkins：入参 username 被忽略，落库 NULL。
+    const gitlab = await startMock();
+    const ignored = await save(
+      ctx,
+      inputFor(gitlab, { username: "should-be-ignored" }) as never,
+      false,
+    );
+    assert.equal(ignored.username, null);
+    assert.equal(storage.getServiceCredential(ignored.id)!.username ?? null, null);
+  });
+
+  it("test(jenkins)：成功写 lastVerifiedAt（username/version）；失败写 lastError", async () => {
+    const mock = await startMockJenkins();
+    const storage = new FakeCredentialStorage();
+    const ctx = makeCtx(storage);
+    const created = await save(ctx, jenkinsInputFor(mock) as never, false);
+    storage.getServiceCredential(created.id)!.last_error = "旧错误";
+
+    const check = await testCredential(ctx, created.id, false);
+    assert.deepEqual(check, {
+      ok: true,
+      username: "CI Bot",
+      version: "2.452.1",
+      detail: null,
+      error: null,
+    });
+    const row = storage.getServiceCredential(created.id)!;
+    assert.equal(row.last_error, null);
+    assert.equal(typeof row.last_verified_at, "string");
+
+    const previousVerified = "2026-01-01T00:00:00Z";
+    row.last_verified_at = previousVerified;
+    row.secret_ciphertext = ctx.secrets.encrypt("wrong-token");
+    const failed = await testCredential(ctx, created.id, false);
+    assert.equal(failed.ok, false);
+    assert.match(String(failed.error), /^Jenkins API 401: /);
+    const after = storage.getServiceCredential(created.id)!;
+    assert.equal(after.last_verified_at, previousVerified);
+    assert.match(String(after.last_error), /用户名或 API Token 无效/);
+  });
+
+  it("envKeys：Jenkins 输出 URL/USER/TOKEN（USER 取 username，缺失为空串）", () => {
+    assert.deepEqual(
+      envKeys({
+        name: "Jenkins",
+        provider: "jenkins",
+        baseUrl: "https://jenkins.example.com",
+        username: JENKINS_USERNAME,
+        envPrefix: "JENKINS",
+        token: JENKINS_TOKEN,
+      }),
+      [
+        ["JENKINS_URL", "https://jenkins.example.com", "service"],
+        ["JENKINS_USER", JENKINS_USERNAME, "service"],
+        ["JENKINS_TOKEN", JENKINS_TOKEN, "cli_token"],
+      ],
+    );
+    // 多实例/旧导出没有 username：USER 为空串，仍是三把键。
+    assert.deepEqual(
+      envKeys({
+        name: "Jenkins NA",
+        provider: "jenkins",
+        baseUrl: "https://jenkins-na.example.com",
+        username: null,
+        envPrefix: "JENKINS_NA",
+        token: JENKINS_TOKEN,
+      }),
+      [
+        ["JENKINS_NA_URL", "https://jenkins-na.example.com", "service"],
+        ["JENKINS_NA_USER", "", "service"],
+        ["JENKINS_NA_TOKEN", JENKINS_TOKEN, "cli_token"],
+      ],
+    );
+  });
+});
+
+// ─── Beszel provider（与 Rust `check_beszel` / save/test 分发对齐） ────────
+
+function beszelInputFor(mock: MockBeszel, overrides: Partial<JsonRow> = {}): JsonRow {
+  return {
+    name: "Beszel 监控 Hub",
+    provider: "beszel",
+    baseUrl: mock.baseUrl,
+    username: BESZEL_EMAIL,
+    token: BESZEL_PASSWORD,
+    ...overrides,
+  };
+}
+
+describe("Beszel 凭据", () => {
+  it("checkBeszel：auth → info → systems，username 取记录邮箱、detail 为系统数量", async () => {
+    const mock = await startMockBeszel();
+    const ok = await checkBeszel(mock.baseUrl, BESZEL_EMAIL, BESZEL_PASSWORD, false);
+    assert.deepEqual(ok, {
+      ok: true,
+      username: BESZEL_EMAIL,
+      version: "0.21.1",
+      detail: "3 台系统",
+      error: null,
+    });
+    // 一次命令只认证一次：auth 用 identity/password，后续请求带 PocketBase 原生 token。
+    const authRequests = mock.requests.filter(
+      (request) => request.path === "/api/collections/users/auth-with-password",
+    );
+    assert.equal(authRequests.length, 1);
+    assert.deepEqual(JSON.parse(authRequests[0]!.body), {
+      identity: BESZEL_EMAIL,
+      password: BESZEL_PASSWORD,
+    });
+    const infoRequest = mock.requests.find((request) => request.path === "/api/beszel/info")!;
+    assert.equal(infoRequest.authorization, BESZEL_TOKEN);
+    assert.ok(!String(infoRequest.authorization).startsWith("Bearer "));
+    assert.equal(infoRequest.userAgent, "flowlet/0.2.0");
+    // 校验只需要 totalItems，systems 用 perPage=1。
+    const systemsRequest = mock.requests.find((request) =>
+      request.path.startsWith("/api/collections/systems/records"),
+    )!;
+    assert.equal(
+      new URL(systemsRequest.path, "http://localhost").searchParams.get("perPage"),
+      "1",
+    );
+
+    // 服务端记录没有 email 时回退入参邮箱。
+    const noEmail = await startMockBeszel();
+    noEmail.recordEmail = "";
+    const fallback = await checkBeszel(noEmail.baseUrl, BESZEL_EMAIL, BESZEL_PASSWORD, false);
+    assert.equal(fallback.username, BESZEL_EMAIL);
+  });
+
+  it("checkBeszel：info 失败不致命（version 为 null），auth/systems 失败即失败", async () => {
+    const degraded = await startMockBeszel();
+    degraded.version = null;
+    const ok = await checkBeszel(degraded.baseUrl, BESZEL_EMAIL, BESZEL_PASSWORD, false);
+    assert.deepEqual(ok, {
+      ok: true,
+      username: BESZEL_EMAIL,
+      version: null,
+      detail: "3 台系统",
+      error: null,
+    });
+
+    const denied = await startMockBeszel();
+    const badAuth = await checkBeszel(denied.baseUrl, BESZEL_EMAIL, "wrong-password", false);
+    assert.equal(badAuth.ok, false);
+    assert.equal(badAuth.username, null);
+    assert.equal(badAuth.version, null);
+    assert.equal(badAuth.detail, null);
+    assert.equal(
+      badAuth.error,
+      "Beszel API 400: Failed to authenticate.（邮箱或密码错误，请确认是 Beszel 用户账号（不是 PocketBase 超级管理员））",
+    );
+
+    const broken = await startMockBeszel();
+    broken.systemsStatus = 500;
+    const badSystems = await checkBeszel(broken.baseUrl, BESZEL_EMAIL, BESZEL_PASSWORD, false);
+    assert.equal(badSystems.ok, false);
+    assert.equal(
+      badSystems.error,
+      "Beszel API 500: systems-boom（请检查邮箱、密码、实例地址与网络连通性）",
+    );
+
+    // 地址非法/邮箱为空时也返回结构化错误，不抛异常。
+    const invalid = await checkBeszel("ftp://host", BESZEL_EMAIL, BESZEL_PASSWORD, false);
+    assert.equal(invalid.ok, false);
+    assert.match(String(invalid.error), /Beszel 地址必须是 http 或 https/);
+    const missingEmail = await checkBeszel(broken.baseUrl, "  ", BESZEL_PASSWORD, false);
+    assert.equal(missingEmail.ok, false);
+    assert.equal(missingEmail.error, "Beszel 邮箱不能为空");
+  });
+
+  it("save(beszel)：邮箱明文落库、密码加密；地址归一剥 /api 与 /_/", async () => {
+    const mock = await startMockBeszel();
+    const storage = new FakeCredentialStorage();
+    const ctx = makeCtx(storage);
+    const view = await save(
+      ctx,
+      beszelInputFor(mock, { baseUrl: `${mock.baseUrl}/api/` }) as never,
+      false,
+    );
+    assert.equal(view.provider, "beszel");
+    assert.equal(view.baseUrl, mock.baseUrl);
+    assert.equal(view.username, BESZEL_EMAIL);
+    assert.equal(view.envPrefix, "BESZEL");
+    assert.equal(view.secretHint, "••••9k7j");
+    assert.equal(view.lastError, null);
+    assert.equal(storage.upserts, 1);
+    // 只有校验通过后才写库。
+    assert.ok(
+      mock.requests.some((request) => request.path === "/api/collections/users/auth-with-password"),
+    );
+
+    const row = storage.getServiceCredential(view.id)!;
+    assert.equal(row.username, BESZEL_EMAIL);
+    assert.equal(row.env_prefix, "BESZEL");
+    assert.notEqual(row.secret_ciphertext, BESZEL_PASSWORD);
+    assert.equal(ctx.secrets.decrypt(String(row.secret_ciphertext)), BESZEL_PASSWORD);
+    // 列表/导出带邮箱，但不含密码明文。
+    const listed = list(ctx)[0]!;
+    assert.equal(listed.username, BESZEL_EMAIL);
+    assert.ok(!JSON.stringify(listed).includes(BESZEL_PASSWORD));
+    const exported = exportCredentials(ctx);
+    assert.equal(exported.length, 1);
+    assert.equal(exported[0]!.username, BESZEL_EMAIL);
+    assert.equal(exported[0]!.token, BESZEL_PASSWORD);
+
+    // PocketBase 管理面板地址后缀也要剥掉。
+    const second = await save(
+      ctx,
+      beszelInputFor(mock, {
+        name: "Beszel 面板地址",
+        baseUrl: `${mock.baseUrl}/_/`,
+        envPrefix: "BESZEL_PANEL",
+      }) as never,
+      false,
+    );
+    assert.equal(second.baseUrl, mock.baseUrl);
+  });
+
+  it("save(beszel)：邮箱必填/长度/基本 @ 校验，失败不落库也不发请求", async () => {
+    const mock = await startMockBeszel();
+    const storage = new FakeCredentialStorage();
+    const ctx = makeCtx(storage);
+    await assert.rejects(
+      () => save(ctx, beszelInputFor(mock, { username: undefined }) as never, false),
+      /Beszel 需要填写邮箱（Beszel 用邮箱 \+ 密码登录）/,
+    );
+    await assert.rejects(
+      () => save(ctx, beszelInputFor(mock, { username: "   " }) as never, false),
+      /Beszel 需要填写邮箱（Beszel 用邮箱 \+ 密码登录）/,
+    );
+    await assert.rejects(
+      () => save(ctx, beszelInputFor(mock, { username: `${"a".repeat(250)}@example.com` }) as never, false),
+      /Beszel 邮箱不能超过 254 个字符/,
+    );
+    for (const bad of ["no-at-sign", "@example.com", "you@", "a@b@c.com"]) {
+      await assert.rejects(
+        () => save(ctx, beszelInputFor(mock, { username: bad }) as never, false),
+        /Beszel 邮箱格式不正确/,
+      );
+    }
+    assert.equal(storage.upserts, 0);
+    assert.equal(storage.listServiceCredentials().length, 0);
+    // 校验在发网络请求之前完成。
+    assert.equal(mock.requests.length, 0);
+  });
+
+  it("save(beszel)：编辑时空 username 保留原邮箱；显式传值更新", async () => {
+    const mock = await startMockBeszel();
+    const storage = new FakeCredentialStorage();
+    const ctx = makeCtx(storage);
+    const created = await save(ctx, beszelInputFor(mock) as never, false);
+
+    const kept = await save(
+      ctx,
+      beszelInputFor(mock, {
+        id: created.id,
+        name: "改名的 Hub",
+        username: "",
+        token: "",
+      }) as never,
+      false,
+    );
+    assert.equal(kept.id, created.id);
+    assert.equal(kept.username, BESZEL_EMAIL);
+    assert.equal(storage.getServiceCredential(created.id)!.username, BESZEL_EMAIL);
+    // 空 token 也保留原密码（解密后重新认证仍成功）。
+    assert.equal(ctx.secrets.decrypt(String(storage.getServiceCredential(created.id)!.secret_ciphertext)), BESZEL_PASSWORD);
+
+    const updated = await save(
+      ctx,
+      beszelInputFor(mock, { id: created.id, username: "  other@example.com  " }) as never,
+      false,
+    );
+    assert.equal(updated.username, "other@example.com");
+    assert.equal(storage.getServiceCredential(created.id)!.username, "other@example.com");
+  });
+
+  it("test(beszel)：成功写 lastVerifiedAt（邮箱/版本/系统数）；失败写 lastError", async () => {
+    const mock = await startMockBeszel();
+    const storage = new FakeCredentialStorage();
+    const ctx = makeCtx(storage);
+    const created = await save(ctx, beszelInputFor(mock) as never, false);
+    storage.getServiceCredential(created.id)!.last_error = "旧错误";
+
+    const check = await testCredential(ctx, created.id, false);
+    assert.deepEqual(check, {
+      ok: true,
+      username: BESZEL_EMAIL,
+      version: "0.21.1",
+      detail: "3 台系统",
+      error: null,
+    });
+    const row = storage.getServiceCredential(created.id)!;
+    assert.equal(row.last_error, null);
+    assert.equal(typeof row.last_verified_at, "string");
+
+    const previousVerified = "2026-01-01T00:00:00Z";
+    row.last_verified_at = previousVerified;
+    row.secret_ciphertext = ctx.secrets.encrypt("wrong-password");
+    const failed = await testCredential(ctx, created.id, false);
+    assert.equal(failed.ok, false);
+    assert.match(String(failed.error), /^Beszel API 400: /);
+    const after = storage.getServiceCredential(created.id)!;
+    assert.equal(after.last_verified_at, previousVerified);
+    assert.match(String(after.last_error), /邮箱或密码错误/);
+  });
+
+  it("envKeys：Beszel 输出 URL/EMAIL/PASSWORD（EMAIL 取 username，缺失为空串）", () => {
+    assert.deepEqual(
+      envKeys({
+        name: "Beszel",
+        provider: "beszel",
+        baseUrl: "http://beszel.example.com:8090",
+        username: BESZEL_EMAIL,
+        envPrefix: "BESZEL",
+        token: BESZEL_PASSWORD,
+      }),
+      [
+        ["BESZEL_URL", "http://beszel.example.com:8090", "service"],
+        ["BESZEL_EMAIL", BESZEL_EMAIL, "service"],
+        ["BESZEL_PASSWORD", BESZEL_PASSWORD, "cli_token"],
+      ],
+    );
+    // 多实例/旧服务端 export 没有 username：EMAIL 为空串，仍是三把键。
+    assert.deepEqual(
+      envKeys({
+        name: "Beszel 北美",
+        provider: "beszel",
+        baseUrl: "http://beszel-na.example.com:8090",
+        username: null,
+        envPrefix: "BESZEL_NA",
+        token: BESZEL_PASSWORD,
+      }),
+      [
+        ["BESZEL_NA_URL", "http://beszel-na.example.com:8090", "service"],
+        ["BESZEL_NA_EMAIL", "", "service"],
+        ["BESZEL_NA_PASSWORD", BESZEL_PASSWORD, "cli_token"],
+      ],
     );
   });
 });
@@ -900,8 +1630,12 @@ describe("环境前缀 / 多实例", () => {
   it("defaultEnvPrefix / normalizeEnvPrefix：默认/大写/trim/长度/字符规则", () => {
     assert.equal(defaultEnvPrefix("gitlab"), "GITLAB");
     assert.equal(defaultEnvPrefix("dockhand"), "DOCKHAND");
+    assert.equal(defaultEnvPrefix("jenkins"), "JENKINS");
+    assert.equal(defaultEnvPrefix("uptime-kuma"), "UPTIME_KUMA");
+    assert.equal(defaultEnvPrefix("beszel"), "BESZEL");
     assert.equal(normalizeEnvPrefix("", "gitlab"), "GITLAB");
     assert.equal(normalizeEnvPrefix("   ", "dockhand"), "DOCKHAND");
+    assert.equal(normalizeEnvPrefix("", "jenkins"), "JENKINS");
     assert.equal(normalizeEnvPrefix(null, "gitlab"), "GITLAB");
     assert.equal(normalizeEnvPrefix(undefined, "dockhand"), "DOCKHAND");
     assert.equal(normalizeEnvPrefix(" na ", "dockhand"), "NA");

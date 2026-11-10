@@ -2370,6 +2370,27 @@ pub(crate) async fn scrape_balance(
     if !interactive && scrape_interaction_required(&state, &account_id)? {
         return Err("账号正在等待控制台登录或人工处理，本轮自动同步已跳过".to_string());
     }
+    // 0. 千问 API 按量付费账号已登录千问平台时，优先走官方 HTTP 接口
+    //    （core::qwen_platform），完全不创建 WebView：Docker / Web Host 可用，
+    //    也不再受控制台页面结构与 WebKitGTK 崩溃影响。未登录或 HTTP 失败时静默
+    //    回退到下面的控制台抓取，保持桌面端既有行为。
+    if let Some(outcome) =
+        crate::core::qwen_platform::auto_sync_account(&state.services, &account_id).await
+    {
+        return Ok(ScrapeBalanceResult {
+            balance: outcome.balance,
+            currency: outcome.currency,
+            plan_name: None,
+            token_total: None,
+            token_used: None,
+            token_remaining: None,
+            token_pack_expire_at: None,
+            token_packs: None,
+            raw_scraped_json: Some(outcome.raw_scraped_json),
+            source: "qwen_platform".to_string(),
+            synced_at: outcome.synced_at,
+        });
+    }
     // 1. 解析模式配置。同时派生账号凭据指纹,供 extractor 把控制台列表里的 key
     //    与本账号实际使用的 key 对上(仅自定义描述符会用到,见 4.6)。
     let (channel_id, mode, credential) = {

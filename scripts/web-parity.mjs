@@ -6,6 +6,11 @@
 //   FLOWLET_RUST_HEADLESS=<二进制>      默认 <主仓库>/src-tauri/target/release/headless
 //   FLOWLET_PARITY_KEEP=1               保留两侧数据库副本（默认保留，便于排查）
 //
+// Rust oracle 默认不参与构建（Cargo feature `legacy-server`，生产 Web Host 已是 Node Host），
+// 需要先显式构建一次：
+//   cargo build --release --manifest-path src-tauri/Cargo.toml \
+//     --no-default-features --features legacy-server --bin headless
+//
 // 服务凭据对拍：脚本内启动 mock GitLab（CE 10.8.7 语义：/api/v4/user、/api/v4/version），
 // 两侧以 insecure + http 指向它，验证 providers/list/save/test/export/delete 与错误文案。
 //
@@ -702,7 +707,11 @@ class MockGitlab {
 
 async function main() {
   if (!existsSync(STATIC_DIR)) throw new Error(`找不到静态界面目录：${STATIC_DIR}`);
-  if (!existsSync(RUST_HEADLESS)) throw new Error(`找不到 Rust headless 二进制：${RUST_HEADLESS}（可用 FLOWLET_RUST_HEADLESS 指定）`);
+  if (!existsSync(RUST_HEADLESS)) throw new Error(
+    `找不到 Rust headless 二进制：${RUST_HEADLESS}（可用 FLOWLET_RUST_HEADLESS 指定；` +
+      "或先构建：cargo build --release --manifest-path src-tauri/Cargo.toml " +
+      "--no-default-features --features legacy-server --bin headless）",
+  );
   if (!existsSync(NODE_ENTRY)) throw new Error(`找不到 Node host 入口：${NODE_ENTRY}`);
   mkdirSync(RUN_DIR, { recursive: true });
   console.log(`对拍工作目录：${RUN_DIR}`);

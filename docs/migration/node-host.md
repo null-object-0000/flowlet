@@ -142,7 +142,7 @@ accountRoutingScores() / usageSummaryRange(startAt,endAt,groupBy,currentDeviceId
 ## 6. 验收（Docker 版本可替换 Rust 的判定）
 
 1. `npm run node:typecheck` 通过。
-2. 同一份数据副本：Node host 与 Rust `headless` 对全部等价命令逐条 `diff`（忽略时间戳/排序/UUID 等无关字段）差异清零 → `scripts/web-parity.mjs`（当前 68 步，含 SSO 与服务凭据 mock GitLab）。Node 专有的 CLI 授权命令（§2.1）Rust 未实现，不参与对拍，由 Node 侧单测与 `e2e-node-host.mjs` 覆盖。
+2. 同一份数据副本：Node host 与 Rust `headless` 对全部等价命令逐条 `diff`（忽略时间戳/排序/UUID 等无关字段）差异清零 → `scripts/web-parity.mjs`（当前 68 步，含 SSO 与服务凭据 mock GitLab）。Node 专有的 CLI 授权命令（§2.1）Rust 未实现，不参与对拍，由 Node 侧单测与 `e2e-node-host.mjs` 覆盖。Rust oracle 默认不构建（`legacy-server` feature 关闭），对拍前先 `cargo build --release --manifest-path src-tauri/Cargo.toml --no-default-features --features legacy-server --bin headless`。
 3. Web UI 在 Node host 上打开，概览/模型服务/请求日志/用量页面数据与 Rust 版一致。
 4. 模型入口：mock 上游 + 真实上游各验证一次 `/v1/chat/completions` 流式、`/anthropic/v1/messages` 流式、`/v1/responses`；请求日志与用量落库字段与 Rust 一致。
 5. Docker 镜像可按现有部署契约构建并跑通 `/health` + 管理 API + 流式冒烟。

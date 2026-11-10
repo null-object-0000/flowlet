@@ -120,6 +120,65 @@ Token Plan 模式时自动写入覆盖。两种资源模式均由官方控制台
 不开放为可路由模型（白名单约束不变）。存量 Qwen 按量付费账号启动时统一迁移为
 `resource_sync_mode = "auto"`（此前仅有手动维护，无自动数据可丢）。
 
+Qwen API 按量付费的余额与免费额度还有一条**不依赖 WebView** 的官方 HTTP 通道
+（`src-tauri/src/core/qwen_platform.rs`）：账号在编辑器里点「登录千问平台」后，
+Flowlet 走千问官方 CLI（`@qianwenai/qianwen-cli`）使用的 device flow（PKCE S256）
+取得访问令牌，再以 `POST https://cli.qianwenai.com/data/v2/api.json` 调用
+`BssOpenAPI-V3` 的 `DescribeFqInstance`（免费额度实例，`Template.Name` 由网关直接
+给出，缺失时才用公开的 `https://alioth.alicdn.com/model-mapping` 反查回填）、
+`GetBillingAccountAvailableAmount`（账户可用余额/未结清，与控制台同口径；该动作
+不可用时回退 `GetFundAccountAvailableAmount`）与 `ListSettleBillTotalSummary`
+（当月结算账单，可选），最后写成与控制台抓取**同构的 slot bundle**
+（`billing_amount` / `fq_instance` / `settle_bill`），因此前端解析器
+（`src/features/channel-accounts/qwenFreetierDetails.ts`）、余额快照表与展示逻辑
+完全复用，快照 `source = "qwen_platform"`、`remark = "千问平台 API"`。
+
+- 触发顺序：`scrape_balance` 与周期同步（`sync_scrape_balances`）先尝试 HTTP；
+  未登录、令牌过期或请求失败时**静默回退**控制台抓取，桌面端既有行为不变；
+- Web Host / Docker 没有 WebView，这条 HTTP 路径是它们获取余额与免费额度的唯一
+  途径；`qwen_platform_status|login_start|login_poll|logout|sync` 已加入
+  `core/web/commands.rs` 的显式命令白名单，授权页由客户端浏览器打开；
+- 凭据按账号存放在数据目录 `qwen-platform/<account_id>.json`（权限 0600），
+  `client-id` 文件用于 device flow 的 `client_id`。令牌没有 refresh token：过期后
+  必须重新走一次 device flow（实测服务端下发的有效期约 2 天），账号编辑器展示
+  「登录有效至 …」。device flow 只返回数字 `User.Id`，展示身份由
+  `/api/account/info.json` 补全（掩码邮箱，如 `nich*****@outlook.com`）；
+- 网关返回的免费额度实例带英文展示单位（`Thousand Tokens` / `TenThousand Word` /
+  `Second` / `Piece`），且带 `InstanceName` / `Uid` / `StartTime`。写入 bundle 前
+  Rust 侧归一到基础单位（`tokens` / `字` / `秒` / `张`，`BaseValue` 语义不变），
+  并丢弃账号身份字段，避免前端把 1000 千tokens 显示成 1,000 Tokens、也避免把
+  账号 Uid 写进余额快照；`Template.Name` 由网关直接给出，缺失时才用
+  model-mapping 反查；
+- 平台登录令牌**只用于余额/免费额度查询**，不参与模型调用、连接测试与路由；
+  渠道 API Key 仍是唯一的模型调用凭据，也不写入 SQLite；
+- 这些网关接口来自千问官方 CLI 的公开行为（不是模型 API 的一部分），接口变化时
+  需对照 CLI 新版本更新 `core/qwen_platform.rs`；控制台抓取配置保留为兜底，
+  `freetier` scrape mode 的槽位定义同时是前端解析口径的事实来源。
+
+**Token Plan 订阅**共用同一次「登录千问平台」，但接口不同（`sync_account` 按
+`resource_mode` 分派）：
+
+- 先用 device-flow 访问令牌换 cs-data 专用派生令牌：
+  `POST cli.qianwenai.com/data/v2/api.json`
+  `{product:"ModelStudioRegional", action:"GenerateCLIAccessToken", version:"2026-02-10"}`；
+- 再用派生令牌调
+  `POST https://cs-data.qianwenai.com/cli/api.json?action=BroadScopeAspnGateway&product=sfm_bailian&api=<api>`
+  （form-urlencoded：`params=<JSON {Api,V,Data:{...,cornerstoneParam}}>&region=cn-beijing`），
+  `api` 与控制台抓取同名：`zeldaHttp.apikeyMgr./tokenplan/personal/api/v2/`
+  `subscription` / `quota-config` / `usage` / `reset-card/list`；
+- 四个响应**原样**写入 `subscription` / `quota_config` / `usage` / `reset_card_list`
+  槽位（前端解析器沿 `data.DataV2.data.data` 取业务数据），因此
+  `qwenTokenPlanDetails` 的订阅额度窗口（5 小时 / 月）、重置券、过期/未订阅判定
+  全部复用；`reset-card/list` 是可选槽位，接口失败只跳过它；
+- `subscription` 需要 `commodityCode = sfm_tokenplansolo_public_cn`（个人版）；
+  接口拒绝该参数时回退无参调用；
+- 实测（2026-11）：`subscription` 返回
+  `{specCode, status, remainingDays, startTime, endTime, autoRenewFlag}`、
+  `quota_config` 返回 `{standard:{five_hour, monthly}, ...}`、
+  `usage` 返回 `{per1MonthPercentage, per1MonthResetTime}`（0~1 或百分数都兼容）、
+  重置券为数组（无券时为空数组）。
+
+
 ### ChatGPT API（OpenAI）
 
 渠道 ID `openai-api`，展示名 ChatGPT API，使用官方项目 API Key。支持

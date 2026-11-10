@@ -4,7 +4,33 @@
 
 ## [Unreleased]
 
+### 变更
+
+- **Rust 服务端遗留物移出默认构建**：生产 Web Host 已由 Node Host 承载，因此 Rust `core::web`
+  命令白名单与 `headless` 二进制改为 Cargo feature `legacy-server`（默认关闭），Rust legacy 凭据
+  CLI 改为 `legacy-cred`（默认关闭）；`tower-http` 随之变为可选依赖。桌面构建不再编译这两条
+  链路（减少约 3.6k 行 Rust 与非桌面依赖），对拍/回滚需要时按文档显式开启；
+  `npm run node:parity` 的 Rust oracle 需先用 `--features legacy-server --bin headless` 构建。
+
 ### 新增
+
+- **服务凭据新增 Jenkins provider**：管理台「服务凭据」在 GitLab、Dockhand 之后新增 Jenkins
+  （用户名 + API Token 的 HTTP Basic 认证）：服务凭据表新增可空 `username` 列（Rust Host /
+  Node Host 均做 `ALTER TABLE` 迁移，GitLab / Dockhand 行为 NULL），保存时实际请求
+  `GET {base}/me/api/json` 校验，版本取 `X-Jenkins` 响应头；校验失败不落库；
+- `flowlet pull` 为 Jenkins 生成 `{PREFIX}_URL` / `{PREFIX}_USER` / `{PREFIX}_TOKEN`
+  （其它 provider 仍为两把键）；CLI 新增 `flowlet jenkins set / status / api / env / clear`，
+  支持 `--profile=<alias>` 多实例；
+- 同步更新 `docs/credential-cli.md`、`docs/docker.md` 与 Skills 包的 Jenkins 使用说明。
+
+- **服务凭据新增 Beszel provider**：管理台「服务凭据」新增 Beszel（开源服务器监控 Hub，
+  PocketBase 底座，默认 8090）。Beszel 没有长期 API Token，因此凭据存「登录邮箱（明文）+
+  密码（密文）」，保存时实际请求 `POST {base}/api/collections/users/auth-with-password`
+  换短期 token 校验，版本取 `GET /api/beszel/info` 的 `v`，摘要为「{n} 台系统」；
+  校验失败不落库。Rust Host / Node Host / CLI / 前端与文档同步实现；
+- `flowlet pull` 为 Beszel 生成 `{PREFIX}_URL` / `{PREFIX}_EMAIL` / `{PREFIX}_PASSWORD`；
+  CLI 新增 `flowlet beszel set / status / systems / api / env / clear`，支持
+  `--profile=<alias>` 多实例（例如 `BESZEL_MON_*`）。
 
 - Web Host / Docker 管理台新增「设置 → 数据维护 → 数据完整性检查」四阶段修复：
   `repair_agent_sessions`（按已存 Header 与最新 UA 规则修复会话/客户端归属）、

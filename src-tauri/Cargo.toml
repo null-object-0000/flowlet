@@ -9,6 +9,14 @@ default-run = "flowlet"
 [features]
 default = ["desktop"]
 desktop = ["dep:tauri", "tauri/wry", "tauri/tray-icon", "dep:tauri-build", "dep:tauri-plugin-autostart", "dep:tauri-plugin-dialog", "dep:tauri-plugin-notification", "dep:tauri-plugin-opener", "dep:tauri-plugin-window-state", "dep:webkit2gtk"]
+# 服务端遗留物：Rust Web Host（`core::web` 命令白名单 + `headless` 二进制）。
+# 生产 Web Host 自 2026-11-10 起由 Node Host（packages/flowlet-core）承载，Rust 侧仅保留
+# 作对拍 oracle 与回滚对照，**默认不编译、不进入桌面产物**。需要时显式开启：
+#   cargo build --no-default-features --features legacy-server --bin headless
+legacy-server = ["dep:tower-http"]
+# Rust legacy 凭据 CLI（用户侧默认实现是 Node 版 packages/flowlet-cred），仅兼容性对拍用。
+#   cargo build --no-default-features --features legacy-cred --bin flowlet-cred
+legacy-cred = []
 
 [lib]
 name = "flowlet_lib"
@@ -22,11 +30,20 @@ required-features = ["desktop"]
 [[bin]]
 name = "headless"
 path = "src/bin/headless.rs"
+required-features = ["legacy-server"]
 
 # 全局凭据库 CLI：不依赖 Tauri，可用 --no-default-features 单独构建。
+# Node 版 `flowlet` 已取代它，这里仅保留 Rust 对拍 oracle。
 [[bin]]
 name = "flowlet-cred"
 path = "src/bin/flowlet_cred.rs"
+required-features = ["legacy-cred"]
+
+# headless 二进制的端到端生命周期测试：随 `legacy-server` 一起门控。
+[[test]]
+name = "headless_host"
+path = "tests/headless_host.rs"
+required-features = ["legacy-server"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [], optional = true }
@@ -70,7 +87,8 @@ thiserror = "2"
 toml_edit = "0.22"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "net", "signal", "process", "time", "io-util"] }
 tokio-util = "0.7"
-tower-http = { version = "0.6", features = ["fs"] }
+# 仅 core::web（legacy-server feature）的静态资源服务使用。
+tower-http = { version = "0.6", features = ["fs"], optional = true }
 tracing = "0.1"
 tracing-appender = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "chrono"] }
@@ -117,7 +135,7 @@ tauri-plugin-barcode-scanner = "2.4.5"
 # 过渡期构建提速（详见 docs/migration/build-perf.md）
 #
 # 目标：在不改变产物语义/平台支持的前提下，降低日常 Rust 重编译的 CPU、IO 与
-# 产物体积。桌面开发最常触发的是本 crate（flowlet_lib + 两个 bin）重编译，依赖
+# 产物体积。桌面开发最常触发的是本 crate（flowlet_lib + `flowlet` bin）重编译，依赖
 # 通常只需编译一次；因此这里对「依赖」与「本 crate」分别设置调试信息级别。
 #
 # - 本 crate：line-tables-only，保留 backtrace 的文件:行号，便于日常排查；

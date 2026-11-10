@@ -4,7 +4,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 
 interface MockOptions {
-  mode: "gitlab" | "flowlet-web" | "dockhand";
+  mode: "gitlab" | "flowlet-web" | "dockhand" | "jenkins" | "beszel";
   versionStatus?: number;
   hiddenVersion?: boolean;
   projectPages?: Array<Array<Record<string, unknown>>>;
@@ -12,6 +12,24 @@ interface MockOptions {
   gitlabToken?: string;
   adminToken?: string;
   dockhandToken?: string;
+  /** jenkins：Basic 认证的用户名 / token / 身份字段。 */
+  jenkinsUser?: string;
+  jenkinsToken?: string;
+  /** jenkins：`/me/api/json` 的 fullName；null 时只返回 id（测试回退取 id）。 */
+  jenkinsFullName?: string | null;
+  /** jenkins：X-Jenkins 版本头；null 时不返回该头（测试「版本未知」）。 */
+  jenkinsVersion?: string | null;
+  /** jenkins：强制 `/me/api/json` 返回该状态码（403/404 分支）。 */
+  jenkinsMeStatus?: number;
+  /** beszel：固定的登录邮箱 / 密码（auth-with-password 校验用）。 */
+  beszelEmail?: string;
+  beszelPassword?: string;
+  /** beszel：`/api/beszel/info` 的版本；null 时不返回 `v`（测试「版本未知」）。 */
+  beszelVersion?: string | null;
+  /** beszel：强制 `/api/beszel/info` 返回该状态码（测试「info 失败不致命」）。 */
+  beszelInfoStatus?: number;
+  /** beszel：`systems/records` 的原始响应覆盖（测试解析失败分支）。 */
+  beszelRecords?: unknown;
   /**
    * flowlet-web：启用浏览器授权端点（/api/auth/cli/start、/api/auth/cli/exchange），
    * 并接受 CLI token 调 export_service_credentials。默认关闭，既有 pull 用例行为不变。
@@ -27,6 +45,20 @@ const options = JSON.parse(process.argv[2] ?? "{}") as MockOptions;
 const GITLAB_TOKEN = options.gitlabToken ?? "glpat-test-fixture-token-1a2b";
 const ADMIN_TOKEN = options.adminToken ?? "flowlet-admin-token-0123456789";
 const DOCKHAND_TOKEN = options.dockhandToken ?? "dockhand-test-fixture-token-9x8y";
+const JENKINS_USER = options.jenkinsUser ?? "fixture-user";
+const JENKINS_TOKEN = options.jenkinsToken ?? "jenkins-test-fixture-token-7q2w";
+const JENKINS_VERSION = options.jenkinsVersion === undefined ? "2.440.1" : options.jenkinsVersion;
+const JENKINS_FULL_NAME = options.jenkinsFullName === undefined ? "Fixture User" : options.jenkinsFullName;
+// Beszel（PocketBase 底座）：固定邮箱/密码换 token；record 字段与真实响应同形。
+const BESZEL_EMAIL = options.beszelEmail ?? "fixture@example.com";
+const BESZEL_PASSWORD = options.beszelPassword ?? "beszel-test-fixture-password-8k3m";
+const BESZEL_TOKEN = "beszel-test-fixture-token-5v1n";
+const BESZEL_VERSION = options.beszelVersion === undefined ? "0.21.1" : options.beszelVersion;
+const BESZEL_SYSTEMS = [
+  { id: "sys-1", name: "web-01", host: "10.0.0.11", status: "up", port: 45876, updated: "2026-11-10T00:00:00Z" },
+  { id: "sys-2", name: "db-01", host: "10.0.0.12", status: "up", port: 45877, updated: "2026-11-10T00:00:00Z" },
+  { id: "sys-3", name: "cache-01", host: "10.0.0.13", status: "down", port: 45878, updated: "2026-11-10T00:00:00Z" },
+];
 const CLI_TOKEN = options.cliToken ?? `flwcli_${"T".repeat(43)}`;
 
 /** 授权码 → PKCE challenge（120 秒有效、一次性，与 Node Host 契约一致）。 */
@@ -241,6 +273,137 @@ const server = createServer((request, response) => {
       });
       return;
     }
+    return send(404, { message: "Not Found" });
+  }
+
+  if (options.mode === "beszel") {
+    // Beszel：邮箱 + 密码换 token（Authorization 是裸 token，不是 Bearer）。
+    const url = new URL(request.url ?? "/", "http://localhost");
+    const authorized = request.headers.authorization === BESZEL_TOKEN;
+    const send = (status: number, value: unknown): void => {
+      const body = Buffer.from(JSON.stringify(value), "utf8");
+      response.writeHead(status, {
+        "content-type": "application/json",
+        "content-length": String(body.length),
+      });
+      response.end(body);
+    };
+    const readJson = (callback: (body: Record<string, unknown>) => void): void => {
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        let body: Record<string, unknown> = {};
+        try {
+          const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+          if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+            body = parsed as Record<string, unknown>;
+          }
+        } catch {
+          body = {};
+        }
+        callback(body);
+      });
+    };
+    const pathname = url.pathname;
+    if (pathname === "/api/collections/users/auth-with-password" && request.method === "POST") {
+      readJson((body) => {
+        const identity = typeof body.identity === "string" ? body.identity.trim() : "";
+        const password = typeof body.password === "string" ? body.password : "";
+        if (identity.toLowerCase() !== BESZEL_EMAIL.toLowerCase() || password !== BESZEL_PASSWORD) {
+          // PocketBase 认证失败统一 400。
+          return send(400, { status: 400, message: "Failed to authenticate." });
+        }
+        return send(200, {
+          token: BESZEL_TOKEN,
+          record: { id: "user-1", email: identity, name: "Fixture Beszel", role: "admin" },
+        });
+      });
+      return;
+    }
+    if (pathname === "/api/beszel/info") {
+      if (!authorized) return send(401, { status: 401, message: "Unauthorized" });
+      if (options.beszelInfoStatus !== undefined && options.beszelInfoStatus !== 200) {
+        return send(options.beszelInfoStatus, { message: `Status ${options.beszelInfoStatus}` });
+      }
+      return send(200, BESZEL_VERSION === null ? {} : { v: BESZEL_VERSION });
+    }
+    if (pathname === "/api/collections/systems/records") {
+      if (!authorized) return send(401, { status: 401, message: "Unauthorized" });
+      if (options.beszelRecords !== undefined) return send(200, options.beszelRecords);
+      const rawPerPage = Number(url.searchParams.get("perPage") ?? "200");
+      const perPage = Number.isInteger(rawPerPage) && rawPerPage > 0 ? rawPerPage : 200;
+      return send(200, {
+        page: 1,
+        perPage,
+        totalItems: BESZEL_SYSTEMS.length,
+        totalPages: 1,
+        items: BESZEL_SYSTEMS.slice(0, perPage),
+      });
+    }
+    if (pathname === "/api/echo") {
+      // 透传测试用：回显 method + 解析后的 JSON body。
+      if (!authorized) return send(401, { status: 401, message: "Unauthorized" });
+      readJson((body) => send(200, { method: request.method ?? "GET", body, path: pathname }));
+      return;
+    }
+    // 404 分支：用 JSON body 证明「可执行提示」而不是上游 HTML。
+    return send(404, { message: "Not Found" });
+  }
+
+  if (options.mode === "jenkins") {
+    // Jenkins：HTTP Basic（用户名:API Token）；`/me/api/json` 校验身份并返回 X-Jenkins。
+    const url = new URL(request.url ?? "/", "http://localhost");
+    const expected = `Basic ${Buffer.from(`${JENKINS_USER}:${JENKINS_TOKEN}`, "utf8").toString("base64")}`;
+    const authorized = request.headers.authorization === expected;
+    const send = (
+      status: number,
+      value: unknown,
+      headers: Record<string, string> = {},
+    ): void => {
+      const body = Buffer.from(JSON.stringify(value), "utf8");
+      response.writeHead(status, {
+        "content-type": "application/json",
+        "content-length": String(body.length),
+        ...headers,
+      });
+      response.end(body);
+    };
+    const versionHeaders: Record<string, string> =
+      JENKINS_VERSION === null ? {} : { "x-jenkins": JENKINS_VERSION };
+    const pathname = url.pathname;
+    if (pathname === "/me/api/json") {
+      if (!authorized) return send(401, { message: "Unauthorized" });
+      if (options.jenkinsMeStatus !== undefined && options.jenkinsMeStatus !== 200) {
+        return send(options.jenkinsMeStatus, { message: `Status ${options.jenkinsMeStatus}` });
+      }
+      const whoami: Record<string, unknown> = { id: JENKINS_USER, description: null };
+      if (JENKINS_FULL_NAME !== null) whoami.fullName = JENKINS_FULL_NAME;
+      return send(200, whoami, versionHeaders);
+    }
+    if (pathname === "/job/flowlet/api/json") {
+      if (!authorized) return send(401, { message: "Unauthorized" });
+      return send(200, { name: "flowlet", color: "blue" });
+    }
+    if (pathname === "/echo") {
+      // 透传测试用：回显 method + 解析后的 JSON body。
+      if (!authorized) return send(401, { message: "Unauthorized" });
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        const text = Buffer.concat(chunks).toString("utf8");
+        let body: unknown = null;
+        if (text.trim() !== "") {
+          try {
+            body = JSON.parse(text);
+          } catch {
+            body = text;
+          }
+        }
+        send(200, { method: request.method ?? "GET", body, path: pathname });
+      });
+      return;
+    }
+    // 404 分支：用 JSON body 证明「可执行提示」而不是上游 HTML。
     return send(404, { message: "Not Found" });
   }
 

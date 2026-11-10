@@ -65,6 +65,8 @@ pub struct ServiceCredentialRow {
     pub note: Option<String>,
     /// 环境前缀（已归一大写）；旧行为 NULL，读取时按 provider 默认解析。
     pub env_prefix: Option<String>,
+    /// Jenkins 用户名（明文）；GitLab/Dockhand 恒为 NULL。
+    pub username: Option<String>,
     pub enabled: bool,
     pub created_at: String,
     pub updated_at: String,
@@ -963,6 +965,7 @@ impl Storage {
                 kind               TEXT NOT NULL DEFAULT 'cli_token',
                 note               TEXT,
                 env_prefix         TEXT,
+                username           TEXT,
                 enabled            INTEGER NOT NULL DEFAULT 1,
                 created_at         TEXT NOT NULL,
                 updated_at         TEXT NOT NULL,
@@ -1348,6 +1351,9 @@ impl Storage {
         // 服务凭据第二期：同一 provider 多实例用环境前缀区分环境变量名。
         // 旧行保持 NULL，读取时按 provider 默认前缀解析，因此无需回填。
         add_column_if_missing(&connection, "service_credentials", "env_prefix", "TEXT")?;
+        // 服务凭据第三期：Jenkins 需要「用户名 + API Token」一起认证；明文落库，
+        // 掩码只针对 token。旧行保持 NULL，GitLab/Dockhand 恒为 NULL。
+        add_column_if_missing(&connection, "service_credentials", "username", "TEXT")?;
 
         add_column_if_missing(
             &connection,

@@ -1,11 +1,15 @@
 # 全局凭据库与 `flowlet`
 
-状态：v4（**新增 `flowlet login` 浏览器授权（loopback + PKCE）：OIDC-only 实例不再需要管理凭据**；
-命令表加入 `login` / `logout`，`pull` 自动使用本机授权；新增「远程登录授权」一节。v3 起用户侧
-命令统一为 `flowlet`，并支持同 provider 多实例环境前缀与 `--profile`、Web Host 下载安装引导。
+状态：v6（**新增 Beszel provider（邮箱 + 密码换短期 token，PocketBase 底座）**；
+`flowlet beszel` 子命令、`pull` 为 Beszel 生成 `{PREFIX}_URL` / `{PREFIX}_EMAIL` / `{PREFIX}_PASSWORD`。
+v5 新增 Jenkins provider（用户名 + API Token 的 Basic 认证），服务凭据支持用户名字段；
+`flowlet jenkins` 子命令、`pull` 为 Jenkins 生成 `{PREFIX}_URL` / `{PREFIX}_USER` / `{PREFIX}_TOKEN`。
+v4 新增 `flowlet login` 浏览器授权（loopback + PKCE）：OIDC-only 实例不再需要管理凭据；
+v3 起用户侧命令统一为 `flowlet`，并支持同 provider 多实例环境前缀与 `--profile`、Web Host 下载安装引导。
 Node 版 CLI 为默认实现；Rust 版二进制名仍为 `flowlet-cred`，标为 legacy，仅用于对拍）
 日期：2026-11-10（v1：Node 移植完成；v2：新增 Dockhand provider；v3：CLI 更名 `flowlet` +
-多实例 env 前缀 + 本机接入下载；v4：`flowlet login` 浏览器授权 + 本机 `auth.json`）
+多实例 env 前缀 + 本机接入下载；v4：`flowlet login` 浏览器授权 + 本机 `auth.json`；
+v5：Jenkins provider + 服务凭据用户名字段；v6：Beszel provider）
 
 ## 1. 定位
 
@@ -63,10 +67,13 @@ DOCKHAND_NA_TOKEN='••••'
 
 ```text
 <data_dir>/secret.key              # 32 字节随机密钥，0600，首次启动生成
-SQLite service_credentials 表       # id / name / provider / base_url / env_prefix /
+SQLite service_credentials 表       # id / name / provider / base_url / username / env_prefix /
                                    # secret_ciphertext（ChaCha20-Poly1305）/ secret_hint /
                                    # kind / note / enabled / 时间戳 / 最近校验结果
 ```
+
+- `username` 是可空列（v5 新增）：Jenkins 存 Basic 认证用户名、Beszel 存登录邮箱，明文存储；
+  GitLab / Dockhand 的行为 NULL；旧库升级时 `ALTER TABLE` 补列，无需回填。
 
 - `env_prefix` 是第二期新增的可空列（旧行 NULL）：存**解析后的大写前缀**，读取时 NULL 按
   provider 默认值解析，升级后行为与第一期一致；
@@ -95,17 +102,19 @@ node packages/flowlet-cred/src/cli.ts init
 npm link ./packages/flowlet-cred && flowlet init   # bin shim: bin/flowlet.mjs
 ```
 
-Agent 机器不需要仓库，直接用 Web Host 页面提供的下载安装脚本（见 §11）：
+Agent 机器不需要仓库，直接用 Web Host 页面提供的下载安装脚本（见 §13）：
 
 ```bash
 curl -fsSL http://<flowlet-host>:20134/downloads/install-flowlet.sh \
   | sh -s -- --base=http://<flowlet-host>:20134/downloads
 ```
 
-Rust legacy 版（仅兼容性对拍/回滚用，Agent 机器不再需要；二进制名仍为 `flowlet-cred`）：
+Rust legacy 版（仅兼容性对拍/回滚用，Agent 机器不再需要；二进制名仍为 `flowlet-cred`，
+Cargo feature `legacy-cred` 默认关闭，需要时显式开启）：
 
 ```bash
-cargo build --release --manifest-path src-tauri/Cargo.toml --no-default-features --bin flowlet-cred
+cargo build --release --manifest-path src-tauri/Cargo.toml \
+  --no-default-features --features legacy-cred --bin flowlet-cred
 # 产物：src-tauri/target/release/flowlet-cred
 ```
 
@@ -147,6 +156,20 @@ flowlet dockhand stacks --env=2 [--json] [--profile=NA]
 flowlet dockhand api GET /environments [--profile=NA]
 flowlet dockhand env [--profile=NA]
 flowlet dockhand clear [--profile=NA]
+
+flowlet jenkins set --url=https://jenkins.example.com --user=ci-bot [--profile=WORK]
+flowlet jenkins status [--insecure] [--profile=WORK]
+flowlet jenkins api GET /api/json?tree=jobs[name,color] [--profile=WORK]
+flowlet jenkins env [--profile=WORK]
+flowlet jenkins clear [--profile=WORK]
+
+flowlet beszel set --url=http://beszel.example.com:8090 --email=you@example.com [--profile=MON]
+                                                 # 密码从 stdin 读取；先认证校验通过才落库
+flowlet beszel status [--insecure] [--profile=MON]        # URL、版本、登录邮箱、系统数量
+flowlet beszel systems [--json] [--profile=MON]           # 系统列表（id/name/host/status/port）
+flowlet beszel api GET /collections/systems/records [--profile=MON]
+flowlet beszel env [--profile=MON]
+flowlet beszel clear [--profile=MON]
 ```
 
 ### 3.3 Node 与 Rust legacy 的已知差异
@@ -243,9 +266,12 @@ server 的 token。三者都没有时报错：
 
 ### 5.1 命名规则
 
-- 生成两把键：`{PREFIX}_URL`（baseUrl，kind `service`）与 `{PREFIX}_TOKEN`（token，
-  kind `cli_token`）；
-- 未填前缀用 provider 默认值：`gitlab` → `GITLAB`、`dockhand` → `DOCKHAND`（与第一期兼容）；
+- 默认生成两把键：`{PREFIX}_URL`（baseUrl，kind `service`）与 `{PREFIX}_TOKEN`（token，
+  kind `cli_token`）；需要 Basic 认证的 `jenkins` 额外生成 `{PREFIX}_USER`（用户名，kind `service`）；
+  `beszel` 用邮箱 + 密码认证，生成 `{PREFIX}_URL` / `{PREFIX}_EMAIL` / `{PREFIX}_PASSWORD`
+  （EMAIL kind `service`，PASSWORD kind `cli_token`）；
+- 未填前缀用 provider 默认值：`gitlab` → `GITLAB`、`dockhand` → `DOCKHAND`、
+  `jenkins` → `JENKINS`、`beszel` → `BESZEL`（与第一期兼容）；
 - 前缀规则：trim 后转大写，`^[A-Z][A-Z0-9_]{0,23}$`，最长 24 个字符；
   非法时保存失败：`环境前缀只能包含字母、数字和下划线，且以字母开头` / `环境前缀不能超过 24 个字符`；
 - **唯一性**：所有已启用（`enabled=true`）凭据解析后的前缀必须唯一（不同 provider 也算冲突，
@@ -265,6 +291,10 @@ UI 的「环境别名（Env 前缀）」填**完整前缀**（例如 `DOCKHAND_N
 | Dockhand 北美 | `DOCKHAND_NA` | `--profile=na` | `DOCKHAND_NA_URL` / `DOCKHAND_NA_TOKEN` |
 | Dockhand 苏州 | `DOCKHAND_SZ` | `--profile=sz` | `DOCKHAND_SZ_URL` / `DOCKHAND_SZ_TOKEN` |
 | Dockhand 自用 | `DOCKHAND_SELF` | `--profile=self` | `DOCKHAND_SELF_URL` / `DOCKHAND_SELF_TOKEN` |
+| Jenkins 默认实例 | 留空 | `flowlet jenkins ...` | `JENKINS_URL` / `JENKINS_USER` / `JENKINS_TOKEN` |
+| Jenkins 工作实例 | `JENKINS_WORK` | `--profile=work` | `JENKINS_WORK_URL` / `JENKINS_WORK_USER` / `JENKINS_WORK_TOKEN` |
+| Beszel 默认实例 | 留空 | `flowlet beszel ...` | `BESZEL_URL` / `BESZEL_EMAIL` / `BESZEL_PASSWORD` |
+| Beszel 监控实例 | `BESZEL_MON` | `--profile=mon` | `BESZEL_MON_URL` / `BESZEL_MON_EMAIL` / `BESZEL_MON_PASSWORD` |
 
 - 别名不区分大小写，落库/落本机键名一律大写；
 - 未传 `--profile` 时读写 provider 默认前缀，与第一期行为完全一致；
@@ -293,7 +323,7 @@ flowlet dockhand clear --profile=na      # 只删 NA 这个前缀
 ```
 
 `pull` 兼容旧服务端：导出条目没有 `envPrefix` 字段时回退 `provider.toUpperCase()`
-（`GITLAB` / `DOCKHAND`），与第一期一致。
+（`GITLAB` / `DOCKHAND` / `JENKINS` / `BESZEL`），与第一期一致。
 
 ## 6. 安全约定
 
@@ -321,23 +351,26 @@ flowlet dockhand clear --profile=na      # 只删 NA 这个前缀
 三方凭据的增删改与校验在 UI 里完成，不要求手工编辑文件：
 
 - **入口**：左侧一级菜单「服务凭据」；
-- **列表**：名称、服务类型、实例地址、**环境前缀**（tooltip 展开 `{PREFIX}_URL` /
-  `{PREFIX}_TOKEN`）、Token 掩码、最近校验结果、启停状态；
-- **添加 / 编辑**：服务类型（GitLab / Dockhand，创建时可选、编辑时不可切换）、名称、实例地址、
-  环境别名（Env 前缀，留空 = 默认）、Token、备注、启用；表单文案（token 说明、地址 placeholder、
-  警告 Banner、前缀预览）按所选 provider 动态展示；
+- **列表**：名称、服务类型、实例地址（Jenkins 额外展示 `@用户名`，Beszel 展示 `@邮箱`）、**环境前缀**（tooltip 展开
+  `{PREFIX}_URL` / `{PREFIX}_TOKEN`，Jenkins 还有 `{PREFIX}_USER`，Beszel 还有 `{PREFIX}_EMAIL` / `{PREFIX}_PASSWORD`）、Token 掩码、最近校验结果、启停状态；
+- **添加 / 编辑**：服务类型（GitLab / Dockhand / Jenkins / Beszel，创建时可选、编辑时不可切换）、名称、实例地址、
+  用户名（Jenkins 必填；Beszel 显示「邮箱」且必填）、环境别名（Env 前缀，留空 = 默认）、Token、备注、启用；
+  表单文案（token 说明、地址 placeholder、警告 Banner、前缀预览）按所选 provider 动态展示；
 - **保存即校验**：服务端按 provider 实际请求上游，失败直接返回错误且不落库：
 
   | provider | 默认前缀 | 保存时校验请求 | `flowlet pull` 写入本机 `.env` |
   |---|---|---|---|
   | `gitlab` | `GITLAB` | `GET {base}/api/v4/user` | `{PREFIX}_URL` / `{PREFIX}_TOKEN` |
   | `dockhand` | `DOCKHAND` | `GET {base}/api/environments` | `{PREFIX}_URL` / `{PREFIX}_TOKEN` |
+  | `jenkins` | `JENKINS` | `GET {base}/me/api/json`（Basic 认证） | `{PREFIX}_URL` / `{PREFIX}_USER` / `{PREFIX}_TOKEN` |
+  | `beszel` | `BESZEL` | `POST {base}/api/collections/users/auth-with-password`（邮箱 + 密码换 token） | `{PREFIX}_URL` / `{PREFIX}_EMAIL` / `{PREFIX}_PASSWORD` |
 
 - **测试**：对已保存凭据重新校验并刷新 `last_verified_at` / `last_error`；成功 toast 会拼
-  `@用户名 · 版本 · provider 摘要`（Dockhand 的摘要是「{n} 个环境」）；
+  `@用户名 · 版本 · provider 摘要`（Dockhand 的摘要是「{n} 个环境」，Jenkins 的版本来自
+  `X-Jenkins` 响应头，Beszel 的版本来自 `/api/beszel/info`、摘要是「{n} 台系统」）；
 - **删除**：清除服务端密文；已同步到 Agent 机器的 `.env` 不受影响；
 - **本机接入**（仅 Web Host）：页面头部「本机接入」按钮提供 CLI / Skills 下载与一键命令，
-  以及「已授权的 CLI」列表（见 §4.2 与 §11）。
+  以及「已授权的 CLI」列表（见 §4.2 与 §13）。
 
 对应的管理命令（桌面 Tauri 与 Web 白名单同名）：
 
@@ -464,7 +497,93 @@ flowlet dockhand clear --profile=na        # 只删 NA 前缀
 - `pull` 会把服务端 Dockhand 凭据映射成 `{PREFIX}_URL` / `{PREFIX}_TOKEN` 写入本机 `.env`
   （无 `envPrefix` 的旧服务端回退 `DOCKHAND_*`），未识别的 provider 继续跳过并写 stderr。
 
-## 11. 本机接入（下载安装）
+## 11. Jenkins 适配（用户名 + API Token）
+
+第三个内置 provider 是 Jenkins（REST API，校验 `GET /me/api/json`）。Jenkins 的 API Token
+必须与用户名一起做 HTTP Basic 认证，因此它是唯一需要额外用户名字段的 provider：
+
+| 约束 | 做法 |
+|---|---|
+| 认证是 Basic，不是 Bearer | 服务端使用 `Authorization: Basic base64(用户名:API Token)`；UI 与 CLI 都必须填写用户名 |
+| 没有匿名可用的版本接口 | 校验 `GET {base}/me/api/json`（需认证）；版本取响应头 `X-Jenkins`，缺失时显示「未知」 |
+| 用户可能粘贴 `/me/api/json` 或 `/api/json` | `normalizeBaseUrl` 只去末尾 `/`、保留子路径，不猜 API 前缀；错误提示要求填 Jenkins 根地址 |
+| 内网自签证书 | `--insecure` 跳过 TLS 校验，不写入存储 |
+
+保存时服务端先校验再落库：401 → 用户名或 API Token 无效；403 → 该用户缺少 Overall/Read
+权限；404 → 地址不是 Jenkins 根地址。`flowlet pull` 为 Jenkins 写三把键：
+`{PREFIX}_URL`、`{PREFIX}_USER`、`{PREFIX}_TOKEN`（其它 provider 仍是两把）。
+
+```bash
+printf '%s' "$JENKINS_TOKEN" | flowlet jenkins set --url=https://jenkins.example.com --user=ci-bot
+flowlet jenkins status
+# URL：https://jenkins.example.com
+# 版本：2.492.1
+# 用户：ci-bot
+
+flowlet jenkins api GET /api/json?tree=jobs[name,color]   # 只接受相对路径
+flowlet jenkins env        # JENKINS_URL / JENKINS_USER / JENKINS_TOKEN（含明文，慎用）
+flowlet jenkins clear
+
+# 多实例：--profile 组合成对应前缀
+printf '%s' "$WORK_TOKEN" | flowlet jenkins set --url=https://jenkins.work.example.com --user=ci --profile=work
+flowlet jenkins env --profile=work   # JENKINS_WORK_URL / JENKINS_WORK_USER / JENKINS_WORK_TOKEN
+```
+
+设计取舍：
+
+- 用户名不是密文，明文落库；token 仍走 `secret_box` 加密 + 掩码展示；
+- `api` 只接受相对路径，`PATH` 原样拼在 Jenkins 根地址后（Jenkins 没有统一的 API 前缀，
+  不自动补 `/api`），避免 token 被发到外部绝对 URL；
+- 错误提示按状态码给出可执行动作（401 凭据无效 / 403 权限不足 / 404 根地址写错 / 429 限流）。
+
+## 12. Beszel 适配（邮箱 + 密码换短期 token）
+
+第四个内置 provider 是 Beszel（开源服务器监控 Hub，PocketBase 底座，默认端口 8090）。
+它**没有长期 API Token**：只能用「邮箱 + 密码」调
+`POST /api/collections/users/auth-with-password` 换短期 token（PocketBase 默认 14 天）。
+因此凭据库保存「邮箱（明文）+ 密码（密文）」，每次校验 / CLI 调用现场换 token。
+
+| 约束 | 做法 |
+|---|---|
+| 没有长期 token | `set` 时先用邮箱 + 密码认证；token 只在单次命令内缓存，不落库 |
+| 认证头是裸 token | 后续请求 `Authorization: <token>`（PocketBase 原生 token，**不是** `Bearer`） |
+| 版本接口需认证 | `GET {base}/api/beszel/info` 取 `v`；失败不致命，`status` 显示「版本未知」 |
+| 系统数量 | `GET {base}/api/collections/systems/records?perPage=1` 取 `totalItems` |
+| 用户可能粘贴 `/api` 或管理面板 `/_/` | `normalizeBaseUrl` 反复剥末尾 `/`、`/api`、`/_`、`/_/`，保留其它子路径 |
+| 密码登录可能被禁用 | 403 提示 `DISABLE_PASSWORD_AUTH` 或账号没有读取权限 |
+
+保存时服务端先校验再落库：auth 失败（PocketBase 返回 400）→ 邮箱或密码错误，且提示确认是
+Beszel 用户账号而不是 PocketBase 超级管理员；401 → token 无效；403 → 密码登录被禁用或无权限；
+404 → 地址不是 Beszel Hub 根地址。`flowlet pull` 为 Beszel 写三把键：
+`{PREFIX}_URL`、`{PREFIX}_EMAIL`、`{PREFIX}_PASSWORD`（旧服务端导出没有 `username` 时 EMAIL 写空串）。
+
+```bash
+printf '%s' "$BESZEL_PASSWORD" | flowlet beszel set --url=http://beszel.example.com:8090 --email=you@example.com
+flowlet beszel status
+# URL：http://beszel.example.com:8090
+# 版本：0.21.1
+# 邮箱：you@example.com
+# 系统：3 台
+
+flowlet beszel systems [--json]                                   # id/name/host/status/port
+flowlet beszel api GET /api/collections/systems/records?perPage=1  # PATH 可带 /api 前缀与 query
+flowlet beszel env        # BESZEL_URL / BESZEL_EMAIL / BESZEL_PASSWORD（含明文，慎用）
+flowlet beszel clear
+
+# 多实例：--profile 组合成对应前缀
+flowlet beszel status --profile=mon
+flowlet beszel env --profile=mon   # BESZEL_MON_URL / BESZEL_MON_EMAIL / BESZEL_MON_PASSWORD
+```
+
+设计取舍：
+
+- `set` **先认证再落库**：密码错误或地址不可达时不写入全局库；
+- 邮箱明文、密码密文；密码不进入日志，`env` 输出会先在 stderr 打印明文警告；
+- `api` 只接受相对路径，并把 `/api` 前缀归一掉；token 只发往填写的 Hub 地址；
+- 错误提示按状态码给出可执行动作（400 邮箱/密码、401 token、403 DISABLE_PASSWORD_AUTH /
+  无读取权限、404 Hub 根地址、429 限流）。
+
+## 13. 本机接入（下载安装）
 
 Web Host 的「服务凭据」页提供「本机接入」抽屉（桌面模式不显示），让 Agent 机器无需仓库即可用上 CLI：
 
@@ -514,7 +633,7 @@ Web Host 的「服务凭据」页提供「本机接入」抽屉（桌面模式�
 
 - 下载产物只包含 CLI 源码与通用 Skills，不包含任何真实 token、`.env` 或 `.agents/` 内容。
 
-## 12. 与 Flowlet 其它能力的关系
+## 14. 与 Flowlet 其它能力的关系
 
 - **与渠道账号**：`channel_accounts.api_key` 是上游模型账号，走路由与余额同步；
   全局凭据库不参与模型路由，两者不要互相写入。
@@ -530,7 +649,7 @@ Web Host 的「服务凭据」页提供「本机接入」抽屉（桌面模式�
 - **与 UI**：`core/credential_store.rs` 是纯 Rust 模块，后续可直接被桌面/Web 命令复用
   （读列表、读单值、写值、删除），不需要重写存储层。
 
-## 13. 验收
+## 15. 验收
 
 - `cargo test --no-default-features --lib credential_store`：9 个用例覆盖读写、顺序、
   注释保留、引号编码、权限、重复键、导出格式、非法键名；
@@ -541,10 +660,15 @@ Web Host 的「服务凭据」页提供「本机接入」抽屉（桌面模式�
 - `cargo test --no-default-features --lib storage_credentials`：覆盖 CRUD、启停、校验结果落库、
   `env_prefix` 存取；
 - `cargo test --no-default-features --lib service_credentials`：覆盖 providers、`env_keys`、
-  环境前缀归一/唯一性、Dockhand 校验；
+  环境前缀归一/唯一性、Dockhand / Jenkins 校验、Jenkins 用户名校验；
+- `cargo test --no-default-features --lib jenkins`：覆盖 URL 归一、空用户名/token、
+  Basic 认证身份解析、`X-Jenkins` 版本与错误码提示；
+- `cargo test --no-default-features --lib beszel`：覆盖 URL 归一（`/api`、`/_/`、子路径）、
+  相对路径限制、邮箱 + 密码认证、info/systems 解析与错误码提示；
 - `npm run cred:typecheck` / `npm run cred:test`：Node CLI 覆盖本地库、GitLab mock、Dockhand
-  mock、多 profile（`--profile=na/sz` 独立键名与实例切换）、`pull` 的 `envPrefix` 映射与
-  `DOCKHAND_*` 映射、Dockhand 纯函数（URL 归一/路径/解析/错误提示），以及 Rust legacy 对拍；
+  mock、Jenkins mock、Beszel mock、多 profile（`--profile=na/sz/mon` 独立键名与实例切换）、
+  `pull` 的 `envPrefix` 映射、`DOCKHAND_*` / `JENKINS_*` / `BESZEL_*` 映射、
+  Dockhand / Jenkins / Beszel 纯函数（URL 归一/路径/解析/错误提示），以及 Rust legacy 对拍；
 - `FLOWLET_RUST_CRED=$PWD/src-tauri/target/debug/flowlet-cred npm run cred:compat`：
   Node CLI 与 Rust legacy 在同一序列下输出/文件字节级一致；
 - 端到端（headless + mock GitLab 10.8.7）：`list → save（校验后加密落库）→ test → export →
@@ -560,6 +684,9 @@ Web Host 的「服务凭据」页提供「本机接入」抽屉（桌面模式�
   以及错误 token 不落库、未配置提示、`env`/`clear`；
 - 手工冒烟（Dockhand）：对 mock 执行 `dockhand set → status → envs → stacks → api`，
   以及错误 token 不落库、未配置提示、`env`/`clear`；多实例用 `--profile` 验证键名隔离；
+- 手工冒烟（Beszel）：对 PocketBase 语义的 mock 执行
+  `beszel set → status → systems → api → env → clear`，验证密码错误不落库、地址粘贴
+  `/api` / `/_/` 被归一、`info` 失败时 `status` 显示版本未知、多实例 `--profile` 键名隔离；
 - 远程登录授权（v4）：
   - `flowlet login --server=<oidc-instance>` 一条命令跑通：终端打印授权 URL、浏览器回调完成
     → `auth.json` 出现该 server 记录（目录 0700 / 文件 0600、原子写、server key 归一）；

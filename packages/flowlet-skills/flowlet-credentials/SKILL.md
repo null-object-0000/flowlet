@@ -31,8 +31,10 @@ Claude Code / Codex / DSH 等 Agent 在接入后需要使用的三方 key。
   提供的安装命令（需要 Node.js 22.6+）：
   `curl -fsSL http://<Flowlet 地址>:20134/downloads/install-flowlet.sh | sh -s -- --base=http://<Flowlet 地址>:20134/downloads`
 - **管理面在 Flowlet UI**：Docker / 桌面左侧「服务凭据」页添加服务（当前支持 GitLab、
-  Dockhand），保存即校验，token 加密存服务端，界面只显示掩码；同一 provider 多实例用
+  Dockhand、Jenkins、Beszel），保存即校验，token 加密存服务端，界面只显示掩码；同一 provider 多实例用
   「环境别名（Env 前缀）」区分（例如 `DOCKHAND_NA` / `DOCKHAND_SZ` / `DOCKHAND_SELF`）。
+  Jenkins 额外需要「用户名」（API Token 与用户名一起做 Basic 认证）；Beszel 额外需要「邮箱」
+  （登录密码换短期 token，没有长期 API Token）。
 - **本机消费（先 login，再 pull）**：Agent 机器上先执行
 
   ```bash
@@ -52,7 +54,7 @@ Claude Code / Codex / DSH 等 Agent 在接入后需要使用的三方 key。
   把启用中的凭据同步到本机 `.env`（`--dry-run` 只预览）。之后的读取方式不变。
 - **token 模式实例**：授权页会提示改用
   `flowlet pull --server=<origin> --token=$FLOWLET_ADMIN_TOKEN`；这是唯一仍需 `--token` 的场景。
-- CLI 的 `gitlab set` / `dockhand set` 只用于没有服务端管理面的离线场景；正常流程不要手工配置。
+- CLI 的 `gitlab set` / `dockhand set` / `jenkins set` / `beszel set` 只用于没有服务端管理面的离线场景；正常流程不要手工配置。
 
 ## 命令
 
@@ -75,14 +77,16 @@ flowlet pull --server=<origin> [--dry-run]       # 自动使用 login 的本机�
 
 ## 多实例与环境前缀
 
-- `flowlet pull` 按服务凭据的「环境前缀」写两把键：`{PREFIX}_URL` / `{PREFIX}_TOKEN`；
-  未设前缀时用 provider 默认（`GITLAB` / `DOCKHAND`）。
+- `flowlet pull` 按服务凭据的「环境前缀」写键：一般 provider 是两把
+  `{PREFIX}_URL` / `{PREFIX}_TOKEN`；Jenkins 是三把 `{PREFIX}_URL` / `{PREFIX}_USER` /
+  `{PREFIX}_TOKEN`，Beszel 是三把 `{PREFIX}_URL` / `{PREFIX}_EMAIL` / `{PREFIX}_PASSWORD`。
+  未设前缀时用 provider 默认（`GITLAB` / `DOCKHAND` / `JENKINS` / `BESZEL`）。
 - 例：三份 Dockhand 的环境前缀为 `DOCKHAND_NA` / `DOCKHAND_SZ` / `DOCKHAND_SELF`，
   `.env` 里就是 `DOCKHAND_NA_URL` / `DOCKHAND_NA_TOKEN` / …；**不要假设只有
   `DOCKHAND_URL` 一把**，先 `flowlet list` 看实际键名。
 - 离线用 CLI 时用 `--profile=<alias>` 选实例，CLI 自动组合 provider 前缀：
-  `--profile=na` → `DOCKHAND_NA_*`，`--profile=work` → `GITLAB_WORK_*`；
-  不传 `--profile` 读写默认前缀（`DOCKHAND_*` / `GITLAB_*`）。
+  `--profile=na` → `DOCKHAND_NA_*`，`--profile=work` → `GITLAB_WORK_*` / `JENKINS_WORK_*`；
+  不传 `--profile` 读写默认前缀（`DOCKHAND_*` / `GITLAB_*` / `JENKINS_*`）。
 - 环境前缀规则：大写字母开头，只含大写字母/数字/下划线，最长 24；同一 provider 多实例
   必须使用不同前缀（否则生成同名环境变量）。
 
@@ -155,6 +159,66 @@ flowlet dockhand clear --profile=na
 - 内网自签证书加 `--insecure`（每次显式指定，不落库）。
 - `pull` 会按环境前缀写键（默认 `DOCKHAND_URL` / `DOCKHAND_TOKEN`，多实例见上）。
 - **不要把 `dockhand env` 的输出贴进对话**，它包含明文 token。
+
+## Jenkins（用户名 + API Token）
+
+Jenkins 的 REST API 用 HTTP Basic 认证：用户名 + API Token。凭据库里 Jenkins 是一个独立
+provider，除了地址和 token 还保存用户名；校验请求是 `GET {base}/me/api/json`，版本取响应头
+`X-Jenkins`。
+
+```bash
+printf '%s' "$JENKINS_TOKEN" | flowlet jenkins set --url=https://jenkins.example.com --user=ci-bot
+flowlet jenkins status              # URL / 版本 / 当前用户
+flowlet jenkins api GET /api/json?tree=jobs[name,color]
+flowlet jenkins env                 # JENKINS_URL / JENKINS_USER / JENKINS_TOKEN（含明文）
+flowlet jenkins clear
+
+# 多实例
+flowlet jenkins status --profile=work
+flowlet jenkins env --profile=work  # JENKINS_WORK_URL / JENKINS_WORK_USER / JENKINS_WORK_TOKEN
+```
+
+要点：
+
+- 服务端管理面里保存 Jenkins 凭据时**必须填用户名**，否则校验直接拒绝；token 必须属于该用户。
+- 地址填 Jenkins 根地址（如 `https://jenkins.example.com`），不要带 `/me` 或 `/api/json`；
+  子路径部署（如 `https://host/ci`）保留，末尾 `/` 会被去掉。
+- `api` 只接受相对路径，PATH 原样拼在根地址后（Jenkins 没有统一 API 前缀，不会自动加 `/api`）。
+- 内网自签证书加 `--insecure`（每次显式指定，不落库）。
+- `pull` 会写三把键（默认 `JENKINS_URL` / `JENKINS_USER` / `JENKINS_TOKEN`，多实例见上）。
+- **不要把 `jenkins env` 的输出贴进对话**，它包含明文 token。
+
+## Beszel（服务器监控 Hub，邮箱 + 密码换短期 token）
+
+Beszel 是开源服务器监控 Hub（PocketBase 底座，默认端口 8090）。它**没有长期 API Token**：
+用「邮箱 + 密码」调 `POST /api/collections/users/auth-with-password` 换短期 token
+（PocketBase 默认 14 天），CLI 每次现场换、不落库。后续请求头是
+`Authorization: <token>`（**不是** `Bearer`）。版本取 `GET /api/beszel/info` 的 `v`，
+系统数量取 `/api/collections/systems/records` 的 `totalItems`。
+
+```bash
+printf '%s' "$BESZEL_PASSWORD" | flowlet beszel set --url=http://beszel.example.com:8090 --email=you@example.com
+flowlet beszel status              # URL / 版本 / 登录邮箱 / 系统数量
+flowlet beszel systems [--json]    # id / name / host / status / port
+flowlet beszel api GET /api/collections/systems/records?perPage=1
+flowlet beszel env                 # BESZEL_URL / BESZEL_EMAIL / BESZEL_PASSWORD（含明文）
+flowlet beszel clear
+
+# 多实例
+flowlet beszel status --profile=mon
+flowlet beszel env --profile=mon   # BESZEL_MON_URL / BESZEL_MON_EMAIL / BESZEL_MON_PASSWORD
+```
+
+要点：
+
+- 服务端管理面里保存 Beszel 凭据时**必须填邮箱**；邮箱明文、密码密文。
+- 认证失败（PocketBase 返回 400）通常意味着邮箱或密码错误，或用了 PocketBase 超级管理员账号
+  而不是 Beszel 用户账号；403 时密码登录可能被 `DISABLE_PASSWORD_AUTH` 禁用。
+- 地址填 Hub 根地址；粘贴 `http://host:8090/api` 或管理面板 `http://host:8090/_/` 会被归一。
+- `api` 只接受相对路径，PATH 可带 `/api` 前缀与 query。
+- 内网自签证书加 `--insecure`（每次显式指定，不落库）。
+- `pull` 会写三把键（默认 `BESZEL_URL` / `BESZEL_EMAIL` / `BESZEL_PASSWORD`，多实例见上）。
+- **不要把 `beszel env` 的输出贴进对话**，它包含明文密码。
 
 ## 与 Agent 配置的关系
 

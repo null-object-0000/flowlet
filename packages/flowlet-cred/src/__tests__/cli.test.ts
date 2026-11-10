@@ -29,6 +29,9 @@ const RUST_CLI = "/home/nichangen/代码/self-code/flowlet/src-tauri/target/debu
 
 const GITLAB_TOKEN = "glpat-test-fixture-token-1a2b";
 const DOCKHAND_TOKEN = "dockhand-test-fixture-token-9x8y";
+const JENKINS_TOKEN = "jenkins-test-fixture-token-7q2w";
+const BESZEL_EMAIL = "fixture@example.com";
+const BESZEL_PASSWORD = "beszel-test-fixture-password-8k3m";
 const ADMIN_TOKEN = "flowlet-admin-token-0123456789";
 const HEADER = [
   "# Flowlet 全局凭据库",
@@ -590,6 +593,361 @@ describe("dockhand 子命令", () => {
     sz.close();
   });
 
+// ─── jenkins 子命令 ────────────────────────────────────────────────────────
+
+describe("jenkins 子命令", () => {
+  it("jenkins set：先校验后落库，URL 去末尾斜杠，三把键的 kind/note 写入", async () => {
+    const mock = await startMock({ mode: "jenkins" });
+    const dir = tempDir();
+    const ok = cli(dir, ["jenkins", "set", `--url=${mock.baseUrl}/`, "--user=fixture-user"], {
+      input: JENKINS_TOKEN,
+    });
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.equal(
+      ok.stdout,
+      `已保存 Jenkins 凭据：${mock.baseUrl}\n用户：Fixture User（Jenkins 2.440.1）\n`,
+    );
+    const meta = JSON.parse(metaFile(dir)) as Record<string, Record<string, unknown>>;
+    assert.equal(meta.JENKINS_URL!.kind, "service");
+    assert.equal(meta.JENKINS_URL!.note, "jenkins 实例地址");
+    assert.equal(meta.JENKINS_USER!.kind, "service");
+    assert.equal(meta.JENKINS_USER!.note, "jenkins 用户名");
+    assert.equal(meta.JENKINS_TOKEN!.kind, "cli_token");
+    assert.equal(meta.JENKINS_TOKEN!.note, "jenkins API token");
+    assert.equal(cli(dir, ["get", "JENKINS_URL", "--reveal"]).stdout, `${mock.baseUrl}\n`);
+    assert.equal(cli(dir, ["get", "JENKINS_USER", "--reveal"]).stdout, "fixture-user\n");
+    assert.equal(cli(dir, ["get", "JENKINS_TOKEN", "--reveal"]).stdout, `${JENKINS_TOKEN}\n`);
+    mock.close();
+  });
+
+  it("jenkins set：缺少 --url/--user 的提示；空 token/用户名与无效 token 都不落库", async () => {
+    const mock = await startMock({ mode: "jenkins" });
+    const dir = tempDir();
+    const noUrl = cli(dir, ["jenkins", "set", "--user=fixture-user"], { input: JENKINS_TOKEN });
+    assert.equal(noUrl.status, 1);
+    assert.match(
+      noUrl.stderr,
+      /^缺少 --url，例如：flowlet jenkins set --url=https:\/\/jenkins\.example\.com --user=NAME\n$/,
+    );
+    const noUser = cli(dir, ["jenkins", "set", `--url=${mock.baseUrl}`], { input: JENKINS_TOKEN });
+    assert.equal(noUser.status, 1);
+    assert.match(noUser.stderr, /^缺少 --user，例如：flowlet jenkins set /);
+    const emptyUser = cli(dir, ["jenkins", "set", `--url=${mock.baseUrl}`, "--user=   "], {
+      input: JENKINS_TOKEN,
+    });
+    assert.equal(emptyUser.stderr, "Jenkins 用户名不能为空\n");
+    const emptyToken = cli(dir, ["jenkins", "set", `--url=${mock.baseUrl}`, "--user=fixture-user"]);
+    assert.equal(
+      emptyToken.stderr,
+      "Jenkins token 不能为空：用 `printf '%s' \"$TOKEN\" | flowlet jenkins set ...`\n",
+    );
+    const failed = cli(dir, ["jenkins", "set", `--url=${mock.baseUrl}`, "--user=fixture-user"], {
+      input: "wrong-jenkins-token",
+    });
+    assert.equal(failed.status, 1);
+    assert.equal(
+      failed.stderr,
+      "Jenkins API 401: Unauthorized（用户名或 API Token 无效，请到 Jenkins 用户设置页确认 API Token）\n" +
+        "未保存。请检查实例地址、用户名与 API Token 是否有效（Jenkins 用户设置 → API Token）。\n",
+    );
+    assert.ok(!existsSync(path.join(dir, "credentials.env")) || !envFile(dir).includes("JENKINS_URL"));
+    mock.close();
+  });
+
+  it("jenkins status：URL/版本/用户三行；X-Jenkins 缺失显示未知；未配置时提示", async () => {
+    const mock = await startMock({ mode: "jenkins" });
+    const dir = tempDir();
+    cli(dir, ["jenkins", "set", `--url=${mock.baseUrl}`, "--user=fixture-user"], {
+      input: JENKINS_TOKEN,
+    });
+    assert.equal(
+      cli(dir, ["jenkins", "status"]).stdout,
+      `URL：${mock.baseUrl}\n版本：2.440.1\n用户：Fixture User\n`,
+    );
+    mock.close();
+
+    const noVersion = await startMock({ mode: "jenkins", jenkinsVersion: null });
+    const dir2 = tempDir();
+    cli(dir2, ["jenkins", "set", `--url=${noVersion.baseUrl}`, "--user=fixture-user"], {
+      input: JENKINS_TOKEN,
+    });
+    assert.equal(
+      cli(dir2, ["jenkins", "status"]).stdout,
+      `URL：${noVersion.baseUrl}\n版本：未知\n用户：Fixture User\n`,
+    );
+    noVersion.close();
+
+    const empty = cli(tempDir(), ["jenkins", "status"]);
+    assert.equal(empty.status, 1);
+    assert.match(empty.stderr, /尚未配置 Jenkins 地址/);
+  });
+
+  it("jenkins api：默认 GET、显式方法、PATH 原样（不加 /api）、POST 透传、拒绝绝对 URL 与非法 --data", async () => {
+    const mock = await startMock({ mode: "jenkins" });
+    const dir = tempDir();
+    cli(dir, ["jenkins", "set", `--url=${mock.baseUrl}`, "--user=fixture-user"], {
+      input: JENKINS_TOKEN,
+    });
+    const me = JSON.parse(cli(dir, ["jenkins", "api", "/me/api/json"]).stdout) as {
+      fullName: string;
+    };
+    assert.equal(me.fullName, "Fixture User");
+    const job = JSON.parse(cli(dir, ["jenkins", "api", "GET", "/job/flowlet/api/json"]).stdout) as {
+      name: string;
+    };
+    assert.equal(job.name, "flowlet");
+    const echoed = JSON.parse(
+      cli(dir, ["jenkins", "api", "POST", "/echo", '--data={"build":1}']).stdout,
+    ) as { method: string; body: unknown; path: string };
+    assert.deepEqual(echoed, { method: "POST", body: { build: 1 }, path: "/echo" });
+    assert.equal(
+      cli(dir, ["jenkins", "api", "GET", "https://evil.example.com/me/api/json"]).stderr,
+      "API 路径必须是相对路径（如 /me/api/json），不接受绝对 URL\n",
+    );
+    assert.match(
+      cli(dir, ["jenkins", "api", "POST", "/echo", "--data=not-json"]).stderr,
+      /--data 不是合法 JSON/,
+    );
+    mock.close();
+  });
+
+  it("jenkins env/clear：明文提示 + 三行；clear 幂等移除三把键", async () => {
+    const mock = await startMock({ mode: "jenkins" });
+    const dir = tempDir();
+    assert.match(cli(dir, ["jenkins", "env"]).stderr, /尚未配置 Jenkins 地址/);
+    cli(dir, ["jenkins", "set", `--url=${mock.baseUrl}`, "--user=fixture-user"], {
+      input: JENKINS_TOKEN,
+    });
+    const env = cli(dir, ["jenkins", "env"]);
+    assert.match(env.stderr, /注意：下面输出包含明文 token/);
+    assert.equal(
+      env.stdout,
+      `JENKINS_URL=${mock.baseUrl}\nJENKINS_USER=fixture-user\nJENKINS_TOKEN=${JENKINS_TOKEN}\n`,
+    );
+    assert.equal(cli(dir, ["jenkins", "clear"]).stdout, "已移除 Jenkins 凭据\n");
+    assert.equal(cli(dir, ["jenkins", "clear"]).stdout, "没有可移除的 Jenkins 凭据\n");
+    mock.close();
+  });
+
+  it("jenkins --profile：多实例独立键名（含 JENKINS_CI_USER），clear 只删该 profile", async () => {
+    const ci = await startMock({ mode: "jenkins" });
+    const dir = tempDir();
+    assert.equal(
+      cli(dir, ["jenkins", "set", `--url=${ci.baseUrl}`, "--user=fixture-user", "--profile=ci"], {
+        input: JENKINS_TOKEN,
+      }).stdout,
+      `已保存 Jenkins 凭据（profile: CI）：${ci.baseUrl}\n用户：Fixture User（Jenkins 2.440.1）\n`,
+    );
+    assert.equal(
+      cli(dir, ["jenkins", "status", "--profile=ci"]).stdout,
+      `URL：${ci.baseUrl}\n版本：2.440.1\n用户：Fixture User\n`,
+    );
+    const env = cli(dir, ["jenkins", "env", "--profile=ci"]);
+    assert.match(env.stderr, /注意：下面输出包含明文 token/);
+    assert.equal(
+      env.stdout,
+      `JENKINS_CI_URL=${ci.baseUrl}\nJENKINS_CI_USER=fixture-user\nJENKINS_CI_TOKEN=${JENKINS_TOKEN}\n`,
+    );
+    // 默认前缀与 profile 独立：未配置默认凭据时提示仍指向 flowlet jenkins set。
+    assert.match(cli(dir, ["jenkins", "env"]).stderr, /尚未配置 Jenkins 地址，先运行 flowlet jenkins set/);
+    assert.equal(
+      cli(dir, ["jenkins", "clear", "--profile=ci"]).stdout,
+      "已移除 Jenkins 凭据（profile: CI）\n",
+    );
+    assert.match(cli(dir, ["jenkins", "env", "--profile=ci"]).stderr, /--profile=CI/);
+    ci.close();
+  });
+});
+
+// ─── beszel 子命令 ────────────────────────────────────────────────────────
+
+describe("beszel 子命令", () => {
+  it("beszel set：先认证再落库，URL 归一（/_/ → 根地址），三把键的 kind/note 写入", async () => {
+    const mock = await startMock({ mode: "beszel" });
+    const dir = tempDir();
+    const ok = cli(dir, ["beszel", "set", `--url=${mock.baseUrl}/_/`, `--email=${BESZEL_EMAIL}`], {
+      input: BESZEL_PASSWORD,
+    });
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.equal(
+      ok.stdout,
+      `已保存 Beszel 凭据：${mock.baseUrl}\n邮箱：${BESZEL_EMAIL}（Beszel 0.21.1）\n系统：3 台\n`,
+    );
+    const meta = JSON.parse(metaFile(dir)) as Record<string, Record<string, unknown>>;
+    assert.equal(meta.BESZEL_URL!.kind, "service");
+    assert.equal(meta.BESZEL_URL!.note, "beszel 实例地址");
+    assert.equal(meta.BESZEL_EMAIL!.kind, "service");
+    assert.equal(meta.BESZEL_EMAIL!.note, "beszel 登录邮箱");
+    assert.equal(meta.BESZEL_PASSWORD!.kind, "cli_token");
+    assert.equal(meta.BESZEL_PASSWORD!.note, "beszel 登录密码");
+    assert.equal(cli(dir, ["get", "BESZEL_URL", "--reveal"]).stdout, `${mock.baseUrl}\n`);
+    assert.equal(cli(dir, ["get", "BESZEL_EMAIL", "--reveal"]).stdout, `${BESZEL_EMAIL}\n`);
+    assert.equal(cli(dir, ["get", "BESZEL_PASSWORD", "--reveal"]).stdout, `${BESZEL_PASSWORD}\n`);
+    mock.close();
+  });
+
+  it("beszel set：缺少 --url/--email、空密码、密码错误都不落库", async () => {
+    const mock = await startMock({ mode: "beszel" });
+    const dir = tempDir();
+    const noUrl = cli(dir, ["beszel", "set", `--email=${BESZEL_EMAIL}`], { input: BESZEL_PASSWORD });
+    assert.equal(noUrl.status, 1);
+    assert.match(
+      noUrl.stderr,
+      /^缺少 --url，例如：flowlet beszel set --url=http:\/\/beszel\.example\.com:8090 --email=you@example\.com\n$/,
+    );
+    const noEmail = cli(dir, ["beszel", "set", `--url=${mock.baseUrl}`], {
+      input: BESZEL_PASSWORD,
+    });
+    assert.equal(noEmail.status, 1);
+    assert.equal(
+      noEmail.stderr,
+      "缺少 --email，例如：flowlet beszel set --url=http://beszel.example.com:8090 --email=you@example.com\n",
+    );
+    const emptyPassword = cli(dir, ["beszel", "set", `--url=${mock.baseUrl}`, `--email=${BESZEL_EMAIL}`]);
+    assert.equal(
+      emptyPassword.stderr,
+      "Beszel 密码不能为空：用 `printf '%s' \"$PASSWORD\" | flowlet beszel set ...`\n",
+    );
+    const failed = cli(dir, ["beszel", "set", `--url=${mock.baseUrl}`, `--email=${BESZEL_EMAIL}`], {
+      input: "wrong-password",
+    });
+    assert.equal(failed.status, 1);
+    assert.equal(
+      failed.stderr,
+      "Beszel API 400: Failed to authenticate.（邮箱或密码错误，请确认是 Beszel 用户账号（不是 PocketBase 超级管理员））\n" +
+        "未保存。请检查实例地址、邮箱与密码是否有效（Beszel 用户账号，不是 PocketBase 超级管理员）。\n",
+    );
+    assert.ok(
+      !existsSync(path.join(dir, "credentials.env")) || !envFile(dir).includes("BESZEL_URL"),
+    );
+    mock.close();
+  });
+
+  it("beszel status：URL/版本/邮箱/系统四行；info 失败显示版本未知；未配置时提示", async () => {
+    const mock = await startMock({ mode: "beszel" });
+    const dir = tempDir();
+    cli(dir, ["beszel", "set", `--url=${mock.baseUrl}`, `--email=${BESZEL_EMAIL}`], {
+      input: BESZEL_PASSWORD,
+    });
+    assert.equal(
+      cli(dir, ["beszel", "status"]).stdout,
+      `URL：${mock.baseUrl}\n版本：0.21.1\n邮箱：${BESZEL_EMAIL}\n系统：3 台\n`,
+    );
+    mock.close();
+
+    const infoDown = await startMock({ mode: "beszel", beszelInfoStatus: 404 });
+    const dir2 = tempDir();
+    cli(dir2, ["beszel", "set", `--url=${infoDown.baseUrl}`, `--email=${BESZEL_EMAIL}`], {
+      input: BESZEL_PASSWORD,
+    });
+    assert.equal(
+      cli(dir2, ["beszel", "status"]).stdout,
+      `URL：${infoDown.baseUrl}\n版本：未知\n邮箱：${BESZEL_EMAIL}\n系统：3 台\n`,
+    );
+    infoDown.close();
+
+    const empty = cli(tempDir(), ["beszel", "status"]);
+    assert.equal(empty.status, 1);
+    assert.match(empty.stderr, /尚未配置 Beszel 地址/);
+  });
+
+  it("beszel systems：默认文本列表与 --json", async () => {
+    const mock = await startMock({ mode: "beszel" });
+    const dir = tempDir();
+    cli(dir, ["beszel", "set", `--url=${mock.baseUrl}`, `--email=${BESZEL_EMAIL}`], {
+      input: BESZEL_PASSWORD,
+    });
+    const text = cli(dir, ["beszel", "systems"]).stdout;
+    assert.match(text, /sys-1.*web-01.*up.*10\.0\.0\.11:45876/);
+    assert.match(text, /sys-3.*cache-01.*down/);
+    const json = JSON.parse(cli(dir, ["beszel", "systems", "--json"]).stdout) as Array<
+      Record<string, unknown>
+    >;
+    assert.equal(json.length, 3);
+    assert.deepEqual(json[0], {
+      id: "sys-1",
+      name: "web-01",
+      host: "10.0.0.11",
+      status: "up",
+      port: "45876",
+    });
+    mock.close();
+  });
+
+  it("beszel api：默认 GET、显式方法、PATH 可带 /api、POST 透传、拒绝绝对 URL 与非法 --data", async () => {
+    const mock = await startMock({ mode: "beszel" });
+    const dir = tempDir();
+    cli(dir, ["beszel", "set", `--url=${mock.baseUrl}`, `--email=${BESZEL_EMAIL}`], {
+      input: BESZEL_PASSWORD,
+    });
+    const info = JSON.parse(cli(dir, ["beszel", "api", "/beszel/info"]).stdout) as { v: string };
+    assert.equal(info.v, "0.21.1");
+    const page = JSON.parse(
+      cli(dir, ["beszel", "api", "GET", "/api/collections/systems/records?perPage=1"]).stdout,
+    ) as { totalItems: number };
+    assert.equal(page.totalItems, 3);
+    const echoed = JSON.parse(
+      cli(dir, ["beszel", "api", "POST", "/echo", '--data={"probe":1}']).stdout,
+    ) as { method: string; body: unknown; path: string };
+    assert.deepEqual(echoed, { method: "POST", body: { probe: 1 }, path: "/api/echo" });
+    assert.equal(
+      cli(dir, ["beszel", "api", "GET", "https://evil.example.com/collections/systems/records"])
+        .stderr,
+      "API 路径必须是相对路径（如 /collections/systems/records），不接受绝对 URL\n",
+    );
+    assert.match(
+      cli(dir, ["beszel", "api", "POST", "/echo", "--data=not-json"]).stderr,
+      /--data 不是合法 JSON/,
+    );
+    mock.close();
+  });
+
+  it("beszel env/clear：明文密码提示 + 三行；clear 幂等移除三把键", async () => {
+    const mock = await startMock({ mode: "beszel" });
+    const dir = tempDir();
+    assert.match(cli(dir, ["beszel", "env"]).stderr, /尚未配置 Beszel 地址/);
+    cli(dir, ["beszel", "set", `--url=${mock.baseUrl}`, `--email=${BESZEL_EMAIL}`], {
+      input: BESZEL_PASSWORD,
+    });
+    const env = cli(dir, ["beszel", "env"]);
+    assert.match(env.stderr, /注意：下面输出包含明文密码/);
+    assert.equal(
+      env.stdout,
+      `BESZEL_URL=${mock.baseUrl}\nBESZEL_EMAIL=${BESZEL_EMAIL}\nBESZEL_PASSWORD=${BESZEL_PASSWORD}\n`,
+    );
+    assert.equal(cli(dir, ["beszel", "clear"]).stdout, "已移除 Beszel 凭据\n");
+    assert.equal(cli(dir, ["beszel", "clear"]).stdout, "没有可移除的 Beszel 凭据\n");
+    mock.close();
+  });
+
+  it("beszel --profile：多实例独立键名（BESZEL_MON_EMAIL/_PASSWORD），clear 只删该 profile", async () => {
+    const mon = await startMock({ mode: "beszel" });
+    const dir = tempDir();
+    assert.equal(
+      cli(dir, ["beszel", "set", `--url=${mon.baseUrl}`, `--email=${BESZEL_EMAIL}`, "--profile=mon"], {
+        input: BESZEL_PASSWORD,
+      }).stdout,
+      `已保存 Beszel 凭据（profile: MON）：${mon.baseUrl}\n邮箱：${BESZEL_EMAIL}（Beszel 0.21.1）\n系统：3 台\n`,
+    );
+    const env = cli(dir, ["beszel", "env", "--profile=mon"]);
+    assert.equal(
+      env.stdout,
+      `BESZEL_MON_URL=${mon.baseUrl}\nBESZEL_MON_EMAIL=${BESZEL_EMAIL}\nBESZEL_MON_PASSWORD=${BESZEL_PASSWORD}\n`,
+    );
+    assert.equal(
+      cli(dir, ["beszel", "status", "--profile=mon"]).stdout,
+      `URL：${mon.baseUrl}\n版本：0.21.1\n邮箱：${BESZEL_EMAIL}\n系统：3 台\n`,
+    );
+    assert.match(cli(dir, ["beszel", "env"]).stderr, /尚未配置 Beszel 地址，先运行 flowlet beszel set/);
+    assert.equal(
+      cli(dir, ["beszel", "clear", "--profile=mon"]).stdout,
+      "已移除 Beszel 凭据（profile: MON）\n",
+    );
+    assert.match(cli(dir, ["beszel", "env", "--profile=mon"]).stderr, /--profile=MON/);
+    mon.close();
+  });
+});
+
 // ─── pull（Flowlet Web Host → 本地 .env） ──────────────────────────────────
 
 describe("pull", () => {
@@ -681,6 +1039,88 @@ describe("pull", () => {
     const meta = JSON.parse(metaFile(dir)) as Record<string, Record<string, unknown>>;
     assert.equal(meta.DOCKHAND_NA_TOKEN!.kind, "cli_token");
     assert.equal(meta.DOCKHAND_NA_TOKEN!.note, "dockhand / 北美");
+    web.close();
+  });
+
+  it("jenkins 条目映射为 JENKINS_URL / JENKINS_USER / JENKINS_TOKEN（缺失 username 写空串）", async () => {
+    const web = await startMock({
+      mode: "flowlet-web",
+      entries: [
+        {
+          name: "预发 Jenkins",
+          provider: "jenkins",
+          baseUrl: "https://jenkins.example.com",
+          token: "jenkins-pulled-1",
+          username: "alice",
+        },
+        {
+          name: "旧导出",
+          provider: "jenkins",
+          baseUrl: "https://ci.example.com",
+          token: "jenkins-pulled-2",
+          envPrefix: "JENKINS_CI",
+        },
+      ],
+    });
+    const dir = tempDir();
+    cli(dir, ["init"]);
+    const pulled = cli(dir, ["pull", `--server=${web.baseUrl}`, `--token=${ADMIN_TOKEN}`]);
+    assert.equal(pulled.status, 0, pulled.stderr);
+    assert.match(pulled.stdout, /已写入 JENKINS_URL（来自 jenkins \/ 预发 Jenkins）/);
+    assert.match(pulled.stdout, /已写入 JENKINS_USER（来自 jenkins \/ 预发 Jenkins）/);
+    assert.match(pulled.stdout, /已写入 JENKINS_CI_USER（来自 jenkins \/ 旧导出）/);
+    assert.match(pulled.stdout, /完成：写入 6 个键 → /);
+    assert.equal(cli(dir, ["get", "JENKINS_URL", "--reveal"]).stdout, "https://jenkins.example.com\n");
+    assert.equal(cli(dir, ["get", "JENKINS_USER", "--reveal"]).stdout, "alice\n");
+    assert.equal(cli(dir, ["get", "JENKINS_TOKEN", "--reveal"]).stdout, "jenkins-pulled-1\n");
+    // 旧导出没有 username：USER 仍写入（空串），凭证键的三键结构不变。
+    assert.equal(cli(dir, ["get", "JENKINS_CI_USER", "--reveal"]).stdout, "\n");
+    const meta = JSON.parse(metaFile(dir)) as Record<string, Record<string, unknown>>;
+    assert.equal(meta.JENKINS_URL!.kind, "service");
+    assert.equal(meta.JENKINS_USER!.kind, "service");
+    assert.equal(meta.JENKINS_USER!.note, "jenkins / 预发 Jenkins");
+    assert.equal(meta.JENKINS_TOKEN!.kind, "cli_token");
+    assert.equal(meta.JENKINS_CI_USER!.kind, "service");
+    assert.equal(meta.JENKINS_CI_USER!.note, "jenkins / 旧导出");
+    web.close();
+  });
+
+  it("beszel 条目映射为 BESZEL_URL / BESZEL_EMAIL / BESZEL_PASSWORD（缺失 username 写空串）", async () => {
+    const web = await startMock({
+      mode: "flowlet-web",
+      entries: [
+        {
+          name: "监控 Hub",
+          provider: "beszel",
+          baseUrl: "http://beszel.example.com:8090",
+          token: "beszel-password-1",
+          username: "ops@example.com",
+        },
+        {
+          name: "旧导出",
+          provider: "beszel",
+          baseUrl: "http://mon.example.com:8090",
+          token: "beszel-password-2",
+          envPrefix: "BESZEL_MON",
+        },
+      ],
+    });
+    const dir = tempDir();
+    cli(dir, ["init"]);
+    const pulled = cli(dir, ["pull", `--server=${web.baseUrl}`, `--token=${ADMIN_TOKEN}`]);
+    assert.equal(pulled.status, 0, pulled.stderr);
+    assert.match(pulled.stdout, /已写入 BESZEL_EMAIL（来自 beszel \/ 监控 Hub）/);
+    assert.match(pulled.stdout, /已写入 BESZEL_MON_PASSWORD（来自 beszel \/ 旧导出）/);
+    assert.match(pulled.stdout, /完成：写入 6 个键 → /);
+    assert.equal(cli(dir, ["get", "BESZEL_EMAIL", "--reveal"]).stdout, "ops@example.com\n");
+    assert.equal(cli(dir, ["get", "BESZEL_PASSWORD", "--reveal"]).stdout, "beszel-password-1\n");
+    // 旧导出没有 username：EMAIL 仍写入（空串），凭证键的三键结构不变。
+    assert.equal(cli(dir, ["get", "BESZEL_MON_EMAIL", "--reveal"]).stdout, "\n");
+    const meta = JSON.parse(metaFile(dir)) as Record<string, Record<string, unknown>>;
+    assert.equal(meta.BESZEL_URL!.kind, "service");
+    assert.equal(meta.BESZEL_EMAIL!.kind, "service");
+    assert.equal(meta.BESZEL_PASSWORD!.kind, "cli_token");
+    assert.equal(meta.BESZEL_MON_EMAIL!.note, "beszel / 旧导出");
     web.close();
   });
 

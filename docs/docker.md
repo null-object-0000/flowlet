@@ -1,6 +1,6 @@
 # Docker 与浏览器部署
 
-> **迁移状态（2026-11，分支 `migrate/electron`）**：Docker 版正在从 Rust `headless` 二进制迁移到
+> **迁移状态（2026-11）**：Docker 版已从 Rust `headless` 二进制切换到
 > **Node Host**（`packages/flowlet-core`，Node 26 直接执行 TypeScript）。迁移目标是行为等价替换：
 > 镜像不再包含 Rust 工具链与编译产物，环境变量、端口、`/data` 数据卷、SQLite schema、管理端
 > 鉴权（token / GitLab OIDC）全部保持相同契约。当前线上实例（10.100.217.60）已于 **2026-11-10 切换为 Node Host 镜像**
@@ -191,12 +191,14 @@ scripts/run-node-host.sh          # 复制数据副本到 .flowlet-dev-data/ 后
 
 端到端冒烟：`node scripts/e2e-node-host.mjs`；Rust↔Node 对拍：`node scripts/web-parity.mjs`。
 
-Rust 版（回滚/对照用）：
+Rust 版 host 已不参与构建与部署（生产 Web Host 由 Node Host 承载），仅在需要回滚对照或
+Rust↔Node 对拍时按需编译，Cargo feature `legacy-server` 默认关闭：
 
 ```bash
 export FLOWLET_ADMIN_TOKEN="$(openssl rand -hex 32)"
-cargo run --manifest-path src-tauri/Cargo.toml --no-default-features --bin headless
+cargo run --manifest-path src-tauri/Cargo.toml --no-default-features --features legacy-server --bin headless
 ```
 
 默认监听 `127.0.0.1:8080` 和 `127.0.0.1:18640`，数据库位于 `flowlet-data/`。
-桌面构建继续使用默认 Cargo feature；独立服务通过 `--no-default-features --bin headless` 排除桌面依赖。
+桌面构建继续使用默认 Cargo feature；`core::web` 与 `headless` 二进制只在 `legacy-server`
+下编译，不会进入桌面产物。

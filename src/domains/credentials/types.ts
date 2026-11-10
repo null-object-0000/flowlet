@@ -1,16 +1,16 @@
 /** 三方服务凭据的领域类型（与 Rust `core::service_credentials` 的 camelCase JSON 对齐）。 */
 
-export type CredentialProviderId = "gitlab" | "dockhand" | "jenkins";
+export type CredentialProviderId = "gitlab" | "dockhand" | "jenkins" | "beszel";
 
 export type CredentialProvider = {
   id: string;
   label: string;
   baseUrlHint: string;
   tokenLabel: string;
-  /** 需要 Basic 认证的 provider（Jenkins）展示用户名输入框；其它为 null。 */
+  /** 需要额外身份字段的 provider（Jenkins 用户名 / Beszel 邮箱）展示用户名输入框；其它为 null。 */
   usernameLabel?: string | null;
   available: boolean;
-  /** 未填 `envPrefix` 时该 provider 使用的默认环境前缀（`GITLAB` / `DOCKHAND` / `JENKINS`）。 */
+  /** 未填 `envPrefix` 时该 provider 使用的默认环境前缀（`GITLAB` / `DOCKHAND` / `JENKINS` / `BESZEL`）。 */
   defaultEnvPrefix: string;
 };
 
@@ -19,7 +19,7 @@ export type ServiceCredential = {
   name: string;
   provider: string;
   baseUrl: string;
-  /** Basic 认证用户名（仅 Jenkins）；其它 provider 为 null / 缺失。 */
+  /** Basic 认证用户名（Jenkins）或登录邮箱（Beszel）；其它 provider 为 null / 缺失。 */
   username?: string | null;
   kind: string;
   note: string | null;
@@ -39,7 +39,7 @@ export type ServiceCredentialInput = {
   name: string;
   provider: string;
   baseUrl: string;
-  /** Basic 认证用户名（仅 Jenkins）；留空表示编辑时保持原值。 */
+  /** Basic 认证用户名（Jenkins）或登录邮箱（Beszel）；留空表示编辑时保持原值。 */
   username?: string;
   /** 留空表示编辑时保持原 token 不变。 */
   token?: string;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  envKeyList,
   envKeysForPrefix,
   envKeysForProvider,
   isValidEnvPrefixInput,
@@ -18,6 +19,7 @@ describe("providerDefaultEnvPrefix", () => {
     expect(providerDefaultEnvPrefix({ id: "gitlab" })).toBe("GITLAB");
     expect(providerDefaultEnvPrefix({ id: "dockhand" })).toBe("DOCKHAND");
     expect(providerDefaultEnvPrefix({ id: "jenkins" })).toBe("JENKINS");
+    expect(providerDefaultEnvPrefix({ id: "beszel" })).toBe("BESZEL");
     expect(providerDefaultEnvPrefix({ id: "custom" })).toBe("CUSTOM");
   });
 });
@@ -46,17 +48,48 @@ describe("envKeysForPrefix", () => {
 });
 
 describe("envKeysForProvider", () => {
-  it("adds a JENKINS USER key only for basic-auth providers", () => {
+  it("adds an identity key for username/email providers", () => {
+    // Jenkins：Basic 认证 → 用户名 + token
     expect(envKeysForProvider("JENKINS_NA", "jenkins")).toEqual({
       url: "JENKINS_NA_URL",
       user: "JENKINS_NA_USER",
       token: "JENKINS_NA_TOKEN",
+    });
+    // Beszel：邮箱 + 密码（没有长期 API Token）
+    expect(envKeysForProvider("BESZEL_NA", "beszel")).toEqual({
+      url: "BESZEL_NA_URL",
+      user: "BESZEL_NA_EMAIL",
+      token: "BESZEL_NA_PASSWORD",
     });
     expect(envKeysForProvider("DOCKHAND_NA", "dockhand")).toEqual({
       url: "DOCKHAND_NA_URL",
       user: null,
       token: "DOCKHAND_NA_TOKEN",
     });
+    expect(envKeysForProvider("GITLAB", "gitlab")).toEqual({
+      url: "GITLAB_URL",
+      user: null,
+      token: "GITLAB_TOKEN",
+    });
+  });
+});
+
+describe("envKeyList", () => {
+  it("returns the ordered keys and drops the unused identity slot", () => {
+    expect(envKeyList(envKeysForProvider("BESZEL_NA", "beszel"))).toEqual([
+      "BESZEL_NA_URL",
+      "BESZEL_NA_EMAIL",
+      "BESZEL_NA_PASSWORD",
+    ]);
+    expect(envKeyList(envKeysForProvider("JENKINS_NA", "jenkins"))).toEqual([
+      "JENKINS_NA_URL",
+      "JENKINS_NA_USER",
+      "JENKINS_NA_TOKEN",
+    ]);
+    expect(envKeyList(envKeysForProvider("DOCKHAND_NA", "dockhand"))).toEqual([
+      "DOCKHAND_NA_URL",
+      "DOCKHAND_NA_TOKEN",
+    ]);
   });
 });
 
@@ -82,6 +115,7 @@ describe("suggestEnvPrefix", () => {
     expect(suggestEnvPrefix({ providerDefault: "DOCKHAND", name: "公司 Dockhand NA" })).toBe("DOCKHAND_NA");
     expect(suggestEnvPrefix({ providerDefault: "GITLAB", name: "gitlab sz 线上" })).toBe("GITLAB_SZ");
     expect(suggestEnvPrefix({ providerDefault: "JENKINS", name: "Jenkins-build 01" })).toBe("JENKINS_BUILD_01");
+    expect(suggestEnvPrefix({ providerDefault: "BESZEL", name: "Beszel 监控 hub" })).toBe("BESZEL_HUB");
   });
 
   it("falls back to the provider default for non-ASCII names", () => {

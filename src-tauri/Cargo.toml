@@ -23,6 +23,11 @@ required-features = ["desktop"]
 name = "headless"
 path = "src/bin/headless.rs"
 
+# 全局凭据库 CLI：不依赖 Tauri，可用 --no-default-features 单独构建。
+[[bin]]
+name = "flowlet-cred"
+path = "src/bin/flowlet_cred.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [], optional = true }
 

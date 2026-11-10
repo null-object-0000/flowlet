@@ -5,6 +5,7 @@ use super::presets::builtin_channel_presets;
 use super::proxy::{extract_log_capture, read_config_raw, ProxyController, ProxySharedConfig};
 use super::rate_limiter::RateLimiter;
 use super::runtime_config::{RuntimeConfigSnapshot, RuntimeConfigStore};
+use super::secret_box::SecretBox;
 use super::storage::Storage;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -25,6 +26,8 @@ pub struct FlowletServices {
     pub bind_config: Arc<Mutex<ProxyBindConfig>>,
     pub config_path: PathBuf,
     pub channels_config: Arc<Mutex<ChannelsConfig>>,
+    /// 三方服务凭据的静态加密（密钥文件在数据目录 `secret.key`）。
+    pub secrets: SecretBox,
     pub upstream_timeout_seconds: u64,
     require_client_auth: bool,
 }
@@ -33,6 +36,14 @@ impl FlowletServices {
     pub fn open(db_path: impl AsRef<Path>, config_path: impl AsRef<Path>) -> Result<Self, String> {
         let config_path = config_path.as_ref().to_path_buf();
         let channels_config = merge_builtin_config(load_channels_config_from(&config_path)?);
+        // 凭据密钥跟数据目录走：Docker 里是 /data，桌面里是应用数据目录/便携目录。
+        let data_dir = db_path
+            .as_ref()
+            .parent()
+            .filter(|path| !path.as_os_str().is_empty())
+            .map(|path| path.to_path_buf())
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        let secrets = SecretBox::load_or_create(&data_dir)?;
         let storage = Storage::open(db_path).map_err(|error| error.to_string())?;
 
         initialize_channel_presets(&storage, &channels_config)?;
@@ -86,6 +97,7 @@ impl FlowletServices {
             bind_config: Arc::new(Mutex::new(bind_config)),
             config_path,
             channels_config: Arc::new(Mutex::new(channels_config)),
+            secrets,
             upstream_timeout_seconds: DEFAULT_UPSTREAM_TIMEOUT_SECONDS,
             require_client_auth: false,
         })

@@ -7,6 +7,7 @@ import {
   IconList,
   IconPieChart2Stroked,
   IconServer,
+  IconKey,
   IconSetting,
 } from "@douyinfe/semi-icons";
 import { NavLink } from "react-router-dom";
@@ -26,6 +27,7 @@ const navGroups: Array<{
     items: [
       { to: "/", label: "运行概览", icon: <IconHome /> },
       { to: "/models", label: "模型服务", icon: <IconServer /> },
+      { to: "/credentials", label: "服务凭据", icon: <IconKey /> },
     ],
   },
   {

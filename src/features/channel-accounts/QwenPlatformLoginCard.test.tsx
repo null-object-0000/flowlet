@@ -97,7 +97,8 @@ describe("QwenPlatformLoginCard", () => {
     expect(screen.getByText("已登录")).toBeInTheDocument();
     expect(screen.getByText("已登录 nich*****@outlook.com")).toBeInTheDocument();
     expect(screen.getByText(/登录有效至 /)).toBeInTheDocument();
-    expect(screen.getByText("已登录说明")).toBeInTheDocument();
+    // 说明文案收进 title，不再占一行（面板高度收敛）。
+    expect(screen.getByTitle("已登录说明")).toBeInTheDocument();
     const relogin = screen.getByText("重新登录").closest("button");
     expect(relogin).not.toBeNull();
     await userEvent.click(relogin!);

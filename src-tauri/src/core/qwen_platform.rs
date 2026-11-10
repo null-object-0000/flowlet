@@ -66,6 +66,7 @@ const HTTP_TIMEOUT: Duration = Duration::from_secs(20);
 const FQ_PAGE_SIZE: usize = 500;
 const MAX_FQ_PAGES: usize = 10;
 const CREDENTIALS_DIR: &str = "qwen-platform";
+const CREDENTIALS_FILE: &str = "credentials.json";
 const CLIENT_ID_FILE: &str = "client-id";
 /// cs-data 网关：Token Plan 订阅数据的真实来源（千问控制台页面也调它）。
 const CS_DATA_BASE: &str = "https://cs-data.qianwenai.com";
@@ -232,11 +233,6 @@ fn platform_dir(storage: &Storage) -> PathBuf {
     data_dir(storage).join(CREDENTIALS_DIR)
 }
 
-fn credential_path(storage: &Storage, account_id: &str) -> Result<PathBuf, String> {
-    validate_account_id(account_id)?;
-    Ok(platform_dir(storage).join(format!("{account_id}.json")))
-}
-
 fn validate_account_id(account_id: &str) -> Result<(), String> {
     let valid = !account_id.is_empty()
         && account_id
@@ -249,36 +245,65 @@ fn validate_account_id(account_id: &str) -> Result<(), String> {
     }
 }
 
-pub fn load_credentials(
-    storage: &Storage,
-    account_id: &str,
-) -> Result<Option<PlatformCredentials>, String> {
-    let path = credential_path(storage, account_id)?;
-    let raw = match fs::read_to_string(&path) {
-        Ok(raw) => raw,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(format!("读取千问平台凭据失败: {error}")),
-    };
-    match serde_json::from_str::<PlatformCredentials>(&raw) {
-        Ok(credentials) if !credentials.access_token.trim().is_empty() => Ok(Some(credentials)),
-        Ok(_) => Ok(None),
-        Err(error) => {
-            tracing::warn!(%error, path = %path.display(), "千问平台凭据文件解析失败，按未登录处理");
-            Ok(None)
-        }
-    }
+/// 千问平台凭据库：令牌按**平台账号**共享，多个 Flowlet 账号可复用。
+///
+/// 同一个千问平台账号通常只对应一个平台登录；按账号各存一份会让用户在
+/// 「按量付费账号」和「Token Plan 账号」上重复授权。这里用
+/// `accounts` 记录 Flowlet 账号 → 平台账号的绑定。
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct CredentialStore {
+    #[serde(default = "store_version")]
+    version: u32,
+    #[serde(default)]
+    platforms: HashMap<String, PlatformCredentials>,
+    #[serde(default)]
+    accounts: HashMap<String, String>,
 }
 
-fn save_credentials(
-    storage: &Storage,
-    account_id: &str,
-    credentials: &PlatformCredentials,
-) -> Result<(), String> {
-    let path = credential_path(storage, account_id)?;
-    if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir).map_err(|error| format!("创建千问平台凭据目录失败: {error}"))?;
+fn store_version() -> u32 {
+    1
+}
+
+fn credentials_path(storage: &Storage) -> PathBuf {
+    platform_dir(storage).join(CREDENTIALS_FILE)
+}
+
+fn platform_key(credentials: &PlatformCredentials) -> String {
+    credentials
+        .aliyun_id
+        .as_deref()
+        .or(credentials.email.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("default")
+        .to_string()
+}
+
+fn load_store(storage: &Storage) -> Result<CredentialStore, String> {
+    let path = credentials_path(storage);
+    let mut store = match fs::read_to_string(&path) {
+        Ok(raw) => match serde_json::from_str::<CredentialStore>(&raw) {
+            Ok(store) => store,
+            Err(error) => {
+                tracing::warn!(%error, path = %path.display(), "千问平台凭据库解析失败，按空库处理");
+                CredentialStore::default()
+            }
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => CredentialStore::default(),
+        Err(error) => return Err(format!("读取千问平台凭据失败: {error}")),
+    };
+    if store.version == 0 {
+        store.version = store_version();
     }
-    let body = serde_json::to_string_pretty(credentials)
+    migrate_legacy_credentials(storage, &mut store)?;
+    Ok(store)
+}
+
+fn save_store(storage: &Storage, store: &CredentialStore) -> Result<(), String> {
+    let dir = platform_dir(storage);
+    fs::create_dir_all(&dir).map_err(|error| format!("创建千问平台凭据目录失败: {error}"))?;
+    let path = credentials_path(storage);
+    let body = serde_json::to_string_pretty(store)
         .map_err(|error| format!("序列化千问平台凭据失败: {error}"))?;
     let temp = path.with_extension("json.tmp");
     fs::write(&temp, body).map_err(|error| format!("写入千问平台凭据失败: {error}"))?;
@@ -287,13 +312,128 @@ fn save_credentials(
     Ok(())
 }
 
-fn remove_credentials(storage: &Storage, account_id: &str) -> Result<bool, String> {
-    let path = credential_path(storage, account_id)?;
-    match fs::remove_file(&path) {
-        Ok(()) => Ok(true),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(format!("删除千问平台凭据失败: {error}")),
+/// 旧版本按 `<accountId>.json` 存单账号令牌；首次读取时导入共享库并删除旧文件。
+fn migrate_legacy_credentials(
+    storage: &Storage,
+    store: &mut CredentialStore,
+) -> Result<(), String> {
+    let dir = platform_dir(storage);
+    let entries = match fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("读取千问平台目录失败: {error}")),
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !name.ends_with(".json") || name == CREDENTIALS_FILE {
+            continue;
+        }
+        let account_id = name.trim_end_matches(".json").to_string();
+        if validate_account_id(&account_id).is_err() {
+            continue;
+        }
+        let Ok(raw) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(credentials) = serde_json::from_str::<PlatformCredentials>(&raw) else {
+            continue;
+        };
+        if credentials.access_token.trim().is_empty() {
+            continue;
+        }
+        let key = platform_key(&credentials);
+        store.platforms.entry(key.clone()).or_insert(credentials);
+        store.accounts.entry(account_id).or_insert(key);
+        if let Err(error) = fs::remove_file(&path) {
+            tracing::warn!(%error, path = %path.display(), "删除旧千问平台凭据失败");
+        }
     }
+    Ok(())
+}
+
+/// 解析某账号可用的平台令牌：先看绑定，再回退到最近更新的有效令牌并补绑定。
+fn resolve_credentials(
+    store: &mut CredentialStore,
+    account_id: &str,
+    now: DateTime<Utc>,
+) -> Option<(String, PlatformCredentials)> {
+    if let Some(key) = store.accounts.get(account_id).cloned() {
+        if let Some(credentials) = store.platforms.get(&key) {
+            if !credentials.access_token.trim().is_empty() && !credentials.is_expired(now) {
+                return Some((key, credentials.clone()));
+            }
+            return None;
+        }
+    }
+    let candidate = store
+        .platforms
+        .iter()
+        .filter(|(_, credentials)| {
+            !credentials.access_token.trim().is_empty() && !credentials.is_expired(now)
+        })
+        .max_by(|left, right| left.1.updated_at.cmp(&right.1.updated_at))
+        .map(|(key, credentials)| (key.clone(), credentials.clone()));
+    if let Some((key, credentials)) = candidate {
+        store.accounts.insert(account_id.to_string(), key.clone());
+        return Some((key, credentials));
+    }
+    None
+}
+
+/// 账号绑定的平台身份（即使令牌已过期也返回，便于界面展示过期身份）。
+fn bound_identity(store: &CredentialStore, account_id: &str) -> Option<PlatformCredentials> {
+    let key = store.accounts.get(account_id)?;
+    store.platforms.get(key).cloned()
+}
+
+pub fn load_credentials(
+    storage: &Storage,
+    account_id: &str,
+) -> Result<Option<PlatformCredentials>, String> {
+    validate_account_id(account_id)?;
+    let mut store = load_store(storage)?;
+    let resolved = resolve_credentials(&mut store, account_id, Utc::now());
+    if resolved.is_some() {
+        // 回退绑定需要落盘，保证后续状态查询与同步一致。
+        save_store(storage, &store)?;
+    }
+    Ok(resolved.map(|(_, credentials)| credentials))
+}
+
+fn bind_platform_credentials(
+    storage: &Storage,
+    account_id: &str,
+    credentials: &PlatformCredentials,
+) -> Result<(), String> {
+    validate_account_id(account_id)?;
+    let mut store = load_store(storage)?;
+    let key = platform_key(credentials);
+    let previous = store.accounts.insert(account_id.to_string(), key.clone());
+    store.platforms.insert(key.clone(), credentials.clone());
+    // 账号改绑到另一个平台身份时，清掉不再被引用的旧令牌，避免共享回退误用孤儿令牌。
+    if let Some(previous) = previous {
+        if previous != key && !store.accounts.values().any(|value| value == &previous) {
+            store.platforms.remove(&previous);
+        }
+    }
+    save_store(storage, &store)
+}
+
+fn unbind_platform_credentials(storage: &Storage, account_id: &str) -> Result<bool, String> {
+    validate_account_id(account_id)?;
+    let mut store = load_store(storage)?;
+    let Some(key) = store.accounts.remove(account_id) else {
+        return Ok(false);
+    };
+    let still_referenced = store.accounts.values().any(|value| value == &key);
+    if !still_referenced {
+        store.platforms.remove(&key);
+    }
+    save_store(storage, &store)?;
+    Ok(true)
 }
 
 #[cfg(unix)]
@@ -772,7 +912,7 @@ pub async fn poll_login(services: &FlowletServices, account_id: &str) -> Result<
                 email: email.clone(),
                 updated_at: Utc::now().to_rfc3339(),
             };
-            save_credentials(&services.storage, account_id, &credentials)?;
+            bind_platform_credentials(&services.storage, account_id, &credentials)?;
             pending_login_store()
                 .lock()
                 .map_err(|_| "锁定千问登录状态失败".to_string())?
@@ -788,22 +928,23 @@ pub async fn poll_login(services: &FlowletServices, account_id: &str) -> Result<
 
 pub fn status(services: &FlowletServices, account_id: &str) -> Result<PlatformStatus, String> {
     let _account = account_or_error(services, account_id)?;
-    let credentials = load_credentials(&services.storage, account_id)?;
-    let logged_in = credentials
-        .as_ref()
-        .is_some_and(|credentials| !credentials.is_expired(Utc::now()));
+    let resolved = load_credentials(&services.storage, account_id)?;
+    let logged_in = resolved.is_some();
+    // 令牌过期时仍展示已绑定的平台身份，界面据此提示「登录已过期」。
+    let identity =
+        resolved.or_else(|| bound_identity(&load_store(&services.storage).ok()?, account_id));
     Ok(PlatformStatus {
         account_id: account_id.to_string(),
         logged_in,
-        aliyun_id: credentials.as_ref().and_then(|c| c.aliyun_id.clone()),
-        email: credentials.as_ref().and_then(|c| c.email.clone()),
-        expires_at: credentials.as_ref().and_then(|c| c.expires_at.clone()),
+        aliyun_id: identity.as_ref().and_then(|c| c.aliyun_id.clone()),
+        email: identity.as_ref().and_then(|c| c.email.clone()),
+        expires_at: identity.as_ref().and_then(|c| c.expires_at.clone()),
     })
 }
 
 pub fn logout(services: &FlowletServices, account_id: &str) -> Result<(), String> {
     let _account = account_or_error(services, account_id)?;
-    remove_credentials(&services.storage, account_id)?;
+    unbind_platform_credentials(&services.storage, account_id)?;
     if let Ok(mut pending) = pending_login_store().lock() {
         pending.remove(account_id);
     }
@@ -1065,10 +1206,25 @@ async fn call_cs_data_api(
 
 /// Token Plan 订阅槽位 bundle：`subscription` / `quota_config` / `usage`
 /// 是前端解析器的必需槽位，`reset_card_list` 可选。
+/// cs-data 信封里的业务对象：`data.DataV2.data.data`。前端解析器依赖该路径，
+/// 缺失时按「没有订阅数据」处理，避免写出解析不出的空槽位。
+fn cs_data_business(value: &Value) -> Option<&Value> {
+    value
+        .pointer("/data/DataV2/data/data")
+        .filter(|inner| inner.is_object())
+}
+
+/// Token Plan 订阅槽位 bundle。
+///
+/// 返回值三态：
+/// - `Ok(Some(bundle))`：确实有订阅（subscription/quota_config/usage 都拿到）；
+/// - `Ok(None)`：该平台账号没有可用订阅（业务错误 / 缺必需槽位），整体同步继续；
+/// - `Err(AuthExpired)`：登录失效，整体同步报过期；
+/// - `Err(Message)`：网络等暂时性失败，由调用方记日志并跳过订阅部分。
 async fn fetch_token_plan_bundle(
     client: &reqwest::Client,
     access_token: &str,
-) -> Result<Value, PlatformError> {
+) -> Result<Option<Value>, PlatformError> {
     let cli_token = derive_cli_access_token(client, access_token).await?;
 
     let mut subscription_params = Map::new();
@@ -1087,13 +1243,33 @@ async fn fetch_token_plan_bundle(
         Ok(value) => value,
         // 团队/其它套餐形态可能不接受 commodityCode：去掉参数再试一次。
         Err(PlatformError::Message(_)) => {
-            call_cs_data_api(client, &cli_token, CS_API_SUBSCRIPTION, Map::new()).await?
+            match call_cs_data_api(client, &cli_token, CS_API_SUBSCRIPTION, Map::new()).await {
+                Ok(value) => value,
+                Err(PlatformError::AuthExpired) => return Err(PlatformError::AuthExpired),
+                Err(_) => return Ok(None),
+            }
         }
         Err(error) => return Err(error),
     };
+    if cs_data_business(&subscription).is_none() {
+        return Ok(None);
+    }
+    // quota_config / usage 是前端解析订阅额度的必需槽位；拿不到就当作无订阅，
+    // 不把「没开 Token Plan」误报成整轮同步失败。
     let quota_config =
-        call_cs_data_api(client, &cli_token, CS_API_QUOTA_CONFIG, Map::new()).await?;
-    let usage = call_cs_data_api(client, &cli_token, CS_API_USAGE, Map::new()).await?;
+        match call_cs_data_api(client, &cli_token, CS_API_QUOTA_CONFIG, Map::new()).await {
+            Ok(value) => value,
+            Err(PlatformError::AuthExpired) => return Err(PlatformError::AuthExpired),
+            Err(_) => return Ok(None),
+        };
+    let usage = match call_cs_data_api(client, &cli_token, CS_API_USAGE, Map::new()).await {
+        Ok(value) => value,
+        Err(PlatformError::AuthExpired) => return Err(PlatformError::AuthExpired),
+        Err(_) => return Ok(None),
+    };
+    if cs_data_business(&quota_config).is_none() || cs_data_business(&usage).is_none() {
+        return Ok(None);
+    }
     // 重置券是可选能力：接口不可用时不阻断订阅同步（与控制台抓取一致）。
     let reset_cards =
         match call_cs_data_api(client, &cli_token, CS_API_RESET_CARDS, Map::new()).await {
@@ -1112,7 +1288,7 @@ async fn fetch_token_plan_bundle(
     if let Some(reset_cards) = reset_cards {
         bundle.insert("reset_card_list".to_string(), reset_cards);
     }
-    Ok(Value::Object(bundle))
+    Ok(Some(Value::Object(bundle)))
 }
 
 /// 平台账号展示身份。device flow 只返回数字 `User.Id`，`/api/account/info.json`
@@ -1448,39 +1624,72 @@ fn now_billing_cycle_yyyymm(now: DateTime<Utc>) -> String {
 
 // ─── 同步 ────────────────────────────────────────────────────────────────────
 
+/// 把按量付费与 Token Plan 两套 slot 合并成一个 bundle。
+///
+/// 前端两个解析器（`qwenFreetierDetails` / `qwenTokenPlanDetails`）各有自己的 key，
+/// 合并后可以同时从同一份 `raw_scraped_json` 读取，不需要再按 resource_mode 二选一。
+fn merge_bundles(pay_as_you_go: Option<Value>, token_plan: Option<Value>) -> Value {
+    let mut merged = Map::new();
+    for bundle in [pay_as_you_go, token_plan].into_iter().flatten() {
+        if let Some(object) = bundle.as_object() {
+            for (key, value) in object {
+                merged.insert(key.clone(), value.clone());
+            }
+        }
+    }
+    Value::Object(merged)
+}
+
+fn require_credentials(storage: &Storage, account_id: &str) -> Result<PlatformCredentials, String> {
+    if let Some(credentials) = load_credentials(storage, account_id)? {
+        return Ok(credentials);
+    }
+    let store = load_store(storage)?;
+    if bound_identity(&store, account_id).is_some() {
+        return Err(PlatformError::AuthExpired.message());
+    }
+    Err(PlatformError::NotLoggedIn.message())
+}
+
 pub async fn sync_account(
     services: &FlowletServices,
     account_id: &str,
 ) -> Result<PlatformSyncOutcome, String> {
     let account = account_or_error(services, account_id)?;
-    let kind = platform_account_kind(&account)
-        .ok_or_else(|| "该账号的资源模式不支持千问平台同步".to_string())?;
-    let credentials = load_credentials(&services.storage, account_id)?
-        .ok_or_else(|| PlatformError::NotLoggedIn.message())?;
+    if platform_account_kind(&account).is_none() {
+        return Err("该账号的资源模式不支持千问平台同步".to_string());
+    }
+    let credentials = require_credentials(&services.storage, account_id)?;
     if credentials.is_expired(Utc::now()) {
         return Err(PlatformError::AuthExpired.message());
     }
     let client = build_client(&account)?;
 
-    // 两种资源模式的数据源不同，但产物都是「与 WebView 抓取同构的 slot bundle」：
-    // 按量付费 → billing_amount / fq_instance / settle_bill；
-    // Token Plan → subscription / quota_config / usage(/ reset_card_list)。
-    let (bundle, balance, currency) = match kind {
-        PlatformAccountKind::PayAsYouGo => {
-            let (bundle, balance, currency) =
-                fetch_pay_as_you_go_bundle(&client, &credentials.access_token)
-                    .await
-                    .map_err(String::from)?;
-            (bundle, balance, currency)
-        }
-        PlatformAccountKind::TokenPlan => {
-            let bundle = fetch_token_plan_bundle(&client, &credentials.access_token)
-                .await
-                .map_err(String::from)?;
-            (bundle, None, None)
+    // 一次同步同时取两套数据：同一个千问平台账号可能既有按量付费余额/免费额度，
+    // 又有 Token Plan 订阅。任一套失败只跳过对应部分（鉴权失败除外）。
+    let (payg_bundle, balance, currency) =
+        match fetch_pay_as_you_go_bundle(&client, &credentials.access_token).await {
+            Ok((bundle, balance, currency)) => (Some(bundle), balance, currency),
+            Err(PlatformError::AuthExpired) => return Err(PlatformError::AuthExpired.message()),
+            Err(error) => {
+                tracing::warn!(%error, "千问平台同步：按量付费数据获取失败，仅保留订阅数据");
+                (None, None, None)
+            }
+        };
+    let token_plan_bundle = match fetch_token_plan_bundle(&client, &credentials.access_token).await
+    {
+        Ok(bundle) => bundle,
+        Err(PlatformError::AuthExpired) => return Err(PlatformError::AuthExpired.message()),
+        Err(error) => {
+            tracing::warn!(%error, "千问平台同步：Token Plan 数据获取失败，仅保留按量付费数据");
+            None
         }
     };
+    if payg_bundle.is_none() && token_plan_bundle.is_none() {
+        return Err("未能从千问平台获取余额或订阅数据，请稍后重试".to_string());
+    }
 
+    let bundle = merge_bundles(payg_bundle, token_plan_bundle);
     let raw_scraped_json = serde_json::to_string(&bundle)
         .map_err(|error| format!("序列化千问平台同步结果失败: {error}"))?;
     let synced_at = Utc::now().to_rfc3339();
@@ -1608,17 +1817,17 @@ pub async fn auto_sync_account(
     if !supports_platform_sync(&account) {
         return None;
     }
-    let credentials = match load_credentials(&services.storage, account_id) {
-        Ok(Some(credentials)) => credentials,
-        Ok(None) => return None,
+    match require_credentials(&services.storage, account_id) {
+        Ok(credentials) => {
+            if credentials.is_expired(Utc::now()) {
+                tracing::info!(account_id, "千问平台登录已过期，回退控制台抓取");
+                return None;
+            }
+        }
         Err(error) => {
-            tracing::warn!(%error, account_id, "千问平台同步：读取凭据失败，回退控制台抓取");
+            tracing::info!(account_id, %error, "千问平台未登录或登录失效，回退控制台抓取");
             return None;
         }
-    };
-    if credentials.is_expired(Utc::now()) {
-        tracing::info!(account_id, "千问平台登录已过期，回退控制台抓取");
-        return None;
     }
     match sync_account(services, account_id).await {
         Ok(outcome) => Some(outcome),
@@ -2098,7 +2307,7 @@ mod tests {
     }
 
     #[test]
-    fn credential_file_roundtrip() {
+    fn shared_credentials_are_reused_and_unbound_per_account() {
         let dir =
             std::env::temp_dir().join(format!("flowlet-qwen-platform-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).expect("mkdir");
@@ -2106,18 +2315,140 @@ mod tests {
         let storage = Storage::open(&database).expect("open storage");
         let credentials = PlatformCredentials {
             access_token: "token".into(),
-            expires_at: Some("2026-12-01T00:00:00Z".into()),
+            expires_at: Some("2099-12-01T00:00:00Z".into()),
             aliyun_id: Some("aliyun".into()),
             email: Some("a@b.c".into()),
             updated_at: "2026-11-10T00:00:00Z".into(),
         };
-        save_credentials(&storage, "acc-1", &credentials).expect("save");
+        bind_platform_credentials(&storage, "acc-1", &credentials).expect("bind");
         assert_eq!(
             load_credentials(&storage, "acc-1").expect("load"),
             Some(credentials.clone())
         );
-        assert!(remove_credentials(&storage, "acc-1").expect("remove"));
-        assert_eq!(load_credentials(&storage, "acc-1").expect("load"), None);
+        // 另一个账号无需重新登录：回退到最近的有效令牌并补绑定。
+        assert_eq!(
+            load_credentials(&storage, "acc-2").expect("load"),
+            Some(credentials.clone())
+        );
+        // 只解绑当前账号；最后一个引用者登出才删除平台令牌。
+        assert!(unbind_platform_credentials(&storage, "acc-1").expect("unbind"));
+        assert_eq!(
+            load_credentials(&storage, "acc-2").expect("load"),
+            Some(credentials.clone())
+        );
+        assert!(unbind_platform_credentials(&storage, "acc-2").expect("unbind"));
+        assert_eq!(load_credentials(&storage, "acc-2").expect("load"), None);
+        let store = load_store(&storage).expect("store");
+        assert!(
+            store.platforms.is_empty(),
+            "最后一个绑定者登出后令牌应被删除"
+        );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rebinding_account_drops_orphan_platform_token() {
+        let dir =
+            std::env::temp_dir().join(format!("flowlet-qwen-platform-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let database = dir.join("flowlet.db");
+        let storage = Storage::open(&database).expect("open storage");
+        let first = PlatformCredentials {
+            access_token: "first".into(),
+            expires_at: Some("2099-12-01T00:00:00Z".into()),
+            aliyun_id: Some("aliyun-a".into()),
+            email: None,
+            updated_at: "2026-11-10T00:00:00Z".into(),
+        };
+        let second = PlatformCredentials {
+            access_token: "second".into(),
+            aliyun_id: Some("aliyun-b".into()),
+            updated_at: "2026-11-10T01:00:00Z".into(),
+            ..first.clone()
+        };
+        bind_platform_credentials(&storage, "acc-1", &first).expect("bind first");
+        bind_platform_credentials(&storage, "acc-2", &first).expect("bind same platform");
+        // acc-1 改绑到另一个平台身份：旧令牌仍被 acc-2 引用，不能删。
+        bind_platform_credentials(&storage, "acc-1", &second).expect("rebind");
+        let store = load_store(&storage).expect("store");
+        assert!(store.platforms.contains_key("aliyun-a"));
+        assert!(store.platforms.contains_key("aliyun-b"));
+        // acc-2 也改绑后，旧令牌无人引用，应被清掉。
+        bind_platform_credentials(&storage, "acc-2", &second).expect("rebind second");
+        let store = load_store(&storage).expect("store");
+        assert!(
+            !store.platforms.contains_key("aliyun-a"),
+            "孤儿令牌应被回收"
+        );
+        assert!(store.platforms.contains_key("aliyun-b"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn token_plan_slots_require_inner_business_object() {
+        let usable = json!({
+            "data": {"DataV2": {"ret": ["SUCCESS::ok"], "data": {"data": {"specCode": "standard"}}}}
+        });
+        assert!(cs_data_business(&usable).is_some());
+        let empty = json!({"data": {"DataV2": {"ret": ["SUCCESS::ok"], "data": {"data": null}}}});
+        assert!(cs_data_business(&empty).is_none());
+        assert!(cs_data_business(&json!({})).is_none());
+    }
+
+    #[test]
+    fn legacy_per_account_credential_is_migrated() {
+        let dir =
+            std::env::temp_dir().join(format!("flowlet-qwen-platform-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(dir.join(CREDENTIALS_DIR)).expect("mkdir");
+        let database = dir.join("flowlet.db");
+        let storage = Storage::open(&database).expect("open storage");
+        let legacy = PlatformCredentials {
+            access_token: "legacy-token".into(),
+            expires_at: Some("2099-12-01T00:00:00Z".into()),
+            aliyun_id: Some("legacy".into()),
+            email: None,
+            updated_at: "2026-11-09T00:00:00Z".into(),
+        };
+        let legacy_path = platform_dir(&storage).join("acc-legacy.json");
+        std::fs::write(&legacy_path, serde_json::to_string(&legacy).expect("json"))
+            .expect("write legacy");
+        let loaded = load_credentials(&storage, "acc-legacy").expect("load");
+        assert_eq!(loaded, Some(legacy.clone()));
+        assert!(!legacy_path.exists(), "旧文件迁移后应删除");
+        let store = load_store(&storage).expect("store");
+        assert_eq!(
+            store.accounts.get("acc-legacy").map(String::as_str),
+            Some("legacy")
+        );
+        assert!(store.platforms.contains_key("legacy"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn merges_pay_as_you_go_and_token_plan_bundles() {
+        let payg = json!({
+            "billing_amount": {"data": {"AvailableAmount": "92.5"}},
+            "fq_instance": {"data": {"Data": []}}
+        });
+        let token_plan = json!({
+            "subscription": {"data": {"DataV2": {"data": {"data": {"specCode": "standard"}}}}},
+            "quota_config": {"data": {}},
+            "usage": {"data": {}}
+        });
+        let merged = merge_bundles(Some(payg), Some(token_plan));
+        for key in [
+            "billing_amount",
+            "fq_instance",
+            "subscription",
+            "quota_config",
+            "usage",
+        ] {
+            assert!(merged.get(key).is_some(), "缺少槽位 {key}");
+        }
+        // 只有一侧可用时直接返回该侧内容。
+        let only_payg = merge_bundles(Some(json!({"billing_amount": {}})), None);
+        assert!(only_payg.get("billing_amount").is_some());
+        assert!(only_payg.get("subscription").is_none());
+        assert_eq!(merge_bundles(None, None), json!({}));
     }
 }

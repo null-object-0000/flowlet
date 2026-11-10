@@ -978,6 +978,7 @@ export function migrate(db: DatabaseSync, options: MigrateOptions = {}): void {
     CREATE INDEX IF NOT EXISTS idx_usage_records_created_at     ON usage_records(created_at);
     CREATE INDEX IF NOT EXISTS idx_usage_channel_upstream_model ON usage_records(channel_id, upstream_model);
     CREATE INDEX IF NOT EXISTS idx_request_capture_refs_state  ON request_capture_refs(state, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_request_capture_refs_segment ON request_capture_refs(storage_key, frame_offset) WHERE state = 'ready';
   `);
 
   db.prepare(

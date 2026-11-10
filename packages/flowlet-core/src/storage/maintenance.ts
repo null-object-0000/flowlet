@@ -7,8 +7,11 @@
 //   1. 历史内联列 request_logs.req_body_b64 / res_body_b64（旧库升级兼容）；
 //   2. `.flcap` 外置帧 + request_capture_refs 指针（新数据统一走这里）。
 // 清理时先处理帧（重写 segment、更新 refs/state、清空指针），再处理内联列。
+import { statSync } from "node:fs";
+import { setImmediate } from "node:timers/promises";
 import type { DatabaseSync } from "node:sqlite";
 import type { RequestCapturePointer, RequestCaptureStore } from "./capture-store.ts";
+import { rewriteCaptureSegment, type CaptureRewrite, type CaptureRewriteJob } from "./capture-compaction.ts";
 
 /** 与 Rust BODY_SIZE_PRUNE_MIN_AGE_HOURS 一致：至少一小时前的记录才按体积清理。 */
 const BODY_SIZE_PRUNE_MIN_AGE_HOURS = 1;
@@ -159,6 +162,18 @@ export function clearBodyDataByLogIds(
   requestLogIds: string[],
   reason: string,
 ): BodyClearResult {
+  const cleanup = clearBodies(db, store, requestLogIds, reason);
+  let step = cleanup.next();
+  while (!step.done) step = cleanup.next(rewriteCaptureSegment(store, step.value));
+  return step.value;
+}
+
+function* clearBodies(
+  db: DatabaseSync,
+  store: RequestCaptureStore,
+  requestLogIds: string[],
+  reason: string,
+): Generator<CaptureRewriteJob, BodyClearResult, CaptureRewrite | null> {
   if (requestLogIds.length === 0) return { cleared: 0, framesCleared: 0, segmentsRewritten: 0 };
   const targets = new Set(requestLogIds);
 
@@ -189,54 +204,57 @@ export function clearBodyDataByLogIds(
      WHERE storage_key = ?1 AND state = 'ready'
      ORDER BY frame_offset`,
   );
+  const updateRef = db.prepare(
+    `UPDATE request_capture_refs
+     SET storage_key = ?2, frame_offset = ?3, frame_length = ?4, checksum = ?5,
+         format_version = ?6, req_body_bytes = ?7, res_body_bytes = ?8,
+         state = ?9, failure_reason = NULL, updated_at = datetime('now')
+     WHERE request_log_id = ?1`,
+  );
+  const markCleared = db.prepare(
+    `UPDATE request_logs
+     SET req_body_cleared_at = CASE WHEN ?2 THEN datetime('now') ELSE req_body_cleared_at END,
+         req_body_cleanup_reason = CASE WHEN ?2 THEN ?4 ELSE req_body_cleanup_reason END,
+         res_body_cleared_at = CASE WHEN ?3 THEN datetime('now') ELSE res_body_cleared_at END,
+         res_body_cleanup_reason = CASE WHEN ?3 THEN ?4 ELSE res_body_cleanup_reason END,
+         req_body_b64 = NULL, res_body_b64 = NULL
+     WHERE id = ?1`,
+  );
   for (const storageKey of segments.keys()) {
     const liveRows = liveStatement.all(storageKey) as Array<Record<string, unknown>>;
-    const records: Array<Record<string, unknown>> = [];
-    const ids: string[] = [];
-    const bodyPresence: Array<{ req: boolean; res: boolean }> = [];
-    for (const row of liveRows) {
-      const requestLogId = String(row.request_log_id);
-      const pointer: RequestCapturePointer = {
-        storage_key: storageKey,
-        offset: Number(row.frame_offset),
-        length: Number(row.frame_length),
-        checksum: String(row.checksum),
-        format_version: Number(row.format_version ?? 1),
-        req_body_bytes: Number(row.req_body_bytes ?? 0),
-        res_body_bytes: Number(row.res_body_bytes ?? 0),
-      };
-      // Rust 在这里用 `?`：损坏帧会让整个清理失败（调用方按错误处理）。
-      const record = store.read(pointer) as unknown as Record<string, unknown>;
-      const hadReq = record.req_body_b64 !== null && record.req_body_b64 !== undefined;
-      const hadRes = record.res_body_b64 !== null && record.res_body_b64 !== undefined;
-      if (targets.has(requestLogId) && (hadReq || hadRes)) {
-        record.req_body_b64 = null;
-        record.res_body_b64 = null;
-        cleared.add(requestLogId);
-        framesCleared += hadReq ? 1 : 0;
-      }
-      ids.push(requestLogId);
-      bodyPresence.push({ req: hadReq, res: hadRes });
-      records.push(record);
+    if (liveRows.length === 0) continue;
+    const job: CaptureRewriteJob = {
+      storageKey,
+      frames: liveRows.map((row) => ({
+        id: String(row.request_log_id),
+        clear: targets.has(String(row.request_log_id)),
+        pointer: {
+          storage_key: storageKey,
+          offset: Number(row.frame_offset),
+          length: Number(row.frame_length),
+          checksum: String(row.checksum),
+          format_version: Number(row.format_version ?? 1),
+          req_body_bytes: Number(row.req_body_bytes ?? 0),
+          res_body_bytes: Number(row.res_body_bytes ?? 0),
+        },
+      })),
+    };
+    const rewrite = yield job;
+    if (!rewrite) {
+      for (const id of segments.get(storageKey) ?? []) targets.delete(id);
+      continue;
     }
-    if (records.length === 0) continue;
-
-    const pointers = store.rewriteSegment(storageKey, records as never);
-    segmentsRewritten += 1;
-    db.exec("BEGIN");
+    const { pointers, bodyPresence } = rewrite;
+    let transactionStarted = false;
     try {
-      for (let index = 0; index < ids.length; index += 1) {
-        const requestLogId = ids[index];
+      db.exec("BEGIN");
+      transactionStarted = true;
+      for (let index = 0; index < job.frames.length; index += 1) {
+        const requestLogId = job.frames[index].id;
         const pointer = pointers[index];
         const presence = bodyPresence[index];
         const isTarget = targets.has(requestLogId);
-        db.prepare(
-          `UPDATE request_capture_refs
-           SET storage_key = ?2, frame_offset = ?3, frame_length = ?4, checksum = ?5,
-               format_version = ?6, req_body_bytes = ?7, res_body_bytes = ?8,
-               state = ?9, failure_reason = NULL, updated_at = datetime('now')
-           WHERE request_log_id = ?1`,
-        ).run(
+        updateRef.run(
           requestLogId,
           pointer.storage_key,
           pointer.offset,
@@ -248,20 +266,14 @@ export function clearBodyDataByLogIds(
           isTarget ? "cleared" : "ready",
         );
         if (isTarget) {
-          db.prepare(
-            `UPDATE request_logs
-             SET req_body_cleared_at = CASE WHEN ?2 THEN datetime('now') ELSE req_body_cleared_at END,
-                 req_body_cleanup_reason = CASE WHEN ?2 THEN ?4 ELSE req_body_cleanup_reason END,
-                 res_body_cleared_at = CASE WHEN ?3 THEN datetime('now') ELSE res_body_cleared_at END,
-                 res_body_cleanup_reason = CASE WHEN ?3 THEN ?4 ELSE res_body_cleanup_reason END,
-                 req_body_b64 = NULL, res_body_b64 = NULL
-             WHERE id = ?1`,
-          ).run(requestLogId, presence.req ? 1 : 0, presence.res ? 1 : 0, reason);
+          if (presence.req || presence.res) cleared.add(requestLogId);
+          if (presence.req) framesCleared += 1;
+          markCleared.run(requestLogId, presence.req ? 1 : 0, presence.res ? 1 : 0, reason);
         }
       }
       db.exec("COMMIT");
     } catch (error) {
-      db.exec("ROLLBACK");
+      if (transactionStarted && db.isTransaction) db.exec("ROLLBACK");
       if (pointers.length > 0) {
         try {
           store.removeSegment(pointers[0].storage_key);
@@ -271,16 +283,40 @@ export function clearBodyDataByLogIds(
       }
       throw error;
     }
+    segmentsRewritten += 1;
     store.removeSegment(storageKey);
   }
 
   // 5. 历史内联列 Body。
-  const inlineCleared = clearInlineBodies(db, requestLogIds, reason);
+  const inlineCleared = clearInlineBodies(db, [...targets], reason);
   return {
     cleared: cleared.size + inlineCleared,
     framesCleared,
     segmentsRewritten,
   };
+}
+
+const BODY_CANDIDATES = `
+  FROM request_logs rl
+  LEFT JOIN request_capture_refs refs ON refs.request_log_id = rl.id
+  WHERE rl.created_at < datetime('now', ?1)
+    AND (
+      rl.req_body_b64 IS NOT NULL OR rl.res_body_b64 IS NOT NULL
+      OR (refs.state = 'ready' AND (refs.req_body_bytes > 0 OR refs.res_body_bytes > 0))
+    )
+    AND EXISTS (
+      SELECT 1 FROM usage_records ur
+      WHERE ur.request_id = rl.request_id
+        AND ur.input_tokens IS NOT NULL
+        AND ur.output_tokens IS NOT NULL
+    )`;
+
+function selectBodyCandidates(db: DatabaseSync, age: string, limit: number): string[] {
+  const rows = db.prepare(`
+    SELECT rl.id ${BODY_CANDIDATES}
+    ORDER BY rl.created_at ASC, rl.id ASC LIMIT ?2
+  `).all(age, limit) as Array<{ id: string }>;
+  return rows.map((row) => row.id);
 }
 
 /** 清理超过保留天数的请求/响应 Body（仅针对已有完整 Token 统计的记录）。 */
@@ -289,26 +325,95 @@ export function cleanupExpiredBodyData(
   store: RequestCaptureStore,
   retentionDays: number,
 ): number {
-  if (retentionDays < 0) return 0; // -1 = 永久保留
-  const rows = db
-    .prepare(
-      `SELECT rl.id
-       FROM request_logs rl
-       LEFT JOIN request_capture_refs refs ON refs.request_log_id = rl.id
-       WHERE rl.created_at < datetime('now', '-${Math.trunc(retentionDays)} days')
-         AND (
-           rl.req_body_b64 IS NOT NULL OR rl.res_body_b64 IS NOT NULL
-           OR (refs.state = 'ready' AND (refs.req_body_bytes > 0 OR refs.res_body_bytes > 0))
-         )
-         AND EXISTS (
-           SELECT 1 FROM usage_records ur
-           WHERE ur.request_id = rl.request_id
-             AND ur.input_tokens IS NOT NULL
-             AND ur.output_tokens IS NOT NULL
-         )`,
-    )
-    .all() as Array<{ id: string }>;
-  return clearBodyDataByLogIds(db, store, rows.map((row) => row.id), "retention").cleared;
+  if (retentionDays < 0) return 0;
+  const ids = selectBodyCandidates(db, `-${Math.trunc(retentionDays)} days`, -1);
+  return clearBodyDataByLogIds(db, store, ids, "retention").cleared;
+}
+
+const CLEANUP_BATCH_SIZE = 250;
+const CLEANUP_BATCHES_PER_RUN = 20;
+const CLEANUP_SEGMENT_BYTES_PER_RUN = 256n * 1024n * 1024n;
+
+function segmentSnapshot(store: RequestCaptureStore, key: string) {
+  const stat = statSync(store.resolveStorageKey(key), { bigint: true, throwIfNoEntry: false });
+  return stat && { size: stat.size, identity: `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}` };
+}
+
+/** 每轮只处理有限数量的候选记录。文件读写与压缩在 worker，发布指针在主线程。 */
+export async function cleanupScheduledBodies(
+  db: DatabaseSync,
+  store: RequestCaptureStore,
+  options: { retentionDays: number; maxBytes: number; pruneRatio: number; signal: AbortSignal },
+  rewriteSegment: (job: CaptureRewriteJob) => Promise<CaptureRewrite>,
+): Promise<{ expiredBodies: number; prunedBodies: number }> {
+  let segmentBytes = 0n;
+  const currentFrames = db.prepare(`
+    SELECT request_log_id AS id, frame_offset AS offset, frame_length AS length, checksum
+    FROM request_capture_refs WHERE storage_key = ? AND state = 'ready' ORDER BY frame_offset
+  `);
+
+  async function clearBatch(ids: string[], reason: string): Promise<number> {
+    const cleanup = clearBodies(db, store, ids, reason);
+    let step = cleanup.next();
+    while (!step.done && !options.signal.aborted) {
+      const job = step.value;
+      const { storageKey, frames } = job;
+      if (segmentBytes >= CLEANUP_SEGMENT_BYTES_PER_RUN) {
+        step = cleanup.next(null);
+        continue;
+      }
+      const snapshot = segmentSnapshot(store, storageKey);
+      segmentBytes += snapshot?.size ?? 0n;
+      const sameSegment = () => {
+        if (snapshot?.identity !== segmentSnapshot(store, storageKey)?.identity) return false;
+        const rows = currentFrames.all(storageKey);
+        return rows.length === frames.length && rows.every((row, index) => {
+          const frame = frames[index];
+          return row.id === frame.id && row.offset === frame.pointer.offset
+            && row.length === frame.pointer.length && row.checksum === frame.pointer.checksum;
+        });
+      };
+      let result: CaptureRewrite | null = null;
+      try {
+        result = await rewriteSegment(job);
+      } catch (error) {
+        if (sameSegment()) throw error;
+      }
+      // HTTP 可以在 worker 运行期间追加帧或补写流式日志。快照失效时保留原段，
+      // 下次重试。验证、更新指针和删除旧段之间不让出主线程。
+      if (result && (options.signal.aborted || !sameSegment())) {
+        store.removeSegment(result.pointers[0].storage_key);
+        result = null;
+      }
+      if (options.signal.aborted) break;
+      step = cleanup.next(result);
+    }
+    return step.done ? step.value.cleared : 0;
+  }
+
+  async function clearBatches(age: string, reason: string, shouldContinue: () => boolean): Promise<number> {
+    let total = 0;
+    for (let batch = 0; batch < CLEANUP_BATCHES_PER_RUN && segmentBytes < CLEANUP_SEGMENT_BYTES_PER_RUN
+      && !options.signal.aborted && shouldContinue(); batch += 1) {
+      const ids = selectBodyCandidates(db, age, CLEANUP_BATCH_SIZE);
+      if (ids.length === 0) break;
+      const cleared = await clearBatch(ids, reason);
+      total += cleared;
+      if (cleared === 0) break;
+      await setImmediate();
+    }
+    return total;
+  }
+
+  const expiredBodies = options.retentionDays < 0 ? 0 : await clearBatches(
+    `-${Math.trunc(options.retentionDays)} days`, "retention", () => true,
+  );
+  const ratio = Math.min(Math.max(options.pruneRatio, 0), 1);
+  const goal = options.maxBytes * (1 - ratio);
+  const prunedBodies = options.maxBytes <= 0 || ratio <= 0 ? 0 : await clearBatches(
+    `-${BODY_SIZE_PRUNE_MIN_AGE_HOURS} hours`, "size_limit", () => getTotalBodySizeBytes(db) > goal,
+  );
+  return { expiredBodies, prunedBodies };
 }
 
 /** 当前 Body 数据总占用字节数（内联列长度 + 已就绪捕获帧声明的字节数）。 */
@@ -317,7 +422,7 @@ export function getTotalBodySizeBytes(db: DatabaseSync): number {
     .prepare(
       `SELECT
          COALESCE((
-           SELECT SUM(length(COALESCE(req_body_b64, '')) + length(COALESCE(res_body_b64, '')))
+           SELECT SUM(COALESCE(octet_length(req_body_b64), 0) + COALESCE(octet_length(res_body_b64), 0))
            FROM request_logs
            WHERE req_body_b64 IS NOT NULL OR res_body_b64 IS NOT NULL
          ), 0)
@@ -343,49 +448,12 @@ export function pruneOldestBodyData(
   const goalBytes = Math.max(targetBytes * (1 - ratio), 0);
   if (getTotalBodySizeBytes(db) <= goalBytes) return 0;
 
-  const eligibleRow = db
-    .prepare(
-      `SELECT COUNT(*) AS total
-       FROM request_logs rl
-       LEFT JOIN request_capture_refs refs ON refs.request_log_id = rl.id
-       WHERE rl.created_at < datetime('now', '-${BODY_SIZE_PRUNE_MIN_AGE_HOURS} hours')
-         AND (
-           rl.req_body_b64 IS NOT NULL OR rl.res_body_b64 IS NOT NULL
-           OR (refs.state = 'ready' AND (refs.req_body_bytes > 0 OR refs.res_body_bytes > 0))
-         )
-         AND EXISTS (
-           SELECT 1 FROM usage_records ur
-           WHERE ur.request_id = rl.request_id
-             AND ur.input_tokens IS NOT NULL
-             AND ur.output_tokens IS NOT NULL
-         )`,
-    )
-    .get() as { total: number } | undefined;
-  const totalEligible = Number(eligibleRow?.total ?? 0);
+  const age = `-${BODY_SIZE_PRUNE_MIN_AGE_HOURS} hours`;
+  const eligible = db.prepare(`SELECT COUNT(*) AS total ${BODY_CANDIDATES}`).get(age);
+  const totalEligible = Number(eligible?.total ?? 0);
   if (totalEligible === 0) return 0;
   const batchSize = Math.max(Math.ceil(totalEligible * ratio), 1);
-
-  const rows = db
-    .prepare(
-      `SELECT rl.id
-       FROM request_logs rl
-       LEFT JOIN request_capture_refs refs ON refs.request_log_id = rl.id
-       WHERE rl.created_at < datetime('now', '-${BODY_SIZE_PRUNE_MIN_AGE_HOURS} hours')
-         AND (
-           rl.req_body_b64 IS NOT NULL OR rl.res_body_b64 IS NOT NULL
-           OR (refs.state = 'ready' AND (refs.req_body_bytes > 0 OR refs.res_body_bytes > 0))
-         )
-         AND EXISTS (
-           SELECT 1 FROM usage_records ur
-           WHERE ur.request_id = rl.request_id
-             AND ur.input_tokens IS NOT NULL
-             AND ur.output_tokens IS NOT NULL
-         )
-       ORDER BY rl.created_at ASC
-       LIMIT ?`,
-    )
-    .all(batchSize) as Array<{ id: string }>;
-  return clearBodyDataByLogIds(db, store, rows.map((row) => row.id), "size_limit").cleared;
+  return clearBodyDataByLogIds(db, store, selectBodyCandidates(db, age, batchSize), "size_limit").cleared;
 }
 
 /** 反复按比例清理，直到压回目标体积或没有可清理记录。 */

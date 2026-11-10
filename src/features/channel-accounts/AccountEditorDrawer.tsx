@@ -38,21 +38,10 @@ import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import { DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
 import { useScrapeConsole } from "./useScrapeConsole";
-import { useQwenPlatformLogin } from "./useQwenPlatformLogin";
-import {
-  QwenPlatformFallbackHint,
-  QwenPlatformLoginCard,
-  QwenPlatformSyncModeTag,
-} from "./QwenPlatformLoginCard";
+import { QwenAccountPanel } from "./QwenAccountPanel";
 import type { ScrapeBalanceResult } from "../../domains/account/commands";
 import { formatFullTimestamp, parseTimestamp } from "../../shared/formatters/datetime";
 import { formatCompactNumber } from "../../shared/formatters/number";
-import {
-  parseQwenTokenPlanDetails,
-  isQwenSubscriptionActive,
-  qwenSubscriptionInactiveKind,
-  type QwenQuotaWindow,
-} from "./qwenTokenPlanDetails";
 import {
   formatQwenFreeQuotaValue,
   parseQwenFreeTierDetails,
@@ -177,8 +166,14 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
   const isLongCatHybrid = draft.channel_id === "longcat" && resourceMode === "hybrid";
   // Qwen Token Plan 的额度只来自官方控制台，也固定为自动同步，不再提供手动维护路径。
   const isQwenTokenPlan = draft.channel_id === QWEN_CHANNEL_ID && resourceMode === "token_plan";
+  /** 千问账号的余额/免费额度/订阅额度一律由平台同步维护（桌面走 WebView、Web 走 HTTP），
+   *  保存账号时绝不能写 manual 快照 —— 那会用一条没有 raw_scraped_json 的记录覆盖掉
+   *  免费额度明细，导致模型列表的「免费 / 免费剩余 …」标注消失。 */
+  const isQwenAutoSyncedAccount = draft.channel_id === QWEN_CHANNEL_ID;
   // Qwen API 按量付费：福利页（权益）提供官方余额与免费额度抓取，同样固定自动同步。
   const isQwenPayAsYouGo = draft.channel_id === QWEN_CHANNEL_ID && resourceMode === "pay_as_you_go";
+  // 千问两种 resource_mode 共用同一个平台面板（同一次同步返回两类 slot）。
+  const isQwenAccount = draft.channel_id === QWEN_CHANNEL_ID;
   // Z.AI API 按量付费：资源包管理页提供官方余额与额度包抓取，固定自动同步。
   const isZhipuPayAsYouGo = isZhipuPayAsYouGoAccount(draft);
   const supportsScrape = desktopCapabilities && (channel?.supports_scrape_balance === true || hasCustomScrape) && !autoSyncBalance;
@@ -370,6 +365,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
     [candidateModelIds, currentDraft.exposed_models],
   );
   // 千问按量付费：免费额度实例（valid 且有剩余）驱动模型勾选列表的免费优先排序与标注。
+  // 免费额度只对「API 按量付费」账号有意义（Token Plan 走订阅额度）。
   const qwenFreeQuotaDetails = useMemo(
     () => (isQwenPayAsYouGo ? parseQwenFreeTierDetails(snapshot?.raw_scraped_json) : null),
     [isQwenPayAsYouGo, snapshot?.raw_scraped_json],
@@ -424,7 +420,9 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
           base_url_override: currentDraft.base_url_override?.trim() || null,
           anthropic_base_url_override: currentDraft.anthropic_base_url_override?.trim() || null,
         },
-        autoSyncBalance || isResourceAutoSync ? null : createSnapshotDraft(currentDraft, resource, resourceMode, tokenRemaining),
+        autoSyncBalance || isResourceAutoSync || isQwenAutoSyncedAccount
+          ? null
+          : createSnapshotDraft(currentDraft, resource, resourceMode, tokenRemaining),
       );
     } finally {
       setSaving(false);
@@ -623,18 +621,8 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
                   language={language}
                   t={t}
                 />
-              ) : isQwenTokenPlan ? (
-                <QwenTokenPlanPanel
-                  account={draft}
-                  enabled={isEdit}
-                  desktopCapabilities={desktopCapabilities}
-                  snapshot={snapshot}
-                  onScrape={onScrape}
-                  language={language}
-                  t={t}
-                />
-              ) : isQwenPayAsYouGo ? (
-                <QwenFreeTierPanel
+              ) : isQwenAccount ? (
+                <QwenAccountPanel
                   account={draft}
                   enabled={isEdit}
                   desktopCapabilities={desktopCapabilities}
@@ -1331,367 +1319,6 @@ function ScrapeConsolePanel({
   );
 }
 
-function QwenTokenPlanPanel({
-  account,
-  enabled,
-  desktopCapabilities = true,
-  snapshot,
-  onScrape,
-  language,
-  t,
-}: {
-  account: ChannelAccount;
-  enabled: boolean;
-  desktopCapabilities?: boolean;
-  snapshot?: AccountBalanceSnapshot;
-  onScrape?: (accountId: string) => Promise<ScrapeBalanceResult>;
-  language: "zh-CN" | "en-US";
-  t: (k: string, params?: Record<string, string | number> | undefined) => string;
-}) {
-  const queryClient = useQueryClient();
-  const platform = useQwenPlatformLogin({
-    accountId: account.id,
-    enabled,
-    // 与 QwenFreeTierPanel / 余额抓取一致：刷新余额快照并失效账号列表。
-    onSynced: () => {
-      void queryClient.refetchQueries({ queryKey: queryKeys.usage.latestBalanceSnapshots(), exact: true });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.account.list() });
-    },
-  });
-  const {
-    startScrape,
-    retryScrape,
-    lastResult,
-    isScraping,
-    needLogin,
-    consoleActionMessage,
-    error: scrapeError,
-    statusText,
-  } = useScrapeConsole(onScrape);
-
-  // 登录完成的自动同步期间也按已登录处理，避免瞬间闪回 WebView 兜底按钮。
-  const isLoggedIn = platform.isLoggedIn || platform.isSyncing;
-  // Token Plan 的 HTTP 同步返回与 WebView 抓取同构的 slot bundle，解析器无需区分来源。
-  const rawScrapedJson = platform.lastSync?.rawScrapedJson
-    ?? lastResult?.raw_scraped_json
-    ?? snapshot?.raw_scraped_json;
-  const details = parseQwenTokenPlanDetails(rawScrapedJson);
-  const syncedAt = platform.lastSync?.syncedAt ?? lastResult?.synced_at ?? snapshot?.synced_at;
-  const refreshLoading = isLoggedIn ? platform.isSyncing : isScraping;
-  const planName = details
-    ? `${details.specCode.charAt(0).toUpperCase()}${details.specCode.slice(1)}`
-    : "";
-  // 套餐过期/未订阅：显示真实状态占位，不渲染额度进度条与重置卡。
-  const subscriptionActive = isQwenSubscriptionActive(details);
-  const inactiveKind = qwenSubscriptionInactiveKind(details);
-  const fiveHour = subscriptionActive ? details?.fiveHour : null;
-  const primaryQuota = subscriptionActive ? details?.primary : null;
-  // 上游控制台改版后不再返回 5 小时用量（usage 只有 per1MonthPercentage），旧写法会留下
-  // 「5 小时 - / 总量 - / 额度重置时间 -」三个空占位。只渲染真正有数据的额度窗口。
-  const quotaWindows: QwenQuotaWindow[] = [];
-  if (fiveHour && fiveHour.key !== primaryQuota?.key) quotaWindows.push(fiveHour);
-  if (primaryQuota) quotaWindows.push(primaryQuota);
-  const resetCards = subscriptionActive ? details?.resetCards : null;
-
-  async function handleScrape() {
-    await startScrape(account.id);
-  }
-
-  async function handleRetry() {
-    await retryScrape(account.id);
-  }
-
-  async function handleRefresh() {
-    if (isLoggedIn) {
-      const result = await platform.syncNow();
-      if (result) Toast.success(t("已通过 HTTP 同步订阅额度"));
-      return;
-    }
-    await startScrape(account.id);
-  }
-
-  return (
-    <div className={styles.longCatResourcePanel}>
-      <div className={styles.longCatSummaryCard}>
-        <div className={styles.longCatSummaryHeading}>
-          <strong>{details ? t("个人版 {name} 套餐", { name: planName }) : t("Token Plan 订阅信息")}</strong>
-          {subscriptionActive ? (
-            <Tag size="small" color="green">{t("自动同步")}</Tag>
-          ) : (
-            <Tag size="small" color="red">{t(inactiveKind === "expired" ? "套餐已过期" : "未订阅套餐")}</Tag>
-          )}
-          <QwenPlatformSyncModeTag platform={platform} t={t} />
-        </div>
-        <div className={`${styles.longCatSummaryGrid} ${styles.qwenSummaryGrid}`}>
-          {subscriptionActive ? (
-            <>
-              {quotaWindows.map((window) => (
-                <QwenQuotaProgress
-                  key={window.key}
-                  period={t(window.label)}
-                  quota={window}
-                  spanAll={quotaWindows.length === 1}
-                  language={language}
-                  t={t}
-                />
-              ))}
-            </>
-          ) : (
-            <div className={styles.qwenTimeSummary}>
-              <span>
-                <small>{t("订阅状态")}</small>
-                <strong>{t(inactiveKind === "expired" ? "套餐已过期" : "未订阅套餐")}</strong>
-              </span>
-            </div>
-          )}
-          <div className={styles.qwenTimeSummary}>
-            <span>
-              <small>{t("套餐到期")}</small>
-              <strong>{details?.expireAt ? formatFullTimestamp(details.expireAt, language) : "-"}</strong>
-            </span>
-            <span>
-              <small>{t("最近同步")}</small>
-              <strong>{syncedAt ? formatFullTimestamp(syncedAt, language) : "-"}</strong>
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {resetCards ? (
-        <div className={styles.qwenResetCards}>
-          <div className={styles.qwenResetCardsHeader}>
-            <strong>{t("重置机会")}</strong>
-            <Tag color="green">{t("可用 {count} 次", { count: resetCards.available_count })}</Tag>
-          </div>
-          {resetCards.credits?.length ? (
-            <div className={styles.qwenResetCardList}>
-              {resetCards.credits.map((card) => {
-                const typeLabel = card.reset_type === "RESET_1W"
-                  ? t("周额度重置")
-                  : card.reset_type || t("用量限额重置");
-                return (
-                  <div className={styles.qwenResetCard} key={card.id}>
-                    <strong>{typeLabel}</strong>
-                    <Text type="tertiary">
-                      {typeof card.expires_at === "number"
-                        ? t("将于 {time} 到期", { time: formatResetCardExpiry(card.expires_at, language) })
-                        : t("未提供过期时间")}
-                    </Text>
-                  </div>
-                );
-              })}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
-      <QwenPlatformLoginCard
-        platform={platform}
-        enabled={enabled}
-        language={language}
-        t={t}
-        loggedOutHint={t("通过千问平台登录后，订阅额度与重置卡由官方 HTTP 接口同步，无需打开 WebView。")}
-        loggedInHint={t("订阅额度与重置卡由官方 HTTP 接口同步，无需打开 WebView。")}
-      />
-
-      <div className={styles.longCatSyncSection}>
-        <div className={styles.longCatSyncControls}>
-          <Button
-            icon={<IconRefresh />}
-            loading={refreshLoading}
-            disabled={!enabled}
-            onClick={() => void handleRefresh()}
-          >
-            {t("立即刷新")}
-          </Button>
-          {isLoggedIn ? (
-            <Text type="tertiary" size="small">
-              {platform.isSyncing
-                ? t("正在同步订阅额度…")
-                : platform.phase === "success"
-                  ? t("已通过 HTTP 同步订阅额度")
-                  : t("HTTP 同步")}
-            </Text>
-          ) : (
-            <ScrapeSyncFeedback
-              isScraping={isScraping}
-              statusText={statusText}
-              needLogin={needLogin}
-              consoleActionMessage={consoleActionMessage}
-              error={scrapeError}
-              onRetry={() => void handleRetry()}
-              showIdleHint={!details}
-              t={t}
-            />
-          )}
-        </div>
-        {platform.error && platform.errorScope === "sync" ? (
-          <div className={styles.scrapeError}>{platform.error}</div>
-        ) : null}
-        <QwenPlatformFallbackHint
-          platform={platform}
-          desktopCapabilities={desktopCapabilities}
-          t={t}
-        />
-      </div>
-    </div>
-  );
-}
-
-/** 千问 API 按量付费：福利页（权益）面板——官方余额、本月账单与免费额度模型明细
- *  （仅展示；路由开放仍受全局白名单约束）。
- *
- *  数据来源有两条：
- *  1. 千问平台登录（device flow）+ 官方 HTTP 接口同步（默认路径，Web Host 也可用）；
- *  2. 未登录时退回原有隐藏 WebView 控制台抓取（仅桌面端可用）。
- *  两条路径的 rawScrapedJson 同构，统一交给 parseQwenFreeTierDetails 解析。 */
-function QwenFreeTierPanel({
-  account,
-  enabled,
-  desktopCapabilities = true,
-  snapshot,
-  onScrape,
-  language,
-  t,
-}: {
-  account: ChannelAccount;
-  enabled: boolean;
-  desktopCapabilities?: boolean;
-  snapshot?: AccountBalanceSnapshot;
-  onScrape?: (accountId: string) => Promise<ScrapeBalanceResult>;
-  language: "zh-CN" | "en-US";
-  t: (k: string, params?: Record<string, string | number> | undefined) => string;
-}) {
-  const queryClient = useQueryClient();
-  const platform = useQwenPlatformLogin({
-    accountId: account.id,
-    enabled,
-    // 与余额抓取/账号保存后的失效方式一致：刷新余额快照并失效账号列表。
-    onSynced: () => {
-      void queryClient.refetchQueries({ queryKey: queryKeys.usage.latestBalanceSnapshots(), exact: true });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.account.list() });
-    },
-  });
-  const {
-    startScrape,
-    retryScrape,
-    lastResult,
-    isScraping,
-    needLogin,
-    consoleActionMessage,
-    error: scrapeError,
-    statusText,
-  } = useScrapeConsole(onScrape);
-
-  // 登录完成的自动同步期间也按已登录处理，避免瞬间闪回 WebView 兜底按钮。
-  const isLoggedIn = platform.isLoggedIn || platform.isSyncing;
-  const rawScrapedJson = platform.lastSync?.rawScrapedJson
-    ?? lastResult?.raw_scraped_json
-    ?? snapshot?.raw_scraped_json;
-  const details = parseQwenFreeTierDetails(rawScrapedJson);
-  const syncedAt = platform.lastSync?.syncedAt ?? lastResult?.synced_at ?? snapshot?.synced_at;
-  const refreshLoading = isLoggedIn ? platform.isSyncing : isScraping;
-
-  async function handleScrape() {
-    await startScrape(account.id);
-  }
-
-  async function handleRetry() {
-    await retryScrape(account.id);
-  }
-
-  async function handleRefresh() {
-    if (isLoggedIn) {
-      const result = await platform.syncNow();
-      if (result) Toast.success(t("已通过 HTTP 同步余额与免费额度"));
-      return;
-    }
-    await startScrape(account.id);
-  }
-
-  return (
-    <div className={styles.longCatResourcePanel}>
-      <div className={styles.longCatSummaryCard}>
-        <div className={styles.longCatSummaryHeading}>
-          <strong>{t("API 按量付费 · 免费额度")}</strong>
-          <QwenPlatformSyncModeTag platform={platform} t={t} />
-        </div>
-        <div className={`${styles.longCatSummaryGrid} ${styles.qwenFreetierSummaryGrid}`}>
-          <div>
-            <small>{t("账户余额")}</small>
-            <strong>{details?.balance == null ? "-" : `${details.balance.toLocaleString(language === "en-US" ? "en-US" : "zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${details.currency ?? ""}`}</strong>
-          </div>
-          <div>
-            <small>{t("未结清")}</small>
-            <strong>{details?.unsettledAmount == null ? "-" : details.unsettledAmount.toLocaleString(language === "en-US" ? "en-US" : "zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
-          </div>
-          <div>
-            <small>{details?.settleBillCycle ? t("账单 {cycle}", { cycle: details.settleBillCycle }) : t("本月账单")}</small>
-            <strong>{details?.settleBillTotal == null ? "-" : details.settleBillTotal.toLocaleString(language === "en-US" ? "en-US" : "zh-CN", { maximumFractionDigits: 2 })}</strong>
-          </div>
-          <div className={styles.qwenTimeSummary}>
-            <span>
-              <small>{t("最近同步")}</small>
-              <strong>{syncedAt ? formatFullTimestamp(syncedAt, language) : "-"}</strong>
-            </span>
-            <Text type="tertiary" size="small">{t("免费模型见下方开放模型列表")}</Text>
-          </div>
-        </div>
-      </div>
-
-      <QwenPlatformLoginCard
-        platform={platform}
-        enabled={enabled}
-        language={language}
-        t={t}
-        loggedOutHint={t("通过千问平台登录后，余额与免费额度由官方 HTTP 接口同步，无需打开 WebView。")}
-        loggedInHint={t("余额与免费额度由官方 HTTP 接口同步，无需打开 WebView。")}
-      />
-
-      <div className={styles.longCatSyncSection}>
-        <div className={styles.longCatSyncControls}>
-          <Button
-            icon={<IconRefresh />}
-            loading={refreshLoading}
-            disabled={!enabled}
-            onClick={() => void handleRefresh()}
-          >
-            {t("立即刷新")}
-          </Button>
-          {isLoggedIn ? (
-            <Text type="tertiary" size="small">
-              {platform.isSyncing
-                ? t("正在同步余额与免费额度…")
-                : platform.phase === "success"
-                  ? t("已通过 HTTP 同步余额与免费额度")
-                  : t("HTTP 同步")}
-            </Text>
-          ) : (
-            <ScrapeSyncFeedback
-              isScraping={isScraping}
-              statusText={statusText}
-              needLogin={needLogin}
-              consoleActionMessage={consoleActionMessage}
-              error={scrapeError}
-              onRetry={() => void handleRetry()}
-              showIdleHint={!details}
-              t={t}
-            />
-          )}
-        </div>
-        {platform.error && platform.errorScope === "sync" ? (
-          <div className={styles.scrapeError}>{platform.error}</div>
-        ) : null}
-        <QwenPlatformFallbackHint
-          platform={platform}
-          desktopCapabilities={desktopCapabilities}
-          t={t}
-        />
-      </div>
-    </div>
-  );
-}
-
 /** Z.AI API 按量付费：资源包管理页抓取结果面板——官方钱包余额与额度包（资源包）
  *  明细。余额来自 account/query-customer-account-report，额度包来自
  *  tokenAccounts/list/my。 */
@@ -1860,42 +1487,6 @@ function formatZhipuPackAmount(
     : formatResourceTokenAmount(value, language);
 }
 
-function QwenQuotaProgress({
-  period,
-  quota,
-  spanAll,
-  language,
-  t,
-}: {
-  period: string;
-  quota: QwenQuotaWindow;
-  spanAll: boolean;
-  language: "zh-CN" | "en-US";
-  t: (k: string, params?: Record<string, string | number> | undefined) => string;
-}) {
-  // 只在窗口确实有数据时才渲染（调用方已过滤），因此这里不再需要「-」占位分支。
-  const percent = Math.round(quota.remainingPercent * 10) / 10;
-  return (
-    <div className={`${styles.qwenProgress} ${spanAll ? styles.qwenProgressSpanAll : ""}`}>
-      <div className={styles.qwenProgressHeading}>
-        <strong>
-          {t("{period} {percent}%", { period, percent: percent.toFixed(1) })}
-        </strong>
-        <small>{t("总量")} {formatCredits(quota.total, language)}</small>
-      </div>
-      <Progress
-        aria-label={t("{period}额度", { period })}
-        percent={percent}
-        size="small"
-        showInfo={false}
-      />
-      <small className={styles.qwenResetTime}>
-        {t("额度重置时间")} <b>{quota.resetAt ? formatFullTimestamp(quota.resetAt, language) : "-"}</b>
-      </small>
-    </div>
-  );
-}
-
 function formatResourceTokens(value: number | null, language: "zh-CN" | "en-US") {
   return value == null ? "-" : `${formatCompactNumber(Math.max(0, value), language)} Tokens`;
 }
@@ -1908,10 +1499,6 @@ function formatResourceTokenAmount(value: number, language: "zh-CN" | "en-US") {
   return formatCompactNumber(Math.max(0, value), language);
 }
 
-function formatCredits(value: number, language: "zh-CN" | "en-US") {
-  return `${Math.max(0, value).toLocaleString(language, { maximumFractionDigits: 0 })} Credits`;
-}
-
 function formatLocalDate(value: string) {
   const date = parseTimestamp(value);
   if (!date) return value.slice(0, 16);
@@ -1920,14 +1507,4 @@ function formatLocalDate(value: string) {
   const hour = String(date.getHours()).padStart(2, "0");
   const minute = String(date.getMinutes()).padStart(2, "0");
   return `${month}月${day}日 ${hour}:${minute}`;
-}
-
-/** 重置卡到期时间的短格式（与 Codex 重置机会明细一致：月/日 + 时分）。 */
-function formatResetCardExpiry(epochMs: number, language: "zh-CN" | "en-US") {
-  return new Intl.DateTimeFormat(language, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(epochMs));
 }

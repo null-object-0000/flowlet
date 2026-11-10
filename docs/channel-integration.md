@@ -138,11 +138,21 @@ Flowlet 走千问官方 CLI（`@qianwenai/qianwen-cli`）使用的 device flow�
 - Web Host / Docker 没有 WebView，这条 HTTP 路径是它们获取余额与免费额度的唯一
   途径；`qwen_platform_status|login_start|login_poll|logout|sync` 已加入
   `core/web/commands.rs` 的显式命令白名单，授权页由客户端浏览器打开；
-- 凭据按账号存放在数据目录 `qwen-platform/<account_id>.json`（权限 0600），
+- 凭据按**千问平台账号**共享，存放在数据目录 `qwen-platform/credentials.json`
+  （权限 0600，`platforms` 存令牌、`accounts` 存 Flowlet 账号 → 平台账号绑定）：
+  同一个平台账号登录一次即可被同渠道的多个 Flowlet 账号复用（未绑定的账号会回退到
+  最近更新的有效令牌并自动补绑定）；`logout` 只解绑当前账号，最后一个引用者登出才
+  删除平台令牌。旧版本按 `<account_id>.json` 存的凭据会在首次读取时自动迁移。
   `client-id` 文件用于 device flow 的 `client_id`。令牌没有 refresh token：过期后
   必须重新走一次 device flow（实测服务端下发的有效期约 2 天），账号编辑器展示
   「登录有效至 …」。device flow 只返回数字 `User.Id`，展示身份由
   `/api/account/info.json` 补全（掩码邮箱，如 `nich*****@outlook.com`）；
+- 一次同步会**同时拉取两套数据**（不再按 `resource_mode` 二选一）：按量付费的
+  `billing_amount` / `fq_instance` / `settle_bill` 与 Token Plan 的
+  `subscription` / `quota_config` / `usage` / `reset_card_list?` 合并进同一个
+  `raw_scraped_json`，因此账号编辑器只需一个面板同时展示「余额 + 免费额度」和
+  「订阅额度」（有订阅才渲染）。某个平台账号没有 Token Plan 时，订阅相关槽位直接
+  跳过，不会把「未订阅」误报为同步失败；两套都取不到才报错；
 - 网关返回的免费额度实例带英文展示单位（`Thousand Tokens` / `TenThousand Word` /
   `Second` / `Piece`），且带 `InstanceName` / `Uid` / `StartTime`。写入 bundle 前
   Rust 侧归一到基础单位（`tokens` / `字` / `秒` / `张`，`BaseValue` 语义不变），
@@ -171,7 +181,8 @@ Flowlet 走千问官方 CLI（`@qianwenai/qianwen-cli`）使用的 device flow�
   `qwenTokenPlanDetails` 的订阅额度窗口（5 小时 / 月）、重置券、过期/未订阅判定
   全部复用；`reset-card/list` 是可选槽位，接口失败只跳过它；
 - `subscription` 需要 `commodityCode = sfm_tokenplansolo_public_cn`（个人版）；
-  接口拒绝该参数时回退无参调用；
+  接口拒绝该参数时回退无参调用；订阅为业务错误（未订阅）时整体同步继续，只跳过
+  Token Plan 槽位；
 - 实测（2026-11）：`subscription` 返回
   `{specCode, status, remainingDays, startTime, endTime, autoRenewFlag}`、
   `quota_config` 返回 `{standard:{five_hour, monthly}, ...}`、

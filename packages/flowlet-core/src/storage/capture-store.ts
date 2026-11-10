@@ -400,7 +400,7 @@ export class RequestCaptureStore {
    * Rust `rewrite_segment_locked`：把同一段内所有存活记录写到新段
    * `compacted-<uuid>.flcap`，返回新指针；旧段由调用方在 refs 提交后删除。
    */
-  rewriteSegment(storageKey: string, records: RequestCaptureRecord[]): RequestCapturePointer[] {
+  rewriteSegment(storageKey: string, records: Iterable<RequestCaptureRecord>): RequestCapturePointer[] {
     try {
       const oldPath = this.resolveStorageKey(storageKey);
       const relative = path.posix.dirname(storageKey);
@@ -414,26 +414,30 @@ export class RequestCaptureStore {
       const fd = openSync(newPath, "wx+");
       const pointers: RequestCapturePointer[] = [];
       try {
-        for (const record of records) {
-          const frame = buildFrameBytes(record);
-          const offset = fstatSync(fd).size;
-          writeSync(fd, frame.buffer);
-          pointers.push({
-            storage_key: newStorageKey,
-            offset,
-            length: FRAME_HEADER_BYTES + frame.compressedLength,
-            checksum: frame.checksum,
-            format_version: FORMAT_VERSION,
-            req_body_bytes: frame.reqBodyBytes,
-            res_body_bytes: frame.resBodyBytes,
-          });
+        try {
+          for (const record of records) {
+            const frame = buildFrameBytes(record);
+            const offset = fstatSync(fd).size;
+            writeSync(fd, frame.buffer);
+            pointers.push({
+              storage_key: newStorageKey,
+              offset,
+              length: FRAME_HEADER_BYTES + frame.compressedLength,
+              checksum: frame.checksum,
+              format_version: FORMAT_VERSION,
+              req_body_bytes: frame.reqBodyBytes,
+              res_body_bytes: frame.resBodyBytes,
+            });
+          }
+        } finally {
+          closeSync(fd);
         }
-      } finally {
-        closeSync(fd);
-      }
-      if (!existsSync(oldPath)) {
+        if (!existsSync(oldPath)) {
+          throw new CaptureError("invalid_frame", "待整理 segment 不存在");
+        }
+      } catch (error) {
         rmSync(newPath, { force: true });
-        throw new CaptureError("invalid_frame", "待整理 segment 不存在");
+        throw error;
       }
       return pointers;
     } catch (error) {

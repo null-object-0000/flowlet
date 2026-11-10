@@ -9,7 +9,15 @@
 // 只访问 127.0.0.1 本地 mock：测试把全局 fetch 重写到 mock 服务器，生产代码里的
 // 官方 URL 不变（只验证 path/query/body 与鉴权头）。
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import {
   createServer as createHttpServer,
   type IncomingMessage,
@@ -36,12 +44,15 @@ import {
   canonicalUnit,
   classifyDeviceError,
   codeChallenge,
+  credentialStorePath,
   csDataRequest,
   generateCodeVerifier,
   isCredentialsExpired,
+  loadCredentialStore,
   loadCredentials,
   loadOrCreateClientId,
   logout,
+  migrateLegacyCredentials,
   nowBillingCycleYyyymm,
   normalizeCapacity,
   normalizeFreeTierInstance,
@@ -50,8 +61,10 @@ import {
   parseGatewayBody,
   parseTokenBody,
   platformAccountKind,
+  platformKeyOf,
   pollLogin,
   removeCredentials,
+  resolveAccountCredentials,
   saveCredentials,
   startLogin,
   status,
@@ -345,7 +358,11 @@ function makeContext(dir: string, accounts: JsonRow[]): { ctx: WebContext; stora
   return { ctx: { catalogDir: dir, storage } as unknown as WebContext, storage };
 }
 
-function credentialFile(dir: string, accountId: string): string {
+function credentialStoreFile(dir: string): string {
+  return credentialStorePath(dir);
+}
+
+function legacyCredentialFile(dir: string, accountId: string): string {
   return path.join(dir, "qwen-platform", `${accountId}.json`);
 }
 
@@ -666,7 +683,7 @@ describe("账号资源模式与凭据落盘", () => {
     assert.equal(platformAccountKind({ channel_id: "deepseek", resource_mode: null }), null);
   });
 
-  it("凭据写入/读取/删除 roundtrip，文件权限 0600", () => {
+  it("凭据写入/读取/删除 roundtrip，共享存储文件权限 0600", () => {
     const dir = makeTempDir();
     const credentials = {
       accessToken: "token-1",
@@ -676,8 +693,11 @@ describe("账号资源模式与凭据落盘", () => {
       updatedAt: "2026-11-10T00:00:00Z",
     };
     saveCredentials(dir, "acc-1", credentials);
-    const file = credentialFile(dir, "acc-1");
-    assert.equal(readFileSync(file, "utf8").includes('"accessToken": "token-1"'), true);
+    const file = credentialStoreFile(dir);
+    const stored = JSON.parse(readFileSync(file, "utf8")) as JsonRow;
+    assert.equal(stored.version, 1);
+    assert.deepEqual(stored.platforms["aliyun-1"], credentials);
+    assert.deepEqual(stored.accounts, { "acc-1": "aliyun-1" });
     if (process.platform !== "win32") {
       assert.equal(statSync(file).mode & 0o777, 0o600);
     }
@@ -685,19 +705,25 @@ describe("账号资源模式与凭据落盘", () => {
     assert.equal(removeCredentials(dir, "acc-1"), true);
     assert.equal(removeCredentials(dir, "acc-1"), false);
     assert.equal(loadCredentials(dir, "acc-1"), null);
+    // 最后一个绑定者登出后平台令牌一并删除。
+    assert.deepEqual(loadCredentialStore(dir).platforms, {});
   });
 
-  it("损坏/缺字段的凭据文件按未登录处理", () => {
+  it("损坏/缺字段的凭据按未登录处理（旧文件与共享存储都容错）", () => {
     const dir = makeTempDir();
     const platformDir = path.join(dir, "qwen-platform");
     mkdirSync(platformDir, { recursive: true });
-    writeFileSync(path.join(platformDir, "acc-broken.json"), "{not json");
+    writeFileSync(legacyCredentialFile(dir, "acc-broken"), "{not json");
     assert.equal(loadCredentials(dir, "acc-broken"), null);
     writeFileSync(
-      path.join(platformDir, "acc-legacy.json"),
+      legacyCredentialFile(dir, "acc-legacy"),
       JSON.stringify({ accessToken: "t", expiresAt: null, aliyunId: null, email: null }),
     );
     assert.equal(loadCredentials(dir, "acc-legacy"), null);
+
+    writeFileSync(credentialStoreFile(dir), "{not json");
+    assert.deepEqual(loadCredentialStore(dir), { version: 1, platforms: {}, accounts: {} });
+    assert.equal(loadCredentials(dir, "acc-broken"), null);
   });
 
   it("非法 accountId 拒绝落盘（防路径穿越）", () => {
@@ -750,6 +776,170 @@ describe("账号资源模式与凭据落盘", () => {
   });
 });
 
+// ─── 共享平台凭据（按平台账号） ─────────────────────────────────────────────
+
+describe("共享平台凭据（按平台账号）", () => {
+  it("platformKey = aliyunId ?? email ?? default（trim）", () => {
+    assert.equal(platformKeyOf("  aliyun-1  ", "a@b.c"), "aliyun-1");
+    assert.equal(platformKeyOf("", " a@b.c "), "a@b.c");
+    assert.equal(platformKeyOf(null, null), "default");
+    assert.equal(platformKeyOf("   ", "  "), "default");
+    assert.equal(platformKeyOf(undefined, undefined), "default");
+  });
+
+  it("两个账号共用一个平台令牌：第二个账号 status 直接 loggedIn 并自动绑定", () => {
+    const dir = makeTempDir();
+    const { ctx } = makeContext(dir, [PAYG_ACCOUNT, TOKEN_PLAN_ACCOUNT]);
+    writeCredentials(dir, "acc-payg");
+
+    const first = status(ctx, "acc-payg");
+    assert.equal(first.loggedIn, true);
+    assert.equal(first.aliyunId, "aliyun-1");
+
+    // 第二个账号从未登录过：共享回退直接命中平台令牌。
+    const second = status(ctx, "acc-plan");
+    assert.equal(second.loggedIn, true);
+    assert.equal(second.aliyunId, "aliyun-1");
+    assert.equal(second.email, "a@b.c");
+    assert.equal(second.expiresAt, loadCredentials(dir, "acc-payg")?.expiresAt);
+
+    const store = loadCredentialStore(dir);
+    assert.deepEqual(store.accounts, { "acc-payg": "aliyun-1", "acc-plan": "aliyun-1" });
+    assert.deepEqual(Object.keys(store.platforms), ["aliyun-1"]);
+  });
+
+  it("过期绑定回退到最新有效平台令牌并重新绑定", () => {
+    const dir = makeTempDir();
+    const { ctx } = makeContext(dir, [PAYG_ACCOUNT, TOKEN_PLAN_ACCOUNT]);
+    saveCredentials(dir, "acc-payg", {
+      accessToken: "old-token",
+      expiresAt: expiredIso(),
+      aliyunId: "aliyun-old",
+      email: null,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    saveCredentials(dir, "acc-plan", {
+      accessToken: "new-token",
+      expiresAt: futureIso(),
+      aliyunId: "aliyun-new",
+      email: null,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const resolution = resolveAccountCredentials(dir, "acc-payg");
+    assert.equal(resolution.state, "ok");
+    if (resolution.state !== "ok") return;
+    assert.equal(resolution.platformKey, "aliyun-new");
+    assert.equal(resolution.credentials.accessToken, "new-token");
+    assert.equal(resolution.rebound, true);
+    assert.equal(loadCredentialStore(dir).accounts["acc-payg"], "aliyun-new");
+    assert.equal(status(ctx, "acc-payg").loggedIn, true);
+    assert.equal(status(ctx, "acc-payg").aliyunId, "aliyun-new");
+  });
+
+  it("status 对过期且无其它有效令牌的账号返回过期身份", () => {
+    const dir = makeTempDir();
+    const { ctx } = makeContext(dir, [PAYG_ACCOUNT]);
+    writeCredentials(dir, "acc-payg", expiredIso());
+    const result = status(ctx, "acc-payg");
+    assert.deepEqual(result, {
+      accountId: "acc-payg",
+      loggedIn: false,
+      aliyunId: "aliyun-1",
+      email: "a@b.c",
+      expiresAt: loadCredentials(dir, "acc-payg")!.expiresAt,
+    });
+  });
+
+  it("logout 只解绑当前账号；最后一个绑定者登出才删除平台令牌", () => {
+    const dir = makeTempDir();
+    const { ctx } = makeContext(dir, [PAYG_ACCOUNT, TOKEN_PLAN_ACCOUNT]);
+    writeCredentials(dir, "acc-payg");
+    // 第二个账号通过共享回退建立绑定。
+    assert.equal(status(ctx, "acc-plan").loggedIn, true);
+    const clientIdBefore = loadOrCreateClientId(dir);
+
+    logout(ctx, "acc-payg");
+    let store = loadCredentialStore(dir);
+    assert.deepEqual(store.accounts, { "acc-plan": "aliyun-1" });
+    assert.ok(store.platforms["aliyun-1"] !== undefined);
+    assert.equal(loadCredentials(dir, "acc-payg"), null);
+    // 仍被 acc-plan 引用，平台令牌不能删。
+    assert.equal(status(ctx, "acc-plan").loggedIn, true);
+
+    logout(ctx, "acc-plan");
+    store = loadCredentialStore(dir);
+    assert.deepEqual(store.accounts, {});
+    assert.deepEqual(store.platforms, {});
+    assert.equal(status(ctx, "acc-plan").loggedIn, false);
+    // client-id 不随登出变化。
+    assert.equal(loadOrCreateClientId(dir), clientIdBefore);
+  });
+
+  it("旧 <accountId>.json 惰性迁移：导入共享存储、绑定账号并删除旧文件", () => {
+    const dir = makeTempDir();
+    const platformDir = path.join(dir, "qwen-platform");
+    mkdirSync(platformDir, { recursive: true });
+    const legacy = {
+      accessToken: "legacy-token",
+      expiresAt: futureIso(),
+      aliyunId: "aliyun-legacy",
+      email: "legacy@example.test",
+      updatedAt: "2026-11-01T00:00:00.000Z",
+    };
+    writeFileSync(legacyCredentialFile(dir, "acc-payg"), JSON.stringify(legacy));
+
+    const { ctx } = makeContext(dir, [PAYG_ACCOUNT, TOKEN_PLAN_ACCOUNT]);
+    const migrated = status(ctx, "acc-payg");
+    assert.equal(migrated.loggedIn, true);
+    assert.equal(migrated.aliyunId, "aliyun-legacy");
+    assert.equal(migrated.email, "legacy@example.test");
+    assert.equal(existsSync(legacyCredentialFile(dir, "acc-payg")), false);
+    assert.equal(existsSync(credentialStoreFile(dir)), true);
+
+    // 另一个账号直接共享迁移后的平台令牌。
+    assert.equal(status(ctx, "acc-plan").loggedIn, true);
+    const store = loadCredentialStore(dir);
+    assert.deepEqual(store.platforms["aliyun-legacy"], legacy);
+    assert.deepEqual(store.accounts, {
+      "acc-payg": "aliyun-legacy",
+      "acc-plan": "aliyun-legacy",
+    });
+  });
+
+  it("迁移幂等：同一平台账号多份旧文件取 updatedAt 最新的一份", () => {
+    const dir = makeTempDir();
+    const platformDir = path.join(dir, "qwen-platform");
+    mkdirSync(platformDir, { recursive: true });
+    const older = {
+      accessToken: "older",
+      expiresAt: futureIso(),
+      aliyunId: "aliyun-1",
+      email: null,
+      updatedAt: "2026-10-01T00:00:00.000Z",
+    };
+    const newer = {
+      accessToken: "newer",
+      expiresAt: futureIso(),
+      aliyunId: "aliyun-1",
+      email: null,
+      updatedAt: "2026-11-01T00:00:00.000Z",
+    };
+    writeFileSync(legacyCredentialFile(dir, "acc-a"), JSON.stringify(older));
+    writeFileSync(legacyCredentialFile(dir, "acc-b"), JSON.stringify(newer));
+
+    migrateLegacyCredentials(dir);
+    assert.equal(loadCredentialStore(dir).platforms["aliyun-1"].accessToken, "newer");
+    assert.equal(existsSync(legacyCredentialFile(dir, "acc-a")), false);
+    assert.equal(existsSync(legacyCredentialFile(dir, "acc-b")), false);
+    // 幂等：再跑一次不会破坏已有绑定。
+    assert.deepEqual(loadCredentialStore(dir).accounts, {
+      "acc-a": "aliyun-1",
+      "acc-b": "aliyun-1",
+    });
+  });
+});
+
 // ─── device flow 集成（本地 mock） ─────────────────────────────────────────
 
 describe("device-flow 登录（本地 mock）", () => {
@@ -790,15 +980,19 @@ describe("device-flow 登录（本地 mock）", () => {
     assert.ok((tokenRequest.query.get("code_verifier") ?? "").length >= 43);
     assert.equal(tokenRequest.query.get("client_id"), mock.requests[0]!.query.get("client_id"));
 
-    const credentials = loadCredentials(dir, "acc-payg");
-    assert.ok(credentials !== null);
+    const store = loadCredentialStore(dir);
+    const platformKey = "1494342465971857"; // device flow 的 User.Id → aliyunId
+    assert.deepEqual(store.accounts, { "acc-payg": platformKey });
+    const credentials = store.platforms[platformKey];
+    assert.ok(credentials !== undefined);
     assert.equal(credentials.accessToken, "access-token-1");
     assert.equal(credentials.expiresAt, "2026-11-12T05:54:20Z");
     assert.equal(credentials.aliyunId, "1494342465971857");
     assert.equal(credentials.email, "nich*****@outlook.com");
     if (process.platform !== "win32") {
-      assert.equal(statSync(credentialFile(dir, "acc-payg")).mode & 0o777, 0o600);
+      assert.equal(statSync(credentialStoreFile(dir)).mode & 0o777, 0o600);
     }
+    assert.deepEqual(loadCredentials(dir, "acc-payg"), credentials);
 
     const platformStatus = status(ctx, "acc-payg");
     assert.equal(platformStatus.loggedIn, true);
@@ -809,6 +1003,27 @@ describe("device-flow 登录（本地 mock）", () => {
     logout(ctx, "acc-payg");
     assert.equal(status(ctx, "acc-payg").loggedIn, false);
     assert.equal(loadCredentials(dir, "acc-payg"), null);
+  });
+
+  it("登录一次后同平台账号共享令牌（device flow 只跑一次）", async () => {
+    const dir = makeTempDir();
+    const { ctx } = makeContext(dir, [PAYG_ACCOUNT, TOKEN_PLAN_ACCOUNT]);
+    await startLogin(ctx, "acc-payg");
+    await pollLogin(ctx, "acc-payg");
+    const tokenRequests = mock.requests.filter((item) => item.pathname === "/cli/device/token");
+    assert.equal(tokenRequests.length, 1);
+
+    // 第二个 Qwen 账号不需要再登录。
+    const shared = status(ctx, "acc-plan");
+    assert.equal(shared.loggedIn, true);
+    assert.equal(shared.aliyunId, "1494342465971857");
+    assert.equal(shared.email, "nich*****@outlook.com");
+
+    const platformKey = "1494342465971857";
+    assert.deepEqual(loadCredentialStore(dir).accounts, {
+      "acc-payg": platformKey,
+      "acc-plan": platformKey,
+    });
   });
 
   it("没有 pending 时轮询报「请先发起」", async () => {
@@ -966,13 +1181,17 @@ describe("qwen_platform_sync（Token Plan）", () => {
     writeCredentials(dir, "acc-plan");
 
     const result = await syncAccount(ctx, "acc-plan");
-    assert.equal(result.balance, null);
-    assert.equal(result.currency, null);
+    // 合并同步：balance/currency 取按量付费结果（不再按 resource_mode 二选一）。
+    assert.equal(result.balance, 92.65);
+    assert.equal(result.currency, "CNY");
 
     const bundle = JSON.parse(result.rawScrapedJson) as JsonRow;
     assert.deepEqual(Object.keys(bundle).sort(), [
+      "billing_amount",
+      "fq_instance",
       "quota_config",
       "reset_card_list",
+      "settle_bill",
       "subscription",
       "usage",
     ]);
@@ -1003,7 +1222,7 @@ describe("qwen_platform_sync（Token Plan）", () => {
 
     assert.equal(storage.snapshots.length, 1);
     assert.equal(storage.snapshots[0]!.raw_scraped_json, result.rawScrapedJson);
-    assert.equal(storage.snapshots[0]!.balance, null);
+    assert.equal(storage.snapshots[0]!.balance, 92.65);
   });
 
   it("订阅业务错误去掉 commodityCode 重试一次", async () => {
@@ -1068,6 +1287,124 @@ describe("qwen_platform_sync（Token Plan）", () => {
       return { json: csEnvelope({}) };
     });
     await assert.rejects(() => syncAccount(ctx, "acc-plan"), new RegExp(LOGIN_EXPIRED_MESSAGE));
+  });
+});
+
+// ─── 合并同步（同一个 rawScrapedJson） ─────────────────────────────────────
+
+describe("qwen_platform_sync（合并 bundle）", () => {
+  function installTokenPlanDataHandlers(): void {
+    mock.on("/cli/api.json", (request) => {
+      const envelope = csDataEnvelopeOf(request);
+      switch (String(envelope.Api ?? "")) {
+        case CS_API_SUBSCRIPTION:
+          return {
+            json: csEnvelope({ specCode: "standard", status: "VALID", remainingDays: 21 }),
+          };
+        case CS_API_QUOTA_CONFIG:
+          return { json: csEnvelope({ standard: { monthly: 80000, five_hour: 2000 } }) };
+        case CS_API_USAGE:
+          return { json: csEnvelope({ per1MonthPercentage: 0.25, per5HourPercentage: 10 }) };
+        case CS_API_RESET_CARDS:
+          return { json: csEnvelope({ list: [] }) };
+        default:
+          return { json: csEnvelope({}) };
+      }
+    });
+  }
+
+  it("同一个 bundle 同时带按量付费与 Token Plan 槽位（两个解析器的必需 key 都在）", async () => {
+    const dir = makeTempDir();
+    const { ctx } = makeContext(dir, [TOKEN_PLAN_ACCOUNT]);
+    writeCredentials(dir, "acc-plan");
+    installTokenPlanDataHandlers();
+
+    const result = await syncAccount(ctx, "acc-plan");
+    const bundle = JSON.parse(result.rawScrapedJson) as JsonRow;
+
+    // parseQwenFreeTierDetails：billing_amount / fq_instance / settle_bill。
+    assert.equal(bundle.billing_amount.data.AvailableAmount, "92.65");
+    assert.equal(bundle.billing_amount.data.SettleCurrency, "CNY");
+    assert.equal(typeof bundle.billing_amount.data.UnsettledAmount, "number");
+    assert.ok(Array.isArray(bundle.fq_instance.data.Data));
+    const instance = bundle.fq_instance.data.Data[0] as JsonRow;
+    assert.deepEqual(instance.Template, { Code: "sfm_tpl_1", Name: "qwen3.7-plus" });
+    assert.equal(instance.InitCapacity.BaseValue, 1_000_000);
+    assert.equal(instance.InitCapacity.ShowUnit, "tokens");
+    assert.equal(bundle.settle_bill.data.Data[0].BillingCycle, "202611");
+
+    // parseQwenTokenPlanDetails：subscription / quota_config / usage 的 data.DataV2.data.data。
+    const subscription = bundle.subscription.data.DataV2.data.data as JsonRow;
+    assert.equal(subscription.specCode, "standard");
+    assert.equal(subscription.status, "VALID");
+    const quotaConfig = bundle.quota_config.data.DataV2.data.data as JsonRow;
+    assert.equal((quotaConfig.standard as JsonRow).monthly, 80_000);
+    const usage = bundle.usage.data.DataV2.data.data as JsonRow;
+    assert.equal(usage.per1MonthPercentage, 0.25);
+    assert.ok(bundle.reset_card_list !== undefined, "重置券可选槽位存在");
+
+    // 仍然只写一条余额快照，balance/currency 取按量付费结果。
+    assert.equal(result.balance, 92.65);
+    assert.equal(result.currency, "CNY");
+  });
+
+  it("没有 Token Plan 订阅（subscription 业务错误）时同步仍成功，只含按量付费槽位", async () => {
+    const dir = makeTempDir();
+    const { ctx, storage } = makeContext(dir, [TOKEN_PLAN_ACCOUNT]);
+    writeCredentials(dir, "acc-plan");
+    mock.on("/cli/api.json", (request) => {
+      const envelope = csDataEnvelopeOf(request);
+      if (envelope.Api === CS_API_SUBSCRIPTION) {
+        return { json: csBusinessErrorEnvelope("INVALID_ARGUMENT::no token plan subscription") };
+      }
+      return { json: csEnvelope({}) };
+    });
+
+    const result = await syncAccount(ctx, "acc-plan");
+    const bundle = JSON.parse(result.rawScrapedJson) as JsonRow;
+    assert.deepEqual(Object.keys(bundle).sort(), [
+      "billing_amount",
+      "fq_instance",
+      "settle_bill",
+    ]);
+    assert.equal(result.balance, 92.65);
+    assert.equal(storage.snapshots.length, 1);
+  });
+
+  it("quota_config 业务错误同样按无订阅跳过全部 Token Plan 槽位", async () => {
+    const dir = makeTempDir();
+    const { ctx } = makeContext(dir, [TOKEN_PLAN_ACCOUNT]);
+    writeCredentials(dir, "acc-plan");
+    mock.on("/cli/api.json", (request) => {
+      const envelope = csDataEnvelopeOf(request);
+      if (envelope.Api === CS_API_QUOTA_CONFIG) {
+        return { json: csBusinessErrorEnvelope("SERVICE_UNAVAILABLE::quota down") };
+      }
+      return { json: csEnvelope({ specCode: "standard" }) };
+    });
+
+    const result = await syncAccount(ctx, "acc-plan");
+    const bundle = JSON.parse(result.rawScrapedJson) as JsonRow;
+    assert.equal(bundle.subscription, undefined);
+    assert.equal(bundle.quota_config, undefined);
+    assert.equal(bundle.usage, undefined);
+    assert.ok(bundle.billing_amount !== undefined);
+  });
+
+  it("Token Plan 鉴权失效仍整体报登录过期（不落余额快照）", async () => {
+    const dir = makeTempDir();
+    const { ctx, storage } = makeContext(dir, [TOKEN_PLAN_ACCOUNT]);
+    writeCredentials(dir, "acc-plan");
+    mock.on("/cli/api.json", (request) => {
+      const envelope = csDataEnvelopeOf(request);
+      if (envelope.Api === CS_API_SUBSCRIPTION) {
+        return { status: 401, text: "Unauthorized" };
+      }
+      return { json: csEnvelope({}) };
+    });
+
+    await assert.rejects(() => syncAccount(ctx, "acc-plan"), new RegExp(LOGIN_EXPIRED_MESSAGE));
+    assert.equal(storage.snapshots.length, 0);
   });
 });
 

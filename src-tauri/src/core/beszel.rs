@@ -216,12 +216,10 @@ impl BeszelClient {
             status: None,
             message,
         })?;
-        let method = method
-            .parse::<reqwest::Method>()
-            .map_err(|_| BeszelError {
-                status: None,
-                message: format!("不支持的 HTTP 方法：{method}"),
-            })?;
+        let method = method.parse::<reqwest::Method>().map_err(|_| BeszelError {
+            status: None,
+            message: format!("不支持的 HTTP 方法：{method}"),
+        })?;
         let client = self.build_client().map_err(|message| BeszelError {
             status: None,
             message,
@@ -266,8 +264,7 @@ impl BeszelClient {
         body: Option<&serde_json::Value>,
     ) -> Result<serde_json::Value, BeszelError> {
         let token = self.ensure_token().await?;
-        self.send_raw(method, path, body, Some(&token), false)
-            .await
+        self.send_raw(method, path, body, Some(&token), false).await
     }
 
     /// 邮箱 + 密码换短期 token；结果缓存在实例内。
@@ -541,7 +538,10 @@ mod tests {
             "http://host:8090/api"
         );
 
-        assert_eq!(resolve_api_path("http://host", "  ").unwrap_err(), "API 路径不能为空");
+        assert_eq!(
+            resolve_api_path("http://host", "  ").unwrap_err(),
+            "API 路径不能为空"
+        );
         assert_eq!(
             resolve_api_path("http://host", "https://evil.example.com/x").unwrap_err(),
             "API 路径必须是相对路径（如 /collections/systems/records），不接受绝对 URL"

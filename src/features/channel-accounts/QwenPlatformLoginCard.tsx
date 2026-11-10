@@ -113,14 +113,17 @@ export function QwenPlatformLoginCard({
           <Button size="small" theme="borderless" onClick={platform.cancelLogin}>{t("取消")}</Button>
         </div>
       ) : isLoggedIn ? (
-        <div className={styles.qwenPlatformIdentity}>
+        // 已登录只占一行：身份 + 有效期 + 操作；说明文案收进 title，避免面板变高。
+        <div className={styles.qwenPlatformInline} title={loggedInHint}>
           <Text>{t("已登录 {account}", { account: platformAccount })}</Text>
           {platform.status?.expiresAt ? (
-            <Text type="tertiary" size="small">
-              {t("登录有效至 {time}", { time: formatPlatformExpiry(platform.status.expiresAt, language) })}
-            </Text>
+            <>
+              <Text type="tertiary" size="small">·</Text>
+              <Text type="tertiary" size="small">
+                {t("登录有效至 {time}", { time: formatPlatformExpiry(platform.status.expiresAt, language) })}
+              </Text>
+            </>
           ) : null}
-          <Text type="tertiary" size="small">{loggedInHint}</Text>
           <div className={styles.qwenPlatformActions}>
             <Button
               size="small"

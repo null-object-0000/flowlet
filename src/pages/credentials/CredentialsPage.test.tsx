@@ -328,7 +328,7 @@ describe("CredentialsPage env prefix (AI streaming)", () => {
 });
 
 describe("CredentialsPage raw token reveal", () => {
-  it("reveals the saved token on demand while the table keeps only the mask", async () => {
+  it("keeps the table token-free and reveals the raw token inside the edit drawer", async () => {
     commands.reveal.mockResolvedValue({
       id: "cred-na",
       name: "公司-北美-线上",
@@ -338,23 +338,43 @@ describe("CredentialsPage raw token reveal", () => {
     });
     renderPage();
     await screen.findByText("公司-北美-线上");
-    // 默认不出现明文，只出现掩码
-    expect(screen.queryByText("dockhand-raw-token-abc123")).not.toBeInTheDocument();
-    expect(screen.getByText("••••1a2b")).toBeInTheDocument();
+    // 列表不再展示 Token 列，也不展示任何掩码
+    expect(screen.queryByRole("columnheader", { name: "Token" })).not.toBeInTheDocument();
+    expect(screen.queryByText("••••1a2b")).not.toBeInTheDocument();
+    // 查看入口不在行操作里，只在编辑抽屉内
+    expect(screen.queryByRole("button", { name: /Reveal raw token/ })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getAllByRole("button", { name: /Reveal raw token/ })[0]!);
+    fireEvent.click(screen.getAllByRole("button", { name: /Edit/ })[0]!);
+    fireEvent.click(await screen.findByRole("button", { name: /Reveal raw token/ }));
     expect(await screen.findByText("dockhand-raw-token-abc123")).toBeInTheDocument();
     expect(screen.getByText(/plaintext token of a saved credential/)).toBeInTheDocument();
     expect(commands.reveal).toHaveBeenCalledWith("cred-na");
+
+    // 点「隐藏」立即清掉明文
+    fireEvent.click(screen.getByRole("button", { name: /Hide raw token/ }));
+    expect(screen.queryByText("dockhand-raw-token-abc123")).not.toBeInTheDocument();
+
+    // 再查一次后关闭抽屉，重新打开不应残留明文
+    fireEvent.click(screen.getByRole("button", { name: /Reveal raw token/ }));
+    expect(await screen.findByText("dockhand-raw-token-abc123")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(screen.queryByText("dockhand-raw-token-abc123")).not.toBeInTheDocument(),
+    );
+    fireEvent.click(screen.getAllByRole("button", { name: /Edit/ })[0]!);
+    expect(screen.queryByText("dockhand-raw-token-abc123")).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Reveal raw token/ })).toBeInTheDocument();
   });
 
-  it("keeps the dialog closed when the host rejects the reveal", async () => {
+  it("shows no plaintext when the host rejects the reveal", async () => {
     commands.reveal.mockRejectedValue(new Error("unsupported_in_web"));
     renderPage();
     await screen.findByText("公司-北美-线上");
-    fireEvent.click(screen.getAllByRole("button", { name: /Reveal raw token/ })[0]!);
+    fireEvent.click(screen.getAllByRole("button", { name: /Edit/ })[0]!);
+    fireEvent.click(await screen.findByRole("button", { name: /Reveal raw token/ }));
     await waitFor(() => expect(commands.reveal).toHaveBeenCalled());
     expect(screen.queryByText(/plaintext token of a saved credential/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Reveal raw token/ })).toBeInTheDocument();
   });
 });
 

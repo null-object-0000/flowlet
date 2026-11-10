@@ -223,6 +223,10 @@ describe("AccountActionOverlay", () => {
 
     expect(await screen.findByText("个人版 Standard 套餐")).toBeInTheDocument();
     expect(screen.getByText("自动同步")).toBeInTheDocument();
+    // 合并同步后 bundle 里也有按量付费数据，但 Token Plan 账号不展示余额摘要，
+    // 避免两条账号记录的面板变得一模一样。
+    expect(screen.queryByText("账户余额")).not.toBeInTheDocument();
+    expect(screen.queryByText("未结清")).not.toBeInTheDocument();
     expect(screen.getByText("5 小时 100.0%")).toBeInTheDocument();
     expect(screen.getByText("总量 3,000 Credits")).toBeInTheDocument();
     expect(screen.getByLabelText("5 小时额度")).toBeInTheDocument();
@@ -231,9 +235,10 @@ describe("AccountActionOverlay", () => {
     expect(screen.getByLabelText("7 天额度")).toBeInTheDocument();
     expect(screen.getAllByText("额度重置时间")).toHaveLength(2);
     expect(screen.getByText("套餐到期")).toBeInTheDocument();
-    expect(screen.getByText("最近同步")).toBeInTheDocument();
-    expect(screen.getByText("套餐到期").parentElement?.parentElement)
-      .toBe(screen.getByText("最近同步").parentElement?.parentElement);
+    // 合并面板后「最近同步」同时出现在账户摘要卡与订阅卡：这里锁定订阅卡那一处，
+    // 仍验证「套餐到期」与「最近同步」在同一格。
+    const subscriptionCell = screen.getByText("套餐到期").parentElement?.parentElement;
+    expect(subscriptionCell?.textContent).toContain("最近同步");
     expect(screen.queryByText("手动维护")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "保存修改" }));
@@ -243,6 +248,90 @@ describe("AccountActionOverlay", () => {
         resource_sync_mode: "auto",
       }),
     ]);
+  });
+
+  it("keeps Qwen free-quota data intact when saving a pay-as-you-go account in Web Host", async () => {
+    const user = userEvent.setup();
+    const onSaveAccounts = vi.fn<(accounts: ChannelAccount[]) => Promise<void>>().mockResolvedValue();
+    const onSaveBalanceSnapshot = vi.fn().mockResolvedValue(undefined);
+    const qwenAccount: ChannelAccount = {
+      ...account,
+      id: "account-qwen-payg-web",
+      channel_id: "qwen",
+      name: "千问按量付费",
+      resource_mode: null,
+      resource_sync_mode: "auto",
+      synced_models: ["qwen3.7-plus"],
+      exposed_models: ["qwen3.7-plus"],
+    };
+    // 平台同步写入的 bundle：模型列表的「免费 / 免费剩余 …」依赖这份 raw_scraped_json。
+    const raw = JSON.stringify({
+      billing_amount: { data: { AvailableAmount: 92.58, SettleCurrency: "CNY" } },
+      fq_instance: {
+        data: {
+          Data: [{
+            Template: { Code: "sfm_inference_public_cn_x", Name: "qwen3.7-plus" },
+            Status: "valid",
+            InitCapacity: { BaseValue: 1000000, ShowUnit: "tokens", ShowValue: "1000000" },
+            CurrCapacity: { BaseValue: 500000, ShowUnit: "tokens", ShowValue: "500000" },
+            CurrentCycleStartTime: "Sat Aug 01 00:00:00 CST 2026",
+            CurrentCycleEndTime: "Tue Sep 01 00:00:00 CST 2026",
+            EndTime: "Tue Sep 01 00:00:00 CST 2026",
+          }],
+        },
+      },
+    });
+
+    render(
+      <AccountActionOverlay
+        request={{ kind: "edit", accountId: qwenAccount.id }}
+        accounts={[qwenAccount]}
+        snapshots={[{
+          id: "snapshot-qwen-payg",
+          account_id: qwenAccount.id,
+          balance: 92.58,
+          currency: "CNY",
+          token_pack_total: null,
+          token_pack_used: null,
+          token_pack_remaining: null,
+          token_pack_expire_at: null,
+          token_packs: null,
+          raw_scraped_json: raw,
+          source: "qwen_platform",
+          synced_at: "2026-11-10T07:22:34Z",
+          remark: "千问平台 API",
+          created_at: "2026-11-10T07:22:34Z",
+          updated_at: "2026-11-10T07:22:34Z",
+        }]}
+        presets={[{
+          ...preset,
+          id: "qwen",
+          name: "Qwen",
+          supports_scrape_balance: true,
+          supports_balance_query: false,
+          supports_model_list: true,
+        }]}
+        busy={false}
+        desktopCapabilities={false}
+        onClose={vi.fn()}
+        onSaveAccounts={onSaveAccounts}
+        onTestConnection={vi.fn().mockResolvedValue(undefined)}
+        onSaveBalanceSnapshot={onSaveBalanceSnapshot}
+        onSyncBalance={vi.fn().mockResolvedValue(undefined)}
+        onScrape={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    // 模型勾选列表仍按免费额度标注（这是被 manual 快照覆盖后丢掉的展示）。
+    expect(await screen.findByText("免费")).toBeInTheDocument();
+    expect(screen.getByText(/免费剩余/)).toBeInTheDocument();
+    // 按量付费账号不渲染订阅卡（即使 bundle 里带了订阅槽位）。
+    expect(screen.queryByText(/个人版 .* 套餐/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Token Plan 订阅信息")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "保存修改" }));
+    // Web Host 保存账号绝不能写 manual 余额快照，否则会覆盖 raw_scraped_json。
+    expect(onSaveBalanceSnapshot).not.toHaveBeenCalled();
   });
 
   it("labels the monthly quota window after the Qwen console revamp", async () => {

@@ -11,10 +11,25 @@
 // - 数据目录用 `ctx.catalogDir`（Docker 为 /data），即 `<catalogDir>/qwen-platform/`；
 //   Rust 用 SQLite 所在目录。两者都只写「数据卷」，不写 SQLite。
 //
-// 令牌没有 refresh token：过期后只能重新走一次 device flow。凭据按账号保存在
-// `qwen-platform/<account_id>.json`（0600），不写入 SQLite，也不复用模型 API Key。
+// 令牌没有 refresh token：过期后只能重新走一次 device flow。凭据按**千问平台账号**
+// 共享，保存在 `qwen-platform/credentials.json`（0600）：同一个平台账号下多个 Flowlet
+// Qwen 账号只登录一次。旧版按账号的 `qwen-platform/<account_id>.json` 会惰性迁移。
+// 凭据不写入 SQLite，也不复用模型 API Key。
+//
+// 一次同步同时拉取「按量付费」与「Token Plan」两套数据，合并成一个 rawScrapedJson
+// slot bundle：{billing_amount, fq_instance, settle_bill?, subscription,
+// quota_config, usage, reset_card_list?}。balance/currency 取按量付费结果；Token Plan
+// 无订阅（业务错误/缺失）时只跳过其槽位，鉴权失效仍整体报登录过期。
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 
 import { CommandError } from "../types.ts";
@@ -42,6 +57,8 @@ const FQ_PAGE_SIZE = 500;
 const MAX_FQ_PAGES = 10;
 const CREDENTIALS_DIR = "qwen-platform";
 const CLIENT_ID_FILE = "client-id";
+/** 共享平台凭据存储（所有 Qwen 账号共用一份）。 */
+const CREDENTIALS_FILE = "credentials.json";
 
 const CLI_ACCESS_PRODUCT = "ModelStudioRegional";
 const CLI_ACCESS_ACTION = "GenerateCLIAccessToken";
@@ -230,9 +247,11 @@ function supportsPlatformSync(account: JsonRow): boolean {
   return platformAccountKind(account) !== null;
 }
 
+const ACCOUNT_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
+
 export function validateAccountId(accountId: string): void {
   // 只允许安全字符，避免路径穿越到凭据目录之外。
-  if (!/^[A-Za-z0-9_-]+$/.test(accountId)) {
+  if (!ACCOUNT_ID_PATTERN.test(accountId)) {
     throw PlatformError.message(`非法账号 id: ${accountId}`);
   }
 }
@@ -241,9 +260,9 @@ function platformDir(catalogDir: string): string {
   return path.join(catalogDir, CREDENTIALS_DIR);
 }
 
-function credentialPath(catalogDir: string, accountId: string): string {
-  validateAccountId(accountId);
-  return path.join(platformDir(catalogDir), `${accountId}.json`);
+/** 共享凭据存储路径：所有 Qwen 账号共用一份平台令牌表。 */
+export function credentialStorePath(catalogDir: string): string {
+  return path.join(platformDir(catalogDir), CREDENTIALS_FILE);
 }
 
 function restrictPermissions(filePath: string): void {
@@ -260,16 +279,61 @@ function optionalText(value: unknown): string | null {
   return trimmed === "" ? null : trimmed;
 }
 
-export function loadCredentials(
-  catalogDir: string,
-  accountId: string,
-): PlatformCredentials | null {
-  const filePath = credentialPath(catalogDir, accountId);
+/**
+ * 共享凭据存储：
+ * - `platforms`：按千问**平台账号**保存的访问令牌（同一平台账号只登录一次）；
+ * - `accounts`：Flowlet 账号 id → 平台账号键的绑定。
+ */
+export interface CredentialStore {
+  version: 1;
+  platforms: Record<string, PlatformCredentials>;
+  accounts: Record<string, string>;
+}
+
+function emptyCredentialStore(): CredentialStore {
+  return { version: 1, platforms: {}, accounts: {} };
+}
+
+/** 平台账号键：`aliyunId ?? email ?? "default"`（全部 trim，空串视为缺失）。 */
+export function platformKeyOf(
+  aliyunId: string | null | undefined,
+  email: string | null | undefined,
+): string {
+  return optionalText(aliyunId) ?? optionalText(email) ?? "default";
+}
+
+function parseStoredCredentials(value: unknown): PlatformCredentials | null {
+  if (!isPlainObject(value)) return null;
+  if (typeof value.accessToken !== "string" || value.accessToken.trim() === "") return null;
+  if (typeof value.updatedAt !== "string") return null;
+  for (const key of ["expiresAt", "aliyunId", "email"] as const) {
+    const field = value[key];
+    if (field !== undefined && field !== null && typeof field !== "string") return null;
+  }
+  return {
+    accessToken: value.accessToken,
+    expiresAt: optionalText(value.expiresAt),
+    aliyunId: optionalText(value.aliyunId),
+    email: optionalText(value.email),
+    updatedAt: value.updatedAt,
+  };
+}
+
+function compareUpdatedAt(left: string, right: string): number {
+  const leftMs = Date.parse(left);
+  const rightMs = Date.parse(right);
+  if (!Number.isNaN(leftMs) && !Number.isNaN(rightMs)) return leftMs - rightMs;
+  return left.localeCompare(right);
+}
+
+/** 读取 `credentials.json`（不触发迁移）。损坏时按空存储处理，不影响登录流程。 */
+function readCredentialStoreFile(catalogDir: string): CredentialStore {
+  const filePath = credentialStorePath(catalogDir);
   let raw: string;
   try {
     raw = readFileSync(filePath, "utf8");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return emptyCredentialStore();
     throw PlatformError.message(`读取千问平台凭据失败: ${errorText(error)}`);
   }
   let parsed: unknown;
@@ -277,46 +341,46 @@ export function loadCredentials(
     parsed = JSON.parse(raw);
   } catch (error) {
     console.warn(`千问平台凭据文件解析失败，按未登录处理：${errorText(error)}`);
-    return null;
+    return emptyCredentialStore();
   }
   if (
     !isPlainObject(parsed) ||
-    typeof parsed.accessToken !== "string" ||
-    typeof parsed.updatedAt !== "string"
+    (parsed.version !== undefined && parsed.version !== 1)
   ) {
-    console.warn("千问平台凭据文件解析失败，按未登录处理：缺少 accessToken/updatedAt");
-    return null;
+    console.warn("千问平台凭据文件解析失败，按未登录处理：version 或结构不符");
+    return emptyCredentialStore();
   }
-  for (const key of ["expiresAt", "aliyunId", "email"] as const) {
-    const value = parsed[key];
-    if (value !== undefined && value !== null && typeof value !== "string") {
-      console.warn("千问平台凭据文件解析失败，按未登录处理：可选字段类型错误");
-      return null;
+  const store = emptyCredentialStore();
+  const platforms = isPlainObject(parsed.platforms) ? parsed.platforms : {};
+  for (const [key, value] of Object.entries(platforms)) {
+    const platformKey = key.trim();
+    if (platformKey === "") continue;
+    const credentials = parseStoredCredentials(value);
+    if (credentials === null) {
+      console.warn(`千问平台凭据文件跳过无效平台令牌：${platformKey}`);
+      continue;
     }
+    store.platforms[platformKey] = credentials;
   }
-  if (parsed.accessToken.trim() === "") return null;
-  return {
-    accessToken: parsed.accessToken,
-    expiresAt: optionalText(parsed.expiresAt),
-    aliyunId: optionalText(parsed.aliyunId),
-    email: optionalText(parsed.email),
-    updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : "",
-  };
+  const accounts = isPlainObject(parsed.accounts) ? parsed.accounts : {};
+  for (const [accountId, platformKey] of Object.entries(accounts)) {
+    if (typeof platformKey !== "string") continue;
+    if (!ACCOUNT_ID_PATTERN.test(accountId)) continue;
+    store.accounts[accountId] = platformKey;
+  }
+  return store;
 }
 
-export function saveCredentials(
-  catalogDir: string,
-  accountId: string,
-  credentials: PlatformCredentials,
-): void {
-  const filePath = credentialPath(catalogDir, accountId);
+/** 先写 tmp、收紧权限、再 rename，避免半个凭据文件被读到。 */
+export function saveCredentialStore(catalogDir: string, store: CredentialStore): void {
+  const filePath = credentialStorePath(catalogDir);
   const dir = path.dirname(filePath);
   try {
     mkdirSync(dir, { recursive: true });
   } catch (error) {
     throw PlatformError.message(`创建千问平台凭据目录失败: ${errorText(error)}`);
   }
-  const body = JSON.stringify(credentials, null, 2);
+  const body = JSON.stringify(store, null, 2);
   const temp = `${filePath}.tmp`;
   try {
     writeFileSync(temp, body);
@@ -331,15 +395,126 @@ export function saveCredentials(
   }
 }
 
-export function removeCredentials(catalogDir: string, accountId: string): boolean {
-  const filePath = credentialPath(catalogDir, accountId);
+function removeLegacyFile(filePath: string): void {
   try {
     rmSync(filePath);
-    return true;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw PlatformError.message(`删除千问平台凭据失败: ${errorText(error)}`);
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    console.warn(`千问平台旧凭据文件删除失败（忽略）：${errorText(error)}`);
   }
+}
+
+/** 旧版单账号凭据文件：`qwen-platform/<accountId>.json`（与 `client-id` 同级）。 */
+function legacyCredentialFiles(catalogDir: string): { accountId: string; filePath: string }[] {
+  const dir = platformDir(catalogDir);
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw PlatformError.message(`读取千问平台凭据目录失败: ${errorText(error)}`);
+  }
+  const files: { accountId: string; filePath: string }[] = [];
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    if (!entry.name.endsWith(".json") || entry.name === CREDENTIALS_FILE) continue;
+    const accountId = entry.name.slice(0, -".json".length);
+    if (!ACCOUNT_ID_PATTERN.test(accountId)) continue;
+    files.push({ accountId, filePath: path.join(dir, entry.name) });
+  }
+  return files.sort((left, right) => left.accountId.localeCompare(right.accountId));
+}
+
+/**
+ * 旧版按账号凭据惰性迁移到共享存储：导入平台令牌、绑定账号，随后删除旧文件。
+ * 无法识别的旧文件保留原样（不静默丢弃用户数据），已有绑定的旧文件视为残留直接清理。
+ */
+export function migrateLegacyCredentials(catalogDir: string): CredentialStore {
+  const store = readCredentialStoreFile(catalogDir);
+  let changed = false;
+  for (const legacy of legacyCredentialFiles(catalogDir)) {
+    if (store.accounts[legacy.accountId] !== undefined) {
+      removeLegacyFile(legacy.filePath);
+      changed = true;
+      continue;
+    }
+    let credentials: PlatformCredentials | null = null;
+    try {
+      credentials = parseStoredCredentials(JSON.parse(readFileSync(legacy.filePath, "utf8")));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      console.warn(`千问平台旧凭据迁移失败，跳过 ${legacy.accountId}：${errorText(error)}`);
+    }
+    if (credentials === null) continue;
+    const platformKey = platformKeyOf(credentials.aliyunId, credentials.email);
+    const existing = store.platforms[platformKey];
+    // 同一平台账号出现多份旧文件时以 updatedAt 最新的为准。
+    if (existing === undefined || compareUpdatedAt(credentials.updatedAt, existing.updatedAt) >= 0) {
+      store.platforms[platformKey] = credentials;
+    }
+    store.accounts[legacy.accountId] = platformKey;
+    removeLegacyFile(legacy.filePath);
+    changed = true;
+  }
+  if (changed) saveCredentialStore(catalogDir, store);
+  return store;
+}
+
+/** 读取共享凭据存储；顺带完成旧格式惰性迁移（status/sync/登录入口都走这里）。 */
+export function loadCredentialStore(catalogDir: string): CredentialStore {
+  return migrateLegacyCredentials(catalogDir);
+}
+
+function pruneUnreferencedPlatform(store: CredentialStore, platformKey: string): void {
+  for (const bound of Object.values(store.accounts)) {
+    if (bound === platformKey) return;
+  }
+  delete store.platforms[platformKey];
+}
+
+/** 登录完成：写入/覆盖平台令牌，并把当前 Flowlet 账号绑定到该平台账号。 */
+export function saveCredentials(
+  catalogDir: string,
+  accountId: string,
+  credentials: PlatformCredentials,
+): void {
+  validateAccountId(accountId);
+  const store = loadCredentialStore(catalogDir);
+  const platformKey = platformKeyOf(credentials.aliyunId, credentials.email);
+  const previousKey = store.accounts[accountId];
+  store.platforms[platformKey] = credentials;
+  store.accounts[accountId] = platformKey;
+  if (previousKey !== undefined && previousKey !== platformKey) {
+    pruneUnreferencedPlatform(store, previousKey);
+  }
+  saveCredentialStore(catalogDir, store);
+}
+
+/** 该账号**已绑定**的平台令牌（不做过期/跨平台回退；回退见 `resolveAccountCredentials`）。 */
+export function loadCredentials(
+  catalogDir: string,
+  accountId: string,
+): PlatformCredentials | null {
+  validateAccountId(accountId);
+  const store = loadCredentialStore(catalogDir);
+  const platformKey = store.accounts[accountId];
+  if (platformKey === undefined) return null;
+  return store.platforms[platformKey] ?? null;
+}
+
+/**
+ * 登出当前 Flowlet 账号：删除它的绑定；平台令牌只在没有任何账号继续引用时删除。
+ * 返回是否真的解绑了账号。
+ */
+export function removeCredentials(catalogDir: string, accountId: string): boolean {
+  validateAccountId(accountId);
+  const store = loadCredentialStore(catalogDir);
+  const platformKey = store.accounts[accountId];
+  if (platformKey === undefined) return false;
+  delete store.accounts[accountId];
+  pruneUnreferencedPlatform(store, platformKey);
+  saveCredentialStore(catalogDir, store);
+  return true;
 }
 
 /**
@@ -395,6 +570,69 @@ export function isCredentialsExpired(
   if (credentials.expiresAt === null) return false;
   const expireAt = parseExpireTime(credentials.expiresAt);
   return expireAt !== null && expireAt <= now;
+}
+
+function latestValidPlatform(
+  store: CredentialStore,
+): { platformKey: string; credentials: PlatformCredentials } | null {
+  let best: { platformKey: string; credentials: PlatformCredentials } | null = null;
+  for (const [platformKey, credentials] of Object.entries(store.platforms)) {
+    if (isCredentialsExpired(credentials)) continue;
+    if (best === null || compareUpdatedAt(credentials.updatedAt, best.credentials.updatedAt) > 0) {
+      best = { platformKey, credentials };
+    }
+  }
+  return best;
+}
+
+/**
+ * 解析账号当前可用的共享平台令牌：
+ * 1) 已绑定且未过期 → 直接用；
+ * 2) 否则取 `platforms` 里 `updatedAt` 最新且未过期的令牌，并重新绑定到当前账号
+ *    （这就是「同一平台账号只需登录一次」的实现）；
+ * 3) 只剩过期令牌 → `expired`（status 用它展示过期身份，sync 报登录过期）；
+ * 4) 完全没有可用令牌 → `missing`。
+ */
+export type CredentialResolution =
+  | {
+      state: "ok";
+      platformKey: string;
+      credentials: PlatformCredentials;
+      /** 是否因为共享回退而改写了账号绑定。 */
+      rebound: boolean;
+    }
+  | { state: "expired"; platformKey: string; credentials: PlatformCredentials }
+  | { state: "missing" };
+
+export function resolveAccountCredentials(
+  catalogDir: string,
+  accountId: string,
+): CredentialResolution {
+  validateAccountId(accountId);
+  const store = loadCredentialStore(catalogDir);
+  const boundKey = store.accounts[accountId];
+  const bound = boundKey === undefined ? undefined : store.platforms[boundKey];
+  if (bound !== undefined && !isCredentialsExpired(bound)) {
+    return { state: "ok", platformKey: boundKey!, credentials: bound, rebound: false };
+  }
+  const fallback = latestValidPlatform(store);
+  if (fallback !== null) {
+    const rebound = boundKey !== fallback.platformKey;
+    if (rebound) {
+      store.accounts[accountId] = fallback.platformKey;
+      saveCredentialStore(catalogDir, store);
+    }
+    return {
+      state: "ok",
+      platformKey: fallback.platformKey,
+      credentials: fallback.credentials,
+      rebound,
+    };
+  }
+  if (bound !== undefined) {
+    return { state: "expired", platformKey: boundKey!, credentials: bound };
+  }
+  return { state: "missing" };
 }
 
 // ─── PKCE / device flow ─────────────────────────────────────────────────────
@@ -584,8 +822,10 @@ export async function startLogin(ctx: WebContext, accountId: string): Promise<Lo
   try {
     const account = accountOrError(ctx, accountId);
     if (!supportsPlatformSync(account)) {
-      throw PlatformError.message("只有千问 API 按量付费账号需要登录千问平台");
+      throw PlatformError.message("该账号的资源模式不支持千问平台登录");
     }
+    // 登录入口同样触发旧凭据惰性迁移：用户可能先点了登录才看状态。
+    loadCredentialStore(ctx.catalogDir);
     const clientId = loadOrCreateClientId(ctx.catalogDir);
     const verifier = generateCodeVerifier();
     const challenge = codeChallenge(verifier);
@@ -721,15 +961,18 @@ async function fetchAccountIdentity(
 export function status(ctx: WebContext, accountId: string): PlatformStatus {
   try {
     accountOrError(ctx, accountId);
-    const credentials = loadCredentials(ctx.catalogDir, accountId);
-    const loggedIn = credentials !== null && !isCredentialsExpired(credentials);
-    return {
-      accountId,
-      loggedIn,
-      aliyunId: credentials?.aliyunId ?? null,
-      email: credentials?.email ?? null,
-      expiresAt: credentials?.expiresAt ?? null,
-    };
+    const resolution = resolveAccountCredentials(ctx.catalogDir, accountId);
+    if (resolution.state !== "missing") {
+      // 过期时仍返回已绑定令牌的身份/到期时间，供 UI 展示过期身份。
+      return {
+        accountId,
+        loggedIn: resolution.state === "ok",
+        aliyunId: resolution.credentials.aliyunId,
+        email: resolution.credentials.email,
+        expiresAt: resolution.credentials.expiresAt,
+      };
+    }
+    return { accountId, loggedIn: false, aliyunId: null, email: null, expiresAt: null };
   } catch (error) {
     throw commandError(error);
   }
@@ -898,6 +1141,15 @@ export function validateCsDataBody(body: string): JsonRow {
   return root;
 }
 
+/** cs-data 信封里真正的业务对象 `data.DataV2.data.data`（前端解析器走同一条路径）。 */
+function csDataInnerData(root: JsonRow): JsonRow | null {
+  const data = isPlainObject(root.data) ? root.data : null;
+  const dataV2 = data !== null && isPlainObject(data.DataV2) ? data.DataV2 : null;
+  const envelope = dataV2 !== null && isPlainObject(dataV2.data) ? dataV2.data : null;
+  if (envelope === null) return null;
+  return isPlainObject(envelope.data) ? envelope.data : null;
+}
+
 async function callCsDataApi(
   cliAccessToken: string,
   api: string,
@@ -939,8 +1191,23 @@ async function deriveCliAccessToken(accessToken: string): Promise<string> {
   return token;
 }
 
-/** Token Plan 订阅槽位 bundle：subscription / quota_config / usage 必需，reset_card_list 可选。 */
-async function fetchTokenPlanBundle(accessToken: string): Promise<JsonRow> {
+/**
+ * Token Plan 槽位 bundle：subscription / quota_config / usage 必需，reset_card_list 可选。
+ *
+ * 返回 `null` 表示「该平台账号没有 Token Plan 订阅」：订阅业务错误、或订阅/额度/用量
+ * 业务数据缺失时跳过全部 Token Plan 槽位，不阻断整体同步。鉴权失效仍抛出（整体报登录过期）。
+ */
+async function fetchTokenPlanBundle(accessToken: string): Promise<JsonRow | null> {
+  try {
+    return await fetchTokenPlanSlots(accessToken);
+  } catch (error) {
+    if (error instanceof PlatformError && error.kind === "auth_expired") throw error;
+    console.warn(`千问平台同步：Token Plan 数据不可用，跳过该槽位组（${errorText(error)}）`);
+    return null;
+  }
+}
+
+async function fetchTokenPlanSlots(accessToken: string): Promise<JsonRow | null> {
   const cliToken = await deriveCliAccessToken(accessToken);
 
   let subscription: JsonRow;
@@ -950,14 +1217,22 @@ async function fetchTokenPlanBundle(accessToken: string): Promise<JsonRow> {
     });
   } catch (error) {
     // 团队/其它套餐形态可能不接受 commodityCode：去掉参数再试一次。
-    if (error instanceof PlatformError && error.kind === "message") {
-      subscription = await callCsDataApi(cliToken, CS_API_SUBSCRIPTION, {});
-    } else {
-      throw error;
-    }
+    if (!(error instanceof PlatformError) || error.kind !== "message") throw error;
+    subscription = await callCsDataApi(cliToken, CS_API_SUBSCRIPTION, {});
   }
+
   const quotaConfig = await callCsDataApi(cliToken, CS_API_QUOTA_CONFIG, {});
   const usage = await callCsDataApi(cliToken, CS_API_USAGE, {});
+
+  // 业务信封里没有真正的订阅/额度/用量对象时，前端解析器无法解析，按「无订阅」跳过。
+  if (
+    csDataInnerData(subscription) === null ||
+    csDataInnerData(quotaConfig) === null ||
+    csDataInnerData(usage) === null
+  ) {
+    console.warn("千问平台同步：Token Plan 订阅数据缺失，跳过 Token Plan 槽位");
+    return null;
+  }
 
   // 重置券是可选能力：接口不可用时不阻断订阅同步（与控制台抓取一致）。
   let resetCards: JsonRow | null = null;
@@ -1258,28 +1533,23 @@ async function fetchPayAsYouGoBundle(
 export async function syncAccount(ctx: WebContext, accountId: string): Promise<PlatformSyncResult> {
   try {
     const account = accountOrError(ctx, accountId);
-    const kind = platformAccountKind(account);
-    if (kind === null) {
+    if (platformAccountKind(account) === null) {
       throw PlatformError.message("该账号的资源模式不支持千问平台同步");
     }
-    const credentials = loadCredentials(ctx.catalogDir, accountId);
-    if (credentials === null) throw PlatformError.notLoggedIn();
-    if (isCredentialsExpired(credentials)) throw PlatformError.authExpired();
+    const resolution = resolveAccountCredentials(ctx.catalogDir, accountId);
+    if (resolution.state === "missing") throw PlatformError.notLoggedIn();
+    if (resolution.state === "expired") throw PlatformError.authExpired();
+    const accessToken = resolution.credentials.accessToken;
 
-    // 两种资源模式的数据源不同，但产物都是「与 WebView 抓取同构的 slot bundle」：
+    // 不再按 resource_mode 二选一：同一个平台令牌同时拉两套数据，合并成一个
+    // 与 WebView 抓取同构的 slot bundle：
     // 按量付费 → billing_amount / fq_instance / settle_bill；
     // Token Plan → subscription / quota_config / usage(/ reset_card_list)。
-    let bundle: JsonRow;
-    let balance: number | null = null;
-    let currency: string | null = null;
-    if (kind === "token_plan") {
-      bundle = await fetchTokenPlanBundle(credentials.accessToken);
-    } else {
-      const result = await fetchPayAsYouGoBundle(credentials.accessToken);
-      bundle = result.bundle;
-      balance = result.balance;
-      currency = result.currency;
-    }
+    const payAsYouGo = await fetchPayAsYouGoBundle(accessToken);
+    const tokenPlan = await fetchTokenPlanBundle(accessToken);
+    const bundle: JsonRow = { ...payAsYouGo.bundle };
+    if (tokenPlan !== null) Object.assign(bundle, tokenPlan);
+    const { balance, currency } = payAsYouGo;
 
     const rawScrapedJson = JSON.stringify(bundle);
     const syncedAt = new Date().toISOString();

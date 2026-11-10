@@ -1,12 +1,18 @@
 // 后台维护任务测试：存储清理 / 目录同步 / 余额同步过滤。
 // 运行：node --test packages/flowlet-core/src/host/__tests__/
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
+import { once } from "node:events";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
 import { SqliteStorage } from "../../storage/index.ts";
+import { rewriteCaptureSegment } from "../../storage/capture-compaction.ts";
+import { cleanupScheduledBodies } from "../../storage/maintenance.ts";
 import { RuntimeConfig } from "../../config/index.ts";
 import type { WebContext } from "../../web/context.ts";
 import {
@@ -104,6 +110,83 @@ test("storage cleanup clears expired frames but keeps incomplete usage", async (
       "用量不完整的请求体必须保留，便于数据修复",
     );
     assert.equal(partial.req_body_cleared_at, null);
+  } finally {
+    storage.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("size cleanup keeps HTTP responsive and preserves recent captures", async () => {
+  const { ctx, storage, dir } = makeContext({
+    log_capture: { body_retention_days: -1, body_max_size_mb: 1, body_prune_ratio: 0.1 },
+  });
+  const scheduler = createHostScheduler({ context: ctx, log: () => {} });
+  let completed = false;
+  const server = createServer((_request, response) => response.end(String(completed)));
+  try {
+    for (let index = 0; index < 64; index += 1) {
+      const requestId = `old-${index}`;
+      storage.insertRequestLog({
+        request_id: requestId,
+        agent_type: "codex",
+        agent_session_id: "busy-session",
+        req_body_b64: randomBytes(192 * 1024).toString("base64"),
+      });
+      storage.insertUsageRecord({ request_id: requestId, input_tokens: 10, output_tokens: 5 });
+    }
+    storage.database().exec("UPDATE request_logs SET created_at = datetime('now', '-2 hours')");
+    storage.insertRequestLog({
+      request_id: "recent",
+      agent_type: "codex",
+      agent_session_id: "busy-session",
+      req_body_b64: "a2VlcA==",
+    });
+    const store = storage.captureStore();
+    const originalRead = store.read.bind(store);
+    store.read = () => assert.fail("scheduled compaction must not read frames on the HTTP thread");
+
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const port = (server.address() as AddressInfo).port;
+    const pending = scheduler.runCleanupOnce().then(() => { completed = true; });
+    assert.equal(await (await fetch(`http://127.0.0.1:${port}/health`)).text(), "false");
+    await pending;
+    store.read = originalRead;
+    const cleared = storage.listRequestLogsByRequestId("old-0")[0];
+    assert.equal(cleared.req_body_b64, null);
+    assert.equal(cleared.req_body_cleanup_reason, "size_limit");
+    assert.equal(storage.listRequestLogsByRequestId("recent")[0].req_body_b64, "a2VlcA==");
+  } finally {
+    server.close();
+    await scheduler.stop();
+    storage.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("cleanup discards a stale compaction when a request appends to the same segment", async () => {
+  const { storage, dir } = makeContext();
+  const capture = { agent_type: "codex", agent_session_id: "shared", req_body_b64: "a2VlcA==" };
+  const store = storage.captureStore();
+  try {
+    storage.insertRequestLog({ ...capture, request_id: "old" });
+    storage.insertUsageRecord({ request_id: "old", input_tokens: 10, output_tokens: 5 });
+    storage.database().exec("UPDATE request_logs SET created_at = datetime('now', '-2 days')");
+    const options = { retentionDays: 1, maxBytes: 0, pruneRatio: 0, signal: new AbortController().signal };
+    const interrupted = await cleanupScheduledBodies(storage.database(), store, options, async (job) => {
+      const rewrite = rewriteCaptureSegment(store, job);
+      storage.insertRequestLog({ ...capture, request_id: "new" });
+      return rewrite;
+    });
+    assert.equal(interrupted.expiredBodies, 0);
+    assert.equal(store.diskUsage().segments, 1);
+    assert.equal(storage.listRequestLogsByRequestId("old")[0].req_body_b64, capture.req_body_b64);
+    assert.equal(storage.listRequestLogsByRequestId("new")[0].req_body_b64, capture.req_body_b64);
+
+    const retried = await cleanupScheduledBodies(storage.database(), store, options, async (job) => rewriteCaptureSegment(store, job));
+    assert.equal(retried.expiredBodies, 1);
+    assert.equal(storage.listRequestLogsByRequestId("old")[0].req_body_b64, null);
+    assert.equal(storage.listRequestLogsByRequestId("new")[0].req_body_b64, capture.req_body_b64);
   } finally {
     storage.close();
     rmSync(dir, { recursive: true, force: true });

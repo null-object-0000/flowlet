@@ -260,7 +260,7 @@ export async function startHost(options: HostOptions): Promise<{ close(): Promis
     if (closing) return;
     closing = true;
     const startedMs = Date.now();
-    scheduler?.stop();
+    const stopScheduler = scheduler?.stop();
     const schedulerMs = Date.now() - startedMs;
     await web.close();
     const webMs = Date.now() - startedMs - schedulerMs;
@@ -268,6 +268,7 @@ export async function startHost(options: HostOptions): Promise<{ close(): Promis
     // 否则 stop_grace_period（30s）就是使用端的停机时间。
     await proxy.dispose();
     const proxyMs = Date.now() - startedMs - schedulerMs - webMs;
+    await stopScheduler;
     storage.close();
     const storageMs = Date.now() - startedMs - schedulerMs - webMs - proxyMs;
     console.log(

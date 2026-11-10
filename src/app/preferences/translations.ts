@@ -1875,12 +1875,11 @@ const english: Record<string, string> = {
   "Personal Access Token（需要 api scope）": "Personal Access Token (api scope required)",
   "API Token（Dockhand 设置 → API 令牌）": "API Token (Dockhand settings → API tokens)",
 
-  // 服务凭据：查看原始 token（仅管理台）
+  // 服务凭据：编辑抽屉里查看原始 token（仅管理台）
   "查看原始 token": "Reveal raw token",
-  "查看原始 token（仅管理台可见）": "Reveal the raw token (admin console only)",
-  "原始 token": "Raw token",
-  "这是已保存凭据的明文 token。仅在需要时查看，用完请关闭弹层；不要粘贴到聊天或日志。":
-    "This is the plaintext token of a saved credential. Reveal it only when needed, close this dialog afterwards, and never paste it into chats or logs.",
+  "隐藏原始 token": "Hide raw token",
+  "这是已保存凭据的明文 token。仅在需要时查看，看完点「隐藏」；不要粘贴到聊天或日志。":
+    "This is the plaintext token of a saved credential. Reveal it only when needed, click \"Hide\" afterwards, and never paste it into chats or logs.",
   "已复制原始 token": "Raw token copied",
   "无法查看原始 token：{message}": "Could not reveal the raw token: {message}",
   // 服务凭据：多实例环境前缀 + 本机接入引导

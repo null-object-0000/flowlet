@@ -12,11 +12,14 @@
 // - 控制台抓取类渠道（需桌面 WebView）不在自动余额同步范围（与 Rust headless 一致）。
 import { renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { Worker } from "node:worker_threads";
 import type { JsonRow } from "../types.ts";
 import type { WebContext } from "../web/context.ts";
 import { queryBalance } from "../web/balance.ts";
 import { presetSupportsBalance } from "../web/config-state.ts";
 import { loadLogCaptureConfig } from "../config/index.ts";
+import { cleanupScheduledBodies } from "../storage/maintenance.ts";
+import type { CaptureRewrite, CaptureRewriteJob } from "../storage/capture-compaction.ts";
 
 export const STORAGE_CLEANUP_FIRST_DELAY_MS = 15 * 60_000;
 export const STORAGE_CLEANUP_INTERVAL_MS = 15 * 60_000;
@@ -56,7 +59,7 @@ export interface HostSchedulerOptions {
 
 export interface HostScheduler {
   start(): void;
-  stop(): void;
+  stop(): Promise<void>;
   runCleanupOnce(): Promise<void>;
   runCatalogSyncOnce(): Promise<void>;
   runBalanceSyncOnce(): Promise<void>;
@@ -67,9 +70,13 @@ export function createHostScheduler(options: HostSchedulerOptions): HostSchedule
   const log = options.log ?? ((line: JsonRow | string) => console.log(line));
   const timers = new Set<NodeJS.Timeout>();
   let stopped = false;
+  let cleanupAbort: AbortController | undefined;
+  let cleanup: Promise<void> | undefined;
 
   function schedule(firstDelayMs: number, intervalMs: number, task: () => Promise<void>): void {
+    let timer: NodeJS.Timeout;
     const tick = (): void => {
+      timers.delete(timer);
       if (stopped) return;
       void task()
         .catch((error: unknown) => {
@@ -77,42 +84,91 @@ export function createHostScheduler(options: HostSchedulerOptions): HostSchedule
         })
         .finally(() => {
           if (stopped) return;
-          const timer = setTimeout(tick, intervalMs);
+          timer = setTimeout(tick, intervalMs);
           timers.add(timer);
         });
     };
-    const timer = setTimeout(tick, firstDelayMs);
+    timer = setTimeout(tick, firstDelayMs);
     timers.add(timer);
   }
 
-  async function runCleanupOnce(): Promise<void> {
-    const logCapture = loadLogCaptureConfig(context.storage, context.config);
-    const retention = parseUsageRetentionConfig(context.config);
-    const before = context.storage.getTotalBodySizeBytes();
-    const expiredBodies = context.storage.cleanupExpiredBodyData(logCapture.body_retention_days);
-    let prunedBodies = 0;
-    if (logCapture.body_max_size_mb > 0) {
-      prunedBodies = context.storage.pruneOldestBodyDataToGoal(
-        logCapture.body_max_size_mb * 1024 * 1024,
-        logCapture.body_prune_ratio,
-      );
-    }
-    const [expiredSnapshots, overLimitSnapshots] = context.storage.pruneBalanceSnapshots(
-      retention.balanceSnapshotRetentionDays,
-      retention.balanceSnapshotMaxPerAccount,
-    );
-    const orphanSnapshots = context.storage.cleanupOrphanBalanceSnapshots();
-    const after = context.storage.getTotalBodySizeBytes();
-    log({
-      task: "storage-cleanup",
-      expiredBodies,
-      prunedBodies,
-      bodyBytesBefore: before,
-      bodyBytesAfter: after,
-      expiredSnapshots,
-      overLimitSnapshots,
-      orphanSnapshots,
+  function runCleanupOnce(): Promise<void> {
+    if (stopped) return Promise.resolve();
+    if (cleanup) return cleanup;
+    const controller = new AbortController();
+    cleanupAbort = controller;
+    cleanup = runStorageCleanup(controller.signal).finally(() => {
+      cleanup = undefined;
+      cleanupAbort = undefined;
     });
+    return cleanup;
+  }
+
+  async function runStorageCleanup(signal: AbortSignal): Promise<void> {
+    const { storage } = context;
+    const logCapture = loadLogCaptureConfig(storage, context.config);
+    const retention = parseUsageRetentionConfig(context.config);
+    const before = storage.getTotalBodySizeBytes();
+    let worker: Worker | undefined;
+    let workerError: Error | undefined;
+    let rejectJob: ((error: Error) => void) | undefined;
+
+    function rewrite(job: CaptureRewriteJob): Promise<CaptureRewrite> {
+      if (!worker) {
+        worker = new Worker(new URL("./capture-cleanup-worker.ts", import.meta.url), {
+          workerData: storage.captureStore().rootPath(),
+        });
+        const fail = (error: Error) => {
+          workerError = error;
+          rejectJob?.(error);
+        };
+        worker.on("error", fail);
+        worker.on("exit", (code) => fail(new Error(`捕获清理 worker 已退出（${code}）`)));
+      }
+      if (workerError) return Promise.reject(workerError);
+      const activeWorker = worker;
+      return new Promise((resolve, reject) => {
+        const receive = (reply: { result: CaptureRewrite } | { error: string }) => {
+          rejectJob = undefined;
+          if ("error" in reply) reject(new Error(reply.error));
+          else resolve(reply.result);
+        };
+        rejectJob = (error) => {
+          activeWorker.off("message", receive);
+          rejectJob = undefined;
+          reject(error);
+        };
+        activeWorker.once("message", receive);
+        activeWorker.postMessage(job);
+      });
+    }
+
+    try {
+      const { expiredBodies, prunedBodies } = await cleanupScheduledBodies(storage.database(), storage.captureStore(), {
+        retentionDays: logCapture.body_retention_days,
+        maxBytes: logCapture.body_max_size_mb * 1024 * 1024,
+        pruneRatio: logCapture.body_prune_ratio,
+        signal,
+      }, rewrite);
+      if (signal.aborted) return;
+      const [expiredSnapshots, overLimitSnapshots] = storage.pruneBalanceSnapshots(
+        retention.balanceSnapshotRetentionDays,
+        retention.balanceSnapshotMaxPerAccount,
+      );
+      const orphanSnapshots = storage.cleanupOrphanBalanceSnapshots();
+      log({
+        task: "storage-cleanup",
+        expiredBodies,
+        prunedBodies,
+        bodyBytesBefore: before,
+        bodyBytesAfter: storage.getTotalBodySizeBytes(),
+        expiredSnapshots,
+        overLimitSnapshots,
+        orphanSnapshots,
+      });
+    } finally {
+      await worker?.terminate();
+    }
   }
 
   async function fetchCatalog(url: string): Promise<string> {
@@ -188,10 +244,12 @@ export function createHostScheduler(options: HostSchedulerOptions): HostSchedule
       schedule(STORAGE_CLEANUP_FIRST_DELAY_MS, STORAGE_CLEANUP_INTERVAL_MS, runCleanupOnce);
       schedule(CATALOG_SYNC_FIRST_DELAY_MS, CATALOG_SYNC_INTERVAL_MS, runCatalogSyncOnce);
     },
-    stop(): void {
+    async stop(): Promise<void> {
       stopped = true;
       for (const timer of timers) clearTimeout(timer);
       timers.clear();
+      cleanupAbort?.abort();
+      await cleanup?.catch(() => {}); // 调度器负责记录任务异常。
     },
     runCleanupOnce,
     runCatalogSyncOnce,

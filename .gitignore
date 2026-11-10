@@ -154,6 +154,8 @@ vite.config.ts.timestamp-*
 .codex/
 .agents/
 .skills/
+# DSH 会话临时目录（部署/冒烟脚本与凭据痕迹，禁止入库）
+.dsh-scratch/
 
 # IDE metadata (including generated Android projects)
 **/.idea/

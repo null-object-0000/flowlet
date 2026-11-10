@@ -246,8 +246,8 @@ export function CredentialsPage() {
   const [testingId, setTestingId] = useState<string | null>(null);
   /** 「本机接入」引导抽屉：仅 Web Host 可打开。 */
   const [accessOpen, setAccessOpen] = useState(false);
-  /** 正在查看的原始 token；关闭弹层即丢弃（不写缓存/不入日志）。 */
-  const [revealed, setRevealed] = useState<{ name: string; token: string } | null>(null);
+  /** 编辑抽屉里临时展示的原始 token（带凭据 id，避免串到别的抽屉）；关闭抽屉即丢弃。 */
+  const [revealed, setRevealed] = useState<{ id: string; token: string } | null>(null);
   /** 「AI 生成」的流式进度：tokens/tok/s/用时来自 SSE 事件，用于让用户看到真实生成进度。 */
   const [aiPrefix, setAiPrefix] = useState<{
     status: "idle" | "streaming" | "done";
@@ -290,6 +290,7 @@ export function CredentialsPage() {
     onSuccess: async (credential) => {
       await invalidate();
       setDraft(null);
+      setRevealed(null);
       setFormError("");
       Toast.success(`${t("已保存")}：${credential.name}`);
     },
@@ -306,8 +307,8 @@ export function CredentialsPage() {
   });
 
   const reveal = useMutation({
-    mutationFn: (credential: ServiceCredential) => credentialCommands.reveal(credential.id),
-    onSuccess: (result) => setRevealed({ name: result.name, token: result.token }),
+    mutationFn: (credentialId: string) => credentialCommands.reveal(credentialId),
+    onSuccess: (result) => setRevealed({ id: result.id, token: result.token }),
     onError: (error) =>
       Toast.error(t("无法查看原始 token：{message}", { message: errorMessage(error) })),
   });
@@ -402,14 +403,23 @@ export function CredentialsPage() {
     }
   };
 
+  /** 关闭编辑抽屉：一并丢弃临时展示的明文 token，避免残留在内存状态里。 */
+  const closeDraft = () => {
+    setDraft(null);
+    setRevealed(null);
+    setFormError("");
+  };
+
   const openCreate = () => {
     setFormError("");
+    setRevealed(null);
     setAiPrefix({ status: "idle", model: "", tokens: 0, elapsedMs: 0, tokPerSec: 0 });
     setDraft({ ...EMPTY_DRAFT });
   };
 
   const openEdit = (credential: ServiceCredential) => {
     setFormError("");
+    setRevealed(null);
     setAiPrefix({ status: "idle", model: "", tokens: 0, elapsedMs: 0, tokPerSec: 0 });
     setDraft({
       id: credential.id,
@@ -457,6 +467,16 @@ export function CredentialsPage() {
     });
   };
 
+  /** 复制抽屉里临时展示的明文 token；只用当前状态，不写缓存/日志。 */
+  const copyRevealedToken = () => {
+    if (revealed === null) return;
+    void copyText(revealed.token)
+      .then(() => Toast.success(t("已复制原始 token")))
+      .catch((error: unknown) =>
+        Toast.error(t("复制失败：{message}", { message: errorMessage(error) })),
+      );
+  };
+
   /**
    * Agent 机器上用 `flowlet login` 走浏览器管理台授权，再 `flowlet pull` 同步；
    * 页面只展示命令，不收集任何管理凭据。
@@ -492,6 +512,12 @@ export function CredentialsPage() {
   const envPrefixInvalid = draft !== null && !isValidEnvPrefixInput(draft.envPrefix);
   /** 生成的环境变量名文案（Jenkins / registry 多 `_USER`，registry 的地址槽位是 `_HOST`，Beszel 为 `_EMAIL` / `_PASSWORD`）。 */
   const previewEnvKeyLabels = envKeyList(previewEnvKeys).join(" / ");
+
+  /** 编辑态才有「查看已保存 token」入口；新建时还没有已保存凭据。 */
+  const editingCredentialId = draft?.id;
+  /** 只在当前编辑的凭据上展示明文：异步返回的旧结果不会串到别的抽屉里。 */
+  const revealedToken =
+    revealed !== null && revealed.id === editingCredentialId ? revealed.token : null;
 
   /** 表格/预览用：旧 Host 未返回 envPrefix 时按 provider 默认前缀兜底。 */
   const defaultEnvPrefixFor = (providerId: string): string => {
@@ -604,12 +630,6 @@ export function CredentialsPage() {
                 },
               },
               {
-                title: t("Token"),
-                dataIndex: "secretHint",
-                width: 130,
-                render: (value: string) => <Typography.Text type="tertiary">{value}</Typography.Text>,
-              },
-              {
                 title: t("最近校验"),
                 dataIndex: "lastVerifiedAt",
                 width: 190,
@@ -640,7 +660,7 @@ export function CredentialsPage() {
               },
               {
                 title: t("操作"),
-                width: 320,
+                width: 250,
                 render: (_, row) => (
                   <div className={styles.actions}>
                     <Button
@@ -651,15 +671,6 @@ export function CredentialsPage() {
                     >
                       {t("测试")}
                     </Button>
-                    <Tooltip content={t("查看原始 token（仅管理台可见）")}>
-                      <Button
-                        size="small"
-                        icon={<IconEyeOpened />}
-                        loading={reveal.isPending && reveal.variables?.id === row.id}
-                        aria-label={t("查看原始 token")}
-                        onClick={() => reveal.mutate(row)}
-                      />
-                    </Tooltip>
                     <Button size="small" icon={<IconEdit />} onClick={() => openEdit(row)}>
                       {t("编辑")}
                     </Button>
@@ -679,51 +690,14 @@ export function CredentialsPage() {
         )}
       </Card>
 
-      <Modal
-        visible={revealed !== null}
-        title={t("原始 token")}
-        onCancel={() => setRevealed(null)}
-        footer={
-          <div className={styles.sheetFooter}>
-            <Button onClick={() => setRevealed(null)}>{t("关闭")}</Button>
-            <Button
-              theme="solid"
-              icon={<IconCopy />}
-              onClick={() => {
-                if (revealed === null) return;
-                void copyText(revealed.token)
-                  .then(() => Toast.success(t("已复制原始 token")))
-                  .catch((error: unknown) =>
-                    Toast.error(t("复制失败：{message}", { message: errorMessage(error) })),
-                  );
-              }}
-            >
-              {t("复制")}
-            </Button>
-          </div>
-        }
-      >
-        <Banner
-          type="warning"
-          closeIcon={null}
-          description={t("这是已保存凭据的明文 token。仅在需要时查看，用完请关闭弹层；不要粘贴到聊天或日志。")}
-        />
-        <div className={styles.revealBlock}>
-          <Typography.Text type="tertiary">{revealed?.name}</Typography.Text>
-          <Typography.Paragraph copyable={false} className={styles.revealToken}>
-            <code>{revealed?.token}</code>
-          </Typography.Paragraph>
-        </div>
-      </Modal>
-
       <SideSheet
         title={draft?.id ? t("编辑服务凭据") : t("添加服务凭据")}
         visible={draft !== null}
-        onCancel={() => setDraft(null)}
+        onCancel={closeDraft}
         width={480}
         footer={
           <div className={styles.sheetFooter}>
-            <Button onClick={() => setDraft(null)}>{t("取消")}</Button>
+            <Button onClick={closeDraft}>{t("取消")}</Button>
             <Button
               theme="solid"
               loading={save.isPending}
@@ -859,13 +833,46 @@ export function CredentialsPage() {
               )}
             </div>
             <div className={styles.field}>
-              <label>{t("Token")}</label>
+              <div className={styles.fieldLabelRow}>
+                <label>{t("Token")}</label>
+                {editingCredentialId !== undefined &&
+                  (revealedToken === null ? (
+                    <Button
+                      size="small"
+                      theme="borderless"
+                      icon={<IconEyeOpened />}
+                      loading={reveal.isPending}
+                      onClick={() => reveal.mutate(editingCredentialId)}
+                    >
+                      {t("查看原始 token")}
+                    </Button>
+                  ) : (
+                    <Button size="small" theme="borderless" onClick={() => setRevealed(null)}>
+                      {t("隐藏原始 token")}
+                    </Button>
+                  ))}
+              </div>
               <Input
                 mode="password"
                 value={draft.token}
                 placeholder={t(tokenPlaceholderFor(draft.provider, draft.id !== undefined))}
                 onChange={(value) => setDraft((current) => (current ? { ...current, token: value } : current))}
               />
+              {revealedToken !== null && (
+                <div className={styles.revealBlock}>
+                  <div className={styles.revealHeader}>
+                    <Typography.Text type="tertiary" size="small">
+                      {t("这是已保存凭据的明文 token。仅在需要时查看，看完点「隐藏」；不要粘贴到聊天或日志。")}
+                    </Typography.Text>
+                    <Button size="small" icon={<IconCopy />} onClick={copyRevealedToken}>
+                      {t("复制")}
+                    </Button>
+                  </div>
+                  <Typography.Paragraph copyable={false} className={styles.revealToken}>
+                    <code>{revealedToken}</code>
+                  </Typography.Paragraph>
+                </div>
+              )}
             </div>
             <div className={styles.field}>
               <label>{t("备注")}</label>

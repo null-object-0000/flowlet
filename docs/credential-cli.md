@@ -411,10 +411,12 @@ flowlet registry clear --profile=na      # 只删 NA 这个前缀
 - **入口**：左侧一级菜单「服务凭据」；
 - **列表**：名称、服务类型、实例地址（Jenkins / OCI 镜像仓库额外展示 `@用户名`，Beszel 展示 `@邮箱`）、**环境前缀**（tooltip 展开
   `{PREFIX}_URL` / `{PREFIX}_TOKEN`，Jenkins 还有 `{PREFIX}_USER`，Beszel 还有 `{PREFIX}_EMAIL` / `{PREFIX}_PASSWORD`，
-  OCI 镜像仓库是 `{PREFIX}_HOST` / `{PREFIX}_USER` / `{PREFIX}_TOKEN`）、Token 掩码、最近校验结果、启停状态；
+  OCI 镜像仓库是 `{PREFIX}_HOST` / `{PREFIX}_USER` / `{PREFIX}_TOKEN`）、最近校验结果、启停状态；
+  列表不展示 token 片段与「查看 token」入口，避免把敏感信息暴露在常驻表格里；
 - **添加 / 编辑**：服务类型（GitLab / Dockhand / Jenkins / Uptime Kuma / Beszel / OCI 镜像仓库，创建时可选、编辑时不可切换）、名称、实例地址、
   用户名（Jenkins 必填；Beszel 显示「邮箱」且必填；OCI 镜像仓库显示「用户名」且必填，robot account
-  直接填 `robot$project+name`）、环境别名（Env 前缀，留空 = 默认）、Token、备注、启用；
+  直接填 `robot$project+name`）、环境别名（Env 前缀，留空 = 默认）、Token（编辑时可在字段旁
+  「查看原始 token」）、备注、启用；
   表单文案（token 说明、地址 placeholder、警告 Banner、前缀预览）按所选 provider 动态展示；
 - **保存即校验**：服务端按 provider 实际请求上游，失败直接返回错误且不落库：
 
@@ -456,8 +458,9 @@ UI 页面本身不调用导出，只调用 `reveal_service_credential` / `list_c
 `reveal_service_credential` 是管理台「查看原始 token」的数据源：解密单条已保存凭据并返回
 `{id, name, provider, envPrefix, token}`，只允许管理鉴权（Cookie 会话 + CSRF，或 token 模式
 Bearer）；`flowlet login` 签发的 CLI token 作用域只有 `credentials:read` 且白名单仅
-`export_service_credentials`，调用本命令返回 403。列表接口继续只返回掩码（`••••1a2b`），
-明文不写日志、不缓存；前端用完即丢弃（关闭弹层即清空状态）。Rust Host 未实现该命令，
+`export_service_credentials`，调用本命令返回 403。入口在「编辑服务凭据」抽屉的 Token 字段，
+点击后才请求明文并就地展示，可复制或点「隐藏」收起；列表接口仍只返回掩码（`••••1a2b`），
+明文不写日志、不缓存；前端用完即丢弃（点「隐藏」或关闭抽屉即清空状态）。Rust Host 未实现该命令，
 桌面端调用会失败并提示「无法查看原始 token」。
 
 UI 是配置入口，CLI 是分发/消费入口：

@@ -36,7 +36,8 @@
     "node:host": "node packages/flowlet-core/src/index.ts",
     "node:typecheck": "tsc -p packages/flowlet-core/tsconfig.json",
     "node:parity": "node scripts/web-parity.mjs",
-    "node:e2e": "node scripts/e2e-node-host.mjs"
+    "node:e2e": "node scripts/e2e-node-host.mjs",
+    "cred": "node packages/flowlet-cred/src/cli.ts"
   },
   "dependencies": {
     "@douyinfe/semi-icons": "^2.101.0",

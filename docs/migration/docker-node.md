@@ -41,6 +41,23 @@ OIDC 模式另验证 fail-closed（无会话/静态 token 均被拒）与不可�
 避免了远端拉 Debian 源导致的构建卡顿；镜像内 `/app` 统一 `chmod -R a+rX`，
 因为本地工作区文件可能是 0600 而容器以 10001 运行。
 
+## 生产切换记录（2026-11-10）
+
+| 项 | 值 |
+| --- | --- |
+| 切换前镜像（回滚点） | `flowlet:docker-20261109-gitlab-sso`（Rust headless） |
+| 切换后镜像 | `flowlet:docker-20261110-nodehost`（= Node Host，含 SSO / .flcap / 价格表 / 服务凭据） |
+| 方式 | Dockhand stack `flowlet` 仅替换 `services.flowlet.image`（`forceRecreate`），`/data` 卷不动 |
+| compose 备份 | `.agents/skills/flowlet-docker-deploy/.work/compose.before-20261110-103921.yaml` |
+| 回滚 | `flowlet_deploy.py deploy --tag flowlet:docker-20261109-gitlab-sso`（DB schema 只增不改，Rust 可直接读回） |
+
+切换后验证（**14/14 通过**）：容器 healthy；`/health`；`/api/auth/config` = oidc + GitLab + `token_login:false`；
+`/api/auth/login` → 302 GitLab authorize（含正确 `client_id`/`redirect_uri`/state/nonce）；
+未登录 `/api/session` 401；回调错误路径 303 `?auth_error=state_invalid`；静态界面 200（含「服务凭据」页）；
+`/v1/models` 200（4 个模型）；`deepseek-v4.1-flash` OpenAI 流式读到 `[DONE]`；
+容器内确认 `service_credentials` 表、`/data/secret.key`、`.flcap` ready 帧可读；新请求日志无错误、无 `stream_cancelled`。
+切换后 10 分钟真实客户端流量：30 条请求（`/v1/chat/completions`、`/anthropic/v1/messages`），**0 错误、0 stream_cancelled**。
+
 ## 体验实例（canary）
 
 为便于验收，在远端 Docker 上另起了一个独立容器（**不进入 Dockhand stack、不影响线上**）：

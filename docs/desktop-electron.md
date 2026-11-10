@@ -449,10 +449,28 @@ xvfb-run ... flowlet-desktop --screenshot=... --data-dir=<data-dir>
 
 `desktop:smoke:pages` 默认用空数据目录（新用户路径）；传 `--db=<sqlite>` 用已有数据库副本
 （老用户升级路径）。报告与截图在 `.flowlet-dev-data/desktop-pages/`（`report.json` +
-每路由 PNG），失败会以非 0 退出码结束。
+每路由 PNG），失败会以非 0 退出码结束。脚本在非 Linux 平台直接启动 Electron（不套
+`xvfb-run`，也不加 `--ozone-platform=x11`），并给冒烟实例设置
+`FLOWLET_BIND_ADDR=127.0.0.1:0`，因此本机正式实例占着 18640 时也能跑。
 
 > 若在 `ELECTRON_RUN_AS_NODE=1` 的 shell（例如某些 Electron 宿主终端）里执行，冒烟脚本会
-> 主动清掉该变量，否则 Electron 二进制会被当成 Node 启动。
+> 主动清掉该变量，否则 Electron 二进制会被当成 Node 启动。**从 Electron 应用内部拉起的
+> 终端（例如 DeepSeek Harness）自带这个变量，手写 `electron.exe ...` 命令时必须先清除，
+> 否则会看到 `The requested module 'electron' does not provide an export named 'BrowserWindow'`。**
+
+### Windows 实机验证记录（2026-11-10，portable）
+
+```text
+npm run desktop:portable                      # → Flowlet_0.2.0_win32_x64_portable（540 MB，含 resources/app.asar）
+node scripts/update-portable.mjs --layout electron --target <便携目录> --skip-build --no-restart
+Start-Process <便携目录>\Flowlet.exe           # 数据目录 = exe 旁（portable.tag）
+```
+
+关键结果：真实 796 MB 旧库直接打开（14 个渠道账号、8 个启用、剩余请求日志 3.7 万条）；
+`/health` 200；旧 client token（`flowlet-local-token`）→ 401，正式 token → 200；
+Chat Completions / SSE / Anthropic Messages / Responses 四条链路各打出一条真实上游请求并落日志；
+`desktop:smoke:pages --db=<真实库>` 8 条路由全部 `ok`、0 console error、0 命令失败。
+`node --test packages/flowlet-core/src` 599 tests / 594 pass / 5 skip / 0 fail（Windows）。
 
 ## 7.2 运行模式：主机 / 客户端
 

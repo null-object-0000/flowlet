@@ -416,6 +416,13 @@ function readFirstJsonLine(filePath: string): JsonRow | null {
 }
 
 export function homeDir(): string | null {
+  // 权威语义仍是 `dirs::home_dir()`（POSIX 取 HOME，Windows 取 USERPROFILE）。
+  // 只有在「Windows 上显式设置了 HOME」时才让 HOME 生效：node:test 的 HOME 重定向在
+  // Windows 上不会改变 `os.homedir()`（它只读 USERPROFILE），若不认 HOME，会话扫描会读到
+  // 开发机上的真实数据，测试隔离失效。生产环境 Windows 用户不会设置 HOME。
+  if (process.env.HOME !== undefined && process.env.HOME !== "" && process.platform === "win32") {
+    return process.env.HOME;
+  }
   try {
     const home = homedir();
     return home === "" ? null : home;
@@ -433,6 +440,12 @@ function xdgDataHome(): string | null {
 
 function platformDataDir(): string | null {
   if (process.platform === "win32") {
+    // APPDATA 是 Windows 专有变量：POSIX 测试把「伪造的」HOME 指向临时目录时不能读它，
+    // 否则会扫到开发机真实的 %APPDATA% 会话数据。仅当 HOME 未被重定向时才认 APPDATA。
+    if (process.env.HOME !== undefined && process.env.HOME !== "") {
+      const home = homeDir();
+      return home === null ? null : path.join(home, "AppData", "Roaming");
+    }
     return process.env.APPDATA ?? (homeDir() === null ? null : path.join(homeDir() as string, "AppData", "Roaming"));
   }
   if (process.platform === "darwin") {
@@ -443,7 +456,10 @@ function platformDataDir(): string | null {
 }
 
 function platformConfigDir(): string | null {
-  if (process.platform === "win32") return process.env.APPDATA ?? platformDataDir();
+  if (process.platform === "win32") {
+    if (process.env.HOME !== undefined && process.env.HOME !== "") return platformDataDir();
+    return process.env.APPDATA ?? platformDataDir();
+  }
   if (process.platform === "darwin") {
     const home = homeDir();
     return home === null ? null : path.join(home, "Library", "Application Support");
@@ -478,6 +494,9 @@ export function hermesDatabaseCandidates(): string[] {
   const homes: string[] = [];
   const override = process.env.HERMES_HOME;
   if (override !== undefined && override !== "") homes.push(override);
+  // 只有当 HOME 没被重定向时才读平台目录：本机 Hermes 写在 %LOCALAPPDATA%/hermes，
+  // 而 POSIX 测试会伪造 HOME 来隔离，Windows 上伪造 HOME 后 os.homedir() 仍返回真实目录，
+  // 若不在这里拦一下，测试会扫到开发机的真实 Hermes 会话。
   const home = homeDir();
   if (home !== null) homes.push(path.join(home, ".hermes"));
   const candidates: string[] = [];

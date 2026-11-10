@@ -91,6 +91,10 @@ function parsePermission(value: unknown): OpenCodePermissionRequest | null {
 
 function bridgeRoot(): string | null {
   try {
+    // 显式 HOME 优先（POSIX 语义；Windows 上 node:test 的 HOME 重定向不改变 os.homedir()，
+    // 否则权限桥测试会读到开发机真实目录）。
+    const override = process.env.HOME;
+    if (override !== undefined && override !== "") return path.join(override, ".flowlet", "opencode-control");
     const home = homedir();
     return home === "" ? null : path.join(home, ".flowlet", "opencode-control");
   } catch {

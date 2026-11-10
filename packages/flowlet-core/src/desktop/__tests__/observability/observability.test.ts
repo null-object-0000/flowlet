@@ -112,22 +112,28 @@ interface SavedHomeEnv {
   home: string | undefined;
   dshHome: string | undefined;
   codexHome: string | undefined;
+  appData: string | undefined;
+  hermesHome: string | undefined;
 }
 
 let savedHomeEnv: SavedHomeEnv | null = null;
 
 /**
- * 测试环境隔离：HOME 指向临时目录，同时把 DSH_HOME 指到该临时目录下不存在的
- * 子目录（宿主环境本身可能设置了 DSH_HOME，指向真实会话目录）。
+ * 测试环境隔离：HOME 指向临时目录，同时把 DSH_HOME / HERMES_HOME 指到该临时目录下不存在的
+ * 子目录、APPDATA 指向临时目录，因为宿主环境本身可能设置了它们（指向真实会话目录）。
  */
 function setHomeEnv(home: string): void {
   savedHomeEnv = {
     home: process.env.HOME,
     dshHome: process.env.DSH_HOME,
     codexHome: process.env.CODEX_HOME,
+    appData: process.env.APPDATA,
+    hermesHome: process.env.HERMES_HOME,
   };
   process.env.HOME = home;
   process.env.DSH_HOME = path.join(home, "dsh-home");
+  process.env.HERMES_HOME = path.join(home, "hermes-home");
+  process.env.APPDATA = path.join(home, "AppData", "Roaming");
   delete process.env.CODEX_HOME;
 }
 
@@ -141,6 +147,10 @@ function restoreHomeEnv(): void {
   else process.env.DSH_HOME = saved.dshHome;
   if (saved.codexHome === undefined) delete process.env.CODEX_HOME;
   else process.env.CODEX_HOME = saved.codexHome;
+  if (saved.appData === undefined) delete process.env.APPDATA;
+  else process.env.APPDATA = saved.appData;
+  if (saved.hermesHome === undefined) delete process.env.HERMES_HOME;
+  else process.env.HERMES_HOME = saved.hermesHome;
 }
 
 function insertJob(
@@ -368,6 +378,8 @@ describe("后台任务命令", () => {
   });
 
   it("sync_agent_data 在租约被占用时返回去重结果（进程内租约语义）", async () => {
+    // 租约是进程内单例：先清掉可能被上一个用例残留占用的租约，否则本用例拿不到租约。
+    releaseAgentDataSync();
     assert.equal(tryAcquireAgentDataSync(), true);
     try {
       const result = (await invoke(makeContext(), "sync_agent_data", {
@@ -1345,11 +1357,20 @@ function writeDshSession(home: string, options: DshFixtureOptions = {}): string 
 function withDshHome<T>(home: string, run: () => Promise<T>): Promise<T> {
   const previousDshHome = process.env.DSH_HOME;
   const previousHome = process.env.HOME;
+  const previousHermesHome = process.env.HERMES_HOME;
+  const previousAppData = process.env.APPDATA;
   process.env.DSH_HOME = home;
   process.env.HOME = home;
+  // 同样隔离其它 Agent 来源，避免列表断言吃到宿主机真实会话。
+  process.env.HERMES_HOME = path.join(home, "hermes-home");
+  process.env.APPDATA = path.join(home, "AppData", "Roaming");
   return run().finally(() => {
     if (previousDshHome === undefined) delete process.env.DSH_HOME;
     else process.env.DSH_HOME = previousDshHome;
+    if (previousHermesHome === undefined) delete process.env.HERMES_HOME;
+    else process.env.HERMES_HOME = previousHermesHome;
+    if (previousAppData === undefined) delete process.env.APPDATA;
+    else process.env.APPDATA = previousAppData;
     restoreHomeEnv();
   });
 }

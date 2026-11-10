@@ -305,9 +305,17 @@ export class RequestCaptureStore {
    */
   static forDatabase(databasePath: string, options: { tempRoot?: string } = {}): RequestCaptureStore {
     if (databasePath === ":memory:") {
-      const root =
-        options.tempRoot ??
-        path.join(process.env.TMPDIR || "/tmp", `flowlet-request-captures-${randomUUID()}`);
+      // 与 Rust `std::env::temp_dir()` 一致：读平台临时目录变量（Windows TEMP/TMP，
+      // POSIX TMPDIR），只写死 "/tmp" 会让 Windows 上的临时目录变成根盘下的 /tmp，
+      // 测试里 `TMPDIR` 重定向也会失效。
+      const tempRoot = options.tempRoot
+        ?? process.env.TMPDIR
+        ?? process.env.TEMP
+        ?? process.env.TMP
+        ?? "/tmp";
+      const root = options.tempRoot === undefined
+        ? path.join(tempRoot, `flowlet-request-captures-${randomUUID()}`)
+        : tempRoot;
       mkdirSync(root, { recursive: true });
       return new RequestCaptureStore(root);
     }

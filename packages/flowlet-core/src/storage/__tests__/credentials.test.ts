@@ -141,8 +141,11 @@ test("secret.key：自动生成 32 字节 hex、文件 0600、实例间密钥稳
     const raw = readFileSync(keyPath, "utf8");
     assert.match(raw, /^[0-9a-f]{64}$/);
     assert.equal(Buffer.from(raw, "hex").length, 32);
-    assert.equal(statSync(keyPath).mode & 0o777, 0o600);
-    assert.equal(statSync(dir).mode & 0o777, 0o700);
+    // POSIX 有 0700 语义；Windows 没有 owner/group/other 位，chmod 结果不可断言（Rust 同平台测试同样只验内容）。
+    if (process.platform !== "win32") {
+      assert.equal(statSync(keyPath).mode & 0o777, 0o600);
+      assert.equal(statSync(dir).mode & 0o777, 0o700);
+    }
 
     const encoded = first.encrypt("glpat-secret-token");
     assert.ok(encoded.startsWith("v1:"));

@@ -33,6 +33,8 @@ function electronEnv() {
   const env = { ...process.env, ELECTRON_ENABLE_LOGGING: "1" };
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.ELECTRON_NO_ATTACH_CONSOLE;
+  // 冒烟用隔离数据目录：本机可能已经有正式实例占着 18640，用临时端口避免互相干扰。
+  env.FLOWLET_BIND_ADDR = "127.0.0.1:0";
   return env;
 }
 
@@ -55,11 +57,16 @@ function ensureBuild() {
 }
 
 function electronBinary() {
-  for (const candidate of [
-    join(DESKTOP_DIR, "node_modules", "electron", "dist", "electron"),
-    join(DESKTOP_DIR, "node_modules", "electron", "dist", "Electron.app", "Contents", "MacOS", "Electron"),
-  ]) {
-    if (existsSync(candidate)) return candidate;
+  // 工作区提升安装时 electron 落在仓库根 node_modules（npm workspaces），
+  // 同时兼容 Windows 的 .exe 后缀。
+  for (const root of [DESKTOP_DIR, REPO_ROOT]) {
+    for (const candidate of [
+      join(root, "node_modules", "electron", "dist", "electron.exe"),
+      join(root, "node_modules", "electron", "dist", "electron"),
+      join(root, "node_modules", "electron", "dist", "Electron.app", "Contents", "MacOS", "Electron"),
+    ]) {
+      if (existsSync(candidate)) return candidate;
+    }
   }
   throw new Error("未找到 Electron 二进制；见 docs/desktop-electron.md 的手工解压步骤");
 }
@@ -82,23 +89,26 @@ async function main() {
     console.log(`[pages] 使用已有数据库副本：${sourceDb}`);
   }
 
-  const args = [
-    "-a",
-    "-s",
-    "-screen 0 1280x800x24",
+  const needsXvfb = process.platform === "linux";
+  const electronArgs = [
     electronBinary(),
     DESKTOP_DIR,
     "--no-sandbox",
     "--disable-gpu",
-    "--ozone-platform=x11",
+  ];
+  // Windows/macOS 有原生显示；xvfb 只用于 Linux CI。X11 平台参数也只在 Linux 追加。
+  if (needsXvfb) electronArgs.push("--ozone-platform=x11");
+  electronArgs.push(
     `--pages=${ARTIFACT_DIR}`,
     `--print-url-file=${URL_FILE}`,
     `--data-dir=${DATA_DIR}`,
     "--screenshot-wait-ms=1400",
-  ];
-  if (routes !== null) args.push(`--routes=${routes}`);
-  console.log(`[pages] 启动：xvfb-run ${args.join(" ")}`);
-  const child = spawn("xvfb-run", args, {
+  );
+  if (routes !== null) electronArgs.push(`--routes=${routes}`);
+  const command = needsXvfb ? "xvfb-run" : electronArgs[0];
+  const args = needsXvfb ? ["-a", "-s", "-screen 0 1280x800x24", ...electronArgs] : electronArgs.slice(1);
+  console.log(`[pages] 启动：${needsXvfb ? "xvfb-run " : ""}${electronArgs.join(" ")}`);
+  const child = spawn(command, args, {
     cwd: REPO_ROOT,
     env: electronEnv(),
     stdio: ["ignore", "pipe", "pipe"],

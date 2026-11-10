@@ -48,7 +48,10 @@ describe("FileAdminSessionStore", () => {
     store.save(session("sha256-key"));
     const raw = readFileSync(file, "utf8");
     assert.ok(raw.includes("sha256-key"));
-    assert.ok((statSync(file).mode & 0o777) === 0o600, "会话文件必须 0600");
+    // Windows 没有 POSIX 权限位（stat 恒为 0666/0444），权限断言只在 POSIX 平台生效。
+    if (process.platform !== "win32") {
+      assert.ok((statSync(file).mode & 0o777) === 0o600, "会话文件必须 0600");
+    }
     const reloaded = new FileAdminSessionStore(file).load("sha256-key");
     assert.ok(reloaded);
     assert.equal(reloaded?.csrfToken, "csrf-token-sha256-key");

@@ -10,6 +10,7 @@
 // 字段命名严格用 Rust `AgentSessionRow` 的 camelCase serde 输出。DeepSeek Harness
 // 的原生目录由 `./deepseek-harness.ts` 提供（v4/v3 已支持，缺代际返回明确错误）。
 import { closeSync, openSync, readSync, statSync } from "node:fs";
+import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { JsonRow } from "../../types.ts";
 import type { ModelPrice } from "../../storage/prices.ts";
@@ -322,10 +323,15 @@ function cachedClaudeSession(filePath: string): CachedClaudeSession | null {
   return entry;
 }
 
-function claudeSessions(): JsonRow[] {
+/** Claude Code 项目目录根（本机扫描与时间线共用，统一走 `timeline.homeDir()` 的重定向规则）。 */
+function claudeProjectsDir(): string | null {
   const home = homeDir();
-  if (home === null) return [];
-  const root = `${home}/.claude/projects`;
+  return home === null ? null : path.join(home, ".claude", "projects");
+}
+
+function claudeSessions(): JsonRow[] {
+  const root = claudeProjectsDir();
+  if (root === null) return [];
   if (!isDirectory(root)) return [];
   const paths: string[] = [];
   collectJsonlFiles(root, paths);
@@ -846,7 +852,8 @@ export function availableNativeAgentTypes(): Set<string> {
   const types = new Set<string>();
   const home = homeDir();
   if (home !== null) {
-    if (isDirectory(`${home}/.claude/projects`)) types.add("claude-code");
+    const claudeRoot = claudeProjectsDir();
+    if (claudeRoot !== null && isDirectory(claudeRoot)) types.add("claude-code");
     if (isDirectory(`${home}/.pi/agent/sessions`)) types.add("pi");
   }
   if (isDirectory(`${codexHome()}/sessions`)) {

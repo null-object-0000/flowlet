@@ -4,6 +4,25 @@
 
 ## [Unreleased]
 
+### 修复
+
+- **Windows 下首次实机跑通 Electron 桌面端**（Rust/Tauri → Electron 本机切换验证时发现）：
+  - Agent 会话扫描的 HOME 隔离：`timeline.homeDir()` 在 Windows 上补认显式 `HOME`
+    （`os.homedir()` 只读 `USERPROFILE`，node:test 的 HOME 重定向失效，会话扫描会读到开发机
+    真实数据）；`platformDataDir/platformConfigDir` 在 HOME 被重定向时不再直读 `APPDATA`；
+    `opencode-control` 权限桥、Hermes 数据库候选同样识别 HOME 重定向。observability 测试
+    的 `setHomeEnv` / `withDshHome` 补齐 `HERMES_HOME` / `APPDATA` 隔离，
+    `sync_agent_data` 用例先释放进程内租约。
+  - `RequestCaptureStore.forDatabase(":memory:")` 的临时根目录改读 `TMPDIR/TEMP/TMP`
+    （只写死 `/tmp` 会让 Windows 上捕获帧落到盘根目录，测试读不到帧）。
+  - Codex app-server 在 Windows 上先判可执行文件存在：不存在的路径交给 powershell 只会得到
+    `CommandNotFoundException`，错误原因被吞进子进程 stderr 且文案随系统语言变化。
+  - Windows 下 3 条平台相关测试断言修正：POSIX 权限位（`0600/0700`）只在 POSIX 断言；
+    优雅退出测试在 Windows 用 SIGINT（control-break）驱动与 Docker/systemd 相同的关闭分支。
+  - `scripts/smoke-desktop-pages.mjs`：Electron 二进制优先仓库根 `node_modules`（workspaces
+    提升安装）并兼容 `electron.exe`；非 Linux 平台不再强制走 `xvfb-run` / `--ozone-platform=x11`；
+    冒烟实例用 `FLOWLET_BIND_ADDR=127.0.0.1:0`，避免与本机正式实例的 18640 冲突。
+
 ### 新增
 
 - **桌面端 Electron + Node/TS 重构（第一阶段）**：桌面端不再依赖 Rust/Tauri 承载业务逻辑，

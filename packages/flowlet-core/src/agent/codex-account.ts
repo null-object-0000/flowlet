@@ -842,6 +842,11 @@ async function startCodexRpc(
   proxy?: AgentProxySettings | null,
 ): Promise<CodexRpc> {
   const executable = await resolveCodexExecutable();
+  // Windows 没有可执行位：不存在的路径必须自己判掉，否则 powershell 会「成功启动」再报
+  // CommandNotFoundException，错误原因被吞进子进程 stderr 且文案随系统语言变化。
+  if (process.platform === "win32" && !fs.existsSync(executable)) {
+    throw new Error(`无法启动 Codex app-server（${executable}）：可执行文件不存在或不可访问`);
+  }
   const args =
     process.platform === "win32"
       ? [

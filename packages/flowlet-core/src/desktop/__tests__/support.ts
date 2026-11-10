@@ -155,7 +155,13 @@ export function createTestContext(options: { prefix?: string } = {}): TestContex
     },
     cleanup() {
       storage.close();
-      rmSync(dir, { recursive: true, force: true });
+      // Windows：刚关闭的 SQLite 文件句柄与进程仍在写日志的句柄可能短暂占用目录（EPERM），
+      // 临时目录清理失败不应让用例失败（失败内容已由断言决定）。
+      try {
+        rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+      } catch {
+        /* 交给系统临时目录清理 */
+      }
     },
   };
 }

@@ -41,7 +41,11 @@ function freePort(): Promise<number> {
 interface RunningHost {
   pid: number;
   proxyPort: number;
-  stop: () => Promise<{ code: number | null; elapsedMs: number }>;
+  stop: () => Promise<{
+    code: number | null;
+    signal: NodeJS.Signals | null;
+    elapsedMs: number;
+  }>;
 }
 
 async function startHost(abortMs: number): Promise<RunningHost> {
@@ -84,12 +88,10 @@ async function startHost(abortMs: number): Promise<RunningHost> {
   child.stdout?.on("data", (chunk: Buffer) => output.push(chunk.toString("utf8")));
   child.stderr?.on("data", (chunk: Buffer) => output.push(chunk.toString("utf8")));
   let exited = false;
-  let exitCode: number | null = null;
-  const exitPromise = new Promise<number | null>((resolve) => {
-    child.once("exit", (code) => {
+  const exitPromise = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+    child.once("exit", (code, signal) => {
       exited = true;
-      exitCode = code;
-      resolve(code);
+      resolve({ code, signal });
     });
   });
   cleanupCallbacks.push(() => {
@@ -123,11 +125,19 @@ async function startHost(abortMs: number): Promise<RunningHost> {
   return {
     pid: child.pid ?? 0,
     proxyPort,
-    stop: async (): Promise<{ code: number | null; elapsedMs: number }> => {
+    stop: async (): Promise<{
+      code: number | null;
+      signal: NodeJS.Signals | null;
+      elapsedMs: number;
+    }> => {
       const started = Date.now();
-      child.kill("SIGTERM");
-      const code = await exitPromise;
-      return { code, elapsedMs: Date.now() - started };
+      // Windows 没有 POSIX 信号：Node 的 child.kill("SIGTERM") 会直接 TerminateProcess，
+      // 进程被硬杀、走不到优雅退出路径（退出码非 0 且耗时无意义）。libuv 在 Windows 上为
+      // `raise(SIGTERM)` 开了后门，因此改发 SIGINT（control-break）让 host 走与 Docker/systemd
+      // 相同的优雅关闭分支（POSIX 上仍是真实 SIGTERM）。
+      child.kill(process.platform === "win32" ? "SIGINT" : "SIGTERM");
+      const result = await exitPromise;
+      return { ...result, elapsedMs: Date.now() - started };
     },
   };
 }
@@ -145,12 +155,21 @@ function openInFlightRequest(port: number): Promise<Socket> {
   });
 }
 
+/** Windows 的 SIGINT 等价于「控制台 Ctrl+C」：进程以 control-break 退出，退出码为 null + 信号。 */
+function assertGracefulExit(code: number | null, signal: NodeJS.Signals | null): void {
+  if (process.platform === "win32") {
+    assert.equal(signal, "SIGINT", "Windows 下应以 control-break 信号优雅退出");
+  } else {
+    assert.equal(code, 0, "SIGTERM 后应以 0 退出");
+  }
+}
+
 describe("Node Host 优雅退出（Docker 升级停机时间）", () => {
   it("存在未完成 in-flight 请求时，SIGTERM 后 1s 内退出（而不是等 30s）", async () => {
     const host = await startHost(200);
     const socket = await openInFlightRequest(host.proxyPort);
-    const { code, elapsedMs } = await host.stop();
-    assert.equal(code, 0, "SIGTERM 后应以 0 退出");
+    const { code, signal, elapsedMs } = await host.stop();
+    assertGracefulExit(code, signal);
     assert.ok(elapsedMs < 3000, `退出耗时 ${elapsedMs}ms，应远小于 30s 的 stop_grace_period`);
     // 端口释放 + 在途连接被断开：旧连接不能让新容器/进程无法重新监听。
     const rebound = await new Promise<boolean>((resolve) => {
@@ -164,8 +183,8 @@ describe("Node Host 优雅退出（Docker 升级停机时间）", () => {
 
   it("没有在途请求时同样快速退出", async () => {
     const host = await startHost(1000);
-    const { code, elapsedMs } = await host.stop();
-    assert.equal(code, 0);
+    const { code, signal, elapsedMs } = await host.stop();
+    assertGracefulExit(code, signal);
     assert.ok(elapsedMs < 2500, `退出耗时 ${elapsedMs}ms，应远小于 30s`);
   });
 });

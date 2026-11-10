@@ -303,4 +303,19 @@ node scripts/e2e-node-host.mjs            # 端到端冒烟（含 mock 上游流
 | 回滚 | `flowlet_deploy.py deploy --tag flowlet:node-20261110-fastshutdown6` |
 | 验证（canary 9/9） | 新镜像临时容器（token 模式 + 空卷）：provider 列表含 jenkins 且元数据 exact（`usernameLabel` = 用户名、默认前缀 `JENKINS`）；缺用户名被拒；不可达实例返回 `校验失败，未保存：Jenkins API` 且不落库；`username` 列迁移成功；UI chunk 含 `Jenkins 用户设置` / `粘贴 API Token（与用户名一起使用）` / `_USER`；SPA 与 `/v1/models` 正常 |
 | 验证（生产 9/9） | 容器镜像 = 新 tag、healthy；`/health` 200；`/api/auth/config` 仍 `mode=oidc` 且 `token_login=false`；容器内存在 `packages/flowlet-core/src/web/jenkins.ts`；UI chunk 含 Jenkins 文案；生产库 `service_credentials` 已有 `username` 列；`/v1/models` 200；SPA 200 |
-| 并发说明 | 同一工作树有并行会话在开发 Beszel / Uptime Kuma provider（当时未提交）。本镜像包含其 Node 侧改动（`tsc` 通过），生产 provider 列表为 gitlab/dockhand/jenkins/uptime-kuma/beszel；并行会话后续若按「HEAD + 自身文件」隔离构建并部署，可能覆盖本镜像，需重新部署或提交后重建 |
+| 并发说明 | 同一工作树有并行会话在开发 Beszel / Uptime Kuma provider（当时未提交）。本镜像包含其 Node 侧改动（`tsc` 通过），生产 provider 列表为 gitlab/dockhand/jenkins/uptime-kuma/beszel |
+| 后续部署 | 14:37:42 并行会话部署 `flowlet:node-20261110-beszel` 覆盖本镜像；复核该镜像仍包含 `web/jenkins.ts`、UI 的 Jenkins 文案、`service_credentials.username` 列且 `/v1/models` 200，Jenkins 功能未丢失。当前线上 = `flowlet:node-20261110-beszel` |
+
+## 环境前缀「AI 生成」发布记录（2026-11-10 15:03）
+
+| 项 | 值 |
+| --- | --- |
+| 需求 | 规则生成只会抽 ASCII 片段，中文名（「公司北美 Dockhand 正式」）退化到默认前缀；改为可让已开放模型生成语义缩写（`NA_PROD` / `SELF`） |
+| 交互 | 表单「环境别名」右侧新增「AI 生成」按钮（显式点击，未填名称时禁用）；成功后提示「已用 {model} 生成：{prefix}」；失败/无模型/输出不合规时回退规则建议并 Toast 说明。AI 结果与手写/规则共用同一套拼接与冲突避让，长度与格式规则不变 |
+| 服务端 | Node 专有命令 `suggest_env_prefix_segment`（管理鉴权；CLI token 403）：从**启用路由**的 `virtual_model_id` 取开放模型（`virtual_models` 表在生产为空，只读它会误判无模型），优先轻量模型；调本机模型入口 `/v1/chat/completions`（client token），prompt 含服务类型/名称/备注/已占用前缀，输出清洗成 `^[A-Z0-9_]{1,20}$` 片段；超时 20s，失败返回可读 502/409/400 |
+| 成本与隐私 | 每次点击 = 一次真实模型调用（计费 + 请求日志）；名称/备注随 prompt 发往该上游模型，文档已注明不要在名称/备注写敏感信息 |
+| 关键修复 | ① `virtual_models` 为空导致「没有可用的开放模型」→ 改为从启用路由派生；② 推理模型把 32 token 预算全花在 `reasoning_content`，`content` 为空 → 预算提到 512 并区分「未返回文本」错误 |
+| canary 实测 | 真实模型三次生成：`公司北美 Dockhand 正式` → `segment=DOCKHAND_NA_PROD`（1.9s）、`个人自建 GitLab` → `SELF_TEST`（0.9s）、`新加坡 CI 集群` → `SG_STAGING`（2.0s），model 均为 `deepseek-v4.1-flash`；前端拼接后为 `DOCKHAND_NA_PROD` / `GITLAB_SELF_TEST` / `JENKINS_SG_STAGING` |
+| 镜像/部署 | `flowlet:node-20261110-aiprefix2`（169s，`sha256:6f01a3cd…`）从 `2363ffa` 的干净 HEAD 构建（含 concurrent 流已提交的 Beszel provider）；15:03 蓝绿切换，回滚点 `flowlet:node-20261110-beszel` |
+| 生产验证 | healthy；`/api/auth/config` 仍 oidc + `token_login=false`；未鉴权 `suggest_env_prefix_segment` 401；UI 含「AI 生成」「AI 生成失败」；服务端含 `exposedModelNames` 路由派生逻辑；启用路由 18 条（含 `deepseek-v4.1-flash`）；重启后 0 请求错误 |
+| 单测 | 服务端 `env-prefix-ai.test.ts` 6 条（模型选择/清洗/失败回退/无模型/CLI token 403/请求形状）；前端 `envPrefix` 15 条（含 AI 片段拼接去重）+ 凭据页 20 条（含 AI 成功与回退） |

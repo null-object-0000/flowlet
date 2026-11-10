@@ -1,6 +1,9 @@
 # 全局凭据库与 `flowlet`
 
-状态：v6（**新增 Beszel provider（邮箱 + 密码换短期 token，PocketBase 底座）**；
+状态：v7（**新增 OCI 镜像仓库（registry）provider（标准 Docker Registry HTTP API V2 / OCI
+Distribution：`GET /v2/` + `WWW-Authenticate` Bearer 质询）**）；
+`flowlet registry` 子命令、`pull` 为 registry 生成 `{PREFIX}_HOST` / `{PREFIX}_USER` / `{PREFIX}_TOKEN`。
+v6 新增 Beszel provider（邮箱 + 密码换短期 token，PocketBase 底座）；
 `flowlet beszel` 子命令、`pull` 为 Beszel 生成 `{PREFIX}_URL` / `{PREFIX}_EMAIL` / `{PREFIX}_PASSWORD`。
 v5 新增 Jenkins provider（用户名 + API Token 的 Basic 认证），服务凭据支持用户名字段；
 `flowlet jenkins` 子命令、`pull` 为 Jenkins 生成 `{PREFIX}_URL` / `{PREFIX}_USER` / `{PREFIX}_TOKEN`。
@@ -9,7 +12,7 @@ v3 起用户侧命令统一为 `flowlet`，并支持同 provider 多实例环境
 Node 版 CLI 为默认实现；Rust 版二进制名仍为 `flowlet-cred`，标为 legacy，仅用于对拍）
 日期：2026-11-10（v1：Node 移植完成；v2：新增 Dockhand provider；v3：CLI 更名 `flowlet` +
 多实例 env 前缀 + 本机接入下载；v4：`flowlet login` 浏览器授权 + 本机 `auth.json`；
-v5：Jenkins provider + 服务凭据用户名字段；v6：Beszel provider）
+v5：Jenkins provider + 服务凭据用户名字段；v6：Beszel provider；v7：OCI 镜像仓库 provider）
 
 ## 1. 定位
 
@@ -72,8 +75,8 @@ SQLite service_credentials 表       # id / name / provider / base_url / usernam
                                    # kind / note / enabled / 时间戳 / 最近校验结果
 ```
 
-- `username` 是可空列（v5 新增）：Jenkins 存 Basic 认证用户名、Beszel 存登录邮箱，明文存储；
-  GitLab / Dockhand 的行为 NULL；旧库升级时 `ALTER TABLE` 补列，无需回填。
+- `username` 是可空列（v5 新增）：Jenkins 与 OCI 镜像仓库（v7）存登录用户名、Beszel 存登录邮箱，
+  明文存储；GitLab / Dockhand 的行为 NULL；旧库升级时 `ALTER TABLE` 补列，无需回填。
 
 - `env_prefix` 是第二期新增的可空列（旧行 NULL）：存**解析后的大写前缀**，读取时 NULL 按
   provider 默认值解析，升级后行为与第一期一致；
@@ -102,7 +105,7 @@ node packages/flowlet-cred/src/cli.ts init
 npm link ./packages/flowlet-cred && flowlet init   # bin shim: bin/flowlet.mjs
 ```
 
-Agent 机器不需要仓库，直接用 Web Host 页面提供的下载安装脚本（见 §13）：
+Agent 机器不需要仓库，直接用 Web Host 页面提供的下载安装脚本（见 §14）：
 
 ```bash
 curl -fsSL http://<flowlet-host>:20134/downloads/install-flowlet.sh \
@@ -170,6 +173,12 @@ flowlet beszel systems [--json] [--profile=MON]           # 系统列表（id/na
 flowlet beszel api GET /collections/systems/records [--profile=MON]
 flowlet beszel env [--profile=MON]
 flowlet beszel clear [--profile=MON]
+
+flowlet registry set --url=hub.example.com --user=robot\$project+name [--profile=NA]
+                                                 # token 从 stdin 读取；先校验通过才落库
+flowlet registry status [--insecure] [--profile=NA]       # 仓库、Registry V2 认证、用户名
+flowlet registry env [--profile=NA]                       # {PREFIX}_HOST / _USER / _TOKEN
+flowlet registry clear [--profile=NA]
 ```
 
 ### 3.3 Node 与 Rust legacy 的已知差异
@@ -270,14 +279,38 @@ server 的 token。三者都没有时报错：
   kind `cli_token`）；需要 Basic 认证的 `jenkins` 额外生成 `{PREFIX}_USER`（用户名，kind `service`）；
   `beszel` 用邮箱 + 密码认证，生成 `{PREFIX}_URL` / `{PREFIX}_EMAIL` / `{PREFIX}_PASSWORD`
   （EMAIL kind `service`，PASSWORD kind `cli_token`）；
+- OCI 镜像仓库（`registry`，v7）用「用户名 + 密码/token」做 `docker login`，地址槽位是
+  **host[:port]**（无 scheme、无路径），因此生成三把键：`{PREFIX}_HOST`（host，kind `service`）、
+  `{PREFIX}_USER`（用户名，kind `service`）、`{PREFIX}_TOKEN`（密码/token，kind `cli_token`）。
+  地址键用 `_HOST` 而不是 `_URL`：它保存的是可以直传 `docker login` 的主机名，
+  而且默认前缀本身就是 `REGISTRY`，若写成 `{PREFIX}_REGISTRY` 会得到 `REGISTRY_REGISTRY`；
 - 未填前缀用 provider 默认值：`gitlab` → `GITLAB`、`dockhand` → `DOCKHAND`、
-  `jenkins` → `JENKINS`、`beszel` → `BESZEL`（与第一期兼容）；
+  `jenkins` → `JENKINS`、`beszel` → `BESZEL`、`registry` → `REGISTRY`（与第一期兼容）；
 - 前缀规则：trim 后转大写，`^[A-Z][A-Z0-9_]{0,23}$`，最长 24 个字符；
   非法时保存失败：`环境前缀只能包含字母、数字和下划线，且以字母开头` / `环境前缀不能超过 24 个字符`；
 - **唯一性**：所有已启用（`enabled=true`）凭据解析后的前缀必须唯一（不同 provider 也算冲突，
   因为会生成同名环境变量）。冲突时：
   `环境前缀已被「{other.name}」占用：{PREFIX}（同一前缀会生成相同的环境变量名）`；
   停用的凭据不参与冲突检查（`pull` 会跳过它们）。
+
+### 5.2 自动生成（规则 / AI）
+
+表单不再要求手写前缀，提供两种生成方式：
+
+- **自动生成（本地规则，默认）**：随名称/备注实时计算，取其中的 ASCII 片段拼成
+  `{默认前缀}_{片段}`（如「公司 Dockhand NA」→ `DOCKHAND_NA`）；纯中文名退化为默认前缀；
+  与已有前缀冲突时追加 `_2`、`_3`；与默认前缀同名的片段会被剔除（不会出现 `DOCKHAND_DOCKHAND`）。
+  不联网、零成本。
+- **AI 生成（可选，显式点击）**：把「服务类型 + 名称 + 备注 + 已占用前缀」作为 prompt，
+  经**本机模型入口**（`/v1/chat/completions`，client token 鉴权）调用一个已开放模型
+  （优先 `flash` / `air` / `lightning` 等轻量模型），让模型输出语义缩写片段
+  （如「公司北美 Dockhand 正式」→ `NA_PROD`、「个人自建 GitLab」→ `SELF`），
+  再按同一套拼接/避让规则落地。每次点击 = 一次真实模型调用（计费并写请求日志）；
+  失败、无可用模型、输出不合规时回退规则建议并在界面提示。
+  **名称与备注会随 prompt 发送到该上游模型**，不要在名称/备注里写敏感信息。
+
+手动输入后不再被自动结果覆盖；「重新生成 / AI 生成」按钮可随时重算。
+编辑已有凭据时保留其已存前缀（视为手动设置），不会因为改名而悄悄改变已同步到 Agent 机器的变量名。
 
 ### 5.2 UI 与 CLI 的对应关系
 
@@ -295,6 +328,8 @@ UI 的「环境别名（Env 前缀）」填**完整前缀**（例如 `DOCKHAND_N
 | Jenkins 工作实例 | `JENKINS_WORK` | `--profile=work` | `JENKINS_WORK_URL` / `JENKINS_WORK_USER` / `JENKINS_WORK_TOKEN` |
 | Beszel 默认实例 | 留空 | `flowlet beszel ...` | `BESZEL_URL` / `BESZEL_EMAIL` / `BESZEL_PASSWORD` |
 | Beszel 监控实例 | `BESZEL_MON` | `--profile=mon` | `BESZEL_MON_URL` / `BESZEL_MON_EMAIL` / `BESZEL_MON_PASSWORD` |
+| OCI 镜像仓库默认实例 | 留空 | `flowlet registry ...` | `REGISTRY_HOST` / `REGISTRY_USER` / `REGISTRY_TOKEN` |
+| OCI 镜像仓库北美实例 | `REGISTRY_NA` | `--profile=na` | `REGISTRY_NA_HOST` / `REGISTRY_NA_USER` / `REGISTRY_NA_TOKEN` |
 
 - 别名不区分大小写，落库/落本机键名一律大写；
 - 未传 `--profile` 时读写 provider 默认前缀，与第一期行为完全一致；
@@ -322,8 +357,21 @@ flowlet dockhand env --profile=na        # DOCKHAND_NA_URL / DOCKHAND_NA_TOKEN
 flowlet dockhand clear --profile=na      # 只删 NA 这个前缀
 ```
 
+OCI 镜像仓库同理，地址键是 host[:port]（可直接用于 `docker login`）：
+
+```bash
+printf '%s' "$REGISTRY_TOKEN" | flowlet registry set --url=hub.example.com --user='robot$project+name' --profile=na
+flowlet registry status --profile=na
+# 仓库：hub.example.com
+# 认证：Registry V2（registry/2.0）
+# 用户：robot$project+name
+
+flowlet registry env --profile=na        # REGISTRY_NA_HOST / REGISTRY_NA_USER / REGISTRY_NA_TOKEN
+flowlet registry clear --profile=na      # 只删 NA 这个前缀
+```
+
 `pull` 兼容旧服务端：导出条目没有 `envPrefix` 字段时回退 `provider.toUpperCase()`
-（`GITLAB` / `DOCKHAND` / `JENKINS` / `BESZEL`），与第一期一致。
+（`GITLAB` / `DOCKHAND` / `JENKINS` / `BESZEL` / `REGISTRY`），与第一期一致。
 
 ## 6. 安全约定
 
@@ -351,10 +399,12 @@ flowlet dockhand clear --profile=na      # 只删 NA 这个前缀
 三方凭据的增删改与校验在 UI 里完成，不要求手工编辑文件：
 
 - **入口**：左侧一级菜单「服务凭据」；
-- **列表**：名称、服务类型、实例地址（Jenkins 额外展示 `@用户名`，Beszel 展示 `@邮箱`）、**环境前缀**（tooltip 展开
-  `{PREFIX}_URL` / `{PREFIX}_TOKEN`，Jenkins 还有 `{PREFIX}_USER`，Beszel 还有 `{PREFIX}_EMAIL` / `{PREFIX}_PASSWORD`）、Token 掩码、最近校验结果、启停状态；
-- **添加 / 编辑**：服务类型（GitLab / Dockhand / Jenkins / Beszel，创建时可选、编辑时不可切换）、名称、实例地址、
-  用户名（Jenkins 必填；Beszel 显示「邮箱」且必填）、环境别名（Env 前缀，留空 = 默认）、Token、备注、启用；
+- **列表**：名称、服务类型、实例地址（Jenkins / OCI 镜像仓库额外展示 `@用户名`，Beszel 展示 `@邮箱`）、**环境前缀**（tooltip 展开
+  `{PREFIX}_URL` / `{PREFIX}_TOKEN`，Jenkins 还有 `{PREFIX}_USER`，Beszel 还有 `{PREFIX}_EMAIL` / `{PREFIX}_PASSWORD`，
+  OCI 镜像仓库是 `{PREFIX}_HOST` / `{PREFIX}_USER` / `{PREFIX}_TOKEN`）、Token 掩码、最近校验结果、启停状态；
+- **添加 / 编辑**：服务类型（GitLab / Dockhand / Jenkins / Beszel / OCI 镜像仓库，创建时可选、编辑时不可切换）、名称、实例地址、
+  用户名（Jenkins 必填；Beszel 显示「邮箱」且必填；OCI 镜像仓库显示「用户名」且必填，robot account
+  直接填 `robot$project+name`）、环境别名（Env 前缀，留空 = 默认）、Token、备注、启用；
   表单文案（token 说明、地址 placeholder、警告 Banner、前缀预览）按所选 provider 动态展示；
 - **保存即校验**：服务端按 provider 实际请求上游，失败直接返回错误且不落库：
 
@@ -364,13 +414,15 @@ flowlet dockhand clear --profile=na      # 只删 NA 这个前缀
   | `dockhand` | `DOCKHAND` | `GET {base}/api/environments` | `{PREFIX}_URL` / `{PREFIX}_TOKEN` |
   | `jenkins` | `JENKINS` | `GET {base}/me/api/json`（Basic 认证） | `{PREFIX}_URL` / `{PREFIX}_USER` / `{PREFIX}_TOKEN` |
   | `beszel` | `BESZEL` | `POST {base}/api/collections/users/auth-with-password`（邮箱 + 密码换 token） | `{PREFIX}_URL` / `{PREFIX}_EMAIL` / `{PREFIX}_PASSWORD` |
+  | `registry` | `REGISTRY` | `GET {base}/v2/`（标准 Registry V2 流程：Basic → `WWW-Authenticate` Bearer 质询 → token → 重试） | `{PREFIX}_HOST` / `{PREFIX}_USER` / `{PREFIX}_TOKEN` |
 
 - **测试**：对已保存凭据重新校验并刷新 `last_verified_at` / `last_error`；成功 toast 会拼
   `@用户名 · 版本 · provider 摘要`（Dockhand 的摘要是「{n} 个环境」，Jenkins 的版本来自
-  `X-Jenkins` 响应头，Beszel 的版本来自 `/api/beszel/info`、摘要是「{n} 台系统」）；
+  `X-Jenkins` 响应头，Beszel 的版本来自 `/api/beszel/info`、摘要是「{n} 台系统」，
+  registry 的版本来自 `docker-distribution-api-version` 响应头、没有摘要）；
 - **删除**：清除服务端密文；已同步到 Agent 机器的 `.env` 不受影响；
 - **本机接入**（仅 Web Host）：页面头部「本机接入」按钮提供 CLI / Skills 下载与一键命令，
-  以及「已授权的 CLI」列表（见 §4.2 与 §13）。
+  以及「已授权的 CLI」列表（见 §4.2 与 §14）。
 
 对应的管理命令（桌面 Tauri 与 Web 白名单同名）：
 
@@ -583,7 +635,86 @@ flowlet beszel env --profile=mon   # BESZEL_MON_URL / BESZEL_MON_EMAIL / BESZEL_
 - 错误提示按状态码给出可执行动作（400 邮箱/密码、401 token、403 DISABLE_PASSWORD_AUTH /
   无读取权限、404 Hub 根地址、429 限流）。
 
-## 13. 本机接入（下载安装）
+## 13. OCI 镜像仓库适配（Registry V2）
+
+第五个内置 provider 是 OCI 镜像仓库（`registry`，v7）。它不针对任何单一产品，只依赖容器镜像
+仓库的行业通用标准：
+
+- **Docker Registry HTTP API V2**：`GET /v2/` 是认证入口，401 时用 `WWW-Authenticate` 质询；
+- **OCI Distribution Specification**：内容寻址与 `/v2/` 端点沿用同一套语义。
+
+因此 Harbor、Docker Hub、GHCR、Quay、ACR 以及任何实现了 `/v2/` 的私有仓库都走同一套流程，
+不需要按厂商分支实现。
+
+| 约束 | 做法 |
+|---|---|
+| 认证入口是 `GET {base}/v2/` | 200 即通过；401 时读 `WWW-Authenticate` 决定后续认证方式 |
+| Bearer token 质询 | `WWW-Authenticate: Bearer realm=…,service=…,scope=…` → 带 Basic 头请求 token 端点 → 用返回的 `token` / `access_token` 以 Bearer 重试 `/v2/` |
+| 版本信息在响应头 | 取 `docker-distribution-api-version`（如 `registry/2.0`），缺失时显示「未知」 |
+| 地址必须是仓库根地址 | `normalize_base_url` 只保留 `http(s)://host[:port]`：补 scheme、去末尾 `/`、去 `/v2`；带路径 / query / 锚点直接报错 |
+| 用户名必填 | `docker login` 需要用户名 + 密码/token；允许 `$` `+` `_` `-`（robot account 形如 `robot$project+name`） |
+
+保存时的实际校验流程：
+
+1. `GET {origin}/v2/`，请求头 `Authorization: Basic base64("{username}:{password}")`；
+2. 直接 200 → 通过，`version` 取响应头 `docker-distribution-api-version`；
+3. 401 且 `WWW-Authenticate` 以 `Bearer` 开头 → 解析 `realm` / `service` / `scope`，
+   `GET {realm}?service=…[&scope=…]`（同样带 Basic 头）换 token；
+4. 拿到非空 `token` / `access_token` 后，以 `Authorization: Bearer {token}` 重试 `/v2/`；
+5. 403 → 认证被拒绝（用户名/token 无效或该账号无权访问）；404 → 不是仓库根地址（提示不要带路径）；
+   429 → 触发限流；其它非 2xx → `镜像仓库返回 HTTP {status}`。
+
+明确不做（Harbor 专属能力一律不实现）：
+
+- 不请求 `/api/v2.0/*`（项目、robot account、系统信息等厂商管理 API）；
+- 不探测仓库版本 / 项目数量，不调用 `/v2/_catalog`，也不按主机名判断「是不是 Harbor」；
+- 不自动创建 robot account，不涉及实例私有的命令行密码 / 工号规则；
+- 不支持 `docker search`（各厂商私有搜索接口不统一），也不支持 ChartMuseum 的 `/chartrepo`
+  + `helm-push` 插件（改用标准 OCI 方式 `helm push oci://…`）。
+
+robot account 说明：它就是一个普通「用户名 + 密码/token」组合，Flowlet 不做任何特判。
+在服务凭据页把用户名填成 `robot$project+name`、Token 填该 robot account 的 token 即可，
+与其它镜像仓库账号完全一致。
+
+本机 `.env` 与 `docker login` / `helm registry login` 用法：
+
+```bash
+# 服务端管理面添加 OCI 镜像仓库凭据后，Agent 机器同步
+flowlet pull --server=http://<flowlet-host>:20134
+
+# 本机 .env 中得到三把键（HOST 是 host[:port]，不带 scheme）
+# REGISTRY_HOST=hub.example.com
+# REGISTRY_USER=robot$project+pull
+# REGISTRY_TOKEN=***
+
+# docker：密码走 stdin，避免出现在 shell history / 进程参数里
+printf '%s' "$REGISTRY_TOKEN" | docker login "$REGISTRY_HOST" -u "$REGISTRY_USER" --password-stdin
+docker pull "$REGISTRY_HOST/project/app:1.0.0"
+docker tag app:local "$REGISTRY_HOST/project/app:1.0.0"
+docker push "$REGISTRY_HOST/project/app:1.0.0"
+
+# helm 走 OCI registry（不需要 ChartMuseum 与 helm-push 插件）
+printf '%s' "$REGISTRY_TOKEN" | helm registry login "$REGISTRY_HOST" -u "$REGISTRY_USER" --password-stdin
+helm push app-1.0.0.tgz "oci://$REGISTRY_HOST/project"
+helm pull "oci://$REGISTRY_HOST/project/app" --version 1.0.0
+
+# 离线/手动写入单个实例
+printf '%s' "$TOKEN" | flowlet registry set --url=hub.example.com --user='robot$project+name'
+flowlet registry status            # 仓库 / Registry V2 认证 / 用户名
+flowlet registry env               # REGISTRY_HOST / REGISTRY_USER / REGISTRY_TOKEN（含明文，慎用）
+flowlet registry clear
+```
+
+设计取舍：
+
+- `set` **先校验再落库**：token 错误、地址不可达或地址带路径都不会写入全局库；
+- 只做一次 `GET /v2/` 校验，不做 catalog / 仓库内容探测，避免把凭据发往不必要的端点；
+- 内网自签证书用 `--insecure` 跳过 TLS 校验，不写入存储；
+- 错误提示按状态码给出可执行动作（401 认证失败 / 403 无权访问 / 404 根地址写错 / 429 限流）；
+- 地址键叫 `{PREFIX}_HOST` 而不是 `{PREFIX}_URL`：值是 `docker login` 直接可用的主机名，
+  且默认前缀就是 `REGISTRY`，避免出现 `REGISTRY_REGISTRY` 这种重复前缀。
+
+## 14. 本机接入（下载安装）
 
 Web Host 的「服务凭据」页提供「本机接入」抽屉（桌面模式不显示），让 Agent 机器无需仓库即可用上 CLI：
 
@@ -633,7 +764,7 @@ Web Host 的「服务凭据」页提供「本机接入」抽屉（桌面模式�
 
 - 下载产物只包含 CLI 源码与通用 Skills，不包含任何真实 token、`.env` 或 `.agents/` 内容。
 
-## 14. 与 Flowlet 其它能力的关系
+## 15. 与 Flowlet 其它能力的关系
 
 - **与渠道账号**：`channel_accounts.api_key` 是上游模型账号，走路由与余额同步；
   全局凭据库不参与模型路由，两者不要互相写入。
@@ -649,7 +780,7 @@ Web Host 的「服务凭据」页提供「本机接入」抽屉（桌面模式�
 - **与 UI**：`core/credential_store.rs` 是纯 Rust 模块，后续可直接被桌面/Web 命令复用
   （读列表、读单值、写值、删除），不需要重写存储层。
 
-## 15. 验收
+## 16. 验收
 
 - `cargo test --no-default-features --lib credential_store`：9 个用例覆盖读写、顺序、
   注释保留、引号编码、权限、重复键、导出格式、非法键名；
@@ -659,16 +790,23 @@ Web Host 的「服务凭据」页提供「本机接入」抽屉（桌面模式�
   不同密钥不可解、密文篡改被拒；
 - `cargo test --no-default-features --lib storage_credentials`：覆盖 CRUD、启停、校验结果落库、
   `env_prefix` 存取；
-- `cargo test --no-default-features --lib service_credentials`：覆盖 providers、`env_keys`、
-  环境前缀归一/唯一性、Dockhand / Jenkins 校验、Jenkins 用户名校验；
+- `cargo test --no-default-features --lib service_credentials`：覆盖 providers（含 v7 的
+  `registry` 顺序）、`env_keys`（registry 三把键含 `_HOST`）、环境前缀归一/唯一性、
+  Dockhand / Jenkins / registry 校验、Jenkins / registry 用户名校验；
 - `cargo test --no-default-features --lib jenkins`：覆盖 URL 归一、空用户名/token、
   Basic 认证身份解析、`X-Jenkins` 版本与错误码提示；
 - `cargo test --no-default-features --lib beszel`：覆盖 URL 归一（`/api`、`/_/`、子路径）、
   相对路径限制、邮箱 + 密码认证、info/systems 解析与错误码提示；
+- `cargo test --no-default-features --lib registry`：覆盖仓库地址归一（补 scheme、去 `/v2`、
+  拒绝路径/query）、`registry_host`、Basic 直接 200、Bearer 质询换 token 后重试 200、
+  401/403/404/429 与网络错误映射、用户名校验；
+- `node --test packages/flowlet-core/src/web/__tests__/registry.test.ts`：Node Host 侧的
+  同一套 Registry V2 校验与错误文案（与 Rust / CLI 逐字一致）；
 - `npm run cred:typecheck` / `npm run cred:test`：Node CLI 覆盖本地库、GitLab mock、Dockhand
-  mock、Jenkins mock、Beszel mock、多 profile（`--profile=na/sz/mon` 独立键名与实例切换）、
-  `pull` 的 `envPrefix` 映射、`DOCKHAND_*` / `JENKINS_*` / `BESZEL_*` 映射、
-  Dockhand / Jenkins / Beszel 纯函数（URL 归一/路径/解析/错误提示），以及 Rust legacy 对拍；
+  mock、Jenkins mock、Beszel mock、Registry V2 mock、多 profile（`--profile=na/sz/mon` 独立
+  键名与实例切换）、`pull` 的 `envPrefix` 映射、`DOCKHAND_*` / `JENKINS_*` / `BESZEL_*` /
+  `REGISTRY_*` 映射（`_HOST` 为 host[:port]）、Dockhand / Jenkins / Beszel / registry 纯函数
+  （URL 归一/路径/解析/错误提示），以及 Rust legacy 对拍；
 - `FLOWLET_RUST_CRED=$PWD/src-tauri/target/debug/flowlet-cred npm run cred:compat`：
   Node CLI 与 Rust legacy 在同一序列下输出/文件字节级一致；
 - 端到端（headless + mock GitLab 10.8.7）：`list → save（校验后加密落库）→ test → export →
@@ -687,6 +825,12 @@ Web Host 的「服务凭据」页提供「本机接入」抽屉（桌面模式�
 - 手工冒烟（Beszel）：对 PocketBase 语义的 mock 执行
   `beszel set → status → systems → api → env → clear`，验证密码错误不落库、地址粘贴
   `/api` / `/_/` 被归一、`info` 失败时 `status` 显示版本未知、多实例 `--profile` 键名隔离；
+- 手工冒烟（OCI 镜像仓库）：对 Registry V2 语义的 mock 执行
+  `registry set → status → env → clear`，验证错误 token 不落库、401 + `WWW-Authenticate`
+  Bearer 质询能换发 token 并重试成功、`status` 显示 `Registry V2（registry/2.0）` 与用户名、
+  地址粘贴 `/v2/` 或带路径被拒绝、多实例 `--profile` 键名隔离（`REGISTRY_NA_HOST`）、
+  `pull` 写入 `_HOST`（无 scheme）/ `_USER` / `_TOKEN`，并用这三把键实际跑通
+  `docker login <host> -u <user> --password-stdin`；确认没有请求任何 `/api/v2.0/*`；
 - 远程登录授权（v4）：
   - `flowlet login --server=<oidc-instance>` 一条命令跑通：终端打印授权 URL、浏览器回调完成
     → `auth.json` 出现该 server 记录（目录 0700 / 文件 0600、原子写、server key 归一）；
@@ -701,6 +845,10 @@ Web Host 的「服务凭据」页提供「本机接入」抽屉（桌面模式�
     列出名称/创建时间/到期时间/最近使用，撤销需确认，成功后 toast 并刷新列表；空状态与
     loading/error 齐全；桌面 Host（无 `list_cli_auth_tokens` 命令）时该段只展示说明文案，
     其余段落不受影响；
-  - 前端检查：`npm run check` 0 错误、`npm test -- src/pages/credentials src/features/credentials` 全绿。
+  - 前端检查：`npm run check` 0 错误、
+  `npm test -- src/pages/credentials src/domains/credentials src/features/credentials` 全绿；
+  其中服务凭据页覆盖 registry 的 provider 下拉、用户名输入框、env 预览
+  `REGISTRY_HOST / REGISTRY_USER / REGISTRY_TOKEN`、默认前缀 `REGISTRY` 与保存 payload
+  （带 `username`）。
 
 `FLOWLET_CRED_DIR` 可在两条验收里都指向临时目录，避免污染真实凭据。

@@ -34,6 +34,7 @@
 53 条等价命令（46 条基础 + 7 条服务凭据）+ 3 条 Node Host 专有的 CLI 授权命令 + 4 条 Node Host 专有的数据完整性检查命令：`ipc_ping`、`list_channel_presets`、`list_channel_accounts`、`list_route_candidates`、`list_virtual_models`、`list_channel_models`、`save_channel_accounts`、`save_route_candidates`、`save_virtual_models`、`proxy_status`、`start_proxy`、`stop_proxy`、`get_proxy_bind_config`、`web_connection_info`、`set_proxy_bind_config`、`list_custom_scrape_channels`、`cleanup_old_logs`、`latest_balance_snapshots`、`save_balance_snapshot`、`query_balance`、`list_request_logs`、`list_known_devices`、`device_daily_usage`、`device_hourly_usage`、`list_request_log_clients`、`list_request_log_models`、`list_request_log_channel_accounts`、`get_request_log_detail`、`list_agent_sessions`、`list_agent_session_children`、`account_routing_scores`、`usage_summary`、`usage_today_tokens`、`get_log_capture_config`、`set_log_capture_config`、`read_app_meta`、`write_app_meta`、`get_models_cn_catalog`、`get_models_dev_provider_catalog`、`get_models_cn_currencies`、`get_upstream_proxy_config`、`set_upstream_proxy_config`、`list_credential_providers`、
 `list_service_credentials`、`save_service_credential`、`test_service_credential`、
 `delete_service_credential`、`export_service_credentials`、`reveal_service_credential`、
+`suggest_env_prefix_segment`、
 `create_cli_auth_code` / `list_cli_auth_tokens` / `revoke_cli_auth_token`
 （另含 `web_connection_info`）；数据完整性检查：`repair_agent_sessions` / `repair_captured_usage` /
 `repair_unknown_usage` / `repair_usage_costs`（对应桌面端「设置 → 数据维护 → 数据完整性检查」；Rust headless 无这四条，Node Host 不含 Agent 原生 transcript 回退）。
@@ -82,7 +83,7 @@ packages/flowlet-core/src/
                     prices.ts（目录派生价格表）、secret-box.ts（ChaCha20-Poly1305）、
                     credentials.ts（service_credentials 表 CRUD）
   web/              [web] HTTP 服务、鉴权（token + OIDC SSO，auth.ts）、CLI 授权
-                    （cli-auth.ts）、静态资源、56 命令 dispatch；
+                    （cli-auth.ts / env-prefix.ts）、静态资源、57 命令 dispatch；
                     gitlab.ts / dockhand.ts / credentials.ts（服务凭据）
   proxy/            [proxy] 模型入口、路由、转发、SSE、日志/用量落库
 scripts/

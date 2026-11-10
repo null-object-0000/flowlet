@@ -41,6 +41,21 @@ OIDC 模式另验证 fail-closed（无会话/静态 token 均被拒）与不可�
 避免了远端拉 Debian 源导致的构建卡顿；镜像内 `/app` 统一 `chmod -R a+rX`，
 因为本地工作区文件可能是 0600 而容器以 10001 运行。
 
+## 体验实例（canary）
+
+为便于验收，在远端 Docker 上另起了一个独立容器（**不进入 Dockhand stack、不影响线上**）：
+
+| 项 | 值 |
+| --- | --- |
+| 容器 / 卷 | `flowlet-canary` / `flowlet-canary-data`（数据卷 = 线上 `/data` 的本地副本，含 .flcap 帧） |
+| 端口 | `20234` (Web) / `20235` (模型入口) |
+| 镜像 | `flowlet:node-20261110-credentials`（49 条命令 / SSO / .flcap / 价格表 / 服务凭据） |
+| 登录 | token 模式（管理凭据仅存在于部署时生成的本机 env，不入库） |
+| 后台任务 | 关闭（`FLOWLET_DISABLE_BACKGROUND_TASKS=1`，避免与线上重复同步） |
+
+canary 验证：令牌登录、14 账号/46 路由/日志与用量、`/v1/models`、「服务凭据」providers/list/export，
+以及 `.flcap` 历史请求详情 hydrate。切换正式环境前只需替换 stack 的 `services.flowlet.image`。
+
 ## 与线上版本的 1:1 验收口径
 
 1. **管理端功能对拍**：从线上容器只读提取 `/usr/local/bin/flowlet-server`（即当前线上 Rust 二进制），

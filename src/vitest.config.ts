@@ -22,7 +22,17 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     include: ["**/*.test.ts", "**/*.test.tsx"],
-    exclude: [...configDefaults.exclude, "src-tauri/target/**", ".worktrees/**", "poc/**", ".agents/**"],
+    // `packages/**` 是 Node Host / CLI / Electron 宿主包，测试由 `node --test` 运行（node:sqlite、
+    // node:test、ESM 顶层 await 等 node 内置能力在 jsdom/vite 环境下无法加载）。混跑会产生
+    // 48 个 "failed to load" 文件级错误，掩盖真实失败。
+    exclude: [
+      ...configDefaults.exclude,
+      "src-tauri/target/**",
+      ".worktrees/**",
+      "poc/**",
+      ".agents/**",
+      "packages/**",
+    ],
     setupFiles: [fileURLToPath(new URL("./shared/testing/setup.ts", import.meta.url))],
     globals: true,
   },

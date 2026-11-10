@@ -7,6 +7,13 @@
     "website",
     "packages/*"
   ],
+  "overrides": {
+    "@tiptap/core": "^3.33.1",
+    "@tiptap/pm": "^3.33.1",
+    "prosemirror-view": "^1.42.9",
+    "source-map-js": "^1.2.2",
+    "fast-copy": "^3.1.0"
+  },
   "scripts": {
     "version:set": "node scripts/set-version.mjs",
     "dev": "vite",
@@ -86,7 +93,7 @@
     "@vitejs/plugin-react": "^6.0.5",
     "jsdom": "^29.1.1",
     "typescript": "^5.9.3",
-    "vite": "^8.2.1",
-    "vitest": "^4.1.10"
+    "vite": "^8.2.4",
+    "vitest": "^4.1.11"
   }
 }

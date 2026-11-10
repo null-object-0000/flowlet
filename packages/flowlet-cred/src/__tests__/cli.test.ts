@@ -139,9 +139,12 @@ describe("本地凭据库", () => {
     assert.equal(result.stdout, `已初始化：${path.join(dir, "credentials.env")}\n`);
     assert.equal(envFile(dir), `${HEADER}\n`);
     assert.equal(metaFile(dir), "{}");
-    assert.equal(modeOf(dir), 0o700);
-    assert.equal(modeOf(path.join(dir, "credentials.env")), 0o600);
-    assert.equal(modeOf(path.join(dir, "credentials.json")), 0o600);
+    // Windows 没有 POSIX 权限位（chmod/stat 恒为 0666），权限断言只在 POSIX 生效。
+    if (process.platform !== "win32") {
+      assert.equal(modeOf(dir), 0o700);
+      assert.equal(modeOf(path.join(dir, "credentials.env")), 0o600);
+      assert.equal(modeOf(path.join(dir, "credentials.json")), 0o600);
+    }
     writeFileSync(path.join(dir, "credentials.env"), `${HEADER}\nKEEP=1\n`);
     assert.equal(cli(dir, ["init"]).status, 0);
     assert.equal(envFile(dir), `${HEADER}\nKEEP=1\n`);
@@ -245,9 +248,14 @@ describe("本地凭据库", () => {
     cli(dir, ["init"]);
     const file = path.join(dir, "credentials.env");
     writeFileSync(file, `${HEADER}\nDUP=one\nDUP=two\nKEY_ONE=value\n`);
-    chmodSync(file, 0o644);
+    // Windows 没有 POSIX 权限位，`chmod 644` 无效且 doctor 按设计不告警（store.ts 仅在非 win32 检查）。
+    if (process.platform !== "win32") {
+      chmodSync(file, 0o644);
+    }
     const report = cli(dir, ["doctor"]).stdout;
-    assert.match(report, /警告：环境文件权限为 644/);
+    if (process.platform !== "win32") {
+      assert.match(report, /警告：环境文件权限为 644/);
+    }
     assert.match(report, /警告：重复的键（后者生效）：DUP/);
     assert.match(report, /提示：缺少元数据的键：DUP, KEY_ONE/);
     assert.equal(cli(dir, ["get", "DUP", "--reveal"]).stdout, "two\n");

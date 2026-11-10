@@ -270,8 +270,11 @@ describe("login（浏览器授权）", () => {
       assert.equal(record.name, "runner-a");
       assert.match(record.expiresAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
       assert.match(record.savedAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
-      assert.equal(modeOf(path.join(dir, "auth.json")), 0o600);
-      assert.equal(modeOf(dir), 0o700);
+      // Windows 没有 POSIX 权限位（chmod/stat 恒为 0666），权限断言只在 POSIX 生效。
+      if (process.platform !== "win32") {
+        assert.equal(modeOf(path.join(dir, "auth.json")), 0o600);
+        assert.equal(modeOf(dir), 0o700);
+      }
       noTempFiles(dir);
     } finally {
       mock.close();
@@ -306,7 +309,8 @@ describe("login（浏览器授权）", () => {
       assert.equal(auth.servers[mockA.baseUrl]!.token, CLI_TOKEN_A);
       assert.equal(auth.servers[mockB.baseUrl]!.name, "runner-b");
       assert.equal(auth.servers[mockB.baseUrl]!.token, CLI_TOKEN_B);
-      assert.equal(modeOf(path.join(dir, "auth.json")), 0o600);
+      // Windows 没有 POSIX 权限位（chmod/stat 恒为 0666），权限断言只在 POSIX 生效。
+      if (process.platform !== "win32") assert.equal(modeOf(path.join(dir, "auth.json")), 0o600);
       noTempFiles(dir);
     } finally {
       mockA.close();
@@ -441,7 +445,8 @@ describe("logout", () => {
         `未找到 ${mock.baseUrl} 的登录记录\n`,
       );
       // 文件保留（空 servers），权限仍为 0600。
-      assert.equal(modeOf(path.join(dir, "auth.json")), 0o600);
+      // Windows 没有 POSIX 权限位（chmod/stat 恒为 0666），权限断言只在 POSIX 生效。
+      if (process.platform !== "win32") assert.equal(modeOf(path.join(dir, "auth.json")), 0o600);
       noTempFiles(dir);
     } finally {
       mock.close();

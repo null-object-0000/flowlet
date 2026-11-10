@@ -4,6 +4,22 @@
 
 ## [Unreleased]
 
+### 安全
+
+- **依赖漏洞收敛（Dependabot 48 → 8，high 6 → 0）**：按 GHSA 逐条核实影响面后升级/覆盖：
+  - `electron` 44.7.0 → 44.10.2（eMudhra 中间证书缓解；桌面壳实际运行时）；
+  - `vite` → 8.3.7、`vitest` → 4.1.12（`launch-editor` Windows 命令注入 / `@vitest/mocker`
+    路径穿越，均为开发期工具）；
+  - `packages/flowlet-core` 的 `undici` ^7.16.0 → ^7.30.1（Postfix 多类 TLS 校验绕过与 DoS，
+    实际承载上游模型请求）；
+  - 根 `overrides` 收敛 Semi 编辑器链路：`@tiptap/core` / `@tiptap/pm` → 3.33.1、
+    `prosemirror-view` → 1.42.9、`source-map-js` → 1.2.2、`fast-copy` → 3.1.0
+    （`fast-copy` 只升到 3.1.0 而非 4.x：4.x 是 ESM-only，Semi 的 `import copy from
+    "fast-copy"` 会让 rolldown 构建直接失败）。
+  - 剩余 8 条无法就地修复并记录原因：`electron-builder`（npm 建议的降级会破坏 ESM main 的
+    Electron 打包，且漏洞位于打包期 `minimatch` / `dmg-builder`）、`katex` 0.18.4
+    （上游尚无修复版本）。
+
 ### 修复
 
 - **Windows 下首次实机跑通 Electron 桌面端**（Rust/Tauri → Electron 本机切换验证时发现）：

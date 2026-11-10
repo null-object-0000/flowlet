@@ -16,7 +16,15 @@ import {
   Tooltip,
   Typography,
 } from "@douyinfe/semi-ui-19";
-import { IconDelete, IconDownload, IconEdit, IconPlus, IconRefresh } from "@douyinfe/semi-icons";
+import {
+  IconCopy,
+  IconDelete,
+  IconDownload,
+  IconEdit,
+  IconEyeOpened,
+  IconPlus,
+  IconRefresh,
+} from "@douyinfe/semi-icons";
 import { credentialCommands } from "../../domains/credentials/commands";
 import type {
   CredentialProvider,
@@ -26,6 +34,7 @@ import type {
 import {
   ENV_PREFIX_MAX_LENGTH,
   envKeysForPrefix,
+  envKeysForProvider,
   isValidEnvPrefixInput,
   providerDefaultEnvPrefix,
   resolveEnvPrefix,
@@ -36,6 +45,7 @@ import { isWebHost } from "../../platform/web/mode";
 import { PageHeader } from "../../shared/ui/PageHeader";
 import { queryKeys } from "../../shared/query-keys";
 import { errorMessage } from "../../shared/errors/AppError";
+import { copyText } from "../../shared/ui/copyText";
 import { formatTimestamp } from "../../shared/formatters/datetime";
 import styles from "./CredentialsPage.module.css";
 
@@ -44,6 +54,8 @@ type Draft = {
   provider: CredentialProviderId;
   name: string;
   baseUrl: string;
+  /** Basic 认证用户名（仅 Jenkins 使用）。 */
+  username: string;
   token: string;
   note: string;
   enabled: boolean;
@@ -55,6 +67,7 @@ const EMPTY_DRAFT: Draft = {
   provider: "gitlab",
   name: "",
   baseUrl: "",
+  username: "",
   token: "",
   note: "",
   enabled: true,
@@ -64,6 +77,7 @@ const EMPTY_DRAFT: Draft = {
 const PROVIDER_LABEL: Record<string, string> = {
   gitlab: "GitLab",
   dockhand: "Dockhand",
+  jenkins: "Jenkins",
 };
 
 /** 服务端 provider 元数据加载前/旧 Host 的兜底，保证表单文案马上可用。 */
@@ -73,6 +87,7 @@ const FALLBACK_PROVIDERS: CredentialProvider[] = [
     label: "GitLab",
     baseUrlHint: "https://gitlab.example.com",
     tokenLabel: "Personal Access Token（需要 api scope）",
+    usernameLabel: null,
     available: true,
     defaultEnvPrefix: "GITLAB",
   },
@@ -81,14 +96,38 @@ const FALLBACK_PROVIDERS: CredentialProvider[] = [
     label: "Dockhand",
     baseUrlHint: "http://dockhand.example.com:3000",
     tokenLabel: "API Token（Dockhand 设置 → API 令牌）",
+    usernameLabel: null,
     available: true,
     defaultEnvPrefix: "DOCKHAND",
+  },
+  {
+    id: "jenkins",
+    label: "Jenkins",
+    baseUrlHint: "https://jenkins.example.com",
+    tokenLabel: "API Token（Jenkins 用户设置 → API Token）",
+    usernameLabel: "用户名",
+    available: true,
+    defaultEnvPrefix: "JENKINS",
   },
 ];
 
 /** 保存时实际校验的端点（与两套 Host 的 check 实现一致）。 */
 function checkEndpoint(provider: CredentialProviderId): string {
-  return provider === "dockhand" ? "Dockhand /api/environments" : "GitLab /api/v4/user";
+  switch (provider) {
+    case "jenkins":
+      return "Jenkins /me/api/json";
+    case "dockhand":
+      return "Dockhand /api/environments";
+    default:
+      return "GitLab /api/v4/user";
+  }
+}
+
+/** provider 需要基本认证用户名（当前只有 Jenkins）；旧 Host 元数据缺失时按 id 兜底。 */
+function usernameLabelFor(provider: CredentialProvider): string | null {
+  const label = provider.usernameLabel?.trim();
+  if (label) return label;
+  return provider.id === "jenkins" ? "用户名" : null;
 }
 
 export function CredentialsPage() {
@@ -99,6 +138,8 @@ export function CredentialsPage() {
   const [testingId, setTestingId] = useState<string | null>(null);
   /** 「本机接入」引导抽屉：仅 Web Host 可打开。 */
   const [accessOpen, setAccessOpen] = useState(false);
+  /** 正在查看的原始 token；关闭弹层即丢弃（不写缓存/不入日志）。 */
+  const [revealed, setRevealed] = useState<{ name: string; token: string } | null>(null);
 
   const providers = useQuery({
     queryKey: queryKeys.credentials.providers(),
@@ -122,6 +163,7 @@ export function CredentialsPage() {
         name: draft?.name ?? "",
         provider: draft?.provider ?? "gitlab",
         baseUrl: draft?.baseUrl ?? "",
+        username: draft?.username.trim() ? draft.username.trim() : undefined,
         token: draft?.token.trim() ? draft.token.trim() : undefined,
         kind: "cli_token",
         note: draft?.note.trim() ? draft.note.trim() : undefined,
@@ -147,6 +189,13 @@ export function CredentialsPage() {
     onError: (error) => Toast.error(errorMessage(error)),
   });
 
+  const reveal = useMutation({
+    mutationFn: (credential: ServiceCredential) => credentialCommands.reveal(credential.id),
+    onSuccess: (result) => setRevealed({ name: result.name, token: result.token }),
+    onError: (error) =>
+      Toast.error(t("无法查看原始 token：{message}", { message: errorMessage(error) })),
+  });
+
   const openCreate = () => {
     setFormError("");
     setDraft({ ...EMPTY_DRAFT });
@@ -156,9 +205,15 @@ export function CredentialsPage() {
     setFormError("");
     setDraft({
       id: credential.id,
-      provider: credential.provider === "dockhand" ? "dockhand" : "gitlab",
+      provider:
+        credential.provider === "dockhand"
+          ? "dockhand"
+          : credential.provider === "jenkins"
+            ? "jenkins"
+            : "gitlab",
       name: credential.name,
       baseUrl: credential.baseUrl,
+      username: credential.username ?? "",
       token: "",
       note: credential.note ?? "",
       enabled: credential.enabled,
@@ -214,12 +269,20 @@ export function CredentialsPage() {
   const selectedProvider = providerOptions.find((option) => option.id === draft?.provider) ?? FALLBACK_PROVIDERS[0]!;
   const selectedProviderLabel = PROVIDER_LABEL[selectedProvider.id] ?? selectedProvider.label;
   const selectedProviderDefaultEnvPrefix = providerDefaultEnvPrefix(selectedProvider);
+  /** 用户名输入框的标题；null 表示该 provider 不需要用户名。 */
+  const selectedUsernameLabel = usernameLabelFor(selectedProvider);
+  /** Jenkins 等 Basic 认证 provider 必须填写用户名才能保存。 */
+  const usernameMissing = selectedUsernameLabel !== null && !draft?.username.trim();
   /** 编辑器的环境前缀预览：空值 → provider 默认，非空 → 大写。 */
   const previewPrefix = resolveEnvPrefix(draft?.envPrefix, selectedProviderDefaultEnvPrefix);
-  const previewEnvKeys = envKeysForPrefix(previewPrefix);
+  const previewEnvKeys = envKeysForProvider(previewPrefix, selectedProvider.id);
   /** 前缀示例按 provider 默认前缀展开，提醒用户填写完整前缀而不是只填别名。 */
   const envPrefixExample = `${selectedProviderDefaultEnvPrefix}_NA`;
   const envPrefixInvalid = draft !== null && !isValidEnvPrefixInput(draft.envPrefix);
+  /** 生成的环境变量名文案（Jenkins 多一个 `_USER`）。 */
+  const previewEnvKeyLabels = [previewEnvKeys.url, previewEnvKeys.user, previewEnvKeys.token]
+    .filter((key): key is string => Boolean(key))
+    .join(" / ");
 
   /** 表格/预览用：旧 Host 未返回 envPrefix 时按 provider 默认前缀兜底。 */
   const defaultEnvPrefixFor = (providerId: string): string => {
@@ -298,7 +361,16 @@ export function CredentialsPage() {
               {
                 title: t("实例地址"),
                 dataIndex: "baseUrl",
-                render: (value: string) => <Typography.Text ellipsis={{ showTooltip: true }}>{value}</Typography.Text>,
+                render: (value: string, row) => (
+                  <div className={styles.nameCell}>
+                    <Typography.Text ellipsis={{ showTooltip: true }}>{value}</Typography.Text>
+                    {row.username && (
+                      <Typography.Text type="tertiary" size="small">
+                        @{row.username}
+                      </Typography.Text>
+                    )}
+                  </div>
+                ),
               },
               {
                 title: t("环境前缀"),
@@ -306,12 +378,13 @@ export function CredentialsPage() {
                 width: 150,
                 render: (_, row) => {
                   const prefix = resolveEnvPrefix(row.envPrefix, defaultEnvPrefixFor(row.provider));
-                  const keys = envKeysForPrefix(prefix);
+                  const keys = envKeysForProvider(prefix, row.provider);
                   return (
                     <Tooltip
                       content={
                         <div className={styles.envKeyTooltip}>
                           <code>{keys.url}</code>
+                          {keys.user && <code>{keys.user}</code>}
                           <code>{keys.token}</code>
                         </div>
                       }
@@ -358,7 +431,7 @@ export function CredentialsPage() {
               },
               {
                 title: t("操作"),
-                width: 230,
+                width: 320,
                 render: (_, row) => (
                   <div className={styles.actions}>
                     <Button
@@ -369,6 +442,15 @@ export function CredentialsPage() {
                     >
                       {t("测试")}
                     </Button>
+                    <Tooltip content={t("查看原始 token（仅管理台可见）")}>
+                      <Button
+                        size="small"
+                        icon={<IconEyeOpened />}
+                        loading={reveal.isPending && reveal.variables?.id === row.id}
+                        aria-label={t("查看原始 token")}
+                        onClick={() => reveal.mutate(row)}
+                      />
+                    </Tooltip>
                     <Button size="small" icon={<IconEdit />} onClick={() => openEdit(row)}>
                       {t("编辑")}
                     </Button>
@@ -388,6 +470,43 @@ export function CredentialsPage() {
         )}
       </Card>
 
+      <Modal
+        visible={revealed !== null}
+        title={t("原始 token")}
+        onCancel={() => setRevealed(null)}
+        footer={
+          <div className={styles.sheetFooter}>
+            <Button onClick={() => setRevealed(null)}>{t("关闭")}</Button>
+            <Button
+              theme="solid"
+              icon={<IconCopy />}
+              onClick={() => {
+                if (revealed === null) return;
+                void copyText(revealed.token)
+                  .then(() => Toast.success(t("已复制原始 token")))
+                  .catch((error: unknown) =>
+                    Toast.error(t("复制失败：{message}", { message: errorMessage(error) })),
+                  );
+              }}
+            >
+              {t("复制")}
+            </Button>
+          </div>
+        }
+      >
+        <Banner
+          type="warning"
+          closeIcon={null}
+          description={t("这是已保存凭据的明文 token。仅在需要时查看，用完请关闭弹层；不要粘贴到聊天或日志。")}
+        />
+        <div className={styles.revealBlock}>
+          <Typography.Text type="tertiary">{revealed?.name}</Typography.Text>
+          <Typography.Paragraph copyable={false} className={styles.revealToken}>
+            <code>{revealed?.token}</code>
+          </Typography.Paragraph>
+        </div>
+      </Modal>
+
       <SideSheet
         title={draft?.id ? t("编辑服务凭据") : t("添加服务凭据")}
         visible={draft !== null}
@@ -403,6 +522,7 @@ export function CredentialsPage() {
                 !draft?.name.trim() ||
                 !draft?.baseUrl.trim() ||
                 (!draft?.id && !draft?.token.trim()) ||
+                usernameMissing ||
                 envPrefixInvalid
               }
               onClick={() => {
@@ -445,6 +565,21 @@ export function CredentialsPage() {
               />
               <Typography.Text type="tertiary">{t(selectedProvider.tokenLabel)}</Typography.Text>
             </div>
+            {selectedUsernameLabel !== null && (
+              <div className={styles.field}>
+                <label>{t(selectedUsernameLabel)}</label>
+                <Input
+                  value={draft.username}
+                  placeholder={t("例如：jenkins-user")}
+                  onChange={(value) =>
+                    setDraft((current) => (current ? { ...current, username: value } : current))
+                  }
+                />
+                <Typography.Text type="tertiary" size="small">
+                  {t("Jenkins API Token 必须与该用户名的 Basic 认证一起使用；留空表示编辑时保持原用户名。")}
+                </Typography.Text>
+              </div>
+            )}
             <div className={styles.field}>
               <label>{t("实例地址")}</label>
               <Input
@@ -473,9 +608,8 @@ export function CredentialsPage() {
                 </Typography.Text>
               ) : (
                 <Typography.Text type="tertiary" size="small">
-                  {t("生成的环境变量：{url} / {token}；请填写完整前缀（如 {example}），同一服务的多实例需使用不同前缀。", {
-                    url: previewEnvKeys.url,
-                    token: previewEnvKeys.token,
+                  {t("生成的环境变量：{keys}；请填写完整前缀（如 {example}），同一服务的多实例需使用不同前缀。", {
+                    keys: previewEnvKeyLabels,
                     example: envPrefixExample,
                   })}
                 </Typography.Text>
@@ -491,7 +625,9 @@ export function CredentialsPage() {
                     ? t("留空表示不修改现有 token")
                     : draft.provider === "dockhand"
                       ? t("粘贴 API Token")
-                      : t("粘贴 Personal Access Token")
+                      : draft.provider === "jenkins"
+                        ? t("粘贴 API Token（与用户名一起使用）")
+                        : t("粘贴 Personal Access Token")
                 }
                 onChange={(value) => setDraft((current) => (current ? { ...current, token: value } : current))}
               />

@@ -40,6 +40,7 @@ import { queryBalance } from "./balance.ts";
 import {
   deleteCredential,
   exportCredentials,
+  revealCredential,
   list as listCredentials,
   providers as credentialProviders,
   save as saveCredential,
@@ -48,6 +49,7 @@ import {
 } from "./credentials.ts";
 import { fetchChannelModels, testChannelConnection, transientAccount } from "./model-sync.ts";
 import { getUpstream, requestErrorDetail } from "./upstream.ts";
+import { loadUaRules } from "../proxy/identity.ts";
 
 /** 与 node-storage 确认过的 storage 方法签名（web 只按此调用）。 */
 interface StorageFacade {
@@ -80,6 +82,10 @@ interface StorageFacade {
     currentDeviceId: string,
   ): JsonRow[];
   usageTodaySummary(): JsonRow;
+  repairAgentSessions(timeRange: string, uaRules: ReturnType<typeof loadUaRules>): JsonRow;
+  repairCapturedUsage(timeRange: string): number;
+  repairUnknownUsage(timeRange: string): number;
+  repairUsageCosts(timeRange: string): number;
   markAccountCredentialHealthy(accountId: string): void;
   markAccountCredentialInvalid(accountId: string): void;
   updateAccountLastError(accountId: string, error: string | null): void;
@@ -506,6 +512,16 @@ export async function dispatch(ctx: WebContext, command: string, rawArgs: unknow
     case "usage_today_tokens":
       return s.usageTodaySummary();
 
+    // 桌面端「设置 → 数据维护 → 数据完整性检查」四阶段（Web Host 等价实现）。
+    case "repair_agent_sessions":
+      return s.repairAgentSessions(argString(args, "timeRange"), loadUaRules(ctx.configPath));
+    case "repair_captured_usage":
+      return s.repairCapturedUsage(argString(args, "timeRange"));
+    case "repair_unknown_usage":
+      return s.repairUnknownUsage(argString(args, "timeRange"));
+    case "repair_usage_costs":
+      return s.repairUsageCosts(argString(args, "timeRange"));
+
     case "get_log_capture_config":
       return { ...ctx.logCapture };
     case "set_log_capture_config": {
@@ -547,6 +563,8 @@ export async function dispatch(ctx: WebContext, command: string, rawArgs: unknow
       return deleteCredential(ctx, argString(args, "id"));
     case "export_service_credentials":
       return exportCredentials(ctx);
+    case "reveal_service_credential":
+      return revealCredential(ctx, argString(args, "id"));
 
     // CLI 浏览器授权（`flowlet login`）：授权码由已登录会话签发，token 只读服务凭据。
     case "create_cli_auth_code":

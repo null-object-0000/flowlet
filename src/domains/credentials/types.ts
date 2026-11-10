@@ -1,14 +1,16 @@
 /** 三方服务凭据的领域类型（与 Rust `core::service_credentials` 的 camelCase JSON 对齐）。 */
 
-export type CredentialProviderId = "gitlab" | "dockhand";
+export type CredentialProviderId = "gitlab" | "dockhand" | "jenkins";
 
 export type CredentialProvider = {
   id: string;
   label: string;
   baseUrlHint: string;
   tokenLabel: string;
+  /** 需要 Basic 认证的 provider（Jenkins）展示用户名输入框；其它为 null。 */
+  usernameLabel?: string | null;
   available: boolean;
-  /** 未填 `envPrefix` 时该 provider 使用的默认环境前缀（`GITLAB` / `DOCKHAND`）。 */
+  /** 未填 `envPrefix` 时该 provider 使用的默认环境前缀（`GITLAB` / `DOCKHAND` / `JENKINS`）。 */
   defaultEnvPrefix: string;
 };
 
@@ -17,6 +19,8 @@ export type ServiceCredential = {
   name: string;
   provider: string;
   baseUrl: string;
+  /** Basic 认证用户名（仅 Jenkins）；其它 provider 为 null / 缺失。 */
+  username?: string | null;
   kind: string;
   note: string | null;
   enabled: boolean;
@@ -35,6 +39,8 @@ export type ServiceCredentialInput = {
   name: string;
   provider: string;
   baseUrl: string;
+  /** Basic 认证用户名（仅 Jenkins）；留空表示编辑时保持原值。 */
+  username?: string;
   /** 留空表示编辑时保持原 token 不变。 */
   token?: string;
   kind?: string;
@@ -55,6 +61,17 @@ export type CliAuthToken = {
   /** TTL 30 天；过期行由服务端惰性清理，前端仍会展示到期时间。 */
   expiresAt: string;
   lastUsedAt: string | null;
+};
+
+/** 管理台「查看原始 token」的返回（仅已鉴权的管理调用可见，勿缓存/落库）。 */
+export type ServiceCredentialReveal = {
+  id: string;
+  name: string;
+  provider: string;
+  envPrefix: string;
+  /** Basic 认证用户名（仅 Jenkins）。 */
+  username?: string | null;
+  token: string;
 };
 
 export type CredentialCheck = {

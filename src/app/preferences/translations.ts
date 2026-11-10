@@ -1082,6 +1082,32 @@ const english: Record<string, string> = {
   "账单 {cycle}": "Bill {cycle}",
   "本月账单": "This month's bill",
   "免费模型见下方开放模型列表": "Free models are shown in the model list below",
+  // 千问平台登录（device flow）+ 官方 HTTP 同步
+  "千问平台登录": "Qwen platform sign-in",
+  "登录千问平台": "Sign in to Qwen platform",
+  "已登录 {account}": "Signed in as {account}",
+  "登录有效至 {time}": "Sign-in valid until {time}",
+  "退出登录": "Sign out",
+  "重新登录": "Sign in again",
+  "登录已过期请重新登录": "The sign-in expired. Sign in again.",
+  "登录授权被拒绝，请重新登录": "Authorization was denied. Sign in again.",
+  "登录失败：{message}": "Sign-in failed: {message}",
+  "登录成功，但同步失败：{message}": "Signed in, but sync failed: {message}",
+  "轮询登录状态失败：{message}": "Failed to check sign-in status: {message}",
+  "退出登录失败：{message}": "Sign-out failed: {message}",
+  "读取登录状态失败：{message}": "Failed to read sign-in status: {message}",
+  "浏览器拦截了登录窗口，请允许弹出窗口后重试。": "The browser blocked the sign-in window. Allow pop-ups and try again.",
+  "无法打开登录页面：{message}": "Could not open the sign-in page: {message}",
+  "通过千问平台登录后，余额与免费额度由官方 HTTP 接口同步，无需打开 WebView。": "Sign in to the Qwen platform to sync the balance and free quota over the official HTTP API without a WebView.",
+  "余额与免费额度由官方 HTTP 接口同步，无需打开 WebView。": "The balance and free quota are synced over the official HTTP API without a WebView.",
+  "未登录千问平台，当前使用 WebView 控制台抓取；登录后可改为 HTTP 同步。": "Not signed in to the Qwen platform. Flowlet currently scrapes the WebView console; sign in to switch to HTTP sync.",
+  "未登录千问平台，请先登录以获得 HTTP 同步。": "Not signed in to the Qwen platform. Sign in to enable HTTP sync.",
+  "保存账号后可登录千问平台": "Save the account to sign in to the Qwen platform",
+  "正在读取登录状态…": "Loading sign-in status…",
+  "正在同步余额与免费额度…": "Syncing balance and free quota…",
+  "已通过 HTTP 同步余额与免费额度": "Balance and free quota synced over HTTP",
+  "HTTP 同步": "HTTP sync",
+  "WebView 抓取": "WebView scraping",
   "套餐已过期": "Plan expired",
   "未订阅套餐": "No subscription",
   "订阅状态": "Subscription status",
@@ -1848,6 +1874,14 @@ const english: Record<string, string> = {
   "Personal Access Token（需要 api scope）": "Personal Access Token (api scope required)",
   "API Token（Dockhand 设置 → API 令牌）": "API Token (Dockhand settings → API tokens)",
 
+  // 服务凭据：查看原始 token（仅管理台）
+  "查看原始 token": "Reveal raw token",
+  "查看原始 token（仅管理台可见）": "Reveal the raw token (admin console only)",
+  "原始 token": "Raw token",
+  "这是已保存凭据的明文 token。仅在需要时查看，用完请关闭弹层；不要粘贴到聊天或日志。":
+    "This is the plaintext token of a saved credential. Reveal it only when needed, close this dialog afterwards, and never paste it into chats or logs.",
+  "已复制原始 token": "Raw token copied",
+  "无法查看原始 token：{message}": "Could not reveal the raw token: {message}",
   // 服务凭据：多实例环境前缀 + 本机接入引导
   "本机接入": "Local access",
   "环境前缀": "Env prefix",
@@ -1855,6 +1889,14 @@ const english: Record<string, string> = {
   "例如 {example}；留空使用默认 {prefix}": "e.g. {example}; leave blank for the default {prefix}",
   "生成的环境变量：{url} / {token}；请填写完整前缀（如 {example}），同一服务的多实例需使用不同前缀。":
     "Environment variables: {url} / {token}. Enter the full prefix (e.g. {example}); multiple instances of the same service need different prefixes.",
+  "生成的环境变量：{keys}；请填写完整前缀（如 {example}），同一服务的多实例需使用不同前缀。":
+    "Environment variables: {keys}. Enter the full prefix (e.g. {example}); multiple instances of the same service need different prefixes.",
+  "用户名": "Username",
+  "例如：jenkins-user": "e.g. jenkins-user",
+  "API Token（Jenkins 用户设置 → API Token）": "API Token (Jenkins user settings → API Token)",
+  "粘贴 API Token（与用户名一起使用）": "Paste the API Token (used with the username)",
+  "Jenkins API Token 必须与该用户名的 Basic 认证一起使用；留空表示编辑时保持原用户名。":
+    "The Jenkins API token must be sent with this username via Basic auth; leave blank to keep the current username when editing.",
   "环境前缀只能包含字母、数字和下划线，且以字母开头（最长 {max} 个字符）":
     "The env prefix may only contain letters, digits and underscores, must start with a letter, and is at most {max} characters.",
   "安装 CLI": "Install the CLI",

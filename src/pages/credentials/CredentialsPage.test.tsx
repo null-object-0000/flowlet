@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppPreferencesProvider } from "../../app/preferences/AppPreferences";
@@ -10,6 +10,7 @@ const commands = vi.hoisted(() => ({
   save: vi.fn(),
   test: vi.fn(),
   remove: vi.fn(),
+  reveal: vi.fn(),
   listCliAuthTokens: vi.fn(),
   revokeCliAuthToken: vi.fn(),
 }));
@@ -37,8 +38,18 @@ const providers = [
     label: "Dockhand",
     baseUrlHint: "http://dockhand.example.com:3000",
     tokenLabel: "API Token（Dockhand 设置 → API 令牌）",
+    usernameLabel: null,
     available: true,
     defaultEnvPrefix: "DOCKHAND",
+  },
+  {
+    id: "jenkins",
+    label: "Jenkins",
+    baseUrlHint: "https://jenkins.example.com",
+    tokenLabel: "API Token（Jenkins 用户设置 → API Token）",
+    usernameLabel: "用户名",
+    available: true,
+    defaultEnvPrefix: "JENKINS",
   },
 ];
 
@@ -53,6 +64,22 @@ const credentials = [
     enabled: true,
     envPrefix: "DOCKHAND_NA",
     secretHint: "••••1a2b",
+    createdAt: "2026-11-01T00:00:00Z",
+    updatedAt: "2026-11-01T00:00:00Z",
+    lastVerifiedAt: null,
+    lastError: null,
+  },
+  {
+    id: "cred-jenkins",
+    name: "公司 Jenkins",
+    provider: "jenkins",
+    baseUrl: "https://jenkins.example.com",
+    username: "ci-bot",
+    kind: "cli_token",
+    note: null,
+    enabled: true,
+    envPrefix: "JENKINS",
+    secretHint: "••••5e6f",
     createdAt: "2026-11-01T00:00:00Z",
     updatedAt: "2026-11-01T00:00:00Z",
     lastVerifiedAt: null,
@@ -130,6 +157,9 @@ describe("CredentialsPage env prefix", () => {
     renderPage();
     expect(await screen.findByText("DOCKHAND_NA_*")).toBeInTheDocument();
     expect(screen.getByText("GITLAB_*")).toBeInTheDocument();
+    // Jenkins 用 Basic 认证：列表额外展示用户名，前缀走 JENKINS 默认值。
+    expect(screen.getByText("JENKINS_*")).toBeInTheDocument();
+    expect(screen.getByText("@ci-bot")).toBeInTheDocument();
   });
 
   it("prefills and previews the env prefix when editing", async () => {
@@ -149,6 +179,37 @@ describe("CredentialsPage env prefix", () => {
     await waitFor(() =>
       expect(screen.getByText(/SELF_URL \/ SELF_TOKEN/)).toBeInTheDocument(),
     );
+  });
+});
+
+describe("CredentialsPage raw token reveal", () => {
+  it("reveals the saved token on demand while the table keeps only the mask", async () => {
+    commands.reveal.mockResolvedValue({
+      id: "cred-na",
+      name: "公司-北美-线上",
+      provider: "dockhand",
+      envPrefix: "DOCKHAND_NA",
+      token: "dockhand-raw-token-abc123",
+    });
+    renderPage();
+    await screen.findByText("公司-北美-线上");
+    // 默认不出现明文，只出现掩码
+    expect(screen.queryByText("dockhand-raw-token-abc123")).not.toBeInTheDocument();
+    expect(screen.getByText("••••1a2b")).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole("button", { name: /Reveal raw token/ })[0]!);
+    expect(await screen.findByText("dockhand-raw-token-abc123")).toBeInTheDocument();
+    expect(screen.getByText(/plaintext token of a saved credential/)).toBeInTheDocument();
+    expect(commands.reveal).toHaveBeenCalledWith("cred-na");
+  });
+
+  it("keeps the dialog closed when the host rejects the reveal", async () => {
+    commands.reveal.mockRejectedValue(new Error("unsupported_in_web"));
+    renderPage();
+    await screen.findByText("公司-北美-线上");
+    fireEvent.click(screen.getAllByRole("button", { name: /Reveal raw token/ })[0]!);
+    await waitFor(() => expect(commands.reveal).toHaveBeenCalled());
+    expect(screen.queryByText(/plaintext token of a saved credential/)).not.toBeInTheDocument();
   });
 });
 
@@ -217,5 +278,52 @@ describe("CredentialsPage local access guide", () => {
     renderPage();
     await screen.findByText("公司-北美-线上");
     expect(screen.queryByRole("button", { name: /Local access/ })).not.toBeInTheDocument();
+  });
+
+});
+
+describe("CredentialsPage jenkins provider", () => {
+  it("prefills the username and previews three env keys when editing", async () => {
+    renderPage();
+    const name = await screen.findByText("公司 Jenkins");
+    const row = name.closest("tr");
+    expect(row).not.toBeNull();
+    fireEvent.click(within(row as HTMLElement).getByRole("button", { name: /Edit/ }));
+
+    const username = (await screen.findByPlaceholderText(/jenkins-user/)) as HTMLInputElement;
+    expect(username.value).toBe("ci-bot");
+    expect(screen.getByText(/JENKINS_URL \/ JENKINS_USER \/ JENKINS_TOKEN/)).toBeInTheDocument();
+    expect(screen.getByText(/Jenkins \/me\/api\.json/)).toBeInTheDocument();
+  });
+
+  it("submits the username together with the credential", async () => {
+    commands.save.mockResolvedValue({ ...credentials[2] });
+    renderPage();
+    const name = await screen.findByText("公司 Jenkins");
+    const row = name.closest("tr");
+    fireEvent.click(within(row as HTMLElement).getByRole("button", { name: /Edit/ }));
+
+    const username = (await screen.findByPlaceholderText(/jenkins-user/)) as HTMLInputElement;
+    fireEvent.change(username, { target: { value: "deploy-bot" } });
+    fireEvent.click(screen.getByRole("button", { name: /Save and verify/ }));
+
+    await waitFor(() =>
+      expect(commands.save).toHaveBeenCalledWith(
+        expect.objectContaining({ provider: "jenkins", username: "deploy-bot" }),
+      ),
+    );
+  });
+
+  it("disables save until a username is entered for jenkins", async () => {
+    renderPage();
+    const name = await screen.findByText("公司 Jenkins");
+    const row = name.closest("tr");
+    fireEvent.click(within(row as HTMLElement).getByRole("button", { name: /Edit/ }));
+
+    const username = (await screen.findByPlaceholderText(/jenkins-user/)) as HTMLInputElement;
+    fireEvent.change(username, { target: { value: "" } });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Save and verify/ })).toBeDisabled(),
+    );
   });
 });

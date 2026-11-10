@@ -247,3 +247,17 @@ node scripts/e2e-node-host.mjs            # 端到端冒烟（含 mock 上游流
 | 文案修订（13:45） | 授权相关文案不再写「公司 SSO」（IdP 由 `FLOWLET_OIDC_DISPLAY_NAME` 配置，也可能是 token 模式）：UI/CLI/文档统一为「登录 Flowlet 管理台并授权」，授权页动态展示实例配置的登录方式；同时把 `packages/flowlet-skills/flowlet-credentials/SKILL.md`（安装脚本下发的 Skills 包）同步为含 `flowlet login` 的版本，去掉旧的 `pull --token` 指引。镜像 `flowlet:node-20261110-logintext`（163s，`sha256:3a61bb05…`），13:45:33 部署后：UI 包无「公司 SSO」、含新文案；Skills 包含 `flowlet login` 且无 `pull --token`；`/v1/models` 200、OIDC 配置不变 |
 | 并发说明 | 本发布与 sessionmeta 流交替部署；当前线上 = `flowlet:node-20261110-cliauth`，该镜像同时含 sessionmeta 派生与 CLI 授权（sessionmeta 侧已实测派生未丢失） |
 | 未覆盖 | Rust Host（桌面/legacy headless）未实现该能力，桌面侧仍可用 `flowlet set`/`--token`；浏览器授权要求 CLI 与浏览器在同一台机器（loopback） |
+
+## 服务凭据「查看原始 token」发布记录（2026-11-10 13:58）
+
+| 项 | 值 |
+| --- | --- |
+| 需求 | 管理台需要能查看/复制已保存服务凭据的**原始 token**（此前列表只显示 `••••1a2b`） |
+| 服务端 | 新增管理命令 `reveal_service_credential`（入参 `{id}`，返回 `{id,name,provider,envPrefix,token}`）：用 `/data/secret.key` 解密单条凭据；仅管理鉴权可用，`flowlet login` 的 CLI token 调用返回 403；明文不写日志、不落库、不缓存；列表接口继续只返回掩码 |
+| 前端 | 「服务凭据」表格操作列新增眼睛按钮（Tooltip「查看原始 token（仅管理台可见）」），弹层展示明文 + 复制 + 明文警示 Banner；关闭即清空状态；失败只 toast，不影响列表 |
+| 镜像 | 从**干净 HEAD 树 + 本功能文件**构建（避免带上当时并行会话的未提交 WIP）：`flowlet:node-20261110-revealtoken`（233s，`sha256:6da126f9…`） |
+| canary | 在 canary 容器内写入一条测试凭据（用其 `/data/secret.key` 加密）→ `list` 仅掩码；`reveal` 200 且返回正确明文与 `envPrefix`；未鉴权 401；不存在 400「凭据不存在」；CLI token 403；测试行已删除 |
+| 部署 | 13:58:13 经 Dockhand 替换 `services.flowlet.image`（`forceRecreate`），healthy；compose 备份 `.agents/skills/flowlet-docker-deploy/.work/compose.before-20261110-135749.yaml` |
+| 生产验证 | 镜像 tag / healthy；`/api/auth/config` 仍 oidc + `token_login=false`；未鉴权 `reveal_service_credential` 401；UI 包含 `reveal_service_credential` 与「查看原始 token」文案；`service_credentials` 1 条保留；`/v1/models` 200（4 个模型）、`deepseek-v4.1-flash` 流式 `[DONE]` |
+| 回滚 | `flowlet_deploy.py deploy --tag flowlet:node-20261110-logintext` |
+| 权限边界 | Rust Host（桌面）未实现该命令，桌面端调用失败并提示「无法查看原始 token」；CLI token 作用域不变（仍只能 `export_service_credentials`） |

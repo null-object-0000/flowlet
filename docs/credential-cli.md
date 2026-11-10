@@ -344,7 +344,7 @@ flowlet dockhand clear --profile=na      # 只删 NA 这个前缀
 ```text
 list_credential_providers / list_service_credentials /
 save_service_credential / test_service_credential /
-delete_service_credential / export_service_credentials
+delete_service_credential / export_service_credentials / reveal_service_credential
 
 # v4：CLI 浏览器授权（`flowlet login`）
 create_cli_auth_code / list_cli_auth_tokens / revoke_cli_auth_token
@@ -353,7 +353,15 @@ create_cli_auth_code / list_cli_auth_tokens / revoke_cli_auth_token
 `export_service_credentials` 是 `flowlet pull` 的数据源，返回明文，要求管理凭据
 （Web Host 上未通过鉴权返回 401）**或**作用域为 `credentials:read` 的 CLI token；
 `create_cli_auth_code` 只能由已登录的管理台浏览器会话（Cookie + CSRF）调用。
-UI 页面本身不调用导出，只调用 `list_cli_auth_tokens` / `revoke_cli_auth_token`。
+UI 页面本身不调用导出，只调用 `reveal_service_credential` / `list_cli_auth_tokens` /
+`revoke_cli_auth_token`。
+
+`reveal_service_credential` 是管理台「查看原始 token」的数据源：解密单条已保存凭据并返回
+`{id, name, provider, envPrefix, token}`，只允许管理鉴权（Cookie 会话 + CSRF，或 token 模式
+Bearer）；`flowlet login` 签发的 CLI token 作用域只有 `credentials:read` 且白名单仅
+`export_service_credentials`，调用本命令返回 403。列表接口继续只返回掩码（`••••1a2b`），
+明文不写日志、不缓存；前端用完即丢弃（关闭弹层即清空状态）。Rust Host 未实现该命令，
+桌面端调用会失败并提示「无法查看原始 token」。
 
 UI 是配置入口，CLI 是分发/消费入口：
 

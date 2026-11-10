@@ -416,6 +416,41 @@ export function deleteCredential(ctx: WebContext, id: string): null {
   return null;
 }
 
+export interface ServiceCredentialReveal {
+  id: string;
+  name: string;
+  provider: string;
+  envPrefix: string;
+  /** 明文 token：只返回给已鉴权的管理调用，不写日志、不落库、不缓存。 */
+  token: string;
+}
+
+/**
+ * 管理台「查看原始 token」：解密单条已保存凭据。
+ *
+ * 权限：只走管理鉴权（Cookie 会话 + CSRF / token 模式 Bearer）；`flowlet login` 签发的
+ * CLI token 作用域仅 `credentials:read` 且白名单只有 `export_service_credentials`，
+ * 因此不能调用本命令。
+ */
+export function revealCredential(ctx: WebContext, id: string): ServiceCredentialReveal {
+  const row = storageOf(ctx).getServiceCredential(id);
+  if (row === null) fail(`凭据不存在：${id}`);
+  const name = String(row!.name ?? "");
+  let token: string;
+  try {
+    token = ctx.secrets.decrypt(String(row!.secret_ciphertext ?? ""));
+  } catch (error) {
+    return fail(`凭据 ${name} 无法解密：${message(error)}`);
+  }
+  return {
+    id: String(row!.id ?? id),
+    name,
+    provider: String(row!.provider ?? ""),
+    envPrefix: resolveEnvPrefix(row!),
+    token,
+  };
+}
+
 /** `flowlet pull` 的导出：只导出启用中的凭据（含明文，仅在已鉴权接口返回）。 */
 export function exportCredentials(ctx: WebContext): ServiceCredentialExport[] {
   const rows = storageOf(ctx).listServiceCredentials().filter((row) => Boolean(row.enabled));

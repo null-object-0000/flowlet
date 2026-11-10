@@ -5,6 +5,7 @@ import type {
   CredentialProvider,
   ServiceCredential,
   ServiceCredentialInput,
+  ServiceCredentialReveal,
 } from "./types";
 
 /** 服务凭据命令适配器：页面/feature 不直接拼命令名。 */
@@ -42,6 +43,15 @@ export const credentialCommands = {
 
   remove: (id: string): Promise<void> =>
     invokeCommand<void>("delete_service_credential", { id }).catch(toAppErr("credential_delete_failed")),
+
+  /**
+   * 查看已保存凭据的原始 token：仅管理鉴权可用（CLI token 作用域禁止）。
+   * 返回值含明文，调用方用完即弃，不要写入任何缓存/日志。
+   */
+  reveal: (id: string): Promise<ServiceCredentialReveal> =>
+    invokeCommand<ServiceCredentialReveal>("reveal_service_credential", { id }).catch(
+      toAppErr("credential_reveal_failed"),
+    ),
 
   /**
    * 已授权的 CLI（`flowlet login` 签发，作用域 `credentials:read`）。

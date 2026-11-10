@@ -1,7 +1,8 @@
 # Docker 镜像迁移到 Node Host
 
-> 状态：**Node Host 镜像已在远端 Docker Engine 构建并通过容器冒烟（18/18）**；
-> 尚未替换线上 `flowlet` 栈（部署需要用户授权，且上线前需确认本文末尾的已知差异）。
+> 状态：**Node Host 已与当前线上版本（含 GitLab OIDC SSO）对齐**：严格对拍 0/0
+> （命令 58 步 + HTTP 检查，Rust oracle = 线上容器二进制 + 生产库快照），镜像已在远端构建并
+> 通过容器冒烟（token / oidc 两种模式）；**尚未替换线上 `flowlet` 栈**（部署需要用户授权）。
 
 ## 镜像结构（`Dockerfile`）
 
@@ -23,15 +24,17 @@
 
 | 项 | 结果 |
 | --- | --- |
-| 镜像 | `flowlet:node-20261109-poc`（`sha256:6b7e27053163`） |
+| 镜像 | `flowlet:node-20261109-poc`（`sha256:97956dd353df`，含 SSO/.flcap/价格表） |
 | 体积 | **258 MB**（Rust 版 runtime 层 ~100 MB + 24 MB 二进制，Node 版一次到位） |
-| 构建 | Docker Engine API `POST /build`，全量 ≈272s；改源码后增量 ≈3.6s（npm 层缓存） |
-| 冒烟 | 临时容器 + 临时数据卷（真实库副本）：**18/18 通过**，见下 |
+| 构建 | Docker Engine API `POST /build`，全量 ≈140–270s；改源码后增量 ≈3.6s（npm 层缓存） |
+| 冒烟（token 模式） | **20/20 通过**（含 `/api/auth/config`、`/api/session` mode 形状） |
+| 冒烟（OIDC 模式） | **12/12 通过**：config.mode=oidc、provider.display_name、token_login=false、无会话 401、Bearer 被拒 401、不可达 IdP 时 `303 /?auth_error=provider_unavailable` |
 | 清理 | 冒烟容器/卷已删除；线上 `flowlet` 容器未受影响 |
 
-容器冒烟覆盖：`healthy`、`/health` 200、`/api/session` 401/200、SPA 200、`/api/*` 404、
-`list_channel_accounts`（14 行）、`list_route_candidates`（44 行）、6 条常用命令 200、
-未知命令 501、`/v1/models` 200（4 个模型）、`/v1/models` 无凭据 401。
+容器冒烟覆盖：`healthy`、`/health` 200、`/api/auth/config`、`/api/session` 401/200 + mode 形状、
+SPA 200、`/api/*` 404、`list_channel_accounts`（14 行）、`list_route_candidates`（44 行）、
+6 条常用命令 200、未知命令 501、`/v1/models` 200（4 个模型）、`/v1/models` 无凭据 401；
+OIDC 模式另验证 fail-closed（无会话/静态 token 均被拒）与不可达 IdP 的优雅降级。
 冒烟使用 `FLOWLET_DISABLE_BACKGROUND_TASKS=1`，避免用库内真实凭据向真实上游发余额请求。
 
 构建期经验：运行阶段已不安装任何 apt 包（健康检查改用 Node `healthcheck.mjs`），
@@ -91,11 +94,19 @@ node scripts/e2e-node-host.mjs            # 端到端冒烟（含 mock 上游流
 | 存储清理 | 15min / 15min | 同上 + `storage/maintenance.ts` | Body 过期清理（app_meta 的 log_capture 为准）、体积超限按比例清理、余额快照保留（默认 30 天 / 每账号 200 条）、孤儿快照清理 |
 | 模型目录同步 | 1h / 1h | 同上 | 抓取 models-cn / models.dev 并原子写入 `FLOWLET_CATALOG_DIR`；单个来源失败不影响另一个 |
 
-## 已知差异 / 待办
+## 已补齐（与线上 1:1 的部分）
 
-- `.flcap` 外置捕获帧（旧请求详情）尚未迁移：Node Host 的 Body 直接落 `request_logs` 列，
-  旧库中已外置的帧仍在磁盘上但不再由 Node 读取/清理；Docker 切换前需要确认这部分历史日志的
-  可接受性（新写入完全正常）。
-- 目录同步只更新目录文件，未重建价格表：Node 的费用估算仍来自 `config.json.model_prices`，
-  不含 models-cn/models.dev 派生价格。迁移收尾阶段需补齐（影响「用量洞察」中部分模型的成本）。
-- 不写 `background_jobs` 后台任务日志（Rust 会写），改为结构化 stdout 行；不影响业务数据。
+| 能力 | 实现 | 验证 |
+| --- | --- | --- |
+| GitLab OIDC SSO | `web/auth.ts`（30+ env 对齐、discovery/JWKS、RS256、PKCE/nonce、白名单、Cookie 会话、CSRF） | auth 单测 22/22；严格对拍 `/api/auth/*` 与 `/api/session` 0 差异；镜像 OIDC 模式冒烟 |
+| `.flcap` 捕获帧 | `storage/capture-store.ts`（FLCAP001 + 60B 头 + zstd + sha256 + 32MiB 分段 + compacted 重写） | 帧头/记录 JSON 逐字节一致；Rust↔Node 互读/互写/互清三场景全通过 |
+| 目录派生价格表 | `storage/prices.ts`（models-cn/models.dev/config 覆盖、分档、每日峰谷） | prod 目录构建 82 条；Rust 落库 cost 与 Node 重算完全相等 |
+
+## 残余差异（均为已知、非用户可见或与 Rust 一致）
+
+- zstd **压缩块字节**非逐字节一致（Rust libzstd 0.13.3 vs Node zlib 1.5.7，差 1 字节）；
+  帧头里的长度按各自实际块写、checksum 覆盖原始 JSON，**跨语言互读已实测无损**。
+- 不写 `background_jobs` 后台任务日志（Rust 会写），改为结构化 stdout 行；不影响业务数据与页面。
+- `cleanupOldLogs` 删行后不额外 GC 已 `cleared` 的 orphan compacted 段（Rust 同样不回收）。
+- 与 Rust 保持一致、未额外实现：仅 RS256、`client_secret_basic`、无 `REQUIRE_EMAIL_VERIFIED`/`CA_FILE`/
+  Sec-Fetch-Site 校验等（设计文档中列为 v1 非目标）。

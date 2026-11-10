@@ -52,8 +52,9 @@ packages/flowlet-core/src/
   types.ts          [Lead] 共享类型、HostOptions、CommandError
   config/           [storage] config.json 读取/默认值合并/渠道预设初始化/RuntimeConfig 快照
   catalog/          [storage] model-catalog.json + models-cn/dev 目录读取与归一
-  storage/          [storage] SQLite 打开/建表/迁移 + 全部读写方法（契约见第 5 节）
-  web/              [web] HTTP 服务、鉴权、静态资源、43 命令 dispatch
+  storage/          [storage] SQLite 打开/建表/迁移 + 全部读写方法；capture-store.ts（.flcap 帧）、
+                    prices.ts（目录派生价格表）
+  web/              [web] HTTP 服务、鉴权（token + OIDC SSO，auth.ts）、静态资源、43 命令 dispatch
   proxy/            [proxy] 模型入口、路由、转发、SSE、日志/用量落库
 scripts/
   web-parity.mjs    [web] Rust headless ↔ Node host 双实现对拍

@@ -18,7 +18,8 @@
 | P0 | Electron + Node 骨架 PoC（复用 dist-web、真实库副本） | ✅ 已完成（`poc/electron-host/`） |
 | **P1′** | **Node Host（Docker 优先）：43 条 Web 命令 + 25 表存储 + 代理核心** | ✅ 已完成（`packages/flowlet-core/`，分支 `migrate/electron`） |
 | **P1″** | **后台维护（余额 5m / 清理 15m / 目录 1h）+ Rust 兼容设备身份** | ✅ 已完成（`src/host/scheduler.ts`） |
-| **P2′** | **Docker 镜像切换到 Node Host（无 Rust 工具链）+ 端到端冒烟** | ✅ 完成：远端构建 `flowlet:node-20261109-poc`（258MB），容器冒烟 18/18 通过；**尚未替换线上栈（待授权）** |
+| **P2′** | **Docker 镜像切换到 Node Host（无 Rust 工具链）+ 端到端冒烟** | ✅ 完成：远端构建 `flowlet:node-20261109-poc`（258MB），容器冒烟 token 20/20 + OIDC 12/12；**尚未替换线上栈（待授权）** |
+| **P3′** | **对齐线上新增能力：GitLab OIDC SSO / .flcap 捕获帧 / 目录派生价格表** | ✅ 完成：严格对拍（线上二进制 oracle + 生产库快照）命令 0 / HTTP 0；SSO 单测 22/22；跨语言帧互读/互写/互清通过；价格表 82 条与 Rust 一致 |
 | P2 | 批次 1–2（A 类命令） | 归入 P1′（Web Host 白名单仅 43 条，已全部实现） |
 | P3–P5 | 批次 3–10、代理核心 | 归入 P1′（代理 P0 已实现；thinking/reasoning 等受控例外见 `proxy-core.md`） |
 | P6 | Electron 桌面宿主（窗口/托盘/通知/凭据/无边框壳） | ⏸ 延后（用户要求先 Docker） |

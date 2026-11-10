@@ -9,7 +9,9 @@ const FALLBACK_DEFAULT_ENV_PREFIX: Record<string, string> = {
   gitlab: "GITLAB",
   dockhand: "DOCKHAND",
   jenkins: "JENKINS",
+  "uptime-kuma": "UPTIME_KUMA",
   beszel: "BESZEL",
+  registry: "REGISTRY",
 };
 
 /** 环境变量名前缀最大长度（与 Host 校验一致）。 */
@@ -22,9 +24,15 @@ export function envKeysForPrefix(prefix: string): { url: string; token: string }
 
 /** provider 维度的环境变量名（字段语义与双 Host 的 `env_keys` 一致）。 */
 export type ProviderEnvKeys = {
+  /**
+   * 地址类键：默认是 baseUrl 生成的 `{PREFIX}_URL`；
+   * OCI 镜像仓库的 url 槽位是 **host[:port]**（无 scheme、无路径，供 `docker login` 用），
+   * 键名为 `{PREFIX}_HOST`（不用 `{PREFIX}_REGISTRY`：默认前缀就是 `REGISTRY`，会得到
+   * `REGISTRY_REGISTRY`；`_HOST` 保持 `{PREFIX}_<属性>` 公式，无需特判）。
+   */
   url: string;
   /**
-   * 用户名类键：Jenkins 用 Basic 认证用户名生成 `{PREFIX}_USER`，
+   * 用户名类键：Jenkins / OCI 镜像仓库用登录用户名生成 `{PREFIX}_USER`，
    * Beszel 用登录邮箱生成 `{PREFIX}_EMAIL`；其余 provider 为 null。
    */
   user: string | null;
@@ -37,14 +45,23 @@ export type ProviderEnvKeys = {
  *
  * - gitlab / dockhand：`{PREFIX}_URL` + `{PREFIX}_TOKEN`；
  * - jenkins：Basic 认证，额外生成 `{PREFIX}_USER`；
- * - beszel：没有长期 API Token，存邮箱 + 密码 → `{PREFIX}_EMAIL` + `{PREFIX}_PASSWORD`。
+ * - uptime-kuma：API Key 只用于 `/metrics` 鉴权，密钥键是 `{PREFIX}_API_KEY`（不是 `_TOKEN`）；
+ * - beszel：没有长期 API Token，存邮箱 + 密码 → `{PREFIX}_EMAIL` + `{PREFIX}_PASSWORD`；
+ * - registry（OCI 镜像仓库）：用户名 + 密码/token 做 `docker login`，地址槽位是 host[:port]，
+ *   因此生成 `{PREFIX}_HOST` + `{PREFIX}_USER` + `{PREFIX}_TOKEN`。
  */
 export function envKeysForProvider(prefix: string, providerId: string): ProviderEnvKeys {
   switch (providerId) {
     case "jenkins":
       return { url: `${prefix}_URL`, user: `${prefix}_USER`, token: `${prefix}_TOKEN` };
+    case "uptime-kuma":
+      // Key 只用于 Prometheus /metrics 鉴权，沿用公司 infra skill 的 `UPTIME_KUMA_API_KEY` 命名。
+      return { url: `${prefix}_URL`, user: null, token: `${prefix}_API_KEY` };
     case "beszel":
       return { url: `${prefix}_URL`, user: `${prefix}_EMAIL`, token: `${prefix}_PASSWORD` };
+    case "registry":
+      // 不是 URL：只放 host[:port]，方便直接用于 `docker login <host>` / `helm registry login`。
+      return { url: `${prefix}_HOST`, user: `${prefix}_USER`, token: `${prefix}_TOKEN` };
     default:
       return { url: `${prefix}_URL`, user: null, token: `${prefix}_TOKEN` };
   }
@@ -102,7 +119,7 @@ function envPrefixTokens(text: string, base: string): string[] {
 }
 
 export interface EnvPrefixSuggestionInput {
-  /** provider 默认前缀（`GITLAB` / `DOCKHAND` / `JENKINS` / `BESZEL`…）。 */
+  /** provider 默认前缀（`GITLAB` / `DOCKHAND` / `JENKINS` / `BESZEL` / `REGISTRY`…）。 */
   providerDefault: string;
   name?: string | null;
   note?: string | null;

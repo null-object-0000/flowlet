@@ -31,10 +31,11 @@ Claude Code / Codex / DSH 等 Agent 在接入后需要使用的三方 key。
   提供的安装命令（需要 Node.js 22.6+）：
   `curl -fsSL http://<Flowlet 地址>:20134/downloads/install-flowlet.sh | sh -s -- --base=http://<Flowlet 地址>:20134/downloads`
 - **管理面在 Flowlet UI**：Docker / 桌面左侧「服务凭据」页添加服务（当前支持 GitLab、
-  Dockhand、Jenkins、Beszel），保存即校验，token 加密存服务端，界面只显示掩码；同一 provider 多实例用
+  Dockhand、Jenkins、Beszel、OCI 镜像仓库），保存即校验，token 加密存服务端，界面只显示掩码；同一 provider 多实例用
   「环境别名（Env 前缀）」区分（例如 `DOCKHAND_NA` / `DOCKHAND_SZ` / `DOCKHAND_SELF`）。
   Jenkins 额外需要「用户名」（API Token 与用户名一起做 Basic 认证）；Beszel 额外需要「邮箱」
-  （登录密码换短期 token，没有长期 API Token）。
+  （登录密码换短期 token，没有长期 API Token）；OCI 镜像仓库额外需要「用户名」
+  （`docker login` 的用户名 + 密码/token）。
 - **本机消费（先 login，再 pull）**：Agent 机器上先执行
 
   ```bash
@@ -54,7 +55,8 @@ Claude Code / Codex / DSH 等 Agent 在接入后需要使用的三方 key。
   把启用中的凭据同步到本机 `.env`（`--dry-run` 只预览）。之后的读取方式不变。
 - **token 模式实例**：授权页会提示改用
   `flowlet pull --server=<origin> --token=$FLOWLET_ADMIN_TOKEN`；这是唯一仍需 `--token` 的场景。
-- CLI 的 `gitlab set` / `dockhand set` / `jenkins set` / `beszel set` 只用于没有服务端管理面的离线场景；正常流程不要手工配置。
+- CLI 的 `gitlab set` / `dockhand set` / `jenkins set` / `uptime-kuma set` / `beszel set` /
+  `registry set` 只用于没有服务端管理面的离线场景；正常流程不要手工配置。
 
 ## 命令
 
@@ -79,14 +81,19 @@ flowlet pull --server=<origin> [--dry-run]       # 自动使用 login 的本机�
 
 - `flowlet pull` 按服务凭据的「环境前缀」写键：一般 provider 是两把
   `{PREFIX}_URL` / `{PREFIX}_TOKEN`；Jenkins 是三把 `{PREFIX}_URL` / `{PREFIX}_USER` /
-  `{PREFIX}_TOKEN`，Beszel 是三把 `{PREFIX}_URL` / `{PREFIX}_EMAIL` / `{PREFIX}_PASSWORD`。
-  未设前缀时用 provider 默认（`GITLAB` / `DOCKHAND` / `JENKINS` / `BESZEL`）。
+  `{PREFIX}_TOKEN`，Beszel 是三把 `{PREFIX}_URL` / `{PREFIX}_EMAIL` / `{PREFIX}_PASSWORD`，
+  OCI 镜像仓库是三把 `{PREFIX}_HOST` / `{PREFIX}_USER` / `{PREFIX}_TOKEN`
+  （`_HOST` 是 host[:port]，不带 scheme，可直接用于 `docker login`），
+  **Uptime Kuma 是 `{PREFIX}_URL` / `{PREFIX}_API_KEY`（不是 `_TOKEN`）**。
+  未设前缀时用 provider 默认（`GITLAB` / `DOCKHAND` / `JENKINS` / `UPTIME_KUMA` /
+  `BESZEL` / `REGISTRY`）。
 - 例：三份 Dockhand 的环境前缀为 `DOCKHAND_NA` / `DOCKHAND_SZ` / `DOCKHAND_SELF`，
   `.env` 里就是 `DOCKHAND_NA_URL` / `DOCKHAND_NA_TOKEN` / …；**不要假设只有
   `DOCKHAND_URL` 一把**，先 `flowlet list` 看实际键名。
 - 离线用 CLI 时用 `--profile=<alias>` 选实例，CLI 自动组合 provider 前缀：
-  `--profile=na` → `DOCKHAND_NA_*`，`--profile=work` → `GITLAB_WORK_*` / `JENKINS_WORK_*`；
-  不传 `--profile` 读写默认前缀（`DOCKHAND_*` / `GITLAB_*` / `JENKINS_*`）。
+  `--profile=na` → `DOCKHAND_NA_*` / `REGISTRY_NA_*`，`--profile=work` → `GITLAB_WORK_*` /
+  `JENKINS_WORK_*`，`--profile=tw`（uptime-kuma）→ `UPTIME_KUMA_TW_*`；不传 `--profile`
+  读写默认前缀（`DOCKHAND_*` / `GITLAB_*` / `JENKINS_*` / `UPTIME_KUMA_*` / `REGISTRY_*`）。
 - 环境前缀规则：大写字母开头，只含大写字母/数字/下划线，最长 24；同一 provider 多实例
   必须使用不同前缀（否则生成同名环境变量）。
 
@@ -188,6 +195,38 @@ flowlet jenkins env --profile=work  # JENKINS_WORK_URL / JENKINS_WORK_USER / JEN
 - `pull` 会写三把键（默认 `JENKINS_URL` / `JENKINS_USER` / `JENKINS_TOKEN`，多实例见上）。
 - **不要把 `jenkins env` 的输出贴进对话**，它包含明文 token。
 
+## Uptime Kuma（Prometheus /metrics 只读）
+
+Uptime Kuma 2.x **没有监控管理 REST API**：API Key 只用于 Prometheus `/metrics` 鉴权
+（Basic 空用户名 + Key），不是监控项 / 通知的管理令牌，也不能当 Push token。
+校验请求是 `GET {base}/metrics`，要求返回 `text/plain` Prometheus 文本；版本取
+`app_version` 指标（公司内部构建是 `0.0.xx`），监控状态取 `monitor_status`。
+
+```bash
+printf '%s' "$KUMA_API_KEY" | flowlet uptime-kuma set --url=https://host/uptime-kuma
+flowlet uptime-kuma status              # 指标样本 / 版本 / 监控 up-down 数量
+flowlet uptime-kuma monitors [--json]   # 从 /metrics 解析 UP/DOWN + id + 名称（只读）
+flowlet uptime-kuma env                 # UPTIME_KUMA_URL / UPTIME_KUMA_API_KEY（含明文）
+flowlet uptime-kuma clear
+
+# 多实例
+flowlet uptime-kuma status --profile=tw
+flowlet uptime-kuma env --profile=tw    # UPTIME_KUMA_TW_URL / UPTIME_KUMA_TW_API_KEY
+```
+
+要点：
+
+- 地址填**实例根地址并带子路径**（如 `https://host/uptime-kuma`）；粘贴
+  `/#/settings/api-keys` 设置页地址会被归一（丢弃 fragment），末尾 `/metrics` 也会被去掉。
+- 子路径写错时 Kuma 的 SPA 兜底会返回 200 HTML——CLI 会按「不是 Prometheus 指标」报错，
+  不要把它当成凭据有效。
+- `disableAuth=true` 的实例可能匿名 200，此时无法从响应判断 Key 真伪；这类实例仍建议创建
+  API Key，避免配置误用。
+- 只能读：不能创建/暂停监控、不能改通知；写操作走 Kuma 页面或 Socket.IO 管理面。
+- 内网自签证书加 `--insecure`（每次显式指定，不落库）。
+- `pull` 会写两把键（默认 `UPTIME_KUMA_URL` / `UPTIME_KUMA_API_KEY`，多实例见上）。
+- **不要把 `uptime-kuma env` 的输出贴进对话**，它包含明文 API Key。
+
 ## Beszel（服务器监控 Hub，邮箱 + 密码换短期 token）
 
 Beszel 是开源服务器监控 Hub（PocketBase 底座，默认端口 8090）。它**没有长期 API Token**：
@@ -219,6 +258,44 @@ flowlet beszel env --profile=mon   # BESZEL_MON_URL / BESZEL_MON_EMAIL / BESZEL_
 - 内网自签证书加 `--insecure`（每次显式指定，不落库）。
 - `pull` 会写三把键（默认 `BESZEL_URL` / `BESZEL_EMAIL` / `BESZEL_PASSWORD`，多实例见上）。
 - **不要把 `beszel env` 的输出贴进对话**，它包含明文密码。
+
+## OCI 镜像仓库（Registry V2，用户名 + 密码/token）
+
+凭据库里 OCI 镜像仓库是一个独立 provider（`registry`），只按行业通用标准
+Docker Registry HTTP API V2 / OCI Distribution 实现：校验是 `GET {base}/v2/`，
+401 时按 `WWW-Authenticate: Bearer realm=…,service=…` 换 token 后重试，
+版本取 `docker-distribution-api-version` 响应头。Harbor、Docker Hub、GHCR、Quay、ACR
+等任何实现 `/v2/` 的仓库都走同一套流程；**不做**任何厂商专属 API（例如 Harbor 的
+`/api/v2.0/*`）、不自动创建 robot account、不支持 `docker search` / ChartMuseum。
+
+```bash
+printf '%s' "$REGISTRY_TOKEN" | flowlet registry set --url=hub.example.com --user='robot$project+name'
+flowlet registry status             # 仓库 / Registry V2 认证 / 用户名
+flowlet registry env                # REGISTRY_HOST / REGISTRY_USER / REGISTRY_TOKEN（含明文）
+flowlet registry clear
+
+# 多实例
+flowlet registry status --profile=na
+flowlet registry env --profile=na   # REGISTRY_NA_HOST / REGISTRY_NA_USER / REGISTRY_NA_TOKEN
+```
+
+要点：
+
+- 服务端管理面里保存 OCI 镜像仓库凭据时**必须填用户名**（`docker login` 需要用户名 +
+  密码/token）；用户名允许 `$` `+` `_` `-`，robot account 直接填 `robot$project+name`，
+  **没有特判**——它只是普通用户名 + token。
+- 地址填仓库根地址（如 `hub.example.com` 或 `https://hub.example.com`）；带路径 / query /
+  锚点会被拒绝，粘贴 `/v2/` 会被归一掉。
+- `_HOST` 是 host[:port]（无 scheme），可直接传给 `docker login` / `helm registry login`：
+  ```bash
+  printf '%s' "$REGISTRY_TOKEN" | docker login "$REGISTRY_HOST" -u "$REGISTRY_USER" --password-stdin
+  printf '%s' "$REGISTRY_TOKEN" | helm registry login "$REGISTRY_HOST" -u "$REGISTRY_USER" --password-stdin
+  docker pull "$REGISTRY_HOST/project/app:1.0.0"
+  helm push app-1.0.0.tgz "oci://$REGISTRY_HOST/project"
+  ```
+- 内网自签证书加 `--insecure`（每次显式指定，不落库）。
+- `pull` 会写三把键（默认 `REGISTRY_HOST` / `REGISTRY_USER` / `REGISTRY_TOKEN`，多实例见上）。
+- **不要把 `registry env` 的输出贴进对话**，它包含明文 token。
 
 ## 与 Agent 配置的关系
 

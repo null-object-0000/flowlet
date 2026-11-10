@@ -8,6 +8,7 @@ use super::beszel::{parse_info_version as beszel_info_version, BeszelClient};
 use super::dockhand::DockhandClient;
 use super::gitlab::GitlabClient;
 use super::jenkins::JenkinsClient;
+use super::registry::RegistryClient;
 use super::services::FlowletServices;
 use super::storage::StorageError;
 use super::uptime_kuma::UptimeKumaClient;
@@ -18,14 +19,17 @@ pub const PROVIDER_DOCKHAND: &str = "dockhand";
 pub const PROVIDER_JENKINS: &str = "jenkins";
 pub const PROVIDER_UPTIME_KUMA: &str = "uptime-kuma";
 pub const PROVIDER_BESZEL: &str = "beszel";
+pub const PROVIDER_REGISTRY: &str = "registry";
 
 /// 环境变量名前缀默认值：`GITLAB_URL` / `DOCKHAND_URL` / `JENKINS_URL` /
-/// `UPTIME_KUMA_URL` / `BESZEL_URL`（与第一期行为一致）。
+/// `UPTIME_KUMA_URL` / `BESZEL_URL` / `REGISTRY_HOST`（与第一期行为一致；registry 的
+/// 地址键是 `_HOST`，见 `env_keys`）。
 pub const DEFAULT_ENV_PREFIX_GITLAB: &str = "GITLAB";
 pub const DEFAULT_ENV_PREFIX_DOCKHAND: &str = "DOCKHAND";
 pub const DEFAULT_ENV_PREFIX_JENKINS: &str = "JENKINS";
 pub const DEFAULT_ENV_PREFIX_UPTIME_KUMA: &str = "UPTIME_KUMA";
 pub const DEFAULT_ENV_PREFIX_BESZEL: &str = "BESZEL";
+pub const DEFAULT_ENV_PREFIX_REGISTRY: &str = "REGISTRY";
 
 /// 列表 / 详情视图：**不含明文密钥**。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -35,8 +39,8 @@ pub struct ServiceCredentialView {
     pub name: String,
     pub provider: String,
     pub base_url: String,
-    /// 用户名（明文，不是密文）：jenkins 存用户名、beszel 存登录邮箱；
-    /// 其它 provider 恒为 `None`。
+    /// 用户名（明文，不是密文）：jenkins 存用户名、beszel 存登录邮箱、
+    /// registry 存 docker login 用户名；其它 provider 恒为 `None`。
     pub username: Option<String>,
     /// 已解析的环境前缀（旧行按 provider 默认值返回），前端直接展示。
     pub env_prefix: String,
@@ -60,7 +64,8 @@ pub struct ServiceCredentialInput {
     pub name: String,
     pub provider: String,
     pub base_url: String,
-    /// 用户名：jenkins 为用户登录名、beszel 为登录邮箱；其它 provider 忽略。
+    /// 用户名：jenkins 为用户登录名、beszel 为登录邮箱、registry 为 docker login
+    /// 用户名；其它 provider 忽略。
     /// 编辑时传空/未传表示保留原值。
     #[serde(default)]
     pub username: Option<String>,
@@ -96,7 +101,8 @@ pub struct ServiceCredentialExport {
     pub name: String,
     pub provider: String,
     pub base_url: String,
-    /// Jenkins 用户名；GitLab/Dockhand 恒为 `None`。
+    /// 用户名：Jenkins 用户名 / Beszel 登录邮箱 / OCI 镜像仓库用户名；
+    /// GitLab/Dockhand/Uptime Kuma 恒为 `None`。
     /// `#[serde(default)]` 兼容尚未升级的服务端响应。
     #[serde(default)]
     pub username: Option<String>,
@@ -116,8 +122,9 @@ pub struct CredentialProvider {
     /// 例如 `https://gitlab.example.com`。
     pub base_url_hint: String,
     pub token_label: String,
-    /// 需要用户名一起认证时给出输入框标签（Jenkins 为 `Some("用户名")`）；
-    /// GitLab/Dockhand 为 `None`，前端不渲染用户名字段。
+    /// 需要用户名一起认证时给出输入框标签（Jenkins / OCI 镜像仓库为 `Some("用户名")`，
+    /// Beszel 为 `Some("邮箱")`）；
+    /// GitLab/Dockhand/Uptime Kuma 为 `None`，前端不渲染用户名字段。
     #[serde(default)]
     pub username_label: Option<String>,
     /// 未填环境前缀时使用的默认值（前端做 placeholder / 预览）。
@@ -172,6 +179,16 @@ pub fn providers() -> Vec<CredentialProvider> {
             default_env_prefix: DEFAULT_ENV_PREFIX_BESZEL.to_string(),
             available: true,
         },
+        CredentialProvider {
+            id: PROVIDER_REGISTRY.to_string(),
+            label: "OCI 镜像仓库".to_string(),
+            base_url_hint: "https://hub.example.com（只填仓库地址，不要带路径）".to_string(),
+            token_label: "密码 / Token（docker login 的密码；Harbor robot account 填其 token）"
+                .to_string(),
+            username_label: Some("用户名".to_string()),
+            default_env_prefix: DEFAULT_ENV_PREFIX_REGISTRY.to_string(),
+            available: true,
+        },
     ]
 }
 
@@ -183,11 +200,13 @@ pub fn is_supported_provider(provider: &str) -> bool {
             | PROVIDER_JENKINS
             | PROVIDER_UPTIME_KUMA
             | PROVIDER_BESZEL
+            | PROVIDER_REGISTRY
     )
 }
 
 /// provider 的默认环境前缀：gitlab → `GITLAB`、dockhand → `DOCKHAND`、
-/// jenkins → `JENKINS`、uptime-kuma → `UPTIME_KUMA`、beszel → `BESZEL`。
+/// jenkins → `JENKINS`、uptime-kuma → `UPTIME_KUMA`、beszel → `BESZEL`、
+/// registry → `REGISTRY`。
 /// 保存/测试路径会先做 provider 校验；这里对旧库中可能存在的未知 provider 行回退成
 /// provider 名的大写（与 Node Host 的 `defaultEnvPrefix` 逐字对齐）。
 pub fn default_env_prefix(provider: &str) -> String {
@@ -197,6 +216,7 @@ pub fn default_env_prefix(provider: &str) -> String {
         PROVIDER_JENKINS => DEFAULT_ENV_PREFIX_JENKINS.to_string(),
         PROVIDER_UPTIME_KUMA => DEFAULT_ENV_PREFIX_UPTIME_KUMA.to_string(),
         PROVIDER_BESZEL => DEFAULT_ENV_PREFIX_BESZEL.to_string(),
+        PROVIDER_REGISTRY => DEFAULT_ENV_PREFIX_REGISTRY.to_string(),
         other => other.trim().to_uppercase(),
     }
 }
@@ -267,12 +287,15 @@ fn now() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
-/// 归一保存入参的 username（契约 §3.2）：
+/// 归一保存入参的 username（契约 §3）：
 /// - gitlab / dockhand / uptime-kuma：忽略入参，恒落库 `NULL`；
 /// - jenkins：trim 后必须非空（编辑时传空表示保留原值）、不超过 64 个字符、
 ///   且不能含冒号/空白/控制字符（Basic 认证用 `:` 分隔，含冒号会改变凭据含义）；
 /// - beszel：trim 后必须是登录邮箱（编辑时传空表示保留原值）、不超过 254 个字符，
-///   且含 `@` 且格式基本合法（邮箱是 PocketBase 的登录身份，不是可选的展示名）。
+///   且含 `@` 且格式基本合法（邮箱是 PocketBase 的登录身份，不是可选的展示名）；
+/// - registry：trim 后必须非空（编辑时传空表示保留原值）、不超过 255 个字符，
+///   且不能含冒号/空白/控制字符（docker login 的 Basic 认证同样用 `:` 分隔）；
+///   明确允许 `$`、`+`、`_`、`-`（Harbor robot account 形如 `robot$project+name`）。
 pub fn normalize_username(
     provider: &str,
     raw: Option<&str>,
@@ -281,6 +304,7 @@ pub fn normalize_username(
     match provider {
         PROVIDER_JENKINS => normalize_jenkins_username(raw, existing),
         PROVIDER_BESZEL => normalize_beszel_email(raw, existing),
+        PROVIDER_REGISTRY => normalize_registry_username(raw, existing).map(Some),
         _ => Ok(None),
     }
 }
@@ -357,6 +381,41 @@ fn validate_beszel_email(email: &str) -> Result<(), String> {
         || domain.contains("..");
     if invalid {
         return Err("Beszel 邮箱格式不正确（例如：you@example.com）".to_string());
+    }
+    Ok(())
+}
+
+/// registry 的 username 就是 docker login 的用户名：trim、编辑时空值回退原值、必填。
+fn normalize_registry_username(
+    raw: Option<&str>,
+    existing: Option<&str>,
+) -> Result<String, String> {
+    let trimmed = raw.map(str::trim).unwrap_or_default();
+    let candidate = if trimmed.is_empty() {
+        existing.map(str::trim).unwrap_or_default()
+    } else {
+        trimmed
+    };
+    if candidate.is_empty() {
+        return Err("镜像仓库需要填写用户名（docker login 需要用户名 + 密码/token）".to_string());
+    }
+    validate_registry_username(candidate)?;
+    Ok(candidate.to_string())
+}
+
+/// 用户名规则（契约 §3）：
+/// - 长度不超过 255 个字符（按 Unicode 字符计，不是 UTF-8 字节）；
+/// - 不能含 `:`、空白或控制字符（`:` 是 Basic 认证的用户名/密码分隔符）；
+/// - `$`、`+`、`_`、`-` 明确允许（Harbor robot account 形如 `robot$project+name`）。
+fn validate_registry_username(username: &str) -> Result<(), String> {
+    if username.chars().count() > 255 {
+        return Err("用户名不能超过 255 个字符".to_string());
+    }
+    if username.chars().any(|ch| {
+        let code = ch as u32;
+        ch == ':' || ch.is_whitespace() || code < 0x20 || code == 0x7f
+    }) {
+        return Err("用户名不能包含冒号、空格或控制字符".to_string());
     }
     Ok(())
 }
@@ -619,6 +678,49 @@ pub async fn check_beszel(
     }
 }
 
+/// 校验一个 OCI 镜像仓库凭据；返回结构化结果而不是直接抛错，便于界面展示。
+///
+/// 只用行业通用标准：`GET {base}/v2/` 探测；401 且带 Bearer 质询时用
+/// realm/service/scope 换 token 再带 `Bearer` 重试。**不做** Harbor 专属探测
+/// （不请求 `/api/v2.0/*`、不调 `/v2/_catalog`、不按主机名猜 Harbor）。
+/// 成功时 `version` 取标准响应头 `docker-distribution-api-version`，`detail` 恒
+/// `None`，`username` 为入参用户名。
+pub async fn check_registry(
+    base_url: &str,
+    username: &str,
+    password: &str,
+    insecure: bool,
+) -> CredentialCheck {
+    let client = match RegistryClient::new(base_url, username, password) {
+        Ok(client) => client.with_insecure(insecure),
+        Err(error) => {
+            return CredentialCheck {
+                ok: false,
+                username: None,
+                version: None,
+                detail: None,
+                error: Some(error),
+            }
+        }
+    };
+    match client.check().await {
+        Ok(identity) => CredentialCheck {
+            ok: true,
+            username: identity.username,
+            version: identity.version,
+            detail: None,
+            error: None,
+        },
+        Err(error) => CredentialCheck {
+            ok: false,
+            username: None,
+            version: None,
+            detail: None,
+            error: Some(error.to_string()),
+        },
+    }
+}
+
 pub async fn save(
     services: &FlowletServices,
     input: ServiceCredentialInput,
@@ -633,7 +735,7 @@ pub async fn save(
     }
     if !is_supported_provider(&input.provider) {
         return Err(format!(
-            "暂不支持的服务类型：{}（当前支持 gitlab、dockhand、jenkins、uptime-kuma、beszel）",
+            "暂不支持的服务类型：{}（当前支持 gitlab、dockhand、jenkins、uptime-kuma、beszel、registry）",
             input.provider
         ));
     }
@@ -642,6 +744,7 @@ pub async fn save(
         PROVIDER_JENKINS => super::jenkins::normalize_base_url(&input.base_url)?,
         PROVIDER_UPTIME_KUMA => super::uptime_kuma::normalize_base_url(&input.base_url)?,
         PROVIDER_BESZEL => super::beszel::normalize_base_url(&input.base_url)?,
+        PROVIDER_REGISTRY => super::registry::normalize_base_url(&input.base_url)?,
         _ => super::dockhand::normalize_base_url(&input.base_url)?,
     };
     let env_prefix = normalize_env_prefix(
@@ -681,7 +784,8 @@ pub async fn save(
             .map_err(|error| format!("原凭据无法解密：{error}"))?,
         (None, None) => return Err("新建凭据时必须填写 token".to_string()),
     };
-    // 非 jenkins 的 username 一律落 NULL；jenkins 编辑时空值表示保留原行用户名。
+    // 非 jenkins/beszel/registry 的 username 一律落 NULL；这三个 provider 编辑时
+    // 空值表示保留原行用户名。
     let username = normalize_username(
         &input.provider,
         input.username.as_deref(),
@@ -717,6 +821,15 @@ pub async fn save(
         PROVIDER_UPTIME_KUMA => check_uptime_kuma(&base_url, &token, insecure).await,
         PROVIDER_BESZEL => {
             check_beszel(
+                &base_url,
+                username.as_deref().unwrap_or_default(),
+                &token,
+                insecure,
+            )
+            .await
+        }
+        PROVIDER_REGISTRY => {
+            check_registry(
                 &base_url,
                 username.as_deref().unwrap_or_default(),
                 &token,
@@ -809,6 +922,15 @@ pub async fn test(
             )
             .await
         }
+        PROVIDER_REGISTRY => {
+            check_registry(
+                &row.base_url,
+                row.username.as_deref().unwrap_or_default(),
+                &token,
+                insecure,
+            )
+            .await
+        }
         provider => return Err(format!("暂不支持测试该服务类型：{provider}")),
     };
     let verified_at = if check.ok { Some(now()) } else { None };
@@ -856,13 +978,17 @@ pub fn export(services: &FlowletServices) -> Result<Vec<ServiceCredentialExport>
 }
 
 /// 供 CLI 拉取时把服务凭据映射成 dotenv 键名：
-/// - 非 jenkins/beszel：`{PREFIX}_URL` / `{PREFIX}_TOKEN`（顺序与第二期一致）；
+/// - 非 jenkins/beszel/registry：`{PREFIX}_URL` / `{PREFIX}_TOKEN`（顺序与第二期一致）；
 /// - jenkins：`{PREFIX}_URL` / `{PREFIX}_USER` / `{PREFIX}_TOKEN`，USER 取导出的
 ///   `username`（缺失时为空串）；
 /// - uptime-kuma：`{PREFIX}_URL` / `{PREFIX}_API_KEY`（它的 Key 只用于 `/metrics`
 ///   鉴权，沿用公司 infra skill 已有的 `UPTIME_KUMA_API_KEY` 命名）；
 /// - beszel：`{PREFIX}_URL` / `{PREFIX}_EMAIL` / `{PREFIX}_PASSWORD`，EMAIL 取导出的
-///   `username`（缺失时为空串），PASSWORD 是登录密码（Beszel 没有长期 API Token）。
+///   `username`（缺失时为空串），PASSWORD 是登录密码（Beszel 没有长期 API Token）；
+/// - registry：`{PREFIX}_HOST` / `{PREFIX}_USER` / `{PREFIX}_TOKEN`，HOST 是
+///   `host[:port]`（无 scheme、无路径，可直接 `docker login $REGISTRY_HOST`），USER 取
+///   导出的 `username`（缺失时为空串）。地址键用 `_HOST` 而不是 `_REGISTRY`：默认前缀
+///   就是 `REGISTRY`，否则会得到 `REGISTRY_REGISTRY`。
 /// 未登记的 provider 返回空，pull 侧跳过。
 pub fn env_keys(export: &ServiceCredentialExport) -> Vec<(String, String, &'static str)> {
     if !is_supported_provider(&export.provider) {
@@ -900,6 +1026,21 @@ pub fn env_keys(export: &ServiceCredentialExport) -> Vec<(String, String, &'stat
             ),
         ];
     }
+    if export.provider == PROVIDER_REGISTRY {
+        return vec![
+            (
+                format!("{prefix}_HOST"),
+                super::registry::registry_host(&export.base_url),
+                "service",
+            ),
+            (
+                format!("{prefix}_USER"),
+                export.username.clone().unwrap_or_default(),
+                "service",
+            ),
+            (format!("{prefix}_TOKEN"), export.token.clone(), "cli_token"),
+        ];
+    }
     let token_key = if export.provider == PROVIDER_UPTIME_KUMA {
         format!("{prefix}_API_KEY")
     } else {
@@ -930,7 +1071,8 @@ mod tests {
                 PROVIDER_DOCKHAND,
                 PROVIDER_JENKINS,
                 PROVIDER_UPTIME_KUMA,
-                PROVIDER_BESZEL
+                PROVIDER_BESZEL,
+                PROVIDER_REGISTRY
             ]
         );
         assert_eq!(listed[0].label, "GitLab");
@@ -938,12 +1080,14 @@ mod tests {
         assert_eq!(listed[2].label, "Jenkins");
         assert_eq!(listed[3].label, "Uptime Kuma");
         assert_eq!(listed[4].label, "Beszel");
+        assert_eq!(listed[5].label, "OCI 镜像仓库");
         assert_eq!(listed[1].base_url_hint, "http://dockhand.example.com:3000");
         assert_eq!(listed[0].default_env_prefix, DEFAULT_ENV_PREFIX_GITLAB);
         assert_eq!(listed[1].default_env_prefix, DEFAULT_ENV_PREFIX_DOCKHAND);
         assert_eq!(listed[2].default_env_prefix, DEFAULT_ENV_PREFIX_JENKINS);
         assert_eq!(listed[3].default_env_prefix, DEFAULT_ENV_PREFIX_UPTIME_KUMA);
         assert_eq!(listed[4].default_env_prefix, DEFAULT_ENV_PREFIX_BESZEL);
+        assert_eq!(listed[5].default_env_prefix, DEFAULT_ENV_PREFIX_REGISTRY);
         assert_eq!(listed[2].base_url_hint, "https://jenkins.example.com");
         assert_eq!(
             listed[2].token_label,
@@ -959,13 +1103,22 @@ mod tests {
         );
         assert_eq!(listed[4].base_url_hint, "http://beszel.example.com:8090");
         assert_eq!(listed[4].token_label, "登录密码（Beszel 用户密码）");
-        // 需要用户名一起认证的 provider 才渲染用户名字段：Jenkins 是「用户名」，
-        // Beszel 是「邮箱」；GitLab/Dockhand/Uptime Kuma 不渲染。
+        assert_eq!(
+            listed[5].base_url_hint,
+            "https://hub.example.com（只填仓库地址，不要带路径）"
+        );
+        assert_eq!(
+            listed[5].token_label,
+            "密码 / Token（docker login 的密码；Harbor robot account 填其 token）"
+        );
+        // 需要用户名一起认证的 provider 才渲染用户名字段：Jenkins / OCI 镜像仓库是
+        // 「用户名」，Beszel 是「邮箱」；GitLab/Dockhand/Uptime Kuma 不渲染。
         assert_eq!(listed[0].username_label, None);
         assert_eq!(listed[1].username_label, None);
         assert_eq!(listed[2].username_label.as_deref(), Some("用户名"));
         assert_eq!(listed[3].username_label, None);
         assert_eq!(listed[4].username_label.as_deref(), Some("邮箱"));
+        assert_eq!(listed[5].username_label.as_deref(), Some("用户名"));
         assert!(listed.iter().all(|provider| provider.available));
 
         // 前端依赖 camelCase 的 usernameLabel；None 序列化成 null。
@@ -973,6 +1126,9 @@ mod tests {
         assert_eq!(values[0]["usernameLabel"], serde_json::Value::Null);
         assert_eq!(values[2]["usernameLabel"], "用户名");
         assert_eq!(values[4]["usernameLabel"], "邮箱");
+        assert_eq!(values[5]["label"], "OCI 镜像仓库");
+        assert_eq!(values[5]["usernameLabel"], "用户名");
+        assert_eq!(values[5]["defaultEnvPrefix"], "REGISTRY");
     }
 
     #[test]
@@ -982,6 +1138,7 @@ mod tests {
         assert!(is_supported_provider(PROVIDER_JENKINS));
         assert!(is_supported_provider(PROVIDER_UPTIME_KUMA));
         assert!(is_supported_provider(PROVIDER_BESZEL));
+        assert!(is_supported_provider(PROVIDER_REGISTRY));
         assert!(!is_supported_provider("github"));
         assert!(!is_supported_provider(""));
         // 前端下拉的 id 是精确匹配，大小写/空白都不能被当成支持。
@@ -993,6 +1150,8 @@ mod tests {
         assert!(!is_supported_provider(" uptime-kuma "));
         assert!(!is_supported_provider("Beszel"));
         assert!(!is_supported_provider(" beszel "));
+        assert!(!is_supported_provider("Registry"));
+        assert!(!is_supported_provider(" registry "));
     }
 
     #[test]
@@ -1070,7 +1229,11 @@ mod tests {
     fn normalizes_beszel_email_like_contract() {
         // gitlab / dockhand / uptime-kuma：忽略入参，恒为 NULL。
         assert_eq!(
-            normalize_username(PROVIDER_GITLAB, Some("you@example.com"), Some("old@example.com")),
+            normalize_username(
+                PROVIDER_GITLAB,
+                Some("you@example.com"),
+                Some("old@example.com")
+            ),
             Ok(None)
         );
         assert_eq!(
@@ -1148,6 +1311,82 @@ mod tests {
         ] {
             assert_eq!(
                 normalize_username(PROVIDER_BESZEL, Some(valid), None),
+                Ok(Some(valid.to_string()))
+            );
+        }
+    }
+
+    #[test]
+    fn normalizes_registry_username_like_contract() {
+        // registry 新建：trim 后必须非空（docker login 需要用户名 + 密码/token）。
+        assert_eq!(
+            normalize_username(PROVIDER_REGISTRY, Some("  robot$flowlet+pull  "), None),
+            Ok(Some("robot$flowlet+pull".to_string()))
+        );
+        assert_eq!(
+            normalize_username(PROVIDER_REGISTRY, None, None).unwrap_err(),
+            "镜像仓库需要填写用户名（docker login 需要用户名 + 密码/token）"
+        );
+        assert_eq!(
+            normalize_username(PROVIDER_REGISTRY, Some("   "), None).unwrap_err(),
+            "镜像仓库需要填写用户名（docker login 需要用户名 + 密码/token）"
+        );
+
+        // registry 编辑：空值保留原值；原值也空同样报空用户名错误。
+        assert_eq!(
+            normalize_username(PROVIDER_REGISTRY, None, Some("robot$flowlet+pull")),
+            Ok(Some("robot$flowlet+pull".to_string()))
+        );
+        assert_eq!(
+            normalize_username(PROVIDER_REGISTRY, Some(""), Some("robot$flowlet+pull")),
+            Ok(Some("robot$flowlet+pull".to_string()))
+        );
+        assert_eq!(
+            normalize_username(PROVIDER_REGISTRY, Some("   "), Some("alice")),
+            Ok(Some("alice".to_string()))
+        );
+        assert_eq!(
+            normalize_username(PROVIDER_REGISTRY, None, Some("   ")).unwrap_err(),
+            "镜像仓库需要填写用户名（docker login 需要用户名 + 密码/token）"
+        );
+
+        // 255 个字符是上限（按 Unicode 字符数，不是 UTF-8 字节数）。
+        assert!(normalize_username(PROVIDER_REGISTRY, Some(&"a".repeat(255)), None).is_ok());
+        assert_eq!(
+            normalize_username(PROVIDER_REGISTRY, Some(&"a".repeat(256)), None).unwrap_err(),
+            "用户名不能超过 255 个字符"
+        );
+        assert!(
+            normalize_username(PROVIDER_REGISTRY, Some(&"用".repeat(255)), None).is_ok(),
+            "长度按字符数而不是 UTF-8 字节数"
+        );
+
+        // 冒号（Basic 认证分隔符）、空白、控制字符一律拒绝。
+        for invalid in [
+            "robot:pull",
+            "robot pull",
+            "robot\tpull",
+            "robot\npull",
+            "robot\u{0}pull",
+            "robot\u{7f}pull",
+        ] {
+            assert_eq!(
+                normalize_username(PROVIDER_REGISTRY, Some(invalid), None).unwrap_err(),
+                "用户名不能包含冒号、空格或控制字符",
+                "invalid username accepted: {invalid:?}"
+            );
+        }
+        // `$`、`+`、`_`、`-` 与常规字符明确允许（Harbor robot account 形态）。
+        for valid in [
+            "robot$flowlet+pull",
+            "robot$project+name",
+            "alice_wang",
+            "alice-wang",
+            "用户名",
+            "alice@example.com",
+        ] {
+            assert_eq!(
+                normalize_username(PROVIDER_REGISTRY, Some(valid), None),
                 Ok(Some(valid.to_string()))
             );
         }
@@ -1331,7 +1570,10 @@ mod tests {
 
         // 多实例（--profile=mon）：三把键都跟着前缀走。
         beszel.env_prefix = "BESZEL_MON".to_string();
-        let keys: Vec<String> = env_keys(&beszel).into_iter().map(|(key, _, _)| key).collect();
+        let keys: Vec<String> = env_keys(&beszel)
+            .into_iter()
+            .map(|(key, _, _)| key)
+            .collect();
         assert_eq!(
             keys,
             vec!["BESZEL_MON_URL", "BESZEL_MON_EMAIL", "BESZEL_MON_PASSWORD"]
@@ -1346,6 +1588,57 @@ mod tests {
     }
 
     #[test]
+    fn maps_registry_export_to_three_env_keys() {
+        let mut registry = export(PROVIDER_REGISTRY, "");
+        registry.base_url = "https://hub.example.com".to_string();
+        registry.username = Some("robot$flowlet+pull".to_string());
+        // 地址键是 `_HOST`（值去掉 scheme/路径），固定顺序 HOST / USER / TOKEN。
+        assert_eq!(
+            env_keys(&registry),
+            vec![
+                (
+                    "REGISTRY_HOST".to_string(),
+                    "hub.example.com".to_string(),
+                    "service"
+                ),
+                (
+                    "REGISTRY_USER".to_string(),
+                    "robot$flowlet+pull".to_string(),
+                    "service"
+                ),
+                (
+                    "REGISTRY_TOKEN".to_string(),
+                    "fixture-token".to_string(),
+                    "cli_token"
+                ),
+            ]
+        );
+
+        // 带端口：HOST 保留端口（docker login 直接用它）。
+        registry.base_url = "http://10.1.1.1:5000".to_string();
+        assert_eq!(env_keys(&registry)[0].0, "REGISTRY_HOST");
+        assert_eq!(env_keys(&registry)[0].1, "10.1.1.1:5000");
+
+        // 多实例（--profile=NA）：三把键都跟着前缀走，默认前缀不会产生 REGISTRY_REGISTRY。
+        registry.env_prefix = "REGISTRY_NA".to_string();
+        let keys: Vec<String> = env_keys(&registry)
+            .into_iter()
+            .map(|(key, _, _)| key)
+            .collect();
+        assert_eq!(
+            keys,
+            vec!["REGISTRY_NA_HOST", "REGISTRY_NA_USER", "REGISTRY_NA_TOKEN"]
+        );
+
+        // username 缺失（例如未升级的旧 Host 导出）时 USER 值为空串而不是丢键。
+        registry.username = None;
+        let pairs = env_keys(&registry);
+        assert_eq!(pairs.len(), 3);
+        assert_eq!(pairs[1].0, "REGISTRY_NA_USER");
+        assert_eq!(pairs[1].1, "");
+    }
+
+    #[test]
     fn normalizes_env_prefix_like_contract() {
         assert_eq!(
             normalize_env_prefix("", PROVIDER_DOCKHAND).unwrap(),
@@ -1354,6 +1647,14 @@ mod tests {
         assert_eq!(
             normalize_env_prefix("  ", PROVIDER_GITLAB).unwrap(),
             DEFAULT_ENV_PREFIX_GITLAB
+        );
+        assert_eq!(
+            normalize_env_prefix("", PROVIDER_REGISTRY).unwrap(),
+            DEFAULT_ENV_PREFIX_REGISTRY
+        );
+        assert_eq!(
+            normalize_env_prefix(" registry_na ", PROVIDER_REGISTRY).unwrap(),
+            "REGISTRY_NA"
         );
         assert_eq!(
             normalize_env_prefix(" dockhand_na ", PROVIDER_DOCKHAND).unwrap(),
@@ -1547,8 +1848,35 @@ mod tests {
         assert_eq!(env_keys(&exported)[1].1, "you@example.com");
     }
 
+    #[test]
+    fn registry_view_keeps_username_and_default_prefix() {
+        let mut registry_row = row("r1", "镜像仓库", PROVIDER_REGISTRY, None, true);
+        registry_row.base_url = "https://hub.example.com".to_string();
+        registry_row.username = Some("robot$flowlet+pull".to_string());
+        let view = to_view(&registry_row);
+        assert_eq!(view.username.as_deref(), Some("robot$flowlet+pull"));
+        assert_eq!(view.env_prefix, DEFAULT_ENV_PREFIX_REGISTRY);
+        let value = serde_json::to_value(&view).unwrap();
+        assert_eq!(value["provider"], "registry");
+        assert_eq!(value["username"], "robot$flowlet+pull");
+
+        // 导出（flowlet pull 用）同样带用户名；env_keys 用它生成 `_HOST`。
+        let exported = export_from_row(&registry_row);
+        assert_eq!(exported.username.as_deref(), Some("robot$flowlet+pull"));
+        assert_eq!(
+            env_keys(&exported)[0],
+            (
+                "REGISTRY_HOST".to_string(),
+                "hub.example.com".to_string(),
+                "service"
+            )
+        );
+    }
+
     /// 测试用：复用 `export()` 的投影逻辑（避免复制粘贴 ServiceCredentialExport 构造）。
-    fn export_from_row(row: &crate::core::storage::ServiceCredentialRow) -> ServiceCredentialExport {
+    fn export_from_row(
+        row: &crate::core::storage::ServiceCredentialRow,
+    ) -> ServiceCredentialExport {
         ServiceCredentialExport {
             name: row.name.clone(),
             provider: row.provider.clone(),

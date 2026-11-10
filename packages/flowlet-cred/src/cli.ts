@@ -8,9 +8,9 @@
 // 与 Rust 的刻意差异（docs/credential-cli.md §3）：
 // - `get` 默认掩码，`--reveal` 才输出明文（安全默认）；`--mask` 仍兼容；
 // - 额外提供 `clear` 清空全部凭据（保留注释与文件头）；
-// - `gitlab` / `dockhand` / `jenkins` / `beszel` / `uptime-kuma` 子命令支持 `--profile` 多实例
-//   （键名 {PREFIX}_URL/{PREFIX}_TOKEN，jenkins 额外有 {PREFIX}_USER，beszel 用 _EMAIL/_PASSWORD，
-//   uptime-kuma 用 _API_KEY）。
+// - `gitlab` / `dockhand` / `jenkins` / `beszel` / `uptime-kuma` / `registry` 子命令支持 `--profile`
+//   多实例（键名 {PREFIX}_URL/{PREFIX}_TOKEN，jenkins 额外有 {PREFIX}_USER，beszel 用 _EMAIL/_PASSWORD，
+//   uptime-kuma 用 _API_KEY，registry 用 _HOST/_USER/_TOKEN）。
 import { spawn, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { hostname } from "node:os";
@@ -51,6 +51,12 @@ import {
   summarizeMetrics,
   type KumaMetrics,
 } from "./uptime-kuma.ts";
+import {
+  RegistryClient,
+  RegistryError,
+  normalizeUsername as normalizeRegistryUsername,
+  registryHost,
+} from "./registry.ts";
 import { CredentialStore, nowRfc3339, type ExportFormat } from "./store.ts";
 
 const GITLAB_DEFAULT_PREFIX = "GITLAB";
@@ -58,6 +64,7 @@ const DOCKHAND_DEFAULT_PREFIX = "DOCKHAND";
 const JENKINS_DEFAULT_PREFIX = "JENKINS";
 const BESZEL_DEFAULT_PREFIX = "BESZEL";
 const UPTIME_KUMA_DEFAULT_PREFIX = "UPTIME_KUMA";
+const REGISTRY_DEFAULT_PREFIX = "REGISTRY";
 
 const USAGE = `flowlet — Flowlet 全局凭据库
 
@@ -115,6 +122,14 @@ Uptime Kuma（Prometheus /metrics 只读，Basic 空用户名 + API Key）：
   flowlet uptime-kuma clear [--profile=TW]                              移除对应前缀的 Uptime Kuma 凭据
   （2.x 没有监控管理 REST API：API Key 只用于指标鉴权，不能创建/暂停监控）
 
+OCI 镜像仓库（Docker Registry HTTP API V2 / OCI Distribution，用户名 + 密码/token）：
+  flowlet registry set --url=hub.example.com --user=NAME [--profile=NA]  token 从 stdin 读取并校验
+  flowlet registry status [--insecure] [--profile=NA]                   仓库地址、Registry V2 认证、用户
+  flowlet registry env [--profile=NA]                                   输出 {PREFIX}_HOST / _USER / _TOKEN
+  flowlet registry clear [--profile=NA]                                 移除对应前缀的 OCI 镜像仓库凭据
+  （只按标准 GET /v2/ + WWW-Authenticate Bearer 认证；不做 Harbor 专属探测，
+    robot account 当普通用户名 + token，--url 只填仓库地址、不要带路径）
+
 远程同步（Docker / 服务端管理的凭据 → 本机 .env）：
   flowlet login --server=http://10.100.217.60:20134 [--name=机器名] [--no-browser] [--insecure] [--timeout=180]
                                             浏览器授权（登录管理台后确认），只保存仅能读服务凭据的本机授权
@@ -127,8 +142,9 @@ Uptime Kuma（Prometheus /metrics 只读，Basic 空用户名 + API Key）：
   - 值永远不会被 list 打印；set 时建议通过 stdin 传值，避免出现在进程列表里。
   - \`run\` 是推荐用法：Agent 不需要看到明文，只要让命令用上凭据。
   - 凭据类型（--kind）目前只是标签，默认 api_key。
-  - --profile 生成 {PREFIX}_URL / {PREFIX}_TOKEN；省略时用 provider 默认前缀（GITLAB / DOCKHAND / JENKINS / BESZEL / UPTIME_KUMA）。
-    jenkins 额外生成 {PREFIX}_USER；beszel 生成 {PREFIX}_EMAIL / {PREFIX}_PASSWORD；uptime-kuma 的 token 键是 {PREFIX}_API_KEY。
+  - --profile 生成 {PREFIX}_URL / {PREFIX}_TOKEN；省略时用 provider 默认前缀（GITLAB / DOCKHAND / JENKINS / BESZEL / UPTIME_KUMA / REGISTRY）。
+    jenkins 额外生成 {PREFIX}_USER；beszel 生成 {PREFIX}_EMAIL / {PREFIX}_PASSWORD；uptime-kuma 的 token 键是 {PREFIX}_API_KEY；
+    registry 生成 {PREFIX}_HOST（host[:port]，无 scheme）/ _USER / _TOKEN。
     同一 provider 多实例必须使用不同 --profile（如 --profile=na / --profile=sz / --profile=self）。
   - pull 的凭据优先级：--token > FLOWLET_ADMIN_TOKEN > 本机授权（flowlet login 保存的 auth.json）。
     OIDC-only 实例不开启管理 Bearer，请先用 flowlet login 登录；本机授权过期/被撤销时重新执行 login。
@@ -373,6 +389,8 @@ async function run(argv: string[]): Promise<number> {
       return beszelCommand(rest);
     case "uptime-kuma":
       return uptimeKumaCommand(rest);
+    case "registry":
+      return registryCommand(rest);
     default:
       throw new Error(`未知命令：${command}\n\n${USAGE}`);
   }
@@ -599,6 +617,7 @@ const PROVIDER_DEFAULT_PREFIX: Record<string, string> = {
   jenkins: "JENKINS",
   beszel: "BESZEL",
   "uptime-kuma": "UPTIME_KUMA",
+  registry: "REGISTRY",
 };
 
 function envKeys(entry: ServiceCredentialExport): Array<[string, string, string]> {
@@ -622,6 +641,16 @@ function envKeys(entry: ServiceCredentialExport): Array<[string, string, string]
     const username = typeof entry.username === "string" ? entry.username : "";
     return [
       [`${prefix}_URL`, entry.baseUrl, "service"],
+      [`${prefix}_USER`, username, "service"],
+      [`${prefix}_TOKEN`, entry.token, "cli_token"],
+    ];
+  }
+  if (entry.provider === "registry") {
+    // 契约 §5：地址键是 `{PREFIX}_HOST`（host[:port]、无 scheme、无路径），
+    // 三把键顺序固定；旧服务端 export 没有 username 时 USER 写空串。
+    const username = typeof entry.username === "string" ? entry.username : "";
+    return [
+      [`${prefix}_HOST`, registryHost(entry.baseUrl), "service"],
       [`${prefix}_USER`, username, "service"],
       [`${prefix}_TOKEN`, entry.token, "cli_token"],
     ];
@@ -1687,6 +1716,160 @@ function storedUptimeKumaClient(
     );
   }
   return new UptimeKumaClient(url, token, { insecure });
+}
+
+// ─── OCI 镜像仓库子命令（Registry V2 / OCI Distribution） ───────────────────
+
+/**
+ * registry 的三把键：地址键是 `{PREFIX}_HOST`（不是 `_URL`）。
+ * 默认前缀 `REGISTRY` → `REGISTRY_HOST` / `REGISTRY_USER` / `REGISTRY_TOKEN`；
+ * `--profile=na` → `REGISTRY_NA_HOST` / `REGISTRY_NA_USER` / `REGISTRY_NA_TOKEN`。
+ */
+function registryKeys(prefix: string): { hostKey: string; userKey: string; tokenKey: string } {
+  return { hostKey: `${prefix}_HOST`, userKey: `${prefix}_USER`, tokenKey: `${prefix}_TOKEN` };
+}
+
+async function registryCommand(args: string[]): Promise<number> {
+  const sub = positional(args, 0);
+  const insecure = flagPresent(args, "--insecure");
+  const profile = resolveProfile(args, REGISTRY_DEFAULT_PREFIX);
+  switch (sub) {
+    case "set":
+      return registrySet(args, insecure, profile);
+    case "status":
+      return registryStatus(args, insecure, profile);
+    case "env": {
+      const keys = registryKeys(profile.prefix);
+      const store = openStore();
+      const host = storedValue(store, keys.hostKey);
+      if (host === null) {
+        throw new Error(
+          `尚未配置 OCI 镜像仓库地址，先运行 flowlet registry set --url=hub.example.com --user=NAME${profileHint(profile)}`,
+        );
+      }
+      const username = storedValue(store, keys.userKey);
+      if (username === null) {
+        throw new Error(
+          `尚未保存 OCI 镜像仓库用户名，先运行 flowlet registry set --url=hub.example.com --user=NAME${profileHint(profile)}`,
+        );
+      }
+      const token = storedValue(store, keys.tokenKey);
+      if (token === null) {
+        throw new Error(
+          `尚未保存 OCI 镜像仓库密码/token，先运行 flowlet registry set --url=hub.example.com --user=NAME${profileHint(profile)}`,
+        );
+      }
+      errLine("注意：下面输出包含明文密码/token，只应在可信 shell 中使用。");
+      // 落库保留 origin（status 复用 scheme）；环境变量只要 host[:port]。
+      outLine(`${keys.hostKey}=${registryHost(host)}`);
+      outLine(`${keys.userKey}=${username}`);
+      outLine(`${keys.tokenKey}=${token}`);
+      return 0;
+    }
+    case "clear": {
+      const keys = registryKeys(profile.prefix);
+      const store = openStore();
+      const hostRemoved = store.unset(keys.hostKey);
+      const userRemoved = store.unset(keys.userKey);
+      const tokenRemoved = store.unset(keys.tokenKey);
+      const suffix = profileDescription(profile);
+      outLine(
+        hostRemoved || userRemoved || tokenRemoved
+          ? `已移除 OCI 镜像仓库凭据${suffix}`
+          : `没有可移除的 OCI 镜像仓库凭据${suffix}`,
+      );
+      return 0;
+    }
+    default:
+      throw new Error(`未知的 registry 子命令：${sub}（set|status|env|clear）`);
+  }
+}
+
+/**
+ * `--url` / `--user` 必填（docker login 需要用户名 + 密码/token），token 从 stdin 读取；
+ * 先走标准 `GET /v2/` 认证流程校验，通过后才落库（与其它 provider 一致）。
+ */
+async function registrySet(
+  args: string[],
+  insecure: boolean,
+  profile: ProfileContext,
+): Promise<number> {
+  const store = openStore();
+  const keys = registryKeys(profile.prefix);
+  const url = optionValue(args, "--url");
+  if (url === null) {
+    throw new Error(
+      `缺少 --url，例如：flowlet registry set --url=hub.example.com --user=NAME${profileHint(profile)}`,
+    );
+  }
+  const rawUsername = optionValue(args, "--user");
+  if (rawUsername === null) {
+    throw new Error(
+      "registry set 需要 --user=<用户名>（docker login 需要用户名 + 密码/token）",
+    );
+  }
+  const username = normalizeRegistryUsername(rawUsername);
+  const token = readStdinValue();
+  if (token === "") {
+    throw new Error(
+      "镜像仓库密码/token 不能为空：用 `printf '%s' \"$TOKEN\" | flowlet registry set ...`",
+    );
+  }
+  let base: string;
+  try {
+    // 与其它 provider 一致：先校验后落库；失败不写任何键。
+    const client = new RegistryClient(url, username, token, { insecure });
+    await client.check();
+    base = client.base();
+  } catch (error) {
+    const detail = error instanceof RegistryError ? error.toString() : errorMessage(error);
+    throw new Error(
+      `${detail}\n未保存。请检查镜像仓库地址、用户名与密码/token 是否有效。`,
+    );
+  }
+  store.set(keys.hostKey, base, "service", "OCI 镜像仓库地址");
+  store.set(keys.userKey, username, "service", "OCI 镜像仓库用户名");
+  store.set(keys.tokenKey, token, "cli_token", "OCI 镜像仓库密码/token");
+  outLine(`已保存 OCI 镜像仓库 凭据${profileDescription(profile)}：${base}`);
+  return 0;
+}
+
+async function registryStatus(
+  args: string[],
+  insecure: boolean,
+  profile: ProfileContext,
+): Promise<number> {
+  const store = openStore();
+  const keys = registryKeys(profile.prefix);
+  const hint = profileHint(profile);
+  const rawHost = storedValue(store, keys.hostKey);
+  if (rawHost === null) {
+    throw new Error(
+      `尚未配置 OCI 镜像仓库地址，先运行 flowlet registry set --url=hub.example.com --user=NAME${hint}`,
+    );
+  }
+  const username = storedValue(store, keys.userKey);
+  if (username === null) {
+    throw new Error(
+      `尚未保存 OCI 镜像仓库用户名，先运行 flowlet registry set --url=hub.example.com --user=NAME${hint}`,
+    );
+  }
+  const token = storedValue(store, keys.tokenKey);
+  if (token === null) {
+    throw new Error(
+      `尚未保存 OCI 镜像仓库密码/token，先运行 flowlet registry set --url=hub.example.com --user=NAME${hint}`,
+    );
+  }
+  // 本地落库可能是 origin（set）或裸 host（pull）：无 scheme 时按 https 补全。
+  const base = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(rawHost) ? rawHost : `https://${rawHost}`;
+  const client = new RegistryClient(base, username, token, { insecure });
+  const result = await client.check();
+  outLine(`仓库：${registryHost(client.base())}`);
+  outLine(
+    result.version === null ? "认证：Registry V2" : `认证：Registry V2（${result.version}）`,
+  );
+  outLine(`用户：${result.username}`);
+  return 0;
 }
 
 // ─── main ───────────────────────────────────────────────────────────────────

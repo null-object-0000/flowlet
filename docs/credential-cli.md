@@ -105,7 +105,7 @@ node packages/flowlet-cred/src/cli.ts init
 npm link ./packages/flowlet-cred && flowlet init   # bin shim: bin/flowlet.mjs
 ```
 
-Agent 机器不需要仓库，直接用 Web Host 页面提供的下载安装脚本（见 §14）：
+Agent 机器不需要仓库，直接用 Web Host 页面提供的下载安装脚本（见 §15）：
 
 ```bash
 curl -fsSL http://<flowlet-host>:20134/downloads/install-flowlet.sh \
@@ -179,6 +179,14 @@ flowlet registry set --url=hub.example.com --user=robot\$project+name [--profile
 flowlet registry status [--insecure] [--profile=NA]       # 仓库、Registry V2 认证、用户名
 flowlet registry env [--profile=NA]                       # {PREFIX}_HOST / _USER / _TOKEN
 flowlet registry clear [--profile=NA]
+
+flowlet uptime-kuma set --url=https://host/uptime-kuma [--profile=TW]
+                                                 # API Key 从 stdin 读取；先取 /metrics 校验通过才落库
+flowlet uptime-kuma status [--insecure] [--profile=TW]    # 指标样本、内部版本、监控 up/down 数量
+flowlet uptime-kuma monitors [--json] [--insecure] [--profile=TW]
+                                                 # 从 /metrics 解析监控项状态（只读）
+flowlet uptime-kuma env [--profile=TW]                    # {PREFIX}_URL / {PREFIX}_API_KEY
+flowlet uptime-kuma clear [--profile=TW]
 ```
 
 ### 3.3 Node 与 Rust legacy 的已知差异
@@ -284,8 +292,11 @@ server 的 token。三者都没有时报错：
   `{PREFIX}_USER`（用户名，kind `service`）、`{PREFIX}_TOKEN`（密码/token，kind `cli_token`）。
   地址键用 `_HOST` 而不是 `_URL`：它保存的是可以直传 `docker login` 的主机名，
   而且默认前缀本身就是 `REGISTRY`，若写成 `{PREFIX}_REGISTRY` 会得到 `REGISTRY_REGISTRY`；
+- Uptime Kuma（`uptime-kuma`）的 API Key 只用于 Prometheus `/metrics` 鉴权，密钥键是
+  **`{PREFIX}_API_KEY`**（不是 `_TOKEN`），与公司 infra skill 已有的 `UPTIME_KUMA_API_KEY` 对齐；
 - 未填前缀用 provider 默认值：`gitlab` → `GITLAB`、`dockhand` → `DOCKHAND`、
-  `jenkins` → `JENKINS`、`beszel` → `BESZEL`、`registry` → `REGISTRY`（与第一期兼容）；
+  `jenkins` → `JENKINS`、`uptime-kuma` → `UPTIME_KUMA`、`beszel` → `BESZEL`、
+  `registry` → `REGISTRY`（与第一期兼容）；
 - 前缀规则：trim 后转大写，`^[A-Z][A-Z0-9_]{0,23}$`，最长 24 个字符；
   非法时保存失败：`环境前缀只能包含字母、数字和下划线，且以字母开头` / `环境前缀不能超过 24 个字符`；
 - **唯一性**：所有已启用（`enabled=true`）凭据解析后的前缀必须唯一（不同 provider 也算冲突，
@@ -401,7 +412,7 @@ flowlet registry clear --profile=na      # 只删 NA 这个前缀
 - **列表**：名称、服务类型、实例地址（Jenkins / OCI 镜像仓库额外展示 `@用户名`，Beszel 展示 `@邮箱`）、**环境前缀**（tooltip 展开
   `{PREFIX}_URL` / `{PREFIX}_TOKEN`，Jenkins 还有 `{PREFIX}_USER`，Beszel 还有 `{PREFIX}_EMAIL` / `{PREFIX}_PASSWORD`，
   OCI 镜像仓库是 `{PREFIX}_HOST` / `{PREFIX}_USER` / `{PREFIX}_TOKEN`）、Token 掩码、最近校验结果、启停状态；
-- **添加 / 编辑**：服务类型（GitLab / Dockhand / Jenkins / Beszel / OCI 镜像仓库，创建时可选、编辑时不可切换）、名称、实例地址、
+- **添加 / 编辑**：服务类型（GitLab / Dockhand / Jenkins / Uptime Kuma / Beszel / OCI 镜像仓库，创建时可选、编辑时不可切换）、名称、实例地址、
   用户名（Jenkins 必填；Beszel 显示「邮箱」且必填；OCI 镜像仓库显示「用户名」且必填，robot account
   直接填 `robot$project+name`）、环境别名（Env 前缀，留空 = 默认）、Token、备注、启用；
   表单文案（token 说明、地址 placeholder、警告 Banner、前缀预览）按所选 provider 动态展示；
@@ -414,14 +425,16 @@ flowlet registry clear --profile=na      # 只删 NA 这个前缀
   | `jenkins` | `JENKINS` | `GET {base}/me/api/json`（Basic 认证） | `{PREFIX}_URL` / `{PREFIX}_USER` / `{PREFIX}_TOKEN` |
   | `beszel` | `BESZEL` | `POST {base}/api/collections/users/auth-with-password`（邮箱 + 密码换 token） | `{PREFIX}_URL` / `{PREFIX}_EMAIL` / `{PREFIX}_PASSWORD` |
   | `registry` | `REGISTRY` | `GET {base}/v2/`（标准 Registry V2 流程：Basic → `WWW-Authenticate` Bearer 质询 → token → 重试） | `{PREFIX}_HOST` / `{PREFIX}_USER` / `{PREFIX}_TOKEN` |
+  | `uptime-kuma` | `UPTIME_KUMA` | `GET {base}/metrics`（Basic 空用户名 + API Key，要求 Prometheus 文本） | `{PREFIX}_URL` / `{PREFIX}_API_KEY` |
 
 - **测试**：对已保存凭据重新校验并刷新 `last_verified_at` / `last_error`；成功 toast 会拼
   `@用户名 · 版本 · provider 摘要`（Dockhand 的摘要是「{n} 个环境」，Jenkins 的版本来自
   `X-Jenkins` 响应头，Beszel 的版本来自 `/api/beszel/info`、摘要是「{n} 台系统」，
-  registry 的版本来自 `docker-distribution-api-version` 响应头、没有摘要）；
+  registry 的版本来自 `docker-distribution-api-version` 响应头、没有摘要，Uptime Kuma 的版本
+  来自 `app_version` 指标、摘要是「{n} 个监控（{m} 正常 / {k} 异常）」）；
 - **删除**：清除服务端密文；已同步到 Agent 机器的 `.env` 不受影响；
 - **本机接入**（仅 Web Host）：页面头部「本机接入」按钮提供 CLI / Skills 下载与一键命令，
-  以及「已授权的 CLI」列表（见 §4.2 与 §14）。
+  以及「已授权的 CLI」列表（见 §4.2 与 §15）。
 
 对应的管理命令（桌面 Tauri 与 Web 白名单同名）：
 
@@ -713,7 +726,50 @@ flowlet registry clear
 - 地址键叫 `{PREFIX}_HOST` 而不是 `{PREFIX}_URL`：值是 `docker login` 直接可用的主机名，
   且默认前缀就是 `REGISTRY`，避免出现 `REGISTRY_REGISTRY` 这种重复前缀。
 
-## 14. 本机接入（下载安装）
+## 14. Uptime Kuma 适配（Prometheus 指标只读）
+
+实测基线：上游稳定版 **2.5.9** + 公司子路径改造（`https://<host>/uptime-kuma`，
+`disableAuth` 与 API Key 解耦）。**2.x 没有监控管理 REST API**：API Key 只用于 Prometheus
+`/metrics` 鉴权，不是监控项 / 通知的管理令牌；监控管理仍走页面或 Socket.IO。
+
+| 约束 | 做法 |
+|---|---|
+| API Key 不能当管理令牌 | 只做 `/metrics` 只读校验与 `status` / `monitors` 查询，不提供创建/暂停监控 |
+| 子路径部署（`/uptime-kuma`） | 地址归一保留路径；粘贴 `/#/settings/api-keys` 时丢弃 fragment |
+| `/metrics` 用 Basic 认证 | 用户名为空、密码为 Key：`Basic base64(":" + key)`；401 即 Key 无效 |
+| 子路径写错会 200 HTML | 必须同时校验 `Content-Type` 为 `text/plain`/`openmetrics` 且至少一条样本 |
+| `disableAuth=true` 的实例 | 可能匿名 200，此时无法从响应判断 Key 真伪；保存按成功处理（边界） |
+| 不跟随重定向 | 3xx 直接报错，避免把 Key 发到别处；10s 超时 |
+| 公司内部构建版本 | `app_version{version="0.0.28"}` → `version`（不是上游 2.5.9） |
+| 监控状态指标名 | `monitor_status`（**不是** `kuma_monitor_status`），组监控 `monitor_type="group"` |
+
+默认实例存两个键：`UPTIME_KUMA_URL`（kind `service`）与
+**`UPTIME_KUMA_API_KEY`**（kind `cli_token`；后缀是 `_API_KEY` 而不是其它 provider 的
+`_TOKEN`，与公司现有 infra skill 的变量名保持一致）；多实例用 `--profile=<alias>` 生成
+`UPTIME_KUMA_{ALIAS}_*`。
+
+```bash
+printf '%s' "$KUMA_API_KEY" | flowlet uptime-kuma set --url=https://host/uptime-kuma
+flowlet uptime-kuma status
+# 地址：https://host/uptime-kuma
+# 指标：Prometheus 文本，466 个样本
+# 版本：0.0.28
+# 监控：54 个监控（54 正常 / 0 异常）
+# 说明：API Key 只用于 /metrics 指标鉴权，不能管理监控项或通知
+flowlet uptime-kuma monitors [--json]   # 从 /metrics 解析 UP/DOWN + id + 名称
+flowlet uptime-kuma env                 # UPTIME_KUMA_URL / UPTIME_KUMA_API_KEY
+flowlet uptime-kuma clear
+```
+
+设计取舍：
+
+- 不实现 Socket.IO 监控管理：API Key 不是管理令牌，CLI 也不引入 socket.io 依赖；
+- `monitors` 从同一条 `/metrics` 解析，覆盖「哪几个监控 down」的只读诊断；
+- `set` 先验证再落库：401 / 200-HTML / 重定向 / 0 样本都给出可执行提示；
+- 版本取 `app_version` 指标：公司内部构建会生成 `0.0.xx` 资源版本，不能据此判断上游是否升级；
+- `pull` 把服务端 Kuma 凭据映射为 `{PREFIX}_URL` / `{PREFIX}_API_KEY`。
+
+## 15. 本机接入（下载安装）
 
 Web Host 的「服务凭据」页提供「本机接入」抽屉（桌面模式不显示），让 Agent 机器无需仓库即可用上 CLI：
 
@@ -763,7 +819,7 @@ Web Host 的「服务凭据」页提供「本机接入」抽屉（桌面模式�
 
 - 下载产物只包含 CLI 源码与通用 Skills，不包含任何真实 token、`.env` 或 `.agents/` 内容。
 
-## 15. 与 Flowlet 其它能力的关系
+## 16. 与 Flowlet 其它能力的关系
 
 - **与渠道账号**：`channel_accounts.api_key` 是上游模型账号，走路由与余额同步；
   全局凭据库不参与模型路由，两者不要互相写入。
@@ -779,7 +835,7 @@ Web Host 的「服务凭据」页提供「本机接入」抽屉（桌面模式�
 - **与 UI**：`core/credential_store.rs` 是纯 Rust 模块，后续可直接被桌面/Web 命令复用
   （读列表、读单值、写值、删除），不需要重写存储层。
 
-## 16. 验收
+## 17. 验收
 
 - `cargo test --no-default-features --lib credential_store`：9 个用例覆盖读写、顺序、
   注释保留、引号编码、权限、重复键、导出格式、非法键名；
@@ -801,6 +857,14 @@ Web Host 的「服务凭据」页提供「本机接入」抽屉（桌面模式�
   401/403/404/429 与网络错误映射、用户名校验；
 - `node --test packages/flowlet-core/src/web/__tests__/registry.test.ts`：Node Host 侧的
   同一套 Registry V2 校验与错误文案（与 Rust / CLI 逐字一致）；
+- `cargo test --no-default-features --lib uptime_kuma`：URL 归一（子路径 / `#/settings/api-keys`
+  fragment / 粘贴 `/metrics`）、Basic 空用户名头、`monitor_status` 与 `app_version` 解析
+  （含中文 label 空格与 Prometheus 转义）、空 Key 拒绝；
+- `node --test packages/flowlet-core/src/web/__tests__/uptime-kuma.test.ts`：
+  Web Host 的同一套归一/解析/错误文案，以及 `checkUptimeKuma` 的 detail/version 与
+  `envKeys` 的 `UPTIME_KUMA_API_KEY`；
+- `node --test packages/flowlet-cred/src/__tests__/uptime-kuma.test.ts`：
+  CLI mock `/metrics` 覆盖 200 文本、401、200 HTML、302（不跟随）、404、200 空样本、空 Key；
 - `npm run cred:typecheck` / `npm run cred:test`：Node CLI 覆盖本地库、GitLab mock、Dockhand
   mock、Jenkins mock、Beszel mock、Registry V2 mock、多 profile（`--profile=na/sz/mon` 独立
   键名与实例切换）、`pull` 的 `envPrefix` 映射、`DOCKHAND_*` / `JENKINS_*` / `BESZEL_*` /
@@ -830,6 +894,10 @@ Web Host 的「服务凭据」页提供「本机接入」抽屉（桌面模式�
   地址粘贴 `/v2/` 或带路径被拒绝、多实例 `--profile` 键名隔离（`REGISTRY_NA_HOST`）、
   `pull` 写入 `_HOST`（无 scheme）/ `_USER` / `_TOKEN`，并用这三把键实际跑通
   `docker login <host> -u <user> --password-stdin`；确认没有请求任何 `/api/v2.0/*`；
+- 手工冒烟（Uptime Kuma）：对真实 2.5.9 实例（子路径 + API Key）执行
+  `uptime-kuma set → status → monitors → env → clear`，确认 401 错误 Key 不落库、
+  `status` 显示 `app_version` 与监控 up/down 计数、`monitors` 列出 UP/DOWN 项、
+  `{PREFIX}_API_KEY` 键名正确；再对 mock 覆盖 200 HTML（子路径写错）与 302（不跟随）；
 - 远程登录授权（v4）：
   - `flowlet login --server=<oidc-instance>` 一条命令跑通：终端打印授权 URL、浏览器回调完成
     → `auth.json` 出现该 server 记录（目录 0700 / 文件 0600、原子写、server key 归一）；

@@ -1,6 +1,12 @@
 /** 三方服务凭据的领域类型（与 Rust `core::service_credentials` 的 camelCase JSON 对齐）。 */
 
-export type CredentialProviderId = "gitlab" | "dockhand" | "jenkins" | "beszel" | "registry";
+export type CredentialProviderId =
+  | "gitlab"
+  | "dockhand"
+  | "jenkins"
+  | "uptime-kuma"
+  | "beszel"
+  | "registry";
 
 export type CredentialProvider = {
   id: string;

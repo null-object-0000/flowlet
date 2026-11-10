@@ -49,6 +49,7 @@ pub mod presets;
 pub mod proxy;
 pub mod qwen_platform;
 pub mod rate_limiter;
+pub mod registry;
 pub mod runtime_config;
 #[cfg(feature = "desktop")]
 pub mod scrape_console;

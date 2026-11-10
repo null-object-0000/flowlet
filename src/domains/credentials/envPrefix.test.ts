@@ -19,6 +19,7 @@ describe("providerDefaultEnvPrefix", () => {
     expect(providerDefaultEnvPrefix({ id: "gitlab" })).toBe("GITLAB");
     expect(providerDefaultEnvPrefix({ id: "dockhand" })).toBe("DOCKHAND");
     expect(providerDefaultEnvPrefix({ id: "jenkins" })).toBe("JENKINS");
+    expect(providerDefaultEnvPrefix({ id: "uptime-kuma" })).toBe("UPTIME_KUMA");
     expect(providerDefaultEnvPrefix({ id: "beszel" })).toBe("BESZEL");
     expect(providerDefaultEnvPrefix({ id: "registry" })).toBe("REGISTRY");
     expect(providerDefaultEnvPrefix({ id: "custom" })).toBe("CUSTOM");
@@ -61,6 +62,12 @@ describe("envKeysForProvider", () => {
       url: "BESZEL_NA_URL",
       user: "BESZEL_NA_EMAIL",
       token: "BESZEL_NA_PASSWORD",
+    });
+    // Uptime Kuma：API Key 只用于 /metrics 鉴权 → token 键是 `_API_KEY`（不是 `_TOKEN`）。
+    expect(envKeysForProvider("UPTIME_KUMA_TW", "uptime-kuma")).toEqual({
+      url: "UPTIME_KUMA_TW_URL",
+      user: null,
+      token: "UPTIME_KUMA_TW_API_KEY",
     });
     // OCI 镜像仓库：地址槽位是 host[:port]，键名用 `_HOST`（默认前缀 REGISTRY 时不会出现 REGISTRY_REGISTRY）。
     expect(envKeysForProvider("REGISTRY", "registry")).toEqual({

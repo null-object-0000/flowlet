@@ -26,6 +26,12 @@ import {
   normalizeBaseUrl as normalizeJenkinsBaseUrl,
 } from "./jenkins.ts";
 import {
+  checkRegistry,
+  normalizeRegistryUrl,
+  normalizeRegistryUsername,
+  registryHost,
+} from "./registry.ts";
+import {
   UptimeKumaClient,
   UptimeKumaError,
   normalizeBaseUrl as normalizeUptimeKumaBaseUrl,
@@ -37,13 +43,15 @@ export const PROVIDER_DOCKHAND = "dockhand";
 export const PROVIDER_JENKINS = "jenkins";
 export const PROVIDER_BESZEL = "beszel";
 export const PROVIDER_UPTIME_KUMA = "uptime-kuma";
+export const PROVIDER_REGISTRY = "registry";
 
 export interface ServiceCredentialView {
   id: string;
   name: string;
   provider: string;
   baseUrl: string;
-  /** Jenkins 用户名 / Beszel 登录邮箱（明文，不是密文）；GitLab/Dockhand 恒为 null。 */
+  /** Jenkins 用户名 / Beszel 登录邮箱 / OCI 镜像仓库用户名（明文，不是密文）；
+   * GitLab/Dockhand/Uptime Kuma 恒为 null。 */
   username: string | null;
   /** 第二期：解析后的环境变量前缀（大写）。旧行（env_prefix NULL）按 provider 默认返回。 */
   envPrefix: string;
@@ -62,8 +70,8 @@ export interface ServiceCredentialInput {
   name: string;
   provider: string;
   baseUrl: string;
-  /** Jenkins 用户名 / Beszel 登录邮箱；仅 jenkins、beszel 生效，其它 provider 忽略，
-   * 编辑时为空表示保留原值。 */
+  /** Jenkins 用户名 / Beszel 登录邮箱 / OCI 镜像仓库用户名；仅 jenkins、beszel、registry 生效，
+   * 其它 provider 忽略，编辑时为空表示保留原值。 */
   username?: string | null;
   token?: string;
   /** 环境别名（Env 前缀）；空/NULL → provider 默认前缀。 */
@@ -77,7 +85,8 @@ export interface CredentialCheck {
   ok: boolean;
   username: string | null;
   version: string | null;
-  /** provider 专属的补充说明（Dockhand 为「N 个环境」；Beszel 为「N 台系统」；GitLab 恒 null）。 */
+  /** provider 专属的补充说明（Dockhand 为「N 个环境」；Beszel 为「N 台系统」；
+   * GitLab/Registry 恒 null）。 */
   detail: string | null;
   error: string | null;
 }
@@ -86,7 +95,8 @@ export interface ServiceCredentialExport {
   name: string;
   provider: string;
   baseUrl: string;
-  /** Jenkins 用户名 / Beszel 登录邮箱；GitLab/Dockhand 恒为 null（旧服务端响应可能缺失）。 */
+  /** Jenkins 用户名 / Beszel 登录邮箱 / OCI 镜像仓库用户名；GitLab/Dockhand 恒为 null
+   * （旧服务端响应可能缺失）。 */
   username: string | null;
   envPrefix: string;
   token: string;
@@ -97,7 +107,7 @@ export interface CredentialProvider {
   label: string;
   baseUrlHint: string;
   tokenLabel: string;
-  /** 需要用户名一起认证时给出输入框标签（Jenkins 为「用户名」，Beszel 为「邮箱」）；
+  /** 需要用户名一起认证时给出输入框标签（Jenkins/Registry 为「用户名」，Beszel 为「邮箱」）；
    * 其它 provider 为 null。 */
   usernameLabel: string | null;
   /** 未设置 envPrefix 时生成的默认环境前缀（前端 placeholder/preview 用）。 */
@@ -165,6 +175,15 @@ export function providers(): CredentialProvider[] {
       defaultEnvPrefix: "BESZEL",
       available: true,
     },
+    {
+      id: PROVIDER_REGISTRY,
+      label: "OCI 镜像仓库",
+      baseUrlHint: "https://hub.example.com（只填仓库地址，不要带路径）",
+      tokenLabel: "密码 / Token（docker login 的密码；Harbor robot account 填其 token）",
+      usernameLabel: "用户名",
+      defaultEnvPrefix: "REGISTRY",
+      available: true,
+    },
   ];
 }
 
@@ -174,27 +193,30 @@ export function isSupportedProvider(provider: string): boolean {
     provider === PROVIDER_DOCKHAND ||
     provider === PROVIDER_JENKINS ||
     provider === PROVIDER_UPTIME_KUMA ||
-    provider === PROVIDER_BESZEL
+    provider === PROVIDER_BESZEL ||
+    provider === PROVIDER_REGISTRY
   );
 }
 
-/** 按 provider 归一地址（两套 Host 的报错文案各自带 provider 前缀）。 */
+/** 按 provider 归一地址（各 Host 的报错文案各自带 provider 前缀）。 */
 function normalizeProviderBaseUrl(provider: string, raw: string): string {
   if (provider === PROVIDER_DOCKHAND) return normalizeDockhandBaseUrl(raw);
   if (provider === PROVIDER_JENKINS) return normalizeJenkinsBaseUrl(raw);
   if (provider === PROVIDER_UPTIME_KUMA) return normalizeUptimeKumaBaseUrl(raw);
   if (provider === PROVIDER_BESZEL) return normalizeBeszelBaseUrl(raw);
+  if (provider === PROVIDER_REGISTRY) return normalizeRegistryUrl(raw);
   return normalizeBaseUrl(raw);
 }
 
 /** provider 默认环境前缀：gitlab → GITLAB、dockhand → DOCKHAND、jenkins → JENKINS、
- * uptime-kuma → UPTIME_KUMA、beszel → BESZEL。 */
+ * uptime-kuma → UPTIME_KUMA、beszel → BESZEL、registry → REGISTRY。 */
 export function defaultEnvPrefix(provider: string): string {
   if (provider === PROVIDER_GITLAB) return "GITLAB";
   if (provider === PROVIDER_DOCKHAND) return "DOCKHAND";
   if (provider === PROVIDER_JENKINS) return "JENKINS";
   if (provider === PROVIDER_UPTIME_KUMA) return "UPTIME_KUMA";
   if (provider === PROVIDER_BESZEL) return "BESZEL";
+  if (provider === PROVIDER_REGISTRY) return "REGISTRY";
   // save/test 会先做 provider 校验；这里只兜底旧库中可能存在的未知 provider 行。
   return provider.trim().toUpperCase();
 }
@@ -486,13 +508,21 @@ function fail(text: string): never {
  * - jenkins：trim 后必须非空（编辑时传空表示保留原值）、不超过 64 个字符，
  *   且不能含冒号/空白/控制字符（Basic 认证用 `:` 分隔，含冒号会改变凭据含义）；
  * - beszel：username 列存**登录邮箱**，规则与 jenkins 同构（必填可回退 existing、
- *   不超过 254 个字符、基本 @ 校验）。
+ *   不超过 254 个字符、基本 @ 校验）；
+ * - registry：username 列存 docker login 用户名（必填可回退 existing、不超过 255 个字符、
+ *   不能含冒号/空白/控制字符；规则见 registry.ts `normalizeRegistryUsername`）。
  */
 function normalizeUsername(
   provider: string,
   raw: string | null | undefined,
   existing: JsonRow | null,
 ): string | null {
+  if (provider === PROVIDER_REGISTRY) {
+    return normalizeRegistryUsername(
+      raw,
+      typeof existing?.username === "string" ? existing.username : null,
+    );
+  }
   if (provider === PROVIDER_BESZEL) {
     const trimmed = (raw ?? "").trim();
     if (trimmed === "") {
@@ -541,7 +571,9 @@ export async function save(
   if (name === "") fail("凭据名称不能为空");
   if ([...name].length > 64) fail("凭据名称不能超过 64 个字符");
   if (!isSupportedProvider(input.provider)) {
-    fail(`暂不支持的服务类型：${input.provider}（当前支持 gitlab、dockhand、jenkins、uptime-kuma、beszel）`);
+    fail(
+      `暂不支持的服务类型：${input.provider}（当前支持 gitlab、dockhand、jenkins、uptime-kuma、beszel、registry）`,
+    );
   }
   let baseUrl: string;
   try {
@@ -605,7 +637,9 @@ export async function save(
           ? await checkUptimeKuma(baseUrl, token, insecure)
           : input.provider === PROVIDER_BESZEL
             ? await checkBeszel(baseUrl, username ?? "", token, insecure)
-            : await checkGitlab(baseUrl, token, insecure);
+            : input.provider === PROVIDER_REGISTRY
+              ? await checkRegistry(baseUrl, username ?? "", token, insecure)
+              : await checkGitlab(baseUrl, token, insecure);
   if (!check.ok) {
     return fail(`校验失败，未保存：${check.error ?? "未知错误"}`);
   }
@@ -674,7 +708,14 @@ export async function test(
                 token,
                 insecure,
               )
-            : await checkGitlab(baseUrl, token, insecure);
+            : provider === PROVIDER_REGISTRY
+              ? await checkRegistry(
+                  baseUrl,
+                  typeof row.username === "string" ? row.username : "",
+                  token,
+                  insecure,
+                )
+              : await checkGitlab(baseUrl, token, insecure);
   const verifiedAt = check.ok ? nowRfc3339() : null;
   storage.updateServiceCredentialVerification(id, verifiedAt, check.error);
   return check;
@@ -690,7 +731,8 @@ export interface ServiceCredentialReveal {
   id: string;
   name: string;
   provider: string;
-  /** Jenkins 用户名 / Beszel 登录邮箱（明文）；GitLab/Dockhand 恒为 null。 */
+  /** Jenkins 用户名 / Beszel 登录邮箱 / OCI 镜像仓库用户名（明文）；
+   * GitLab/Dockhand/Uptime Kuma 恒为 null。 */
   username: string | null;
   envPrefix: string;
   /** 明文 token：只返回给已鉴权的管理调用，不写日志、不落库、不缓存。 */
@@ -768,6 +810,15 @@ export function envKeys(item: ServiceCredentialExport): Array<[string, string, s
       [`${prefix}_URL`, item.baseUrl, "service"],
       [`${prefix}_EMAIL`, item.username ?? "", "service"],
       [`${prefix}_PASSWORD`, item.token, "cli_token"],
+    ];
+  }
+  // OCI 镜像仓库：地址键是 `_HOST`（值不带 scheme/路径，可直接 `docker login $REGISTRY_HOST`），
+  // 三把键固定顺序 HOST / USER / TOKEN；旧服务端导出没有 username 时 USER 写空串。
+  if (item.provider === PROVIDER_REGISTRY) {
+    return [
+      [`${prefix}_HOST`, registryHost(item.baseUrl), "service"],
+      [`${prefix}_USER`, item.username ?? "", "service"],
+      [`${prefix}_TOKEN`, item.token, "cli_token"],
     ];
   }
   // Uptime Kuma 的 Key 只用于 `/metrics` 鉴权，变量名沿用公司 infra skill 的

@@ -32,6 +32,8 @@ const DOCKHAND_TOKEN = "dockhand-test-fixture-token-9x8y";
 const JENKINS_TOKEN = "jenkins-test-fixture-token-7q2w";
 const BESZEL_EMAIL = "fixture@example.com";
 const BESZEL_PASSWORD = "beszel-test-fixture-password-8k3m";
+const REGISTRY_USER = "robot$flowlet+pull";
+const REGISTRY_PASSWORD = "registry-test-fixture-password-4h6k";
 const ADMIN_TOKEN = "flowlet-admin-token-0123456789";
 const HEADER = [
   "# Flowlet 全局凭据库",
@@ -120,6 +122,11 @@ function normalized(text: string, dir: string): string {
 
 function modeOf(target: string): number {
   return statSync(target).mode & 0o777;
+}
+
+/** `{PREFIX}_HOST` 的值是 host[:port]（无 scheme），从 mock 的 origin 提取。 */
+function hostOf(baseUrl: string): string {
+  return new URL(baseUrl).host;
 }
 
 // ─── 本地凭据库 ─────────────────────────────────────────────────────────────
@@ -948,6 +955,165 @@ describe("beszel 子命令", () => {
   });
 });
 
+// ─── registry（OCI 镜像仓库）子命令 ───────────────────────────────────────
+
+describe("registry 子命令", () => {
+  it("registry set：先校验后落库，URL 归一（去 /v2/），三把键的 kind/note 写入", async () => {
+    const mock = await startMock({ mode: "registry" });
+    const dir = tempDir();
+    const ok = cli(
+      dir,
+      ["registry", "set", `--url=${mock.baseUrl}/v2/`, `--user=${REGISTRY_USER}`],
+      { input: REGISTRY_PASSWORD },
+    );
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.equal(ok.stdout, `已保存 OCI 镜像仓库 凭据：${mock.baseUrl}\n`);
+    const meta = JSON.parse(metaFile(dir)) as Record<string, Record<string, unknown>>;
+    assert.equal(meta.REGISTRY_HOST!.kind, "service");
+    assert.equal(meta.REGISTRY_HOST!.note, "OCI 镜像仓库地址");
+    assert.equal(meta.REGISTRY_USER!.kind, "service");
+    assert.equal(meta.REGISTRY_USER!.note, "OCI 镜像仓库用户名");
+    assert.equal(meta.REGISTRY_TOKEN!.kind, "cli_token");
+    assert.equal(meta.REGISTRY_TOKEN!.note, "OCI 镜像仓库密码/token");
+    assert.equal(cli(dir, ["get", "REGISTRY_HOST", "--reveal"]).stdout, `${mock.baseUrl}\n`);
+    assert.equal(cli(dir, ["get", "REGISTRY_USER", "--reveal"]).stdout, `${REGISTRY_USER}\n`);
+    assert.equal(cli(dir, ["get", "REGISTRY_TOKEN", "--reveal"]).stdout, `${REGISTRY_PASSWORD}\n`);
+    mock.close();
+  });
+
+  it("registry set：缺少 --url/--user、非法用户名、空 token、带路径与无效密码都不落库", async () => {
+    const mock = await startMock({ mode: "registry" });
+    const dir = tempDir();
+    const noUrl = cli(dir, ["registry", "set", `--user=${REGISTRY_USER}`], {
+      input: REGISTRY_PASSWORD,
+    });
+    assert.equal(noUrl.status, 1);
+    assert.match(
+      noUrl.stderr,
+      /^缺少 --url，例如：flowlet registry set --url=hub\.example\.com --user=NAME\n$/,
+    );
+    const noUser = cli(dir, ["registry", "set", `--url=${mock.baseUrl}`], {
+      input: REGISTRY_PASSWORD,
+    });
+    assert.equal(noUser.status, 1);
+    assert.equal(
+      noUser.stderr,
+      "registry set 需要 --user=<用户名>（docker login 需要用户名 + 密码/token）\n",
+    );
+    const badUser = cli(dir, ["registry", "set", `--url=${mock.baseUrl}`, "--user=a:b"], {
+      input: REGISTRY_PASSWORD,
+    });
+    assert.equal(badUser.stderr, "用户名不能包含冒号、空格或控制字符\n");
+    const badPath = cli(
+      dir,
+      ["registry", "set", `--url=${mock.baseUrl}/api/v2.0/`, `--user=${REGISTRY_USER}`],
+      { input: REGISTRY_PASSWORD },
+    );
+    assert.equal(
+      badPath.stderr,
+      "镜像仓库地址只能是主机（可带端口），不能包含路径\n" +
+        "未保存。请检查镜像仓库地址、用户名与密码/token 是否有效。\n",
+    );
+    const emptyToken = cli(dir, ["registry", "set", `--url=${mock.baseUrl}`, `--user=${REGISTRY_USER}`]);
+    assert.equal(
+      emptyToken.stderr,
+      "镜像仓库密码/token 不能为空：用 `printf '%s' \"$TOKEN\" | flowlet registry set ...`\n",
+    );
+    const failed = cli(dir, ["registry", "set", `--url=${mock.baseUrl}`, `--user=${REGISTRY_USER}`], {
+      input: "wrong-registry-password",
+    });
+    assert.equal(failed.status, 1);
+    assert.equal(
+      failed.stderr,
+      "用户名或 token 无效（registry 认证失败）\n" +
+        "未保存。请检查镜像仓库地址、用户名与密码/token 是否有效。\n",
+    );
+    assert.ok(
+      !existsSync(path.join(dir, "credentials.env")) || !envFile(dir).includes("REGISTRY_HOST"),
+    );
+    mock.close();
+  });
+
+  it("registry status：仓库/Registry V2 认证/用户三行；版本缺失省略括号；未配置时提示", async () => {
+    const mock = await startMock({ mode: "registry" });
+    const dir = tempDir();
+    cli(dir, ["registry", "set", `--url=${mock.baseUrl}`, `--user=${REGISTRY_USER}`], {
+      input: REGISTRY_PASSWORD,
+    });
+    assert.equal(
+      cli(dir, ["registry", "status"]).stdout,
+      `仓库：${hostOf(mock.baseUrl)}\n认证：Registry V2（registry/2.0）\n用户：${REGISTRY_USER}\n`,
+    );
+    mock.close();
+
+    const noVersion = await startMock({ mode: "registry", registryVersion: null });
+    const dir2 = tempDir();
+    cli(dir2, ["registry", "set", `--url=${noVersion.baseUrl}`, `--user=${REGISTRY_USER}`], {
+      input: REGISTRY_PASSWORD,
+    });
+    assert.equal(
+      cli(dir2, ["registry", "status"]).stdout,
+      `仓库：${hostOf(noVersion.baseUrl)}\n认证：Registry V2\n用户：${REGISTRY_USER}\n`,
+    );
+    noVersion.close();
+
+    const empty = cli(tempDir(), ["registry", "status"]);
+    assert.equal(empty.status, 1);
+    assert.match(empty.stderr, /尚未配置 OCI 镜像仓库地址/);
+  });
+
+  it("registry env/clear：明文提示 + 三行（_HOST 去 scheme）；clear 幂等移除三把键", async () => {
+    const mock = await startMock({ mode: "registry" });
+    const dir = tempDir();
+    assert.match(cli(dir, ["registry", "env"]).stderr, /尚未配置 OCI 镜像仓库地址/);
+    cli(dir, ["registry", "set", `--url=${mock.baseUrl}`, `--user=${REGISTRY_USER}`], {
+      input: REGISTRY_PASSWORD,
+    });
+    const env = cli(dir, ["registry", "env"]);
+    assert.match(env.stderr, /注意：下面输出包含明文密码\/token/);
+    assert.equal(
+      env.stdout,
+      `REGISTRY_HOST=${hostOf(mock.baseUrl)}\nREGISTRY_USER=${REGISTRY_USER}\nREGISTRY_TOKEN=${REGISTRY_PASSWORD}\n`,
+    );
+    assert.equal(cli(dir, ["registry", "clear"]).stdout, "已移除 OCI 镜像仓库凭据\n");
+    assert.equal(cli(dir, ["registry", "clear"]).stdout, "没有可移除的 OCI 镜像仓库凭据\n");
+    mock.close();
+  });
+
+  it("registry --profile：多实例独立键名（REGISTRY_NA_HOST/_USER/_TOKEN），clear 只删该 profile", async () => {
+    const na = await startMock({ mode: "registry" });
+    const dir = tempDir();
+    assert.equal(
+      cli(
+        dir,
+        ["registry", "set", `--url=${na.baseUrl}`, `--user=${REGISTRY_USER}`, "--profile=na"],
+        { input: REGISTRY_PASSWORD },
+      ).stdout,
+      `已保存 OCI 镜像仓库 凭据（profile: NA）：${na.baseUrl}\n`,
+    );
+    const env = cli(dir, ["registry", "env", "--profile=na"]);
+    assert.match(env.stderr, /注意：下面输出包含明文密码\/token/);
+    assert.equal(
+      env.stdout,
+      `REGISTRY_NA_HOST=${hostOf(na.baseUrl)}\n` +
+        `REGISTRY_NA_USER=${REGISTRY_USER}\n` +
+        `REGISTRY_NA_TOKEN=${REGISTRY_PASSWORD}\n`,
+    );
+    assert.equal(
+      cli(dir, ["registry", "status", "--profile=na"]).stdout,
+      `仓库：${hostOf(na.baseUrl)}\n认证：Registry V2（registry/2.0）\n用户：${REGISTRY_USER}\n`,
+    );
+    // 默认前缀与 profile 独立：未配置默认凭据时提示仍指向 flowlet registry set。
+    assert.match(cli(dir, ["registry", "env"]).stderr, /尚未配置 OCI 镜像仓库地址，先运行 flowlet registry set/);
+    assert.equal(
+      cli(dir, ["registry", "clear", "--profile=na"]).stdout,
+      "已移除 OCI 镜像仓库凭据（profile: NA）\n",
+    );
+    assert.match(cli(dir, ["registry", "env", "--profile=na"]).stderr, /--profile=NA/);
+    na.close();
+  });
+});
+
 // ─── pull（Flowlet Web Host → 本地 .env） ──────────────────────────────────
 
 describe("pull", () => {
@@ -1002,6 +1168,34 @@ describe("pull", () => {
     assert.equal(meta.DOCKHAND_URL!.kind, "service");
     assert.equal(meta.DOCKHAND_TOKEN!.kind, "cli_token");
     assert.equal(meta.DOCKHAND_TOKEN!.note, "dockhand / 预发面板");
+    web.close();
+  });
+
+  it("uptime-kuma 条目映射为 UPTIME_KUMA_URL / UPTIME_KUMA_API_KEY", async () => {
+    const web = await startMock({
+      mode: "flowlet-web",
+      entries: [
+        {
+          name: "TW Kuma",
+          provider: "uptime-kuma",
+          baseUrl: "https://tcwireless.qa.17usoft.com/uptime-kuma",
+          token: "uk1-pulled-1",
+          envPrefix: "UPTIME_KUMA_TW",
+        },
+      ],
+    });
+    const dir = tempDir();
+    const pulled = cli(dir, ["pull", `--server=${web.baseUrl}`, `--token=${ADMIN_TOKEN}`]);
+    assert.equal(pulled.status, 0, pulled.stderr);
+    assert.match(pulled.stdout, /已写入 UPTIME_KUMA_TW_URL（来自 uptime-kuma \/ TW Kuma）/);
+    assert.match(pulled.stdout, /已写入 UPTIME_KUMA_TW_API_KEY（来自 uptime-kuma \/ TW Kuma）/);
+    assert.match(pulled.stdout, /完成：写入 2 个键 → /);
+    assert.equal(
+      cli(dir, ["get", "UPTIME_KUMA_TW_API_KEY", "--reveal"]).stdout,
+      "uk1-pulled-1\n",
+    );
+    // 密钥键必须是 _API_KEY，不能同时出现 _TOKEN（与其它 provider 的键名区分）。
+    assert.equal(cli(dir, ["get", "UPTIME_KUMA_TW_TOKEN"]).status, 1);
     web.close();
   });
 
@@ -1121,6 +1315,52 @@ describe("pull", () => {
     assert.equal(meta.BESZEL_EMAIL!.kind, "service");
     assert.equal(meta.BESZEL_PASSWORD!.kind, "cli_token");
     assert.equal(meta.BESZEL_MON_EMAIL!.note, "beszel / 旧导出");
+    web.close();
+  });
+
+  it("registry 条目映射为 REGISTRY_HOST / REGISTRY_USER / REGISTRY_TOKEN（缺失 username 写空串）", async () => {
+    const web = await startMock({
+      mode: "flowlet-web",
+      entries: [
+        {
+          name: "主仓库",
+          provider: "registry",
+          baseUrl: "https://hub.example.com",
+          token: "registry-pulled-1",
+          username: "robot$flowlet+pull",
+        },
+        {
+          name: "旧导出",
+          provider: "registry",
+          baseUrl: "http://registry.example.com:5000",
+          token: "registry-pulled-2",
+          envPrefix: "REGISTRY_NA",
+        },
+      ],
+    });
+    const dir = tempDir();
+    cli(dir, ["init"]);
+    const pulled = cli(dir, ["pull", `--server=${web.baseUrl}`, `--token=${ADMIN_TOKEN}`]);
+    assert.equal(pulled.status, 0, pulled.stderr);
+    assert.match(pulled.stdout, /已写入 REGISTRY_HOST（来自 registry \/ 主仓库）/);
+    assert.match(pulled.stdout, /已写入 REGISTRY_TOKEN（来自 registry \/ 主仓库）/);
+    assert.match(pulled.stdout, /已写入 REGISTRY_NA_HOST（来自 registry \/ 旧导出）/);
+    assert.match(pulled.stdout, /完成：写入 6 个键 → /);
+    // HOST 是 host[:port]（无 scheme），与 docker login / helm registry login 的用法一致。
+    assert.equal(cli(dir, ["get", "REGISTRY_HOST", "--reveal"]).stdout, "hub.example.com\n");
+    assert.equal(cli(dir, ["get", "REGISTRY_USER", "--reveal"]).stdout, "robot$flowlet+pull\n");
+    assert.equal(cli(dir, ["get", "REGISTRY_TOKEN", "--reveal"]).stdout, "registry-pulled-1\n");
+    assert.equal(
+      cli(dir, ["get", "REGISTRY_NA_HOST", "--reveal"]).stdout,
+      "registry.example.com:5000\n",
+    );
+    // 旧导出没有 username：USER 仍写入（空串），三键结构不变。
+    assert.equal(cli(dir, ["get", "REGISTRY_NA_USER", "--reveal"]).stdout, "\n");
+    const meta = JSON.parse(metaFile(dir)) as Record<string, Record<string, unknown>>;
+    assert.equal(meta.REGISTRY_HOST!.kind, "service");
+    assert.equal(meta.REGISTRY_USER!.kind, "service");
+    assert.equal(meta.REGISTRY_TOKEN!.kind, "cli_token");
+    assert.equal(meta.REGISTRY_NA_USER!.note, "registry / 旧导出");
     web.close();
   });
 

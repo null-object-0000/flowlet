@@ -32,6 +32,20 @@
   CLI 新增 `flowlet beszel set / status / systems / api / env / clear`，支持
   `--profile=<alias>` 多实例（例如 `BESZEL_MON_*`）。
 
+- **服务凭据新增 OCI 镜像仓库（registry）provider**：管理台「服务凭据」在 Beszel 之后新增
+  「OCI 镜像仓库」，只按行业通用标准 Docker Registry HTTP API V2 / OCI Distribution 实现：
+  保存时请求 `GET {base}/v2/`，401 时按 `WWW-Authenticate` 的 Bearer 质询换 token 后重试，
+  版本取 `docker-distribution-api-version` 响应头；用户名 + 密码/token（robot account 同样只是
+  普通用户名 + token，不做特判）。不实现任何 Harbor 专属能力：不调用 `/api/v2.0/*`、
+  不探测 catalog、不支持 `docker search` 与 ChartMuseum。Rust Host / Node Host / CLI / 前端与
+  文档同步实现，校验失败不落库；
+- `flowlet pull` 为 registry 生成 `{PREFIX}_HOST` / `{PREFIX}_USER` / `{PREFIX}_TOKEN`
+  （`_HOST` 是 host[:port]、无 scheme，可直接用于 `docker login` / `helm registry login`；
+  地址键用 `_HOST` 而非 `_REGISTRY`，避免默认前缀产生 `REGISTRY_REGISTRY`）；CLI 新增
+  `flowlet registry set / status / env / clear`，支持 `--profile=<alias>` 多实例；
+- 同步更新 `docs/credential-cli.md`（新增 §13「OCI 镜像仓库适配（Registry V2）」）与 Skills
+  包的 registry 使用说明。
+
 - Web Host / Docker 管理台新增「设置 → 数据维护 → 数据完整性检查」四阶段修复：
   `repair_agent_sessions`（按已存 Header 与最新 UA 规则修复会话/客户端归属）、
   `repair_captured_usage`（从响应捕获帧重解析历史 usage 并按原始请求时间回填）、

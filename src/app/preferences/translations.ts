@@ -1908,6 +1908,9 @@ const english: Record<string, string> = {
   "粘贴 API Token（与用户名一起使用）": "Paste the API Token (used with the username)",
   "Jenkins API Token 必须与该用户名的 Basic 认证一起使用；留空表示编辑时保持原用户名。":
     "The Jenkins API token must be sent with this username via Basic auth; leave blank to keep the current username when editing.",
+  "API Key（设置 → API 密钥；仅用于读取 /metrics 指标）":
+    "API Key (Settings → API Keys; used only to read /metrics)",
+  "粘贴 API Key（仅用于 /metrics 只读）": "Paste the API Key (read-only access to /metrics)",
   "邮箱": "Email",
   "例如：you@example.com": "e.g. you@example.com",
   "登录密码（Beszel 用户密码）": "Login password (Beszel user password)",

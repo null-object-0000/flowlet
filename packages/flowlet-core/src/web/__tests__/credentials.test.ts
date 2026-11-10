@@ -20,6 +20,7 @@ import {
   deleteCredential,
   envKeys,
   exportCredentials,
+  isSupportedProvider,
   list,
   maskSecret,
   normalizeEnvPrefix,
@@ -30,6 +31,7 @@ import {
   validateEnvPrefixConflict,
 } from "../credentials.ts";
 import { GitlabClient, normalizeBaseUrl, resolveApiPath } from "../gitlab.ts";
+import { basicAuthorization as registryBasicAuthorization } from "../registry.ts";
 
 const VALID_TOKEN = "glpat-valid-token-1a2b";
 const ADMIN_TOKEN = "glpat-admin-token-9z8y";
@@ -39,6 +41,10 @@ const JENKINS_TOKEN = "jenkins-test-fixture-token-9q8w";
 const BESZEL_EMAIL = "ops@example.com";
 const BESZEL_PASSWORD = "beszel-test-fixture-password-9k7j";
 const BESZEL_TOKEN = "pb-fixture-token-4c5d";
+// Harbor robot account 形态：`$` 与 `+` 必须被接受。
+const REGISTRY_USERNAME = "robot$flowlet+pull";
+const REGISTRY_PASSWORD = "registry-test-fixture-token-4b3c";
+const REGISTRY_BEARER_TOKEN = "registry-test-bearer-token-1z2y";
 
 // ─── Fake storage（node-storage 最后提供真实实现；这里验证编排语义） ────────
 
@@ -500,6 +506,92 @@ class MockBeszel {
   }
 }
 
+// ─── Mock OCI Registry V2（`/v2/` + token 端点，契约 §4） ──────────────────
+
+class MockRegistry {
+  #server: Server | null = null;
+  baseUrl = "";
+  /** open：Basic 正确即 200；bearer：Basic 只能换 token，需 Bearer 重试才算通过。 */
+  mode: "open" | "bearer" = "open";
+  version: string | null = "registry/2.0";
+  requests: Array<{ method: string; path: string; authorization: string | undefined }> = [];
+
+  async start(): Promise<void> {
+    this.#server = createHttpServer((request, response) => {
+      void this.#handle(request, response);
+    });
+    await new Promise<void>((resolve, reject) => {
+      this.#server!.once("error", reject);
+      this.#server!.listen(0, "127.0.0.1", () => {
+        const address = this.#server!.address();
+        const port = typeof address === "object" && address ? address.port : 0;
+        this.baseUrl = `http://127.0.0.1:${port}`;
+        resolve();
+      });
+    });
+    cleanup.push(
+      () =>
+        new Promise<void>((resolve) => {
+          this.#server?.close(() => resolve());
+        }),
+    );
+  }
+
+  /** 用户名任意，密码必须是 fixture 密码（编辑测试会换用户名）。 */
+  #authorizedBasic(authorization: string | undefined): boolean {
+    if (typeof authorization !== "string" || !authorization.startsWith("Basic ")) return false;
+    const decoded = Buffer.from(authorization.slice("Basic ".length), "base64").toString("utf8");
+    const separator = decoded.indexOf(":");
+    if (separator <= 0) return false;
+    return decoded.slice(separator + 1) === REGISTRY_PASSWORD;
+  }
+
+  async #handle(request: IncomingMessage, response: ServerResponseLike): Promise<void> {
+    const url = new URL(request.url ?? "/", "http://localhost");
+    const authorization =
+      typeof request.headers.authorization === "string" ? request.headers.authorization : undefined;
+    this.requests.push({
+      method: request.method ?? "GET",
+      path: `${url.pathname}${url.search}`,
+      authorization,
+    });
+    const send = (
+      status: number,
+      value: unknown,
+      headers: Record<string, string> = {},
+    ): void => {
+      const body = Buffer.from(JSON.stringify(value), "utf8");
+      response.writeHead(status, {
+        "content-type": "application/json",
+        "content-length": String(body.length),
+        ...headers,
+      });
+      response.end(body);
+    };
+    const versionHeaders: Record<string, string> =
+      this.version === null ? {} : { "docker-distribution-api-version": this.version };
+
+    if (url.pathname === "/v2/") {
+      if (this.#authorizedBasic(authorization)) {
+        if (this.mode === "open") return send(200, {}, versionHeaders);
+        // 标准 Bearer 质询：realm 指向本 mock 的 /token。
+        return send(401, {}, {
+          "www-authenticate": `Bearer realm="${this.baseUrl}/token",service="registry.example.com",scope="repository:library/nginx:pull"`,
+        });
+      }
+      if (this.mode === "bearer" && authorization === `Bearer ${REGISTRY_BEARER_TOKEN}`) {
+        return send(200, {}, versionHeaders);
+      }
+      return send(401, {}, { "www-authenticate": 'Basic realm="registry"' });
+    }
+    if (url.pathname === "/token") {
+      if (!this.#authorizedBasic(authorization)) return send(401, {});
+      return send(200, { token: REGISTRY_BEARER_TOKEN });
+    }
+    send(404, {});
+  }
+}
+
 const cleanup: Array<() => Promise<void>> = [];
 after(async () => {
   for (const fn of cleanup.reverse()) await fn();
@@ -526,6 +618,12 @@ async function startMockJenkins(): Promise<MockJenkins> {
 
 async function startMockBeszel(): Promise<MockBeszel> {
   const mock = new MockBeszel();
+  await mock.start();
+  return mock;
+}
+
+async function startMockRegistry(): Promise<MockRegistry> {
+  const mock = new MockRegistry();
   await mock.start();
   return mock;
 }
@@ -622,6 +720,15 @@ describe("GitLab 客户端基础", () => {
         tokenLabel: "登录密码（Beszel 用户密码）",
         usernameLabel: "邮箱",
         defaultEnvPrefix: "BESZEL",
+        available: true,
+      },
+      {
+        id: "registry",
+        label: "OCI 镜像仓库",
+        baseUrlHint: "https://hub.example.com（只填仓库地址，不要带路径）",
+        tokenLabel: "密码 / Token（docker login 的密码；Harbor robot account 填其 token）",
+        usernameLabel: "用户名",
+        defaultEnvPrefix: "REGISTRY",
         available: true,
       },
     ]);
@@ -726,7 +833,7 @@ describe("服务凭据编排", () => {
     );
     await assert.rejects(
       () => save(ctx, inputFor(mock, { provider: "github" }) as never, false),
-      /暂不支持的服务类型：github（当前支持 gitlab、dockhand、jenkins、uptime-kuma、beszel）/,
+      /暂不支持的服务类型：github（当前支持 gitlab、dockhand、jenkins、uptime-kuma、beszel、registry）/,
     );
     await assert.rejects(
       () => save(ctx, inputFor(mock, { baseUrl: "ftp://example.com" }) as never, false),
@@ -1120,7 +1227,7 @@ describe("Dockhand 凭据", () => {
     );
     await assert.rejects(
       () => save(ctx, { name: "x", provider: "github", baseUrl: "http://host", token: "t" } as never, false),
-      /暂不支持的服务类型：github（当前支持 gitlab、dockhand、jenkins、uptime-kuma、beszel）/,
+      /暂不支持的服务类型：github（当前支持 gitlab、dockhand、jenkins、uptime-kuma、beszel、registry）/,
     );
   });
 });
@@ -1604,6 +1711,281 @@ describe("Beszel 凭据", () => {
   });
 });
 
+// ─── Registry provider（OCI 镜像仓库；与 Rust `check_registry` / save/test 分发对齐） ──
+
+function registryInputFor(mock: MockRegistry, overrides: Partial<JsonRow> = {}): JsonRow {
+  return {
+    name: "OCI 镜像仓库",
+    provider: "registry",
+    baseUrl: mock.baseUrl,
+    username: REGISTRY_USERNAME,
+    token: REGISTRY_PASSWORD,
+    ...overrides,
+  };
+}
+
+describe("Registry 凭据", () => {
+  it("元数据：provider 追加在 beszel 之后、supported、默认前缀 REGISTRY", () => {
+    assert.deepEqual(
+      providers().map((item) => item.id),
+      ["gitlab", "dockhand", "jenkins", "uptime-kuma", "beszel", "registry"],
+    );
+    assert.equal(isSupportedProvider("registry"), true);
+    assert.equal(isSupportedProvider("github"), false);
+    assert.equal(defaultEnvPrefix("registry"), "REGISTRY");
+  });
+
+  it("save(registry)：/v2/ Basic 200 才落库；地址归一为主机；username 明文、token 加密", async () => {
+    const mock = await startMockRegistry();
+    const storage = new FakeCredentialStorage();
+    const ctx = makeCtx(storage);
+    // 用户把文档里的 /v2/ 一起粘贴进来也要归一成 origin。
+    const view = await save(
+      ctx,
+      registryInputFor(mock, { baseUrl: `${mock.baseUrl}/v2/` }) as never,
+      false,
+    );
+    assert.equal(view.provider, "registry");
+    assert.equal(view.baseUrl, mock.baseUrl);
+    assert.equal(view.username, REGISTRY_USERNAME);
+    assert.equal(view.envPrefix, "REGISTRY");
+    assert.equal(view.secretHint, "••••4b3c");
+    assert.equal(view.lastError, null);
+    assert.equal(storage.upserts, 1);
+    // 只有校验通过才写库：请求确实打过标准 /v2/（Basic）。
+    assert.equal(mock.requests.at(-1)!.path, "/v2/");
+    assert.equal(
+      mock.requests.at(-1)!.authorization,
+      registryBasicAuthorization(REGISTRY_USERNAME, REGISTRY_PASSWORD),
+    );
+
+    const row = storage.getServiceCredential(view.id)!;
+    assert.equal(row.username, REGISTRY_USERNAME);
+    assert.equal(row.env_prefix, "REGISTRY");
+    assert.notEqual(row.secret_ciphertext, REGISTRY_PASSWORD);
+    assert.equal(ctx.secrets.decrypt(String(row.secret_ciphertext)), REGISTRY_PASSWORD);
+    // 列表/导出带 username，但不含密码/token 明文。
+    const listed = list(ctx)[0]!;
+    assert.equal(listed.username, REGISTRY_USERNAME);
+    assert.ok(!JSON.stringify(listed).includes(REGISTRY_PASSWORD));
+    const exported = exportCredentials(ctx);
+    assert.equal(exported.length, 1);
+    assert.equal(exported[0]!.username, REGISTRY_USERNAME);
+    assert.equal(exported[0]!.baseUrl, mock.baseUrl);
+  });
+
+  it("save(registry)：401 Bearer 质询 → 换 token → Bearer 重试通过后才落库", async () => {
+    const mock = await startMockRegistry();
+    mock.mode = "bearer";
+    const storage = new FakeCredentialStorage();
+    const ctx = makeCtx(storage);
+    const view = await save(ctx, registryInputFor(mock) as never, false);
+    assert.equal(view.username, REGISTRY_USERNAME);
+    assert.deepEqual(
+      mock.requests.map((item) => item.path.split("?")[0]!),
+      ["/v2/", "/token", "/v2/"],
+    );
+    assert.equal(mock.requests.at(-1)!.authorization, `Bearer ${REGISTRY_BEARER_TOKEN}`);
+    assert.equal(storage.upserts, 1);
+  });
+
+  it("save(registry)：非法 token 不落库，错误文案对齐契约 §4", async () => {
+    const mock = await startMockRegistry();
+    const storage = new FakeCredentialStorage();
+    const ctx = makeCtx(storage);
+    await assert.rejects(
+      () => save(ctx, registryInputFor(mock, { token: "wrong-token" }) as never, false),
+      (error: Error) => {
+        assert.match(error.message, /^校验失败，未保存：用户名或 token 无效（registry 认证失败）$/);
+        return true;
+      },
+    );
+    assert.equal(storage.upserts, 0);
+    assert.equal(storage.listServiceCredentials().length, 0);
+  });
+
+  it("save(registry)：用户名必填/长度/字符校验，robot account 放行，失败不落库也不发请求", async () => {
+    const mock = await startMockRegistry();
+    const storage = new FakeCredentialStorage();
+    const ctx = makeCtx(storage);
+    await assert.rejects(
+      () => save(ctx, registryInputFor(mock, { username: undefined }) as never, false),
+      /镜像仓库需要填写用户名（docker login 需要用户名 \+ 密码\/token）/,
+    );
+    await assert.rejects(
+      () => save(ctx, registryInputFor(mock, { username: "   " }) as never, false),
+      /镜像仓库需要填写用户名（docker login 需要用户名 \+ 密码\/token）/,
+    );
+    await assert.rejects(
+      () => save(ctx, registryInputFor(mock, { username: "a".repeat(256) }) as never, false),
+      /用户名不能超过 255 个字符/,
+    );
+    for (const bad of ["al:ice", "al ice", "al\u0001ice"]) {
+      await assert.rejects(
+        () => save(ctx, registryInputFor(mock, { username: bad }) as never, false),
+        /用户名不能包含冒号、空格或控制字符/,
+      );
+    }
+    assert.equal(storage.upserts, 0);
+    assert.equal(mock.requests.length, 0, "用户名规则属于配置错误，不该先发网络请求");
+    // Harbor robot account 字符 `$`/`+`/`_`/`-` 必须放行。
+    const saved = await save(
+      ctx,
+      registryInputFor(mock, { username: "  robot$proj+name_pull-1  " }) as never,
+      false,
+    );
+    assert.equal(saved.username, "robot$proj+name_pull-1");
+  });
+
+  it("save(registry)：编辑时空 username 保留原值，显式传值更新", async () => {
+    const mock = await startMockRegistry();
+    const storage = new FakeCredentialStorage();
+    const ctx = makeCtx(storage);
+    const created = await save(ctx, registryInputFor(mock) as never, false);
+
+    const kept = await save(
+      ctx,
+      registryInputFor(mock, { id: created.id, name: "改名了", username: "", token: "" }) as never,
+      false,
+    );
+    assert.equal(kept.id, created.id);
+    assert.equal(kept.username, REGISTRY_USERNAME);
+    assert.equal(storage.getServiceCredential(created.id)!.username, REGISTRY_USERNAME);
+    // 空 token 保留原密码（解密后重新认证仍通过）。
+    assert.equal(
+      ctx.secrets.decrypt(String(storage.getServiceCredential(created.id)!.secret_ciphertext)),
+      REGISTRY_PASSWORD,
+    );
+
+    const updated = await save(
+      ctx,
+      registryInputFor(mock, { id: created.id, username: "  robot$other+pull  " }) as never,
+      false,
+    );
+    assert.equal(updated.username, "robot$other+pull");
+    assert.equal(storage.getServiceCredential(created.id)!.username, "robot$other+pull");
+  });
+
+  it("test(registry)：成功写 lastVerifiedAt/version；失败写 lastError 且保留上次验证时间", async () => {
+    const mock = await startMockRegistry();
+    const storage = new FakeCredentialStorage();
+    const ctx = makeCtx(storage);
+    const created = await save(ctx, registryInputFor(mock) as never, false);
+    storage.getServiceCredential(created.id)!.last_error = "旧错误";
+
+    const check = await testCredential(ctx, created.id, false);
+    assert.deepEqual(check, {
+      ok: true,
+      username: REGISTRY_USERNAME,
+      version: "registry/2.0",
+      detail: null,
+      error: null,
+    });
+    const row = storage.getServiceCredential(created.id)!;
+    assert.equal(row.last_error, null);
+    assert.equal(typeof row.last_verified_at, "string");
+
+    const previousVerified = "2026-01-01T00:00:00Z";
+    row.last_verified_at = previousVerified;
+    row.secret_ciphertext = ctx.secrets.encrypt("wrong-token");
+    const failed = await testCredential(ctx, created.id, false);
+    assert.equal(failed.ok, false);
+    assert.equal(failed.error, "用户名或 token 无效（registry 认证失败）");
+    const after = storage.getServiceCredential(created.id)!;
+    assert.equal(after.last_verified_at, previousVerified);
+    assert.match(String(after.last_error), /用户名或 token 无效（registry 认证失败）/);
+  });
+
+  it("envKeys：三把键 HOST/USER/TOKEN（HOST 去 scheme、带端口；username 缺失写空串）", () => {
+    // 默认前缀 REGISTRY：地址键是 `_HOST`（避免 REGISTRY_REGISTRY）。
+    assert.deepEqual(
+      envKeys({
+        name: "镜像仓库",
+        provider: "registry",
+        baseUrl: "https://hub.17usoft.com",
+        username: REGISTRY_USERNAME,
+        envPrefix: "REGISTRY",
+        token: REGISTRY_PASSWORD,
+      }),
+      [
+        ["REGISTRY_HOST", "hub.17usoft.com", "service"],
+        ["REGISTRY_USER", REGISTRY_USERNAME, "service"],
+        ["REGISTRY_TOKEN", REGISTRY_PASSWORD, "cli_token"],
+      ],
+    );
+    // 带端口 + 多实例前缀：`{PREFIX}_<属性>` 公式不变。
+    assert.deepEqual(
+      envKeys({
+        name: "镜像仓库 北美",
+        provider: "registry",
+        baseUrl: "http://10.1.1.1:5000",
+        username: "robot$na+pull",
+        envPrefix: "REGISTRY_NA",
+        token: REGISTRY_PASSWORD,
+      }),
+      [
+        ["REGISTRY_NA_HOST", "10.1.1.1:5000", "service"],
+        ["REGISTRY_NA_USER", "robot$na+pull", "service"],
+        ["REGISTRY_NA_TOKEN", REGISTRY_PASSWORD, "cli_token"],
+      ],
+    );
+    // 旧服务端导出没有 username：USER 写空串，仍是三把键。
+    assert.deepEqual(
+      envKeys({
+        name: "旧导出",
+        provider: "registry",
+        baseUrl: "https://legacy.example.com",
+        username: null,
+        envPrefix: "REGISTRY",
+        token: REGISTRY_PASSWORD,
+      }),
+      [
+        ["REGISTRY_HOST", "legacy.example.com", "service"],
+        ["REGISTRY_USER", "", "service"],
+        ["REGISTRY_TOKEN", REGISTRY_PASSWORD, "cli_token"],
+      ],
+    );
+    // 旧服务端的导出没有 envPrefix → 回退 REGISTRY 默认。
+    assert.deepEqual(
+      envKeys({
+        name: "旧导出 2",
+        provider: "registry",
+        baseUrl: "https://legacy.example.com",
+        username: null,
+        envPrefix: "",
+        token: REGISTRY_PASSWORD,
+      }),
+      [
+        ["REGISTRY_HOST", "legacy.example.com", "service"],
+        ["REGISTRY_USER", "", "service"],
+        ["REGISTRY_TOKEN", REGISTRY_PASSWORD, "cli_token"],
+      ],
+    );
+  });
+
+  it("save(registry)：地址归一文案走 registry 分支", async () => {
+    const ctx = makeCtx(new FakeCredentialStorage());
+    await assert.rejects(
+      () =>
+        save(
+          ctx,
+          { name: "x", provider: "registry", baseUrl: "ftp://hub.example.com", username: "u", token: "t" } as never,
+          false,
+        ),
+      /镜像仓库地址必须是 http 或 https/,
+    );
+    await assert.rejects(
+      () =>
+        save(
+          ctx,
+          { name: "x", provider: "registry", baseUrl: "https://hub.example.com/repo", username: "u", token: "t" } as never,
+          false,
+        ),
+      /镜像仓库地址只能是主机（可带端口），不能包含路径/,
+    );
+  });
+});
+
 // ─── 环境前缀 / 多实例（phase2-spec §1） ────────────────────────────────────
 
 function credentialRow(overrides: JsonRow = {}): JsonRow {
@@ -1633,6 +2015,7 @@ describe("环境前缀 / 多实例", () => {
     assert.equal(defaultEnvPrefix("jenkins"), "JENKINS");
     assert.equal(defaultEnvPrefix("uptime-kuma"), "UPTIME_KUMA");
     assert.equal(defaultEnvPrefix("beszel"), "BESZEL");
+    assert.equal(defaultEnvPrefix("registry"), "REGISTRY");
     assert.equal(normalizeEnvPrefix("", "gitlab"), "GITLAB");
     assert.equal(normalizeEnvPrefix("   ", "dockhand"), "DOCKHAND");
     assert.equal(normalizeEnvPrefix("", "jenkins"), "JENKINS");

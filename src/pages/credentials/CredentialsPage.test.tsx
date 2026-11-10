@@ -58,6 +58,15 @@ const providers = [
     defaultEnvPrefix: "JENKINS",
   },
   {
+    id: "uptime-kuma",
+    label: "Uptime Kuma",
+    baseUrlHint: "https://uptime-kuma.example.com/uptime-kuma",
+    tokenLabel: "API Key（设置 → API 密钥；仅用于读取 /metrics 指标）",
+    usernameLabel: null,
+    available: true,
+    defaultEnvPrefix: "UPTIME_KUMA",
+  },
+  {
     id: "beszel",
     label: "Beszel",
     baseUrlHint: "http://beszel.example.com:8090",
@@ -631,6 +640,64 @@ describe("CredentialsPage registry provider", () => {
           provider: "registry",
           username: "robot$project+pull",
           token: "registry-password",
+        }),
+      ),
+    );
+  });
+});
+
+describe("CredentialsPage uptime-kuma provider", () => {
+  const sheet = () => document.querySelector(".semi-sidesheet") as HTMLElement;
+
+  it("offers Uptime Kuma, hides the username field and previews URL / API_KEY", async () => {
+    renderPage();
+    await screen.findByText("公司-北美-线上");
+    fireEvent.click(await screen.findByRole("button", { name: /Add credential/ }));
+    fireEvent.click(within(sheet()).getByText("GitLab"));
+    fireEvent.click(await screen.findByRole("option", { name: /Uptime Kuma/ }));
+    await waitFor(() => expect(within(sheet()).getAllByText("Uptime Kuma").length).toBeGreaterThan(0));
+
+    // API Key 只用于 /metrics 的 Basic 认证（用户名为空），表单不渲染身份字段。
+    expect(screen.queryByPlaceholderText("e.g. jenkins-user")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Paste the API Key/)).toBeInTheDocument();
+    // Banner 里展示实际校验端点。
+    expect(screen.getAllByText((content) => content.includes("/metrics")).length).toBeGreaterThan(0);
+
+    // 留空使用默认前缀 UPTIME_KUMA；token 键是 _API_KEY 而不是 _TOKEN。
+    const prefixInput = (await screen.findByPlaceholderText(
+      /Leave blank for the default UPTIME_KUMA/,
+    )) as HTMLInputElement;
+    expect(prefixInput.value).toBe("");
+    expect(screen.getByText(/UPTIME_KUMA_URL \/ UPTIME_KUMA_API_KEY/)).toBeInTheDocument();
+  });
+
+  it("submits the uptime-kuma credential with the pasted API Key", async () => {
+    renderPage();
+    await screen.findByText("公司-北美-线上");
+    fireEvent.click(await screen.findByRole("button", { name: /Add credential/ }));
+    fireEvent.click(within(sheet()).getByText("GitLab"));
+    fireEvent.click(await screen.findByRole("option", { name: /Uptime Kuma/ }));
+    await waitFor(() => expect(within(sheet()).getAllByText("Uptime Kuma").length).toBeGreaterThan(0));
+
+    fireEvent.change(screen.getByPlaceholderText(/For example: Company Uptime Kuma/), {
+      target: { value: "TW Kuma" },
+    });
+    fireEvent.change(screen.getByPlaceholderText(/uptime-kuma\.example\.com/), {
+      target: { value: "https://tcwireless.qa.17usoft.com/uptime-kuma" },
+    });
+    fireEvent.change(screen.getByPlaceholderText(/Paste the API Key/), {
+      target: { value: "uk1_fixture-api-key" },
+    });
+
+    const saveButton = screen.getByRole("button", { name: /Save and verify/ });
+    await waitFor(() => expect(saveButton).not.toBeDisabled());
+    fireEvent.click(saveButton);
+
+    await waitFor(() =>
+      expect(commands.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: "uptime-kuma",
+          token: "uk1_fixture-api-key",
         }),
       ),
     );

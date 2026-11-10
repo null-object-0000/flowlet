@@ -4,7 +4,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 
 interface MockOptions {
-  mode: "gitlab" | "flowlet-web" | "dockhand" | "jenkins" | "beszel";
+  mode: "gitlab" | "flowlet-web" | "dockhand" | "jenkins" | "beszel" | "registry";
   versionStatus?: number;
   hiddenVersion?: boolean;
   projectPages?: Array<Array<Record<string, unknown>>>;
@@ -30,6 +30,29 @@ interface MockOptions {
   beszelInfoStatus?: number;
   /** beszel：`systems/records` 的原始响应覆盖（测试解析失败分支）。 */
   beszelRecords?: unknown;
+  /** registry：Basic 认证的用户名 / 密码（docker login 的密码或 token）。 */
+  registryUser?: string;
+  registryPassword?: string;
+  /** registry：Bearer 换发后 `/v2/` 认可的 token。 */
+  registryToken?: string;
+  /** registry：认证方式；basic = 直接 200，bearer = 401 质询后换 token（默认 bearer）。 */
+  registryAuth?: "basic" | "bearer";
+  /** registry：`GET /v2/` 的 docker-distribution-api-version 响应头；null 时不返回。 */
+  registryVersion?: string | null;
+  /** registry：强制 `GET /v2/` 返回该状态码（403/404/429 等，绕过认证）。 */
+  registryStatus?: number;
+  /** registry：强制 token 端点返回该状态码。 */
+  registryTokenStatus?: number;
+  /** registry：token 端点 200 的响应体覆盖（测试「没有 token 字段」）。 */
+  registryTokenBody?: unknown;
+  /** registry：token 响应体里的 token 字段名（token | access_token）。 */
+  registryTokenField?: string;
+  /** registry：token 响应头的 docker-distribution-api-version（测试 version 回退）。 */
+  registryTokenVersion?: string | null;
+  /** registry：重试 `GET /v2/` 带 Bearer 时的响应状态（测试 token 成功但重试失败）。 */
+  registryRetryStatus?: number;
+  /** registry：覆盖 401 的 WWW-Authenticate（测试 Basic 质询 / 缺 realm / 不可解析）。 */
+  registryChallenge?: string;
   /**
    * flowlet-web：启用浏览器授权端点（/api/auth/cli/start、/api/auth/cli/exchange），
    * 并接受 CLI token 调 export_service_credentials。默认关闭，既有 pull 用例行为不变。
@@ -60,6 +83,14 @@ const BESZEL_SYSTEMS = [
   { id: "sys-3", name: "cache-01", host: "10.0.0.13", status: "down", port: 45878, updated: "2026-11-10T00:00:00Z" },
 ];
 const CLI_TOKEN = options.cliToken ?? `flwcli_${"T".repeat(43)}`;
+// OCI 镜像仓库（Docker Registry HTTP API V2）：Basic 换 Bearer token 的标准流程。
+const REGISTRY_USER = options.registryUser ?? "robot$flowlet+pull";
+const REGISTRY_PASSWORD = options.registryPassword ?? "registry-test-fixture-password-4h6k";
+const REGISTRY_TOKEN = options.registryToken ?? "registry-test-fixture-bearer-2w9c";
+const REGISTRY_AUTH = options.registryAuth ?? "bearer";
+const REGISTRY_VERSION = options.registryVersion === undefined ? "registry/2.0" : options.registryVersion;
+const REGISTRY_TOKEN_VERSION =
+  options.registryTokenVersion === undefined ? null : options.registryTokenVersion;
 
 /** 授权码 → PKCE challenge（120 秒有效、一次性，与 Node Host 契约一致）。 */
 const cliAuthCodes = new Map<string, { challenge: string; expiresAt: number }>();
@@ -347,6 +378,76 @@ const server = createServer((request, response) => {
       return;
     }
     // 404 分支：用 JSON body 证明「可执行提示」而不是上游 HTML。
+    return send(404, { message: "Not Found" });
+  }
+
+  if (options.mode === "registry") {
+    // OCI 镜像仓库：`GET /v2/` Basic → 401 + WWW-Authenticate: Bearer → token 端点 → 重试。
+    // 只 mock 标准 Registry V2 端点（/v2/ 与 token），不提供任何 Harbor 专属 API。
+    const url = new URL(request.url ?? "/", "http://localhost");
+    const send = (
+      status: number,
+      value: unknown,
+      headers: Record<string, string> = {},
+    ): void => {
+      const body = Buffer.from(JSON.stringify(value), "utf8");
+      response.writeHead(status, {
+        "content-type": "application/json",
+        "content-length": String(body.length),
+        ...headers,
+      });
+      response.end(body);
+    };
+    const versionHeaders: Record<string, string> =
+      REGISTRY_VERSION === null ? {} : { "docker-distribution-api-version": REGISTRY_VERSION };
+    const tokenVersionHeaders: Record<string, string> =
+      REGISTRY_TOKEN_VERSION === null
+        ? {}
+        : { "docker-distribution-api-version": REGISTRY_TOKEN_VERSION };
+    const expectedBasic = `Basic ${Buffer.from(`${REGISTRY_USER}:${REGISTRY_PASSWORD}`, "utf8").toString("base64")}`;
+    const authorization = request.headers.authorization ?? "";
+    const origin = `http://${request.headers.host ?? "127.0.0.1"}`;
+    const challenge =
+      options.registryChallenge ??
+      `Bearer realm="${origin}/token",service="mock-registry",scope="repository:library/nginx:pull"`;
+    const pathname = url.pathname;
+    if (pathname === "/v2/" || pathname === "/v2") {
+      if (options.registryStatus !== undefined && options.registryStatus !== 200) {
+        const headers: Record<string, string> =
+          options.registryStatus === 401 ? { "www-authenticate": challenge } : {};
+        return send(
+          options.registryStatus,
+          { errors: [{ code: "UNAUTHORIZED", message: `status ${options.registryStatus}` }] },
+          headers,
+        );
+      }
+      if (REGISTRY_AUTH === "basic") {
+        if (authorization !== expectedBasic) {
+          return send(401, { errors: [{ code: "UNAUTHORIZED" }] });
+        }
+        return send(200, {}, versionHeaders);
+      }
+      if (authorization === `Bearer ${REGISTRY_TOKEN}`) {
+        if (options.registryRetryStatus !== undefined && options.registryRetryStatus !== 200) {
+          return send(options.registryRetryStatus, { errors: [{ code: "DENIED" }] });
+        }
+        return send(200, {}, versionHeaders);
+      }
+      return send(401, { errors: [{ code: "UNAUTHORIZED" }] }, { "www-authenticate": challenge });
+    }
+    if (pathname === "/token") {
+      if (options.registryTokenStatus !== undefined && options.registryTokenStatus !== 200) {
+        return send(options.registryTokenStatus, { errors: [{ code: "UNAUTHORIZED" }] });
+      }
+      if (authorization !== expectedBasic) {
+        return send(401, { errors: [{ code: "UNAUTHORIZED" }] });
+      }
+      if (options.registryTokenBody !== undefined) {
+        return send(200, options.registryTokenBody, tokenVersionHeaders);
+      }
+      const field = options.registryTokenField ?? "token";
+      return send(200, { [field]: REGISTRY_TOKEN }, tokenVersionHeaders);
+    }
     return send(404, { message: "Not Found" });
   }
 

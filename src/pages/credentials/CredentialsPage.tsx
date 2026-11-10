@@ -82,6 +82,7 @@ const PROVIDER_LABEL: Record<string, string> = {
   gitlab: "GitLab",
   dockhand: "Dockhand",
   jenkins: "Jenkins",
+  "uptime-kuma": "Uptime Kuma",
   beszel: "Beszel",
   registry: "OCI 镜像仓库",
 };
@@ -116,6 +117,15 @@ const FALLBACK_PROVIDERS: CredentialProvider[] = [
     defaultEnvPrefix: "JENKINS",
   },
   {
+    id: "uptime-kuma",
+    label: "Uptime Kuma",
+    baseUrlHint: "https://uptime-kuma.example.com/uptime-kuma",
+    tokenLabel: "API Key（设置 → API 密钥；仅用于读取 /metrics 指标）",
+    usernameLabel: null,
+    available: true,
+    defaultEnvPrefix: "UPTIME_KUMA",
+  },
+  {
     id: "beszel",
     label: "Beszel",
     baseUrlHint: "http://beszel.example.com:8090",
@@ -145,6 +155,9 @@ function checkEndpoint(provider: CredentialProviderId): string {
   switch (provider) {
     case "jenkins":
       return "Jenkins /me/api/json";
+    case "uptime-kuma":
+      // 只读：API Key 走 Basic（空用户名）+ Prometheus /metrics。
+      return "Uptime Kuma /metrics";
     case "beszel":
       return "Beszel /api/collections/users/auth-with-password";
     case "dockhand":
@@ -162,6 +175,7 @@ function asCredentialProviderId(value: string): CredentialProviderId {
   switch (value) {
     case "dockhand":
     case "jenkins":
+    case "uptime-kuma":
     case "beszel":
     case "registry":
       return value;
@@ -213,6 +227,8 @@ function tokenPlaceholderFor(provider: CredentialProviderId, editing: boolean): 
       return "粘贴 API Token";
     case "jenkins":
       return "粘贴 API Token（与用户名一起使用）";
+    case "uptime-kuma":
+      return "粘贴 API Key（仅用于 /metrics 只读）";
     case "beszel":
       return "粘贴 Beszel 登录密码";
     case "registry":

@@ -14,7 +14,7 @@ import { after, describe, it } from "node:test";
 
 import type { JsonRow } from "../../types.ts";
 import { createWebHost } from "../index.ts";
-import { parseSegment, pickSuggestionModel } from "../env-prefix.ts";
+import { exposedModelNames, parseSegment, pickSuggestionModel } from "../env-prefix.ts";
 
 const ADMIN_TOKEN = "flowlet-envprefix-ai-admin-0123456789";
 const CLIENT_TOKEN = "flowlet-envprefix-ai-client-0123456789";
@@ -56,16 +56,27 @@ function freePort(): Promise<number> {
 
 // ─── 纯函数 ─────────────────────────────────────────────────────────────────
 
-describe("pickSuggestionModel / parseSegment", () => {
-  it("prefers lightweight exposed models and skips disabled rows", () => {
-    const models: JsonRow[] = [
-      { name: "deepseek-v4-pro", enabled: true },
-      { name: "qwen3.8-flash", enabled: true },
-      { name: "glm-4.5-air", enabled: false },
-    ];
-    assert.equal(pickSuggestionModel(models), "qwen3.8-flash");
-    assert.equal(pickSuggestionModel([{ name: "gpt-6.1-sol", enabled: true }]), "gpt-6.1-sol");
-    assert.equal(pickSuggestionModel([]), null);
+describe("exposedModelNames / pickSuggestionModel / parseSegment", () => {
+  it("prefers lightweight exposed models and skips disabled routes/models", () => {
+    const snapshot: JsonRow = {
+      // 生产里 virtual_models 常为空，真正开放的是路由行的 virtual_model_id。
+      virtual_models: [],
+      routes: [
+        { virtual_model_id: "gpt-6.1-sol", client_protocol: "openai", enabled: 1 },
+        { virtual_model_id: "qwen3.8-flash", client_protocol: "openai", enabled: 1 },
+        { virtual_model_id: "deepseek-v4-pro", client_protocol: "openai", enabled: 0 },
+        { virtual_model_id: "kimi-k3", client_protocol: "anthropic", enabled: 1 },
+      ],
+    };
+    assert.deepEqual(exposedModelNames(snapshot), ["gpt-6.1-sol", "qwen3.8-flash"]);
+    assert.equal(pickSuggestionModel(exposedModelNames(snapshot)), "qwen3.8-flash");
+
+    const tableOnly: JsonRow = {
+      virtual_models: [{ name: "glm-4.5-air", enabled: true }],
+      routes: [],
+    };
+    assert.equal(pickSuggestionModel(exposedModelNames(tableOnly)), "glm-4.5-air");
+    assert.equal(pickSuggestionModel(exposedModelNames({ virtual_models: [], routes: [] })), null);
   });
 
   it("cleans model output into a legal uppercase segment", () => {
@@ -138,6 +149,7 @@ function chatCompletion(content: string): { status: number; body: string } {
 interface HostOptions {
   modelResponder?: (call: ModelCall) => { status: number; body: string };
   virtualModels?: JsonRow[];
+  routes?: JsonRow[];
 }
 
 async function startHost(options: HostOptions = {}): Promise<{
@@ -168,13 +180,13 @@ async function startHost(options: HostOptions = {}): Promise<{
     default_client_token: CLIENT_TOKEN,
   };
 
-  const virtualModels: JsonRow[] = options.virtualModels ?? [
-    { id: "vm-1", name: "deepseek-v4.1-flash", protocol_type: "openai", enabled: true },
-  ];
+  const virtualModels: JsonRow[] = options.virtualModels ?? [];
   const snapshot: JsonRow = {
     channels: [],
     accounts: [],
-    routes: [],
+    routes:
+      options.routes ??
+      [{ virtual_model_id: "deepseek-v4.1-flash", client_protocol: "openai", enabled: 1 }],
     rules: [],
     virtual_models: virtualModels,
   };
@@ -320,7 +332,7 @@ describe("HTTP：suggest_env_prefix_segment", () => {
     assert.equal(failed.status, 502);
     assert.match(String(failed.json?.message ?? ""), /模型返回 HTTP 500/);
 
-    const empty = await startHost({ virtualModels: [] });
+    const empty = await startHost({ routes: [], virtualModels: [] });
     const noModel = await post(empty.baseUrl, "suggest_env_prefix_segment", INPUT, ADMIN_TOKEN);
     assert.equal(noModel.status, 409);
     assert.match(String(noModel.json?.message ?? ""), /没有可用的开放模型/);

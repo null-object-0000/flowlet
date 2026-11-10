@@ -39,15 +39,42 @@ function trim(value: unknown, limit = MAX_INPUT_CHARS): string {
   return text.length > limit ? text.slice(0, limit) : text;
 }
 
-/** 从已开放模型里挑一个适合短任务的模型名（`virtual_models.name` 即对外模型名）。 */
-export function pickSuggestionModel(virtualModels: readonly JsonRow[]): string | null {
-  const names = virtualModels
-    .filter((model) => model !== null && typeof model === "object")
-    .filter((model) => model.enabled !== false && model.enabled !== 0)
-    .map((model) => (typeof model.name === "string" ? model.name.trim() : ""))
-    .filter((name) => name !== "");
-  if (names.length === 0) return null;
-  return names.find((name) => PREFERRED_MODEL.test(name)) ?? names[0]!;
+/**
+ * 当前实例真正开放、且支持 OpenAI chat 的模型名（去重、保序）。
+ *
+ * 注意：`virtual_models` 表可能为空——对外模型实际由路由行（`virtual_model_routes`）
+ * 的 `virtual_model_id` 决定，`/v1/models` 也是这么算的。因此优先取路由，再回退表。
+ */
+export function exposedModelNames(snapshot: JsonRow): string[] {
+  const names: string[] = [];
+  const push = (raw: unknown): void => {
+    if (typeof raw !== "string") return;
+    const name = raw.trim();
+    if (name !== "" && !names.includes(name)) names.push(name);
+  };
+  const routes = Array.isArray(snapshot.routes) ? (snapshot.routes as JsonRow[]) : [];
+  for (const route of routes) {
+    if (route === null || typeof route !== "object") continue;
+    if (route.enabled === false || route.enabled === 0) continue;
+    const protocol = route.client_protocol;
+    // 只选支持 OpenAI chat 的候选（本项目调用 /v1/chat/completions）。
+    if (typeof protocol === "string" && protocol !== "" && protocol !== "openai") continue;
+    push(route.virtual_model_id);
+  }
+  const models = Array.isArray(snapshot.virtual_models) ? (snapshot.virtual_models as JsonRow[]) : [];
+  for (const model of models) {
+    if (model === null || typeof model !== "object") continue;
+    if (model.enabled === false || model.enabled === 0) continue;
+    push(model.name);
+  }
+  return names;
+}
+
+/** 从开放模型里挑一个适合短任务的模型名；识别不到轻量模型时用第一个。 */
+export function pickSuggestionModel(names: readonly string[]): string | null {
+  const usable = names.map((name) => name.trim()).filter((name) => name !== "");
+  if (usable.length === 0) return null;
+  return usable.find((name) => PREFERRED_MODEL.test(name)) ?? usable[0]!;
 }
 
 const SYSTEM_PROMPT = [
@@ -159,8 +186,7 @@ export async function suggestEnvPrefixSegment(
     : [];
 
   const snapshot = ctx.runtimeConfig.snapshot();
-  const models = Array.isArray(snapshot.virtual_models) ? (snapshot.virtual_models as JsonRow[]) : [];
-  const model = pickSuggestionModel(models);
+  const model = pickSuggestionModel(exposedModelNames(snapshot));
   if (model === null) {
     throw new CommandError(
       409,

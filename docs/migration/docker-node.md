@@ -289,4 +289,5 @@ node scripts/e2e-node-host.mjs            # 端到端冒烟（含 mock 上游流
 | 镜像 | `flowlet:node-20261110-autoprefix`（`sha256:2ba5f63d…`）：从当次一致的 HEAD `16fd9b5` + 本功能文件构建（工作树当时含并行会话未提交的 provider 扩展，刻意隔离） |
 | 部署 | 14:17:12 healthy；部署脚本本次走蓝绿切换（新容器 `/v1/models` 200 后 3.1s 完成，egress 未重建）；回滚点 `flowlet:node-20261110-fastshutdown5` |
 | 验证 | 生产 healthy；UI 包含「自动生成」「已按名称与备注自动生成」与既有「查看原始 token」「flowlet login」；`service_credentials` 3 条（`GITLAB` / `DOCKHAND_SELF` / `DOCKHAND_NA_PROD`）保留；重启后仅 Hermes `/v1/props` 404 噪声，无真实错误 |
+| 并发说明 | 14:19 并行会话又部署了 `flowlet:node-20261110-fastshutdown6`（含其快速退出/会话持久化）。核对其 UI 包仍包含「自动生成」「查看原始 token」「flowlet login」，本次功能未被覆盖；当前线上 = `flowlet:node-20261110-fastshutdown6` |
 | 遗留 | 并行会话的 `89733c1`（快速退出 + 管理端会话持久化）已提交，但同一时刻其 Beszel/Uptime Kuma/Jenkins provider 仍为未提交 WIP，导致该 HEAD 自身 `tsc` 不通过（页面已引用未提交的 provider 类型）。因此本次镜像**未包含** `89733c1`；待该功能提交、HEAD 恢复可构建后，重新从 HEAD 构建即可同时带上两者 |

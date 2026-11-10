@@ -15,10 +15,10 @@ import type { WebContext } from "./context.ts";
 /** 片段只允许大写字母/数字/下划线，最多 20 字符（拼上默认前缀后仍 ≤24）。 */
 const SEGMENT_PATTERN = /^[A-Z0-9_]{1,20}$/;
 const MAX_INPUT_CHARS = 200;
-const MODEL_TIMEOUT_MS = 20_000;
+const MODEL_TIMEOUT_MS = 45_000;
 // 推理模型（deepseek-v4.x 等）会先输出 reasoning_content：预算太小会被截断成空 content，
-// 因此这里给足 512 token（输出本身很短，成本可忽略）。
-const MAX_TOKENS = 512;
+// 因此这里给足 768 token（输出本身很短，成本可忽略）。超时同样放宽，避免长思考被误判失败。
+const MAX_TOKENS = 768;
 
 /** 优先用轻量模型做这种短任务；找不到时退回第一个已开放模型。 */
 const PREFERRED_MODEL = /flash|air|lightning|luna|terra|mini|small|haiku/i;
@@ -111,6 +111,11 @@ function proxyBaseUrl(ctx: WebContext): string {
   return `http://${usableHost}:${bind.port}`;
 }
 
+/** 取推理文本末尾一段（模型通常在思考末尾给出最终答案）。 */
+function reasoningTail(reasoning: string): string {
+  return reasoning.length > 600 ? reasoning.slice(-600) : reasoning;
+}
+
 /** SSE 事件（前端按 `data: {...}` 逐条解析）。 */
 export type EnvPrefixStreamEvent =
   | { type: "start"; model: string }
@@ -168,6 +173,8 @@ export function prepareEnvPrefixTarget(ctx: WebContext, input: EnvPrefixAiInput)
 
 interface StreamDelta {
   content: string;
+  /** 推理过程文本：content 为空（思考被截断）时用它兜底提炼片段。 */
+  reasoning: string;
   tokens: number;
   completionTokens: number | null;
 }
@@ -216,6 +223,7 @@ async function* readModelStream(url: string, model: string, userPrompt: string, 
   }
 
   let content = "";
+  let reasoning = "";
   let tokens = 0;
   let completionTokens: number | null = null;
   const decoder = new TextDecoder();
@@ -245,14 +253,14 @@ async function* readModelStream(url: string, model: string, userPrompt: string, 
       if (!Array.isArray(choices) || choices.length === 0) continue;
       const delta = (choices[0] as JsonRow).delta;
       if (delta === null || typeof delta !== "object") continue;
-      const piece = (delta as JsonRow);
-      const text = [piece.content, piece.reasoning_content]
-        .filter((value): value is string => typeof value === "string" && value !== "")
-        .join("");
-      if (text === "") continue;
-      content += text;
+      const piece = delta as JsonRow;
+      const pieceContent = typeof piece.content === "string" ? piece.content : "";
+      const pieceReasoning = typeof piece.reasoning_content === "string" ? piece.reasoning_content : "";
+      if (pieceContent === "" && pieceReasoning === "") continue;
+      content += pieceContent;
+      reasoning += pieceReasoning;
       tokens += 1;
-      yield { content, tokens, completionTokens };
+      yield { content, reasoning, tokens, completionTokens };
     }
   }
 }
@@ -273,6 +281,7 @@ export async function streamEnvPrefixSegment(
 
   let lastProgressMs = 0;
   let content = "";
+  let reasoning = "";
   let tokens = 0;
   let completionTokens: number | null = null;
   try {
@@ -294,7 +303,8 @@ export async function streamEnvPrefixSegment(
 
   const elapsedMs = Math.max(1, Date.now() - startedMs);
   const finalTokens = completionTokens ?? tokens;
-  const segment = parseSegment(content);
+  // content 为空但有过推理文本时（思考被截断），从推理末尾兜底找可用的英文片段。
+  const segment = parseSegment(content) ?? (content.trim() === "" ? parseSegment(reasoningTail(reasoning)) : null);
   if (segment === null) {
     onEvent({
       type: "error",

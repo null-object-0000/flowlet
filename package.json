@@ -32,7 +32,11 @@
     "website:check": "npm run check --workspace flowlet-website",
     "website:build": "npm run build --workspace flowlet-website",
     "build:web": "tsc && vite build --mode web --outDir dist-web",
-    "dev:web": "vite --mode web"
+    "dev:web": "vite --mode web",
+    "node:host": "node packages/flowlet-core/src/index.ts",
+    "node:typecheck": "tsc -p packages/flowlet-core/tsconfig.json",
+    "node:parity": "node scripts/web-parity.mjs",
+    "node:e2e": "node scripts/e2e-node-host.mjs"
   },
   "dependencies": {
     "@douyinfe/semi-icons": "^2.101.0",

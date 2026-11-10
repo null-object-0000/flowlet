@@ -1,0 +1,16 @@
+{
+  "name": "@flowlet/core",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Flowlet Node host: Web Host + model proxy, drop-in replacement for the Rust headless binary",
+  "exports": {
+    ".": "./src/index.ts",
+    "./storage": "./src/storage/index.ts",
+    "./proxy": "./src/proxy/index.ts",
+    "./web": "./src/web/index.ts"
+  },
+  "dependencies": {
+    "undici": "^7.16.0"
+  }
+}

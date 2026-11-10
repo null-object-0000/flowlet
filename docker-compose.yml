@@ -31,6 +31,7 @@ services:
       FLOWLET_CLIENT_TOKEN: ${FLOWLET_CLIENT_TOKEN:-}
       FLOWLET_PUBLIC_PROXY_URL: ${FLOWLET_PUBLIC_PROXY_URL:-}
       RUST_LOG: ${RUST_LOG:-info}
+      NODE_ENV: ${NODE_ENV:-production}
     volumes:
       - flowlet-data:/data
     stop_grace_period: 30s

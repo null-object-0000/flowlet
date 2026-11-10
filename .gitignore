@@ -169,3 +169,14 @@ antigravity-accounts/
 dist-web/
 flowlet-data/
 !.env.docker.example
+
+# Node host 本地开发数据（数据库副本/配置/设备身份）
+.flowlet-dev-data/
+.flowlet-dev-data-*/
+
+# Electron PoC 证据（含真实账号数据，禁止入库）
+apps/desktop-electron/evidence/
+
+# 冒烟测试的数据库副本（含真实凭据，禁止入库）
+**/__smoke__/data/
+.flowlet-dev-data/

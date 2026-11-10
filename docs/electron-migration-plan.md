@@ -8,6 +8,33 @@
 
 ---
 
+## 0.0 执行状态（2026-11-09 更新）
+
+**用户决策：先做 Docker/headless 版本，桌面 Electron 端延后。**
+因此本文件的 P-阶段被重新排序执行，实际进度如下：
+
+| 阶段 | 内容 | 状态 |
+| --- | --- | --- |
+| P0 | Electron + Node 骨架 PoC（复用 dist-web、真实库副本） | ✅ 已完成（`poc/electron-host/`） |
+| **P1′** | **Node Host（Docker 优先）：43 条 Web 命令 + 25 表存储 + 代理核心** | ✅ 已完成（`packages/flowlet-core/`，分支 `migrate/electron`） |
+| **P1″** | **后台维护（余额 5m / 清理 15m / 目录 1h）+ Rust 兼容设备身份** | ✅ 已完成（`src/host/scheduler.ts`） |
+| **P2′** | **Docker 镜像切换到 Node Host（无 Rust 工具链）+ 端到端冒烟** | ✅ 完成：远端构建 `flowlet:node-20261109-poc`（258MB），容器冒烟 18/18 通过；**尚未替换线上栈（待授权）** |
+| P2 | 批次 1–2（A 类命令） | 归入 P1′（Web Host 白名单仅 43 条，已全部实现） |
+| P3–P5 | 批次 3–10、代理核心 | 归入 P1′（代理 P0 已实现；thinking/reasoning 等受控例外见 `proxy-core.md`） |
+| P6 | Electron 桌面宿主（窗口/托盘/通知/凭据/无边框壳） | ⏸ 延后（用户要求先 Docker） |
+| P7 | 控制台抓取（Web Host 不需要） | ⏸ 不适用于 Docker；桌面阶段再评估 |
+| P8 | 打包签名/灰度发布 | 部分完成：Docker 镜像构建路径已就绪，桌面安装包延后 |
+
+当前基线证据（本地，`migrate/electron` 分支）：
+- `npm run node:typecheck` 0 错误；
+- 单元测试 **42/42**（storage 10 + proxy 22 + scheduler 5 ... 见各目录 `__tests__`）；
+- 端到端 `scripts/e2e-node-host.mjs` **12/12**（真实库副本 + mock 上游流式 + 日志落库）；
+- Rust↔Node 对拍 `scripts/web-parity.mjs` **命令差异 0 / HTTP 差异 0**（58 步命令序列）；
+- Docker 镜像：`Dockerfile` 已改为 Node 运行时（无 Rust 阶段），远端 Engine API 构建与容器冒烟见
+  `docs/migration/docker-node.md`。
+
+---
+
 ## 0. TL;DR
 
 | 问题 | 结论 |

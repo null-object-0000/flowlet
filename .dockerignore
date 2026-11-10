@@ -22,3 +22,7 @@ flowlet-data
 src-tauri/gen
 src-tauri/binaries
 website/.next
+.worktrees
+apps
+**/*.tsbuildinfo
+.flowlet-dev-data*

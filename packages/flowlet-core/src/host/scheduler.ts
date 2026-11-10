@@ -9,13 +9,15 @@
 // MVP 差异（已在 docs/migration/docker-node.md 标注）：
 // - 不写 background_jobs 后台任务日志（Rust 会写）；只输出结构化 console 行，便于容器日志检索。
 // - 目录同步只负责抓取并原子写入 catalogDir，不重建价格表（Node 价格仍来自 config.json）。
-// - 控制台抓取类渠道（需桌面 WebView）不在自动余额同步范围（与 Rust headless 一致）。
+// - 控制台抓取类渠道（需桌面 WebView）不在自动余额同步范围（与 Rust headless 一致）；
+//   例外是千问：登录千问平台后走官方 HTTP 接口，Node Host 直接参与周期同步。
 import { renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { Worker } from "node:worker_threads";
 import type { JsonRow } from "../types.ts";
 import type { WebContext } from "../web/context.ts";
 import { queryBalance } from "../web/balance.ts";
+import { resolveAccountCredentials, syncAccount } from "../web/qwen-platform.ts";
 import { presetSupportsBalance } from "../web/config-state.ts";
 import { loadLogCaptureConfig } from "../config/index.ts";
 import { cleanupScheduledBodies } from "../storage/maintenance.ts";
@@ -34,6 +36,8 @@ export const MODELS_DEV_URL = "https://models.dev/api.json";
 
 /** 提供官方余额接口、可在无桌面环境自动同步的渠道（Rust supports_official_balance）。 */
 const OFFICIAL_BALANCE_CHANNELS = new Set(["deepseek", "kimi", "openrouter", "vibetoken"]);
+/** 千问账号通过千问平台 HTTP 接口自动同步（余额 + 免费额度 + Token Plan 订阅）。 */
+const QWEN_PLATFORM_CHANNEL = "qwen";
 
 interface UsageRetentionConfig {
   balanceSnapshotRetentionDays: number;
@@ -234,7 +238,33 @@ export function createHostScheduler(options: HostSchedulerOptions): HostSchedule
         });
       }
     }
-    if (targets.length > 0) log({ task: "balance-sync", attempted: targets.length, succeeded, failed });
+    // 千问：有平台登录态的账号走 HTTP 同步（余额/免费额度/订阅），
+    // 与桌面端「已登录后自动同步」一致；未登录的账号跳过，不刷失败日志。
+    let qwenAttempted = 0;
+    for (const account of accounts) {
+      if (!account || account.enabled !== true) continue;
+      if (String(account.channel_id ?? "") !== QWEN_PLATFORM_CHANNEL) continue;
+      const accountId = String(account.id ?? "");
+      if (accountId === "") continue;
+      const credentials = resolveAccountCredentials(context.catalogDir, accountId);
+      if (credentials.state !== "ok") continue;
+      qwenAttempted += 1;
+      try {
+        await syncAccount(context, accountId);
+        succeeded += 1;
+      } catch (error) {
+        failed += 1;
+        log({
+          task: "balance-sync",
+          channel: "qwen",
+          accountId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    if (targets.length > 0 || qwenAttempted > 0) {
+      log({ task: "balance-sync", attempted: targets.length + qwenAttempted, qwen: qwenAttempted, succeeded, failed });
+    }
   }
 
   return {

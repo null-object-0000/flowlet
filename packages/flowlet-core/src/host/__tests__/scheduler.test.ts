@@ -5,7 +5,7 @@ import { randomBytes } from "node:crypto";
 import { once } from "node:events";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -270,6 +270,60 @@ test("balance sync skips disabled accounts and accounts with custom base url", a
     const scheduler = createHostScheduler({ context: ctx, log: () => {} });
     await scheduler.runBalanceSyncOnce();
     assert.equal(upstreamCalls, 0, "不应对禁用账号或自定义端点账号发起余额查询");
+  } finally {
+    globalThis.fetch = originalFetch;
+    storage.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("balance sync includes qwen only when the platform login exists", async () => {
+  const { ctx, storage, dir } = makeContext();
+  const originalFetch = globalThis.fetch;
+  const logs: JsonRow[] = [];
+  try {
+    const qwenAccounts = [
+      { id: "qwen-not-logged-in", channel_id: "qwen", enabled: true, api_key: "sk-x" },
+      { id: "qwen-logged-in", channel_id: "qwen", enabled: true, api_key: "sk-x" },
+    ];
+    // syncAccount 从 storage 读账号，所以两边都要有。
+    storage.saveChannelAccounts(qwenAccounts);
+    (ctx.runtimeConfig as RuntimeConfig).replace({
+      channels: [],
+      accounts: qwenAccounts,
+      routes: [],
+      rules: [],
+      virtual_models: [],
+    });
+    // 只给 qwen-logged-in 准备共享平台凭据（另一个账号应被跳过，不发请求）。
+    const credentialDir = path.join(ctx.catalogDir, "qwen-platform");
+    mkdirSync(credentialDir, { recursive: true });
+    writeFileSync(
+      path.join(credentialDir, "credentials.json"),
+      JSON.stringify({
+        version: 1,
+        platforms: {
+          aliyun: {
+            accessToken: "token",
+            expiresAt: "2099-01-01T00:00:00Z",
+            aliyunId: "aliyun",
+            email: null,
+            updatedAt: "2026-11-10T00:00:00Z",
+          },
+        },
+        accounts: { "qwen-logged-in": "aliyun" },
+      }),
+    );
+    let attempted = 0;
+    globalThis.fetch = (async () => {
+      attempted += 1;
+      throw new Error("network down in test");
+    }) as typeof fetch;
+    const scheduler = createHostScheduler({ context: ctx, log: (line) => logs.push(line as JsonRow) });
+    await scheduler.runBalanceSyncOnce();
+    assert.ok(attempted > 0, "已登录的千问账号应参与周期同步");
+    const qwenFailure = logs.find((line) => line.channel === "qwen" || line.task === "balance-sync");
+    assert.ok(qwenFailure !== undefined, "同步失败应写入结构化日志");
   } finally {
     globalThis.fetch = originalFetch;
     storage.close();

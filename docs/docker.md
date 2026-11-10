@@ -48,7 +48,7 @@ docker compose logs -f flowlet
 模型调用的 OpenAI Base URL 为 `http://服务器地址:20135/v1`，Anthropic Base URL 为 `http://服务器地址:20135/anthropic`，Responses 使用 `/v1/responses`。
 调用密钥可在「渠道账号 → 显示调用密钥」查看。先添加渠道账号、拉取并勾选需要开放的模型，再到「模型服务」调整候选渠道/账号的启停和优先级。
 
-服务启动 30 秒后会自动同步一轮官方余额，之后每 5 分钟一轮：DeepSeek、Kimi、OpenRouter、VibeToken 等提供官方余额 API 的渠道由服务端直接查询并写入余额快照，不依赖管理页面是否打开，账号与渠道改动在下一轮生效、无需重启。LongCat、Qwen、Z.AI 与自定义渠道依赖桌面端隐藏 WebView 抓取控制台，Web Host 不支持该能力，需要在桌面端同步或手动维护余额。
+服务启动 30 秒后会自动同步一轮官方余额，之后每 5 分钟一轮：DeepSeek、Kimi、OpenRouter、VibeToken 等提供官方余额 API 的渠道由服务端直接查询并写入余额快照，不依赖管理页面是否打开，账号与渠道改动在下一轮生效、无需重启。**Qwen 账号在管理台完成一次「登录千问平台」后也参与这轮周期同步**：Node Host 直接调用千问平台 HTTP 接口拉取余额、免费额度与 Token Plan 订阅，不再依赖 WebView；未登录的 Qwen 账号会被跳过（不刷失败日志）。LongCat、Z.AI 与自定义渠道仍依赖桌面端隐藏 WebView 抓取控制台，Web Host 不支持该能力，需要在桌面端同步或手动维护余额。
 
 管理凭据与模型调用密钥分别鉴权。管理凭据不能调用模型，调用密钥不能访问管理接口。未设置 `FLOWLET_CLIENT_TOKEN` 时，首次启动随机生成调用密钥并保存到数据卷，后续重启继续使用。
 token 模式的浏览器凭据仅保存在当前标签页的 sessionStorage 中；OIDC 模式改用 HttpOnly 会话 Cookie，

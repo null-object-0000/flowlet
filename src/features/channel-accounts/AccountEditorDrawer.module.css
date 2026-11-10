@@ -123,6 +123,11 @@
 .qwenPlatformIdentity { display: grid; gap: 4px; }
 .qwenPlatformActions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .qwenPlatformInline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.qwenPlatformInlineBlock { display: grid; gap: 4px; }
+.qwenCardFooter { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--semi-color-border); }
+.qwenSyncActions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.qwenSyncActions > button { min-width: 0; }
+.qwenSyncFeedback { display: flex; align-items: center; min-width: 0; }
 .modelQuota { display: block; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .scrapeHint { color: var(--semi-color-text-2); font-size: 12px; line-height: 1.5; }
 .modelHeading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }

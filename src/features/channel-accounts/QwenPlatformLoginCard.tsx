@@ -33,6 +33,10 @@ export type QwenPlatformLoginCardProps = {
   loggedOutHint: string;
   /** 已登录时的说明文案（已翻译）。 */
   loggedInHint: string;
+  /** 行内模式：不渲染独立卡片外壳与标题，作为资源卡片的底部一行使用。 */
+  inline?: boolean;
+  /** 是否渲染登录/重新登录/退出按钮；行内模式下由同步工具条统一放置。 */
+  showActions?: boolean;
 };
 
 /** 登录完成的自动同步期间也按已登录处理，避免瞬间闪回 WebView 兜底按钮。 */
@@ -90,22 +94,14 @@ export function QwenPlatformLoginCard({
   t,
   loggedOutHint,
   loggedInHint,
+  inline = false,
+  showActions = true,
 }: QwenPlatformLoginCardProps) {
   const isLoggedIn = useIsPlatformLoggedIn(platform);
   const platformAccount = platform.status?.aliyunId ?? platform.status?.email ?? "-";
 
-  return (
-    <div className={styles.longCatSummaryCard}>
-      <div className={styles.longCatSummaryHeading}>
-        <strong>{t("千问平台登录")}</strong>
-        {platform.statusLoading ? (
-          <Tag size="small" color="grey">{t("正在读取登录状态…")}</Tag>
-        ) : isLoggedIn ? (
-          <Tag size="small" color="green">{t("已登录")}</Tag>
-        ) : (
-          <Tag size="small" color="grey">{t("未登录")}</Tag>
-        )}
-      </div>
+  const body = (
+    <>
 
       {platform.isPolling ? (
         <div className={styles.scrapeToolbar}>
@@ -124,50 +120,73 @@ export function QwenPlatformLoginCard({
               </Text>
             </>
           ) : null}
-          <div className={styles.qwenPlatformActions}>
-            <Button
-              size="small"
-              theme="borderless"
-              icon={<IconRefresh />}
-              disabled={!enabled || platform.isSyncing}
-              onClick={() => void platform.startLogin()}
-            >
-              {t("重新登录")}
-            </Button>
-            <Button
-              size="small"
-              type="danger"
-              theme="borderless"
-              disabled={!enabled || platform.isSyncing}
-              onClick={() => void platform.logout()}
-            >
-              {t("退出登录")}
-            </Button>
-          </div>
+          {showActions ? (
+            <div className={styles.qwenPlatformActions}>
+              <Button
+                size="small"
+                theme="borderless"
+                icon={<IconRefresh />}
+                disabled={!enabled || platform.isSyncing}
+                onClick={() => void platform.startLogin()}
+              >
+                {t("重新登录")}
+              </Button>
+              <Button
+                size="small"
+                type="danger"
+                theme="borderless"
+                disabled={!enabled || platform.isSyncing}
+                onClick={() => void platform.logout()}
+              >
+                {t("退出登录")}
+              </Button>
+            </div>
+          ) : null}
         </div>
       ) : (
         <div className={styles.qwenPlatformIdentity}>
           <Text type="tertiary" size="small">{loggedOutHint}</Text>
-          <div className={styles.qwenPlatformActions}>
-            <Button
-              size="small"
-              theme="solid"
-              loading={platform.phase === "starting"}
-              disabled={!enabled || platform.isSyncing}
-              onClick={() => void platform.startLogin()}
-            >
-              {t("登录千问平台")}
-            </Button>
-            {!enabled ? (
-              <Text type="tertiary" size="small">{t("保存账号后可登录千问平台")}</Text>
-            ) : null}
-          </div>
+          {showActions ? (
+            <div className={styles.qwenPlatformActions}>
+              <Button
+                size="small"
+                theme="solid"
+                loading={platform.phase === "starting"}
+                disabled={!enabled || platform.isSyncing}
+                onClick={() => void platform.startLogin()}
+              >
+                {t("登录千问平台")}
+              </Button>
+              {!enabled ? (
+                <Text type="tertiary" size="small">{t("保存账号后可登录千问平台")}</Text>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       )}
 
       {platform.error && platform.errorScope !== "sync" ? (
         <div className={styles.scrapeError}>{platform.error}</div>
       ) : null}
+    </>
+  );
+
+  if (inline) {
+    return <div className={styles.qwenPlatformInlineBlock}>{body}</div>;
+  }
+  return (
+    <div className={styles.longCatSummaryCard}>
+      <div className={styles.longCatSummaryHeading}>
+        <strong>{t("千问平台登录")}</strong>
+        {platform.statusLoading ? (
+          <Tag size="small" color="grey">{t("正在读取登录状态…")}</Tag>
+        ) : isLoggedIn ? (
+          <Tag size="small" color="green">{t("已登录")}</Tag>
+        ) : (
+          <Tag size="small" color="grey">{t("未登录")}</Tag>
+        )}
+      </div>
+      {body}
     </div>
   );
 }

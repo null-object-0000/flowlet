@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button, Progress, Tag, Toast, Typography } from "@douyinfe/semi-ui-19";
 import { IconRefresh } from "@douyinfe/semi-icons";
@@ -46,11 +46,11 @@ export type QwenAccountPanelProps = {
  * 千问账号统一资源面板。
  *
  * 同一个千问平台账号的「按量付费余额/免费额度」与「Token Plan 订阅额度」由同一次
- * 平台同步返回（同一个 `rawScrapedJson`），因此这里只渲染**一个**面板、一次登录：
- * - 摘要卡：账户余额 / 未结清 / 本月账单（字段缺失的行不渲染）+ 免费额度模型数；
- * - 订阅卡：仅当 bundle 里存在订阅槽位（`parseQwenTokenPlanDetails` 非 null）时渲染，
- *   保留套餐名、5 小时/月额度窗口、重置卡与过期/未订阅态；
- * - 登录卡与同步控件各只有一份：已登录走官方 HTTP 同步，未登录回退 WebView 抓取。
+ * 平台同步返回（同一个 `rawScrapedJson`），但**每个 Flowlet 账号只展示自己资源模式的
+ * 那部分数据**：按量付费账号显示余额/免费额度，Token Plan 账号显示订阅额度。
+ * 两条账号记录因此不会长得一模一样，面板也不会无谓变高。
+ * - 登录卡与同步控件各只有一份（登录按平台账号共享），已登录走官方 HTTP 同步，
+ *   未登录回退 WebView 抓取。
  */
 export function QwenAccountPanel({
   account,
@@ -123,6 +123,20 @@ export function QwenAccountPanel({
     void syncNowRef.current();
   }, [account.id, enabled, platform.isLoggedIn, platform.isSyncing, snapshot?.raw_scraped_json]);
 
+  // 登录状态收进资源卡片底部一行（不再单独占一张卡），面板高度明显收敛。
+  const loginRow = (
+    <QwenPlatformLoginCard
+      platform={platform}
+      enabled={enabled}
+      language={language}
+      t={t}
+      inline
+      showActions={false}
+      loggedOutHint={t("通过千问平台登录后，余额、免费额度与订阅额度由官方 HTTP 接口同步，无需打开 WebView。")}
+      loggedInHint={t("余额、免费额度与订阅额度由官方 HTTP 接口同步，无需打开 WebView。")}
+    />
+  );
+
   async function handleRefresh() {
     if (isLoggedIn) {
       const result = await platform.syncNow();
@@ -145,6 +159,7 @@ export function QwenAccountPanel({
           platform={platform}
           showFreeHints={showFreeHints}
           showEmptyHint={!hasAnyData}
+          footer={loginRow}
           language={language}
           t={t}
         />
@@ -152,7 +167,7 @@ export function QwenAccountPanel({
 
       {isTokenPlanAccount ? (
         subscription ? (
-          <QwenSubscriptionCard details={subscription} syncedAt={syncedAt} language={language} t={t} />
+          <QwenSubscriptionCard details={subscription} syncedAt={syncedAt} footer={loginRow} language={language} t={t} />
         ) : (
           <div className={styles.longCatSummaryCard}>
             <div className={styles.longCatSummaryHeading}>
@@ -162,21 +177,14 @@ export function QwenAccountPanel({
             <Text type="tertiary" size="small">
               {isLoggedIn ? t("尚未同步到订阅信息，点击“立即刷新”重试。") : t("登录千问平台后自动同步订阅额度。")}
             </Text>
+            <div className={styles.qwenCardFooter}>{loginRow}</div>
           </div>
         )
       ) : null}
 
-      <QwenPlatformLoginCard
-        platform={platform}
-        enabled={enabled}
-        language={language}
-        t={t}
-        loggedOutHint={t("通过千问平台登录后，余额、免费额度与订阅额度由官方 HTTP 接口同步，无需打开 WebView。")}
-        loggedInHint={t("余额、免费额度与订阅额度由官方 HTTP 接口同步，无需打开 WebView。")}
-      />
-
       <div className={styles.longCatSyncSection}>
         <div className={styles.longCatSyncControls}>
+          <div className={styles.qwenSyncActions}>
           <Button
             icon={<IconRefresh />}
             loading={refreshLoading}
@@ -185,6 +193,40 @@ export function QwenAccountPanel({
           >
             {t("立即刷新")}
           </Button>
+          {isLoggedIn ? (
+            <>
+              <Button
+                size="small"
+                theme="borderless"
+                icon={<IconRefresh />}
+                disabled={!enabled || platform.isSyncing}
+                onClick={() => void platform.startLogin()}
+              >
+                {t("重新登录")}
+              </Button>
+              <Button
+                size="small"
+                type="danger"
+                theme="borderless"
+                disabled={!enabled || platform.isSyncing}
+                onClick={() => void platform.logout()}
+              >
+                {t("退出登录")}
+              </Button>
+            </>
+          ) : (
+            <Button
+              size="small"
+              theme="solid"
+              loading={platform.phase === "starting"}
+              disabled={!enabled || platform.isSyncing}
+              onClick={() => void platform.startLogin()}
+            >
+              {t("登录千问平台")}
+            </Button>
+          )}
+          </div>
+          <div className={styles.qwenSyncFeedback}>
           {isLoggedIn ? (
             <Text type="tertiary" size="small">
               {platform.isSyncing
@@ -205,6 +247,7 @@ export function QwenAccountPanel({
               t={t}
             />
           )}
+          </div>
         </div>
         {platform.error && platform.errorScope === "sync" ? (
           <div className={styles.scrapeError}>{platform.error}</div>
@@ -226,6 +269,7 @@ function QwenFreeTierSummary({
   platform,
   showFreeHints,
   showEmptyHint,
+  footer,
   language,
   t,
 }: {
@@ -234,6 +278,7 @@ function QwenFreeTierSummary({
   platform: ReturnType<typeof useQwenPlatformLogin>;
   showFreeHints: boolean;
   showEmptyHint: boolean;
+  footer?: ReactNode;
   language: "zh-CN" | "en-US";
   t: Translate;
 }) {
@@ -281,6 +326,7 @@ function QwenFreeTierSummary({
       {showEmptyHint ? (
         <Text type="tertiary" size="small">{t("尚未同步账户余额与免费额度")}</Text>
       ) : null}
+      {footer ? <div className={styles.qwenCardFooter}>{footer}</div> : null}
     </div>
   );
 }
@@ -289,11 +335,13 @@ function QwenFreeTierSummary({
 function QwenSubscriptionCard({
   details,
   syncedAt,
+  footer,
   language,
   t,
 }: {
   details: QwenTokenPlanDetails;
   syncedAt?: string | null;
+  footer?: ReactNode;
   language: "zh-CN" | "en-US";
   t: Translate;
 }) {
@@ -354,6 +402,7 @@ function QwenSubscriptionCard({
             </span>
           </div>
         </div>
+        {footer ? <div className={styles.qwenCardFooter}>{footer}</div> : null}
       </div>
 
       {resetCards ? (

@@ -135,8 +135,9 @@ Flowlet 走千问官方 CLI（`@qianwenai/qianwen-cli`）使用的 device flow�
 
 - 触发顺序：`scrape_balance` 与周期同步（`sync_scrape_balances`）先尝试 HTTP；
   未登录、令牌过期或请求失败时**静默回退**控制台抓取，桌面端既有行为不变；
-- Web Host / Docker 没有 WebView，这条 HTTP 路径是它们获取余额与免费额度的唯一
-  途径；`qwen_platform_status|login_start|login_poll|logout|sync` 已加入
+- Web Host / Docker 没有 WebView，这条 HTTP 路径是它们获取余额与免费额度、订阅额度的
+  唯一途径；Node Host 的周期余额同步（启动 30 秒后首轮、之后每 5 分钟）会把
+  **已登录的 Qwen 账号**纳入同一轮任务，未登录账号直接跳过；`qwen_platform_status|login_start|login_poll|logout|sync` 已加入
   `core/web/commands.rs` 的显式命令白名单，授权页由客户端浏览器打开；
 - 凭据按**千问平台账号**共享，存放在数据目录 `qwen-platform/credentials.json`
   （权限 0600，`platforms` 存令牌、`accounts` 存 Flowlet 账号 → 平台账号绑定）：

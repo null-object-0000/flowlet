@@ -5,6 +5,7 @@ use crate::core::{
         AgentSessionsFilter, ChannelAccount, LogsFilter, ProxyBindConfig, RouteCandidate,
         VirtualModel,
     },
+    service_credentials::{self, ServiceCredentialInput},
     storage::storage_tasks,
     sync,
 };
@@ -334,6 +335,30 @@ pub async fn dispatch(state: &WebState, command: &str, args: Value) -> Result<Va
             crate::core::upstream_proxy::set(config).map_err(error)?;
             Ok(Value::Null)
         }
+        "list_credential_providers" => value(service_credentials::providers()),
+        "list_service_credentials" => value(service_credentials::list(s).map_err(error)?),
+        "save_service_credential" => {
+            let input: ServiceCredentialInput = arg(&args, "input")?;
+            let insecure: Option<bool> = arg(&args, "insecure")?;
+            let view = service_credentials::save(s, input, insecure.unwrap_or(false))
+                .await
+                .map_err(error)?;
+            value(view)
+        }
+        "test_service_credential" => {
+            let id: String = arg(&args, "id")?;
+            let insecure: Option<bool> = arg(&args, "insecure")?;
+            let check = service_credentials::test(s, &id, insecure.unwrap_or(false))
+                .await
+                .map_err(error)?;
+            value(check)
+        }
+        "delete_service_credential" => {
+            let id: String = arg(&args, "id")?;
+            service_credentials::delete(s, &id).map_err(error)?;
+            Ok(Value::Null)
+        }
+        "export_service_credentials" => value(service_credentials::export(s).map_err(error)?),
         _ => Err((
             StatusCode::NOT_IMPLEMENTED,
             "unsupported_in_web",

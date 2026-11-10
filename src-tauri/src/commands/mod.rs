@@ -7,6 +7,7 @@
 mod account_workspace;
 mod agent;
 mod channels;
+mod credentials;
 mod device_sync;
 mod maintenance;
 mod observability;
@@ -17,6 +18,7 @@ mod usage;
 pub(super) use account_workspace::*;
 pub(super) use agent::*;
 pub(super) use channels::*;
+pub(super) use credentials::*;
 pub(super) use device_sync::*;
 pub(super) use maintenance::*;
 pub(super) use observability::*;

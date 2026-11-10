@@ -9,6 +9,11 @@ Web Host 与桌面端执行同一组后台维护任务：每 15 分钟做一次�
 
 本机 Agent 自动发现/写入配置、原生会话采集、桌面 WebView 控制台抓取和本机 OAuth 授权仍使用桌面端。Web 版不会扫描服务器上的个人 Agent 配置。
 
+「服务凭据」页面集中管理 Agent 接入所需的三方服务 token（当前支持 GitLab API v4，按 CE 10.8.7 实现）：token 经 ChaCha20-Poly1305 加密后存 SQLite，密钥文件 `secret.key` 在 `/data` 下并随命名卷备份；管理接口只返回 `••••1234` 掩码，保存时会实际请求 `GET /api/v4/user` 校验，失败不落库。Agent 机器上执行
+`flowlet-cred pull --server=http://<服务器地址>:20134 --token=<管理凭据>` 把启用中的凭据同步到本地
+`~/.config/flowlet/credentials/credentials.env`，Agent 继续读本机 `.env` 或用 `flowlet-cred run` 注入；
+服务端不向 Agent 下发明文以外的任何凭据管理能力。
+
 「会话管理」在 Web 版只聚合经过本实例代理的请求观测：按请求携带的 Agent 类型与会话标识聚合客户端、请求数、成功/失败数、Token、预估费用和最近活动时间，并支持客户端筛选、会话 ID 搜索、子会话查看和跳转请求日志。它不读取服务器本机 Agent 原生会话文件，因此不展示原生用量、原生时间线，也不提供 OpenCode 实时权限确认；这些能力仍需在桌面端使用。文件夹级别的原生会话上报仍依赖桌面端设备同步，Web 版不参与。
 
 ## 启动

@@ -15,6 +15,11 @@ export const queryKeys = {
     status: () => [...queryKeys.proxy.all, "status"] as const,
     bindConfig: () => [...queryKeys.proxy.all, "bind-config"] as const,
   },
+  credentials: {
+    all: ["credentials"] as const,
+    list: () => [...queryKeys.credentials.all, "list"] as const,
+    providers: () => [...queryKeys.credentials.all, "providers"] as const,
+  },
   channel: {
     all: ["channel"] as const,
     presets: () => [...queryKeys.channel.all, "presets"] as const,

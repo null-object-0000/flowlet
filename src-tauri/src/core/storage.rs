@@ -32,6 +32,8 @@ pub enum StorageError {
 
 #[path = "storage_config.rs"]
 mod storage_config;
+#[path = "storage_credentials.rs"]
+mod storage_credentials;
 #[path = "storage_device_usage.rs"]
 mod storage_device_usage;
 #[path = "storage_maintenance.rs"]
@@ -48,6 +50,25 @@ pub use storage_tasks::{
     AgentDataSyncResult, AgentSyncStatusReport, BackgroundJobDetail, BackgroundJobRow,
     BackgroundJobsFilter, BackgroundJobsPage, CatalogSyncResult, CleanupBackgroundJobsResult,
 };
+
+/// 三方服务凭据的持久化行：`secret_ciphertext` 是 `secret_box` 加密后的密文，
+/// 明文只在保存、校验和导出时短暂出现在内存里。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServiceCredentialRow {
+    pub id: String,
+    pub name: String,
+    pub provider: String,
+    pub base_url: String,
+    pub secret_ciphertext: String,
+    pub secret_hint: String,
+    pub kind: String,
+    pub note: Option<String>,
+    pub enabled: bool,
+    pub created_at: String,
+    pub updated_at: String,
+    pub last_verified_at: Option<String>,
+    pub last_error: Option<String>,
+}
 
 #[derive(Clone)]
 pub struct Storage {
@@ -929,6 +950,25 @@ impl Storage {
                 value      TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS service_credentials (
+                id                 TEXT PRIMARY KEY,
+                name               TEXT NOT NULL,
+                provider           TEXT NOT NULL,
+                base_url           TEXT NOT NULL,
+                secret_ciphertext  TEXT NOT NULL,
+                secret_hint        TEXT NOT NULL,
+                kind               TEXT NOT NULL DEFAULT 'cli_token',
+                note               TEXT,
+                enabled            INTEGER NOT NULL DEFAULT 1,
+                created_at         TEXT NOT NULL,
+                updated_at         TEXT NOT NULL,
+                last_verified_at   TEXT,
+                last_error         TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_service_credentials_provider
+                ON service_credentials(provider, enabled);
 
             CREATE TABLE IF NOT EXISTS known_devices (
                 device_id               TEXT PRIMARY KEY,

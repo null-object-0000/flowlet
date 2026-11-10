@@ -58,6 +58,7 @@ import {
   type AccountActionRequest,
 } from "../features/channel-accounts/AccountActionOverlay";
 import { ModelServicesPage } from "../pages/models/ModelServicesPage";
+import { CredentialsPage } from "../pages/credentials/CredentialsPage";
 import { RequestLogsPage } from "../pages/request-logs/RequestLogsPage";
 import { PageHeader } from "../shared/ui/PageHeader";
 import { usageCommands } from "../domains/usage/commands";
@@ -246,6 +247,7 @@ function WebSession() {
           availableRoutes={[
             "/",
             "/models",
+            "/credentials",
             "/logs",
             "/sessions",
             "/usage",
@@ -259,6 +261,7 @@ function WebSession() {
         <Route path="overview" element={<Navigate to="/" replace />} />
         <Route path="accounts" element={<Navigate to="/" replace />} />
         <Route path="models" element={<ModelServicesPage />} />
+        <Route path="credentials" element={<CredentialsPage />} />
         <Route path="logs" element={<RequestLogsPage />} />
         <Route
           path="sessions"

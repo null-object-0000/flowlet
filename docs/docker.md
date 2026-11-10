@@ -17,7 +17,7 @@ Web Host 与桌面端执行同一组后台维护任务：每 15 分钟做一次�
 本机 Agent 自动发现/写入配置、原生会话采集、桌面 WebView 控制台抓取和本机 OAuth 授权仍使用桌面端。Web 版不会扫描服务器上的个人 Agent 配置。
 
 「服务凭据」页面集中管理 Agent 接入所需的三方服务 token（provider：GitLab API v4，按 CE 10.8.7 实现；Dockhand 面板 API，Bearer Token）：token 经 ChaCha20-Poly1305 加密后存 SQLite，密钥文件 `secret.key` 在 `/data` 下并随命名卷备份；管理接口只返回 `••••1234` 掩码，保存时会实际请求上游校验（GitLab `GET /api/v4/user`、Dockhand `GET /api/environments`），失败不落库。同 provider 多实例用「环境别名（Env 前缀）」区分，`flowlet pull` 生成 `{PREFIX}_URL` / `{PREFIX}_TOKEN`（如三份 Dockhand 得到 `DOCKHAND_NA_URL` / `DOCKHAND_SZ_URL` / `DOCKHAND_SELF_URL`）。页面还提供「本机接入」下载引导：可直接下载 `install-flowlet.sh`、CLI 与 Skills 包（`/downloads/`），用一条 `curl ... | sh` 命令在 Agent 机器安装 `flowlet`。安装后在 Agent 机器上执行
-`flowlet login --server=http://<服务器地址>:20134`，在浏览器用公司 SSO 完成授权（loopback + PKCE），
+`flowlet login --server=http://<服务器地址>:20134`，在浏览器登录管理台并确认授权（loopback + PKCE；OIDC 实例走实例配置的登录方式），
 CLI 只保存一把 **仅能读服务凭据** 的本机授权（`~/.config/flowlet/credentials/auth.json`，30 天有效，
 可在管理台「服务凭据 → 本机接入 → 已授权的 CLI」撤销）；随后
 `flowlet pull --server=http://<服务器地址>:20134` 把启用中的凭据同步到本地

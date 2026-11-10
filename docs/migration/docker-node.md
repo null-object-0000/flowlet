@@ -244,5 +244,6 @@ node scripts/e2e-node-host.mjs            # 端到端冒烟（含 mock 上游流
 | 生产验证 | 镜像 tag / healthy；`/api/auth/config` 仍为 `oidc` 且 `token_login=false`（静态管理 Bearer 仍被 401，未放开兜底）；授权页 200（含核准按钮、登录提示分支、`credentials:read`、`DENY`/`no-store`/CSP）；`exchange` 非法 code → 400 `invalid_grant`；`/v1/models` 4 个模型；`deepseek-v4.1-flash` 流式读到 `[DONE]`；`service_credentials` 1 条保留、`cli_auth_tokens` 表可读；自容器启动起请求日志 0 错误（仅历史 Hermes `/v1/props` 404 噪声） |
 | 前端 | 「服务凭据 → 本机接入」改为「登录并同步凭据」两步（login + pull）并新增「已授权的 CLI」列表/撤销；`flowlet pull` 不再携带 `--token` |
 | 回滚 | `flowlet_deploy.py deploy --tag flowlet:node-20261110-sessionmeta`（发布前 stack 值）；DB schema 只增不改，旧镜像可直接读回 |
+| 文案修订（13:45） | 授权相关文案不再写「公司 SSO」（IdP 由 `FLOWLET_OIDC_DISPLAY_NAME` 配置，也可能是 token 模式）：UI/CLI/文档统一为「登录 Flowlet 管理台并授权」，授权页动态展示实例配置的登录方式；同时把 `packages/flowlet-skills/flowlet-credentials/SKILL.md`（安装脚本下发的 Skills 包）同步为含 `flowlet login` 的版本，去掉旧的 `pull --token` 指引。镜像 `flowlet:node-20261110-logintext`（163s，`sha256:3a61bb05…`），13:45:33 部署后：UI 包无「公司 SSO」、含新文案；Skills 包含 `flowlet login` 且无 `pull --token`；`/v1/models` 200、OIDC 配置不变 |
 | 并发说明 | 本发布与 sessionmeta 流交替部署；当前线上 = `flowlet:node-20261110-cliauth`，该镜像同时含 sessionmeta 派生与 CLI 授权（sessionmeta 侧已实测派生未丢失） |
 | 未覆盖 | Rust Host（桌面/legacy headless）未实现该能力，桌面侧仍可用 `flowlet set`/`--token`；浏览器授权要求 CLI 与浏览器在同一台机器（loopback） |

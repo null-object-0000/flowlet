@@ -1863,12 +1863,12 @@ const english: Record<string, string> = {
   "复制命令": "Copy command",
   "安装命令已复制": "Install command copied",
   "登录并同步凭据": "Sign in and sync credentials",
-  "两步完成：先用浏览器公司 SSO 授权本机 CLI，再同步启用中的服务凭据。本页不会收集管理凭据。":
-    "Two steps: authorize this machine's CLI with your company SSO in the browser, then sync the enabled service credentials. This page never collects admin credentials.",
+  "两步完成：先在浏览器登录 Flowlet 管理台并授权本机 CLI，再同步启用中的服务凭据。本页不会收集管理凭据。":
+    "Two steps: sign in to the Flowlet console in the browser and authorize this machine's CLI, then sync the enabled service credentials. This page never collects admin credentials.",
   "登录授权": "Sign in",
   "登录命令已复制": "Sign-in command copied",
-  "打开浏览器用公司 SSO 授权；CLI 会拿到一把只能读取服务凭据的 token（30 天有效，可随时在下方撤销）。":
-    "Opens the browser for company SSO authorization. The CLI receives a token that can only read service credentials (valid for 30 days, revocable below at any time).",
+  "打开浏览器完成管理台登录授权（使用该实例配置的登录方式，如企业 SSO）；CLI 会拿到一把只能读取服务凭据的 token（30 天有效，可随时在下方撤销）。":
+    "Opens the browser to sign in and authorize via the console's configured login method (e.g. enterprise SSO). The CLI receives a token that can only read service credentials (valid for 30 days, revocable below at any time).",
   "同步凭据": "Sync credentials",
   "可重复执行，只同步启用中的服务凭据；已登录时无需再填任何管理凭据。":
     "Safe to re-run; it only syncs enabled service credentials and needs no admin credential once signed in.",

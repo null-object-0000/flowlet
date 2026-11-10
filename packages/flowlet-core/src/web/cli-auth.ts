@@ -289,12 +289,14 @@ export function createCliAuth(
 不能登录管理台、不能修改配置。</p>
 <div class="kv">
   <div>请求来源：<code>${escapeHtml(name === "" ? "未命名机器" : name)}</code></div>
+  <div>管理台登录方式：<span id="approve-provider">该实例配置的登录方式</span></div>
   <div>作用域：<code>${CLI_TOKEN_SCOPE}</code>（仅 <code>export_service_credentials</code>）</div>
   <div>有效期：30 天，可在「服务凭据 → 本机接入」随时撤销</div>
 </div>
 <div id="state-loading"><p class="muted">正在检查管理台登录状态…</p></div>
 <div id="state-login" class="hidden">
   <p class="error">需要先登录 Flowlet 管理台。</p>
+  <p class="muted">登录方式：<span id="login-provider">该实例配置的登录方式</span></p>
   <p class="muted">登录后回到终端重新执行 <code>flowlet login</code>，或先在新标签页打开
   <a href="/" target="_blank" rel="noreferrer">Flowlet 管理台</a> 完成登录。</p>
 </div>
@@ -329,6 +331,16 @@ export function createCliAuth(
   fetch("/api/auth/config", { credentials: "same-origin" })
     .then(function (response) { return response.json(); })
     .then(function (config) {
+      var providerName =
+        config && config.provider && typeof config.provider.display_name === "string"
+          ? config.provider.display_name.trim()
+          : "";
+      if (providerName !== "") {
+        ["login-provider", "approve-provider"].forEach(function (id) {
+          var node = document.getElementById(id);
+          if (node) node.textContent = providerName;
+        });
+      }
       if (config && config.mode === "token") {
         var command = document.getElementById("token-cmd");
         if (command) command.textContent = "flowlet pull --server=" + origin + " --token=<管理凭据>";

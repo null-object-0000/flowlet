@@ -200,7 +200,7 @@ export function CredentialsPage() {
   };
 
   /**
-   * Agent 机器上用 `flowlet login` 走浏览器 SSO 授权，再 `flowlet pull` 同步；
+   * Agent 机器上用 `flowlet login` 走浏览器管理台授权，再 `flowlet pull` 同步；
    * 页面只展示命令，不收集任何管理凭据。
    */
   const syncCommand = useMemo(() => {

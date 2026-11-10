@@ -67,7 +67,7 @@ Dockhand（Docker 管理面板，Bearer API Token）：
 
 远程同步（Docker / 服务端管理的凭据 → 本机 .env）：
   flowlet login --server=http://10.100.217.60:20134 [--name=机器名] [--no-browser] [--insecure] [--timeout=180]
-                                            浏览器授权（公司 SSO），只保存仅能读服务凭据的本机授权
+                                            浏览器授权（登录管理台后确认），只保存仅能读服务凭据的本机授权
   flowlet logout --server=http://10.100.217.60:20134
                                             删除本机该 server 的授权记录
   flowlet pull --server=http://10.100.217.60:20134 [--token=管理凭据] [--dry-run] [--insecure]

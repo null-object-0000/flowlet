@@ -41,7 +41,7 @@ export function installCommand(base: string): string {
   return `curl -fsSL ${base}/install-flowlet.sh | sh -s -- --base=${base}`;
 }
 
-/** 浏览器授权登录：用公司 SSO 换取一把只能读服务凭据的 token（本机落 `auth.json`）。 */
+/** 浏览器授权登录：用管理台的登录方式（OIDC/SSO 或 token 模式）换取一把只能读服务凭据的 token（本机落 `auth.json`）。 */
 export function loginCommand(origin: string): string {
   return `flowlet login --server=${origin}`;
 }
@@ -57,7 +57,7 @@ export function agentPrompt(origin: string): string {
   return [
     "请把本机接入 Flowlet 凭据服务：",
     `1) 安装 CLI：${installCommand(base)}`,
-    `2) 登录授权：${loginCommand(origin)}（在浏览器中用公司 SSO 完成授权；本步骤不会索取管理凭据）`,
+    `2) 登录授权：${loginCommand(origin)}（在浏览器中登录 Flowlet 管理台并确认授权；本步骤不会索取管理凭据）`,
     `3) 同步凭据：${pullCommand(origin)}`,
     `4) 安装 Skills：下载 ${base}/flowlet-skills.tar.gz，解压到你所在 Agent 的 skills 目录并阅读 flowlet-credentials/SKILL.md。`,
     "完成后运行 `flowlet list`，把可用的环境变量名和环境前缀告诉我。",

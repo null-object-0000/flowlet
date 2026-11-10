@@ -165,7 +165,7 @@ export function LocalAccessSideSheet({
             <div>
               <Title heading={5}>{t("登录并同步凭据")}</Title>
               <Text type="tertiary" size="small">
-                {t("两步完成：先用浏览器公司 SSO 授权本机 CLI，再同步启用中的服务凭据。本页不会收集管理凭据。")}
+                {t("两步完成：先在浏览器登录 Flowlet 管理台并授权本机 CLI，再同步启用中的服务凭据。本页不会收集管理凭据。")}
               </Text>
             </div>
           </div>
@@ -187,7 +187,7 @@ export function LocalAccessSideSheet({
                 </Button>
               </div>
               <Text type="tertiary" size="small">
-                {t("打开浏览器用公司 SSO 授权；CLI 会拿到一把只能读取服务凭据的 token（30 天有效，可随时在下方撤销）。")}
+                {t("打开浏览器完成管理台登录授权（使用该实例配置的登录方式，如企业 SSO）；CLI 会拿到一把只能读取服务凭据的 token（30 天有效，可随时在下方撤销）。")}
               </Text>
               <div className={styles.codeBlock}>
                 <code>{loginCommand(origin)}</code>

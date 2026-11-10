@@ -5,11 +5,18 @@
 // - list_request_logs_by_request_id：按 attempt_seq/created_at 升序取全部 attempt；
 // - insert_request_log / update_request_log_timing。
 //
-// 捕获帧（`.flcap`）MVP 不实现：req/res body 直接落 request_logs 列，capture_state 来自
-// request_capture_refs（旧库/Rust 写入的行仍可读状态，但不 hydrate 外置帧内容）。
+// Body 存储与 Rust 一致：新数据把 req/res body 写 `.flcap` 帧（request_logs 的 body 列
+// 保持 NULL），`request_capture_refs` 存指针；历史库可能仍有内联列 body（读时兼容）。
+// 详情查询从帧 hydrate，帧缺失/损坏按 Rust 行为降级（refs 置 corrupt，不抛错）。
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import type { JsonRow } from "../types.ts";
+import {
+  captureRecordFromLog,
+  type RequestCaptureRecord,
+  type RequestCaptureStore,
+} from "./capture-store.ts";
+import { readCaptureRecord, readCaptureRef, setCaptureFailed, setCaptureReady } from "./maintenance.ts";
 
 export const LOG_FILTER_CLIENT_UNKNOWN = "__unknown__";
 
@@ -26,23 +33,12 @@ function bool(value: unknown): boolean {
   return Number(value) !== 0;
 }
 
-function captureState(db: DatabaseSync, logId: string): { state: string | null; reason: string | null } {
-  const row = db
-    .prepare(
-      "SELECT state, failure_reason FROM request_capture_refs WHERE request_log_id = ?1",
-    )
-    .get(logId) as { state?: string; failure_reason?: string | null } | undefined;
-  if (!row) return { state: null, reason: null };
-  return { state: row.state ?? null, reason: row.failure_reason ?? null };
-}
-
 interface BaseRowOptions {
   /** 列表查询不返回四个大字段（Rust 同）。 */
   includeBodies: boolean;
 }
 
 function requestLogRow(
-  db: DatabaseSync,
   row: Record<string, unknown>,
   columns: Record<string, boolean>,
   options: BaseRowOptions,
@@ -111,11 +107,6 @@ function requestLogRow(
     agent_session_id: row.agent_session_id ?? null,
     parent_agent_session_id: row.parent_agent_session_id ?? null,
   };
-  if (options.includeBodies) {
-    const capture = captureState(db, result.id as string);
-    result.capture_state = capture.state;
-    result.capture_failure_reason = capture.reason;
-  }
   return result;
 }
 
@@ -282,14 +273,44 @@ export function listRequestLogsPage(db: DatabaseSync, filter: JsonRow): JsonRow 
     LIMIT ? OFFSET ?
   `;
   const rows = db.prepare(listSql).all(...params, pageSize, offset) as Array<Record<string, unknown>>;
-  const logRows = rows.map((row) =>
-    requestLogRow(db, row, LIST_COLUMNS, { includeBodies: false }),
-  );
+  const logRows = rows.map((row) => requestLogRow(row, LIST_COLUMNS, { includeBodies: false }));
   return { rows: logRows, total: requestCount, page, pageSize, summary };
 }
 
+/**
+ * Rust `hydrate_request_capture`：详情行填充 capture_state / failure_reason，
+ * 并在 refs=ready 时从帧读回 headers/body。损坏帧会把 refs 置 corrupt（不抛错）。
+ */
+function hydrateRequestCapture(
+  db: DatabaseSync,
+  store: RequestCaptureStore,
+  logRow: JsonRow,
+): void {
+  const requestLogId = String(logRow.id);
+  const reference = readCaptureRef(db, requestLogId);
+  if (reference) {
+    logRow.capture_state = reference.state;
+    logRow.capture_failure_reason = reference.failure_reason;
+  }
+  const record = readCaptureRecord(db, store, requestLogId);
+  if (record) {
+    logRow.req_headers_json = logRow.req_headers_json ?? record.req_headers_json ?? null;
+    logRow.req_body_b64 = record.req_body_b64 ?? null;
+    logRow.res_headers_json = logRow.res_headers_json ?? record.res_headers_json ?? null;
+    logRow.res_body_b64 = record.res_body_b64 ?? null;
+  } else if (logRow.capture_state === "ready") {
+    const refreshed = readCaptureRef(db, requestLogId);
+    logRow.capture_state = refreshed?.state ?? null;
+    logRow.capture_failure_reason = refreshed?.failure_reason ?? null;
+  }
+}
+
 /** Rust list_request_logs_by_request_id（详情抽屉：全部 attempt + 完整 body）。 */
-export function listRequestLogsByRequestId(db: DatabaseSync, requestId: string): JsonRow[] {
+export function listRequestLogsByRequestId(
+  db: DatabaseSync,
+  store: RequestCaptureStore,
+  requestId: string,
+): JsonRow[] {
   const rows = db
     .prepare(
       `SELECT
@@ -316,7 +337,9 @@ export function listRequestLogsByRequestId(db: DatabaseSync, requestId: string):
        ORDER BY rl.attempt_seq ASC, rl.created_at ASC`,
     )
     .all(requestId) as Array<Record<string, unknown>>;
-  return rows.map((row) => requestLogRow(db, row, LIST_COLUMNS, { includeBodies: true }));
+  const logRows = rows.map((row) => requestLogRow(row, LIST_COLUMNS, { includeBodies: true }));
+  for (const logRow of logRows) hydrateRequestCapture(db, store, logRow);
+  return logRows;
 }
 
 /** Rust list_request_log_clients（筛选项：未知客户端用空 id + "未知"）。 */
@@ -363,8 +386,12 @@ export function listRequestLogModels(db: DatabaseSync): JsonRow {
   return { publicModels, upstreamModels };
 }
 
-/** Rust insert_request_log：id 由 storage 生成，created_at = datetime('now')。 */
-export function insertRequestLog(db: DatabaseSync, log: JsonRow): string {
+/**
+ * Rust `insert_request_log`：id 由 storage 生成，created_at = datetime('now')。
+ * Body 不落内联列（与 Rust 一致：req_body_b64/res_body_b64 恒为 NULL），
+ * 而是压缩进 `.flcap` 帧并写 request_capture_refs 指针；写帧失败时 refs 置 failed。
+ */
+export function insertRequestLog(db: DatabaseSync, store: RequestCaptureStore, log: JsonRow): string {
   const requestLogId = randomUUID().replace(/-/g, "");
   db.prepare(
     `INSERT INTO request_logs (
@@ -379,7 +406,7 @@ export function insertRequestLog(db: DatabaseSync, log: JsonRow): string {
     ) VALUES (
         ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
         ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, datetime('now'),
-        ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35
+        ?26, ?27, ?28, ?29, NULL, ?30, NULL, ?31, ?32, ?33
     )`,
   ).run(
     requestLogId,
@@ -411,9 +438,7 @@ export function insertRequestLog(db: DatabaseSync, log: JsonRow): string {
     log.duration_ms ?? null,
     Number(log.attempt_seq ?? 0),
     log.req_headers_json ?? null,
-    log.req_body_b64 ?? null,
     log.res_headers_json ?? null,
-    log.res_body_b64 ?? null,
     log.is_last_attempt === false ? 0 : 1,
     log.upstream_url ?? null,
     log.upstream_proxy_used === null || log.upstream_proxy_used === undefined
@@ -422,16 +447,37 @@ export function insertRequestLog(db: DatabaseSync, log: JsonRow): string {
         ? 1
         : 0,
   );
+  db.prepare(
+    `INSERT INTO request_capture_refs (
+        request_log_id, state, format_version, req_body_bytes, res_body_bytes,
+        created_at, updated_at
+     ) VALUES (?1, 'pending', 1, 0, 0, datetime('now'), datetime('now'))`,
+  ).run(requestLogId);
+  const record = captureRecordFromLog(requestLogId, log);
+  try {
+    const pointer = store.append(record);
+    setCaptureReady(db, requestLogId, pointer);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    setCaptureFailed(db, requestLogId, reason);
+  }
   return requestLogId;
 }
 
 /**
- * Rust update_request_log_timing：只更新最近一条 last_attempt + stream 的日志。
+ * Rust `update_request_log_timing`：只更新最近一条 last_attempt + stream 的日志，
+ * 并把补写的响应 headers/body 追加到该日志的 `.flcap` 帧（refs 置 ready）。
  * `patch` 支持 ttfb_ms / ttft_ms / duration_ms / res_headers_json / res_body_b64 /
- * error_message / route_reason；未传的键保持原值（= Rust 语义）。
+ * error_message / route_reason；未传的键保持原值。
  */
-export function updateRequestLogTiming(db: DatabaseSync, requestId: string, patch: JsonRow): void {
-  const has = (key: string): boolean => Object.prototype.hasOwnProperty.call(patch, key) && patch[key] !== undefined;
+export function updateRequestLogTiming(
+  db: DatabaseSync,
+  store: RequestCaptureStore,
+  requestId: string,
+  patch: JsonRow,
+): void {
+  const has = (key: string): boolean =>
+    Object.prototype.hasOwnProperty.call(patch, key) && patch[key] !== undefined;
   const ttfbMs = has("ttfb_ms") ? Number(patch.ttfb_ms) : null;
   const ttftMs = has("ttft_ms") ? patch.ttft_ms : null;
   const durationMs = has("duration_ms") ? Number(patch.duration_ms) : null;
@@ -461,36 +507,29 @@ export function updateRequestLogTiming(db: DatabaseSync, requestId: string, patc
        AND is_last_attempt = 1
        AND is_stream = 1`,
   ).run(requestId, ttfbMs, ttftMs, durationMs, resHeadersJson, resBodyB64, errorMessage, routeReason);
-}
 
-/** Rust cleanup_old_logs：先清 Body 再删除两表，返回 (日志数, 用量数)。 */
-export function cleanupOldLogs(
-  db: DatabaseSync,
-  keepDays: number,
-  reason = "log_retention",
-): [number, number] {
-  const ids = (
-    db
-      .prepare(`SELECT id FROM request_logs WHERE created_at < datetime('now', '-${Math.trunc(keepDays)} days')`)
-      .all() as Array<{ id: string }>
-  ).map((row) => row.id);
-  if (ids.length > 0) {
-    const clear = db.prepare(
-      `UPDATE request_logs
-       SET req_body_cleared_at = CASE WHEN req_body_b64 IS NOT NULL THEN datetime('now') ELSE req_body_cleared_at END,
-           req_body_cleanup_reason = CASE WHEN req_body_b64 IS NOT NULL THEN ?2 ELSE req_body_cleanup_reason END,
-           res_body_cleared_at = CASE WHEN res_body_b64 IS NOT NULL THEN datetime('now') ELSE res_body_cleared_at END,
-           res_body_cleanup_reason = CASE WHEN res_body_b64 IS NOT NULL THEN ?2 ELSE res_body_cleanup_reason END,
-           req_body_b64 = NULL, res_body_b64 = NULL
-       WHERE id = ?1 AND (req_body_b64 IS NOT NULL OR res_body_b64 IS NOT NULL)`,
-    );
-    for (const id of ids) clear.run(id, reason);
+  const row = db
+    .prepare(
+      `SELECT id FROM request_logs
+       WHERE request_id = ?1 AND is_last_attempt = 1 AND is_stream = 1
+       ORDER BY created_at DESC LIMIT 1`,
+    )
+    .get(requestId) as { id?: string } | undefined;
+  const requestLogId = typeof row?.id === "string" ? row.id : null;
+  if (!requestLogId) return;
+
+  const record = readCaptureRecord(db, store, requestLogId) as unknown as RequestCaptureRecord | null;
+  if (!record) return;
+  record.res_headers_json = (resHeadersJson as string | null) ?? null;
+  record.res_body_b64 = (resBodyB64 as string | null) ?? null;
+  if (errorMessage !== null) record.error_message = String(errorMessage);
+  if (routeReason !== null) record.route_reason = String(routeReason);
+  record.incomplete = false;
+  try {
+    const pointer = store.append(record);
+    setCaptureReady(db, requestLogId, pointer);
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    setCaptureFailed(db, requestLogId, reason);
   }
-  const deletedLogs = db
-    .prepare(`DELETE FROM request_logs WHERE created_at < datetime('now', '-${Math.trunc(keepDays)} days')`)
-    .run();
-  const deletedUsage = db
-    .prepare(`DELETE FROM usage_records WHERE created_at < datetime('now', '-${Math.trunc(keepDays)} days')`)
-    .run();
-  return [Number(deletedLogs.changes), Number(deletedUsage.changes)];
 }

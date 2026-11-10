@@ -7,16 +7,20 @@
 // 实现分模块：schema.ts（建表/迁移）、config.ts（渠道/账号/路由/模型/余额/app_meta）、
 // logs.ts（请求日志）、usage.ts（用量聚合/费用）、devices.ts（设备）、sessions.ts（会话）。
 // 本文件只做连接生命周期 + 方法门面，签名与 Rust `Storage` 对齐。
-import { existsSync, statSync } from "node:fs";
+import { existsSync, rmSync, statSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import type { JsonRow } from "../types.ts";
 import { migrate } from "./schema.ts";
+import { RequestCaptureStore } from "./capture-store.ts";
 import {
   cleanupExpiredBodyData,
+  cleanupOldLogs,
   getTotalBodySizeBytes,
   pruneBalanceSnapshots,
+  pruneOldestBodyData,
   pruneOldestBodyDataToGoal,
 } from "./maintenance.ts";
+import { buildPriceTable } from "./prices.ts";
 import {
   cleanupOrphanBalanceSnapshots,
   ensureMissingPresets,
@@ -47,7 +51,6 @@ import {
   updateAccountLastUsed,
 } from "./config.ts";
 import {
-  cleanupOldLogs,
   insertRequestLog,
   listRequestLogClients,
   listRequestLogModels,
@@ -84,6 +87,9 @@ export class SqliteStorage {
   #db: DatabaseSync;
   #dbPath: string;
   #prices: ModelPrice[] = [];
+  #captureStore: RequestCaptureStore;
+  /** `:memory:` 的临时捕获目录（close 时清理，Rust 测试同样用临时目录）。 */
+  #temporaryCaptureRoot: boolean;
 
   constructor(dbPath: string) {
     this.#dbPath = dbPath;
@@ -95,6 +101,14 @@ export class SqliteStorage {
     }
     this.#db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
     migrate(this.#db);
+    // Rust RequestCaptureStore::for_database：<db 目录>/request-captures。
+    this.#captureStore = RequestCaptureStore.forDatabase(dbPath);
+    this.#temporaryCaptureRoot = dbPath === ":memory:";
+  }
+
+  /** 当前捕获帧存储（测试/诊断用）。 */
+  captureStore(): RequestCaptureStore {
+    return this.#captureStore;
   }
 
   /** 底层连接（仅供同包内需要执行自定义 SQL 的高级场景，web/proxy 不应依赖）。 */
@@ -108,12 +122,30 @@ export class SqliteStorage {
 
   close(): void {
     this.#db.close();
+    if (this.#temporaryCaptureRoot) {
+      try {
+        rmSync(this.#captureStore.rootPath(), { recursive: true, force: true });
+      } catch {
+        /* 测试临时目录清理失败不影响关闭 */
+      }
+    }
   }
 
   // ─── 价格表（Rust Storage::set_prices；来自 config.json / 模型目录） ─────────
 
   setPrices(prices: ModelPrice[]): void {
     this.#prices = prices;
+  }
+
+  /**
+   * Rust `storage_tasks::rebuild_price_table`：models-cn + models.dev + config.json
+   * `model_prices` 合并成完整价格表并写入内存（供成本估算）。
+   * 返回价格条数（调用方可用于日志）。
+   */
+  rebuildPriceTable(catalogDir: string, configJson: JsonRow): number {
+    const result = buildPriceTable(catalogDir, configJson);
+    this.#prices = result.prices;
+    return result.count;
   }
 
   prices(): ModelPrice[] {
@@ -251,7 +283,7 @@ export class SqliteStorage {
   }
 
   listRequestLogsByRequestId(requestId: string): JsonRow[] {
-    return listRequestLogsByRequestId(this.#db, requestId);
+    return listRequestLogsByRequestId(this.#db, this.#captureStore, requestId);
   }
 
   listRequestLogClients(): JsonRow[] {
@@ -264,7 +296,7 @@ export class SqliteStorage {
 
   /** Rust cleanup_old_logs：返回 [日志行数, 用量行数]。 */
   cleanupOldLogs(keepDays: number): [number, number] {
-    return cleanupOldLogs(this.#db, keepDays);
+    return cleanupOldLogs(this.#db, this.#captureStore, keepDays);
   }
 
   /**
@@ -272,7 +304,17 @@ export class SqliteStorage {
    * 仅清理已有完整 Token 统计的记录；返回清理行数。
    */
   cleanupExpiredBodyData(retentionDays: number): number {
-    return cleanupExpiredBodyData(this.#db, retentionDays);
+    return cleanupExpiredBodyData(this.#db, this.#captureStore, retentionDays);
+  }
+
+  /** 按体积上限清理最老的一批 Body（帧 + 内联列），返回清理行数。 */
+  pruneOldestBodyData(targetBytes: number, pruneRatio: number): number {
+    return pruneOldestBodyData(this.#db, this.#captureStore, targetBytes, pruneRatio);
+  }
+
+  /** 捕获帧磁盘占用（段数与字节数，Rust `disk_usage`）。 */
+  captureDiskUsage(): { segments: number; bytes: number } {
+    return this.#captureStore.diskUsage();
   }
 
   /** 当前 Body 数据总占用字节数（Rust get_total_body_size_bytes）。 */
@@ -282,7 +324,13 @@ export class SqliteStorage {
 
   /** 按体积上限清理最老 Body（Rust prune_oldest_body_data_to_goal）。 */
   pruneOldestBodyDataToGoal(targetBytes: number, pruneRatio: number, maxRounds = 50): number {
-    return pruneOldestBodyDataToGoal(this.#db, targetBytes, pruneRatio, maxRounds);
+    return pruneOldestBodyDataToGoal(
+      this.#db,
+      this.#captureStore,
+      targetBytes,
+      pruneRatio,
+      maxRounds,
+    );
   }
 
   /** 余额/资源快照保留（Rust prune_balance_snapshots），返回 [expired, overLimit]。 */
@@ -292,12 +340,12 @@ export class SqliteStorage {
 
   /** id/created_at 由 storage 生成，其余字段由 proxy 传入（snake_case）。 */
   insertRequestLog(row: JsonRow): string {
-    return insertRequestLog(this.#db, row);
+    return insertRequestLog(this.#db, this.#captureStore, row);
   }
 
   /** 语义 = Rust update_request_log_timing（最近一条 last_attempt + stream）。 */
   updateRequestLogTiming(requestId: string, patch: JsonRow): void {
-    updateRequestLogTiming(this.#db, requestId, patch);
+    updateRequestLogTiming(this.#db, this.#captureStore, requestId, patch);
   }
 
   insertUsageRecord(row: JsonRow): void {

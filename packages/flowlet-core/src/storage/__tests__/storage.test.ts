@@ -92,7 +92,7 @@ function seedRequestLog(
     duration_ms: 120,
     attempt_seq: 0,
     req_headers_json: JSON.stringify({ authorization: "[redacted]" }),
-    req_body_b64: null,
+    req_body_b64: "aGVsbG8=",
     res_headers_json: null,
     res_body_b64: null,
     is_last_attempt: true,
@@ -292,7 +292,14 @@ test("请求日志：分页 / 详情 / 筛选项 / 今日用量", () => {
   const detail = storage.listRequestLogsByRequestId(second.requestId);
   assert.equal(detail.length, 1);
   assert.equal(detail[0].res_headers_json, JSON.stringify({ "content-type": "application/json" }));
-  assert.equal(detail[0].capture_state, null);
+  assert.equal(detail[0].capture_state, "ready");
+  // Body 只在 .flcap 帧里：内联列为 NULL，详情从帧 hydrate。
+  const inline = storage.database().prepare("SELECT req_body_b64, res_body_b64 FROM request_logs WHERE id = ?1").get(detail[0].id as string) as { req_body_b64: string | null; res_body_b64: string | null };
+  assert.equal(inline.req_body_b64, null);
+  assert.equal(inline.res_body_b64, null);
+  const firstDetail = storage.listRequestLogsByRequestId(first.requestId)[0];
+  assert.equal(firstDetail.req_body_b64, "aGVsbG8=");
+  assert.equal(firstDetail.capture_state, "ready");
 
   // update_request_log_timing：仅更新 is_stream 的 last attempt。
   storage.updateRequestLogTiming(second.requestId, {
@@ -508,13 +515,21 @@ test("用量金额：配置价格表启用后写入 estimated_cost 与分类费�
   const storage = storageFor(":memory:");
   storage.setPrices([
     {
+      id: "price-deepseek-deepseek-v4-flash",
       channel_id: "deepseek",
       upstream_model: "deepseek-v4-flash",
       input_uncached_price: 1,
       input_cached_price: 0.2,
       input_cache_write_price: null,
       output_price: 2,
+      tiers: [],
+      schedules: [],
       currency: "CNY",
+      unit: "1M tokens",
+      source_url: null,
+      price_version: null,
+      created_at: "2026-11-09T00:00:00Z",
+      updated_at: "2026-11-09T00:00:00Z",
     },
   ]);
   const { requestId } = seedRequestLog(storage);

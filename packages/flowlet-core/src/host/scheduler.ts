@@ -136,7 +136,9 @@ export function createHostScheduler(options: HostSchedulerOptions): HostSchedule
         const temporary = `${target}.tmp-${process.pid}`;
         writeFileSync(temporary, text, { mode: 0o644 });
         renameSync(temporary, target);
-        log({ task: "catalog-sync", file, bytes: text.length });
+        // 与 Rust sync_catalog_file 一致：目录更新后重建价格表（两个来源独立重建无害）。
+        const priceCount = context.storage.rebuildPriceTable(context.catalogDir, context.config);
+        log({ task: "catalog-sync", file, bytes: text.length, prices: priceCount });
       } catch (error) {
         log({
           task: "catalog-sync",

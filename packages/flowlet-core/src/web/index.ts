@@ -1,18 +1,16 @@
 // Web Host（管理界面 + 命令 API）。Owner: node-web.
 //
-// 契约：docs/migration/node-host.md §2；权威 Rust 实现：
-// src-tauri/src/core/web/{mod.rs,commands.rs} 与 src-tauri/src/bin/headless.rs。
+// 契约：docs/migration/node-host.md §2、docs/admin-sso-design.md §6/§9；权威 Rust 实现：
+// src-tauri/src/core/web/{mod.rs,commands.rs,auth.rs} 与 src-tauri/src/bin/headless.rs。
 //
 // 路由与鉴权（与 Rust axum router 逐条对齐）：
-//   GET|HEAD /api/session          → 401 / {"authenticated":true}（鉴权后 no-store）
-//   POST     /api/commands/{cmd}   → 命令 dispatch（鉴权，no-store，body ≤ 4 MiB）
-//   GET|HEAD /health               → {"status":"ok"}（不鉴权）
-//   GET|HEAD|POST /api/{*path}     → 404 空 body（不鉴权；绝不回退 SPA）
-//   其 他    /api/{*path}          → 405（allow: GET,HEAD,POST）
-//   GET|HEAD 其余路径              → dist-web 静态文件 / SPA fallback（404 + index.html）
-//   其余方法                       → 405（allow: GET,HEAD）
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import type { Server } from "node:http";
+//   公开：GET|HEAD /health、/api/auth/config、/api/auth/login、/api/auth/callback、静态资源
+//   受保护（auth 中间件 + 非安全方法 CSRF）：GET|HEAD /api/session、
+//     POST /api/auth/logout、POST /api/commands/{cmd}
+//   其他 /api/*：404 空 body（绝不回退 SPA）；错误方法 405（allow 与 axum 一致）
+//   token 模式：Bearer + HMAC 常量时间比较；OIDC 模式：HttpOnly Cookie 会话 + CSRF。
+//   受保护响应统一 Cache-Control: no-store（401/403 由中间件提前返回，不带该头，与 Rust 一致）。
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
 import type {
   DeviceIdentity,
@@ -23,7 +21,7 @@ import type {
 } from "../types.ts";
 import { CommandError } from "../types.ts";
 import type { SqliteStorage } from "../storage/index.ts";
-import { checkAdminAuth } from "./auth.ts";
+import { AdminAuth, type AuthResponse } from "./auth.ts";
 import { dispatch } from "./commands.ts";
 import type { WebContext } from "./context.ts";
 import {
@@ -44,6 +42,8 @@ export interface WebHostOptions {
   catalogDir: string;
   configPath: string;
   adminToken: string;
+  /** index.ts 在打开 DB 之前创建的 AdminAuth（fail-fast）；缺省时自己 fromEnv。 */
+  auth?: AdminAuth;
   clientToken: string;
   staticDir: string;
   publicProxyUrl: string;
@@ -51,10 +51,10 @@ export interface WebHostOptions {
 }
 
 export interface WebHost {
-  /** 命令层共享上下文（调度器复用 queryBalance / 预设语义）。 */
-  readonly context: WebContext;
   listen(addr: string): Promise<void>;
   close(): Promise<void>;
+  /** Host 维护任务（余额/目录/清理）共享的上下文。 */
+  context: WebContext;
 }
 
 function parseAddr(addr: string): { host: string; port: number } {
@@ -171,8 +171,21 @@ function unauthorized(response: ServerResponse, extraHeaders: Record<string, str
   );
 }
 
+function writeAuthResponse(
+  response: ServerResponse,
+  payload: AuthResponse,
+  head: boolean,
+  forceNoStore: boolean,
+): void {
+  const headers: Record<string, string | string[]> = { ...payload.headers };
+  if (forceNoStore) headers["cache-control"] = "no-store";
+  response.writeHead(payload.status, headers);
+  response.end(head || payload.body.length === 0 ? undefined : payload.body);
+}
+
 export function createWebHost(options: WebHostOptions): WebHost {
   const config = readConfigJson(options.configPath);
+  const auth = options.auth ?? AdminAuth.fromEnv(process.env, options.adminToken);
   const ctx: WebContext = {
     storage: options.storage,
     proxy: options.proxy,
@@ -199,64 +212,102 @@ export function createWebHost(options: WebHostOptions): WebHost {
     const pathname = url.pathname;
     const method = request.method ?? "GET";
     const head = method === "HEAD";
-    const authorized = (): boolean =>
-      checkAdminAuth(
-        typeof request.headers.authorization === "string" ? request.headers.authorization : undefined,
-        options.adminToken,
-      );
+    const authInfo = { headers: request.headers, url: rawUrl };
 
-    // ── /api/session ────────────────────────────────────────────────────────
-    if (pathname === "/api/session") {
-      const methodAllowed = method === "GET" || method === "HEAD";
-      if (!authorized()) return unauthorized(response, methodAllowed ? {} : { allow: "GET,HEAD" });
-      if (!methodAllowed) {
-        return sendEmpty(response, 405, { allow: "GET,HEAD", "cache-control": "no-store" });
+    // ── 公开 OIDC 路由（与 Rust 的 public Router 一致：无鉴权、无 no-store 中间件） ──
+    if (
+      pathname === "/api/auth/config" ||
+      pathname === "/api/auth/login" ||
+      pathname === "/api/auth/callback"
+    ) {
+      if (method !== "GET" && method !== "HEAD") {
+        return sendEmpty(response, 405, { allow: "GET,HEAD" });
       }
-      return sendJson(response, 200, { authenticated: true }, { noStore: true, head });
+      const payload =
+        pathname === "/api/auth/config"
+          ? auth.configHandler()
+          : pathname === "/api/auth/login"
+            ? await auth.loginHandler(authInfo)
+            : await auth.callbackHandler(authInfo);
+      return writeAuthResponse(response, payload, head, false);
     }
 
-    // ── /api/commands/{command} ─────────────────────────────────────────────
-    if (pathname.startsWith("/api/commands/")) {
-      const encoded = pathname.slice("/api/commands/".length);
-      const isCommandRoute = encoded !== "" && !encoded.includes("/");
-      if (isCommandRoute) {
-        const methodAllowed = method === "POST";
-        if (!authorized()) return unauthorized(response, methodAllowed ? {} : { allow: "POST" });
-        if (!methodAllowed) {
-          return sendEmpty(response, 405, { allow: "POST", "cache-control": "no-store" });
-        }
-        let command = encoded;
-        try {
-          command = decodeURIComponent(encoded);
-        } catch {
-          /* 保留原文 */
-        }
-        const body = await readJsonBody(request);
-        if (!body.ok) {
-          return sendText(response, body.status, body.text, { noStore: true, head: false });
-        }
-        try {
-          const result = await dispatch(ctx, command, body.value);
-          return sendJson(response, 200, result, { noStore: true, head: false });
-        } catch (error) {
-          if (error instanceof CommandError) {
-            return sendJson(
-              response,
-              error.status,
-              { code: error.code, message: error.message },
-              { noStore: true, head: false },
-            );
-          }
-          const message = error instanceof Error ? error.message : String(error);
+    // ── 受保护路由：/api/session、/api/auth/logout、/api/commands/{cmd} ──────
+    const commandEncoded = pathname.startsWith("/api/commands/")
+      ? pathname.slice("/api/commands/".length)
+      : null;
+    const isCommandRoute = commandEncoded !== null && commandEncoded !== "" && !commandEncoded.includes("/");
+    const isSession = pathname === "/api/session";
+    const isLogout = pathname === "/api/auth/logout";
+
+    if (isSession || isLogout || isCommandRoute) {
+      const allowedMethods = isSession ? "GET,HEAD" : "POST";
+      const methodAllowed =
+        isSession ? method === "GET" || method === "HEAD" : method === "POST";
+      const context = auth.authenticate(request.headers);
+      if (context === null) {
+        request.resume();
+        return unauthorized(response, methodAllowed ? {} : { allow: allowedMethods });
+      }
+      // axum 中间件：非 GET/HEAD/OPTIONS 先校验 CSRF（在方法路由之前），失败返回 403 且无 no-store。
+      if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS") {
+        if (!auth.verifyCsrf(request.headers, context)) {
+          request.resume();
           return sendJson(
             response,
-            400,
-            { code: "command_failed", message },
-            { noStore: true, head: false },
+            403,
+            { code: "csrf_rejected", message: "请求校验失败，请刷新页面后重试" },
+            { noStore: false, head: false },
           );
         }
       }
-      // 非命令路由（空 command / 多级路径）落到 /api/* 语义。
+      if (!methodAllowed) {
+        request.resume();
+        return sendEmpty(response, 405, {
+          allow: allowedMethods,
+          "cache-control": "no-store",
+        });
+      }
+
+      if (isSession) {
+        return writeAuthResponse(response, auth.sessionHandler(context), head, true);
+      }
+      if (isLogout) {
+        request.resume();
+        return writeAuthResponse(response, auth.logoutHandler(context), head, true);
+      }
+
+      // 命令路由：auth 通过后才读取 body（与 axum extractor 顺序一致）。
+      let command = commandEncoded as string;
+      try {
+        command = decodeURIComponent(commandEncoded as string);
+      } catch {
+        /* 保留原文 */
+      }
+      const body = await readJsonBody(request);
+      if (!body.ok) {
+        return sendText(response, body.status, body.text, { noStore: true, head: false });
+      }
+      try {
+        const result = await dispatch(ctx, command, body.value);
+        return sendJson(response, 200, result, { noStore: true, head: false });
+      } catch (error) {
+        if (error instanceof CommandError) {
+          return sendJson(
+            response,
+            error.status,
+            { code: error.code, message: error.message },
+            { noStore: true, head: false },
+          );
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        return sendJson(
+          response,
+          400,
+          { code: "command_failed", message },
+          { noStore: true, head: false },
+        );
+      }
     }
 
     // ── /health ─────────────────────────────────────────────────────────────

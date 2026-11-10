@@ -186,6 +186,9 @@ export async function startHost(options: HostOptions): Promise<{ close(): Promis
   storage.setAppMeta("proxy_bind_config", JSON.stringify(bindConfig));
 
   const catalog = loadModelCatalog(options.catalogDir, REPO_ROOT);
+  // 与 Rust FlowletServices::open 一致：启动时按 model-catalog + models-cn/dev + config 覆盖
+  // 重建价格表，供 proxy 的 usage 成本估算与 Web 用量页使用。
+  storage.rebuildPriceTable(options.catalogDir, configJson);
   const proxy = createProxyController({
     storage,
     catalog,

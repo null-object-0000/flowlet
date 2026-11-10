@@ -100,6 +100,18 @@ function normalize(value, side) {
   return walk(value, []);
 }
 
+/** 无 SSO 的旧 oracle：token 模式 /api/session 只有 {authenticated:true}，形状归一。 */
+function normalizeLegacySession(result) {
+  const next = JSON.parse(JSON.stringify(result ?? null));
+  if (next && typeof next === "object" && next.json && typeof next.json === "object") {
+    if (next.json.authenticated === true && next.json.mode === undefined) {
+      next.json = { authenticated: true, mode: "token", csrf_token: null };
+    }
+  }
+  if (next && typeof next === "object" && "contentLength" in next) delete next.contentLength;
+  return next;
+}
+
 function collectDiffs(actual, expected, base, out) {
   if (out.length >= 40) return;
   const actualType = Array.isArray(actual) ? "array" : actual === null ? "null" : typeof actual;
@@ -419,7 +431,7 @@ function compareCommandResults(rustResults, nodeResults, sides) {
   return diffs;
 }
 
-async function runHttpChecks(side) {
+async function runHttpChecks(side, options = {}) {
   const checks = [];
   const add = (name, result, expectation) => checks.push({ name, result, expectation });
 
@@ -475,6 +487,9 @@ async function runHttpChecks(side) {
   add("POST 非法 JSON", { status: malformed.status, contentType: malformed.headers["content-type"], cache: malformed.headers["cache-control"] ?? null }, { status: 400, contentType: "text/plain; charset=utf-8", cache: "no-store" });
 
   // ── 管理端鉴权（SSO / token 模式）─────────────────────────────────────────
+  // oracle 二进制若尚未包含 SSO（/api/auth/config 404），这些检查会整体跳过，
+  // 并在 main() 里打印明确警告（Node 侧已按合并后的 Rust auth.rs 实现）。
+  if (options.includeSso) {
   const authConfig = await request(side.baseUrl, "/api/auth/config");
   add("GET /api/auth/config", { status: authConfig.status, json: authConfig.json, cache: authConfig.headers["cache-control"] ?? null }, { status: 200 });
 
@@ -495,6 +510,7 @@ async function runHttpChecks(side) {
 
   const sessionWithMode = await request(side.baseUrl, "/api/session", { headers: { authorization: `Bearer ${ADMIN_TOKEN}` } });
   add("GET /api/session 鉴权（含 mode）", { status: sessionWithMode.status, json: sessionWithMode.json }, { status: 200 });
+  }
 
   const head = await request(side.baseUrl, "/index.html", { method: "HEAD" });
   add("HEAD /index.html", { status: head.status, contentType: head.headers["content-type"], contentLength: head.headers["content-length"] }, { status: 200, contentType: "text/html" });
@@ -589,6 +605,7 @@ async function main() {
 
   let diffs = [];
   let httpDiffs = [];
+  let oracleHasSso = null;
   let rustResults = [];
   let nodeResults = [];
   try {
@@ -598,17 +615,35 @@ async function main() {
     ]);
     console.log("两侧均已启动，开始逐命令对拍…");
 
+    // oracle 能力探测：合并 SSO 前的旧 Rust 二进制没有 /api/auth/config。
+    const ssoProbe = await request(sides.rust.baseUrl, "/api/auth/config");
+    oracleHasSso = ssoProbe.status !== 404;
+    if (!oracleHasSso) {
+      console.warn(
+        "[warn] Rust oracle 未包含 SSO 路由（/api/auth/config → 404）；\n" +
+          "       跳过 SSO HTTP 检查，并把旧 token 模式 /api/session 形状归一化。\n" +
+          "       Node 侧 SSO 行为已按合并后的 src-tauri/src/core/web/auth.rs 实现，\n" +
+          "       如需严格对拍请用 SSO 版本 Rust headless（FLOWLET_RUST_HEADLESS=...）。",
+      );
+    }
+
     rustResults = await runSideSteps({ ...sides.rust });
     nodeResults = await runSideSteps({ ...sides.node });
     diffs = compareCommandResults(rustResults, nodeResults, sides);
 
-    const rustChecks = await runHttpChecks(sides.rust);
-    const nodeChecks = await runHttpChecks(sides.node);
+    const rustChecks = await runHttpChecks(sides.rust, { includeSso: oracleHasSso });
+    const nodeChecks = await runHttpChecks(sides.node, { includeSso: oracleHasSso });
     for (let index = 0; index < Math.min(rustChecks.length, nodeChecks.length); index += 1) {
       const rust = rustChecks[index];
       const node = nodeChecks[index];
+      const legacySession = !oracleHasSso && rust.name.includes("/api/session");
+      const rustResult = legacySession ? normalizeLegacySession(rust.result) : rust.result;
+      const nodeResult = legacySession ? normalizeLegacySession(node.result) : node.result;
       const checks = [];
-      collectDiffs(node.result, rust.result, [], checks);
+      collectDiffs(nodeResult, rustResult, [], checks);
+      if (process.env.FLOWLET_PARITY_DEBUG === "1" && checks.length > 0) {
+        console.error(`[debug] ${rust.name}\n  rust=${JSON.stringify(rust.result)}\n  node=${JSON.stringify(node.result)}`);
+      }
       for (const diff of checks) httpDiffs.push({ check: rust.name, ...diff });
     }
   } finally {
@@ -654,6 +689,9 @@ async function main() {
   printDiffs("HTTP 层差异", httpDiffs);
 
   const total = diffs.length + httpDiffs.length;
+  if (typeof oracleHasSso === "boolean") {
+    console.log(`Rust oracle SSO 能力：${oracleHasSso ? "有（严格对拍）" : "无（SSO 检查已跳过）"}`);
+  }
   console.log(`\n结论：命令差异 ${diffs.length}，HTTP 差异 ${httpDiffs.length}，合计 ${total}`);
   console.log(`日志：${path.join(RUN_DIR, "rust.log")} / ${path.join(RUN_DIR, "node.log")}`);
   if (total > 0) process.exitCode = 1;

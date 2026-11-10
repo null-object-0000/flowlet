@@ -397,13 +397,38 @@ export function importedHourlyUsage(db: DatabaseSync, deviceId?: string | null):
 
 // ─── device_usage.rs 等价入口（web 命令直接调用） ─────────────────────────────
 
+/**
+ * 设备身份输入：同时接受 Node/Rust 的 snake_case 字段与 Rust 身份文件（camelCase）字段，
+ * 便于 web/proxy/测试直接传 `flowlet-device.json` 的解析结果。
+ */
 export interface DeviceIdentityLike {
-  device_id: string;
+  device_id?: string;
   device_created_at?: string;
   created_at?: string;
   display_name?: string;
   platform?: string;
   app_version?: string;
+  deviceId?: string;
+  createdAt?: string;
+  deviceCreatedAt?: string;
+  displayName?: string;
+  appVersion?: string;
+}
+
+function normalizedIdentity(identity: DeviceIdentityLike): {
+  deviceId: string;
+  createdAt: string;
+  displayName: string;
+  platform: string;
+  appVersion: string;
+} {
+  return {
+    deviceId: identity.device_id ?? identity.deviceId ?? "",
+    createdAt: identity.device_created_at ?? identity.created_at ?? identity.createdAt ?? identity.deviceCreatedAt ?? "",
+    displayName: identity.display_name ?? identity.displayName ?? "",
+    platform: identity.platform ?? "",
+    appVersion: identity.app_version ?? identity.appVersion ?? "",
+  };
 }
 
 /**
@@ -412,26 +437,27 @@ export interface DeviceIdentityLike {
  */
 export function knownDevices(db: DatabaseSync, identity?: DeviceIdentityLike): JsonRow[] {
   if (!identity) return importedKnownDevices(db);
+  const current = normalizedIdentity(identity);
   const currentDays = dailyUsageTotals(db);
   const devices = importedKnownDevices(db).filter(
-    (device) => String(device.deviceId) !== identity.device_id,
+    (device) => String(device.deviceId) !== current.deviceId,
   );
   // Rust DeviceIdentity::read_and_validate 每次加载都会把平台键收敛到当前系统检测值，
   // 因此 known_devices 的当前设备行必须使用 resolvePlatform，而不是文件里的原始值
   // （例如身份文件中的 "linux" 在 Ubuntu 上应显示为 "ubuntu"）。
   const resolvedPlatform = resolvePlatform(
-    identity.platform ?? "",
+    current.platform,
     detectPlatform(),
     currentOsFamily(),
   );
   devices.unshift({
-    deviceId: identity.device_id,
-    deviceCreatedAt: identity.device_created_at ?? identity.created_at ?? "",
-    displayName: identity.display_name?.trim()
-      ? identity.display_name.trim()
-      : resolveDeviceDisplayName("", resolvedPlatform, identity.device_id),
+    deviceId: current.deviceId,
+    deviceCreatedAt: current.createdAt,
+    displayName: current.displayName.trim()
+      ? current.displayName.trim()
+      : resolveDeviceDisplayName("", resolvedPlatform, current.deviceId),
     platform: resolvedPlatform,
-    appVersion: identity.app_version ?? "node-host-0.1.0",
+    appVersion: current.appVersion || "node-host-0.1.0",
     isCurrent: true,
     timezoneOffsetMinutes: Math.round(-new Date().getTimezoneOffset()),
     firstUsageDate: currentDays.length > 0 ? currentDays[0].date : null,

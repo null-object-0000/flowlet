@@ -11,6 +11,9 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { JsonRow } from "../types.ts";
 import { canonicalModelKey, officialChannelIdForModel } from "../catalog/index.ts";
+import { resolvePrices, resolvePricesAt, type ModelPrice } from "./prices.ts";
+
+export type { ModelPrice, ModelPriceTier } from "./prices.ts";
 
 function reqNum(value: unknown): number {
   return Number(value ?? 0);
@@ -21,23 +24,6 @@ function num(value: unknown): number | null {
   return Number(value);
 }
 
-export interface ModelPrice {
-  channel_id: string;
-  upstream_model: string;
-  input_uncached_price: number;
-  input_cached_price: number;
-  input_cache_write_price?: number | null;
-  output_price: number;
-  currency: string;
-  tiers?: Array<{
-    up_to_input_tokens?: number | null;
-    input_uncached_price?: number;
-    input_cached_price?: number;
-    input_cache_write_price?: number | null;
-    output_price?: number;
-  }>;
-}
-
 export interface CostBreakdown {
   total: number;
   input_uncached: number;
@@ -46,40 +32,7 @@ export interface CostBreakdown {
   output: number;
 }
 
-function resolvePrices(
-  price: ModelPrice,
-  inputTokens: number | null,
-): [number, number, number | null, number] | null {
-  if (Array.isArray(price.tiers) && price.tiers.length > 0) {
-    const total = inputTokens ?? 0;
-    for (const tier of price.tiers) {
-      if (tier.up_to_input_tokens === null || tier.up_to_input_tokens === undefined) continue;
-      if (total <= Number(tier.up_to_input_tokens)) {
-        return [
-          Number(tier.input_uncached_price ?? 0),
-          Number(tier.input_cached_price ?? 0),
-          tier.input_cache_write_price === undefined ? null : tier.input_cache_write_price,
-          Number(tier.output_price ?? 0),
-        ];
-      }
-    }
-    const last = price.tiers[price.tiers.length - 1];
-    return [
-      Number(last.input_uncached_price ?? 0),
-      Number(last.input_cached_price ?? 0),
-      last.input_cache_write_price === undefined ? null : last.input_cache_write_price,
-      Number(last.output_price ?? 0),
-    ];
-  }
-  return [
-    Number(price.input_uncached_price ?? 0),
-    Number(price.input_cached_price ?? 0),
-    price.input_cache_write_price ?? null,
-    Number(price.output_price ?? 0),
-  ];
-}
-
-/** 单次使用费用估算（Rust estimate_cost_at 的等价实现，忽略分时价格 schedules）。 */
+/** 单次使用费用估算（Rust estimate_cost_at：按当前时刻解析分时价格，未命中返回 null）。 */
 export function estimateCostAt(
   prices: ModelPrice[],
   channelId: string | null,
@@ -107,7 +60,7 @@ export function estimateCostAt(
     }
   }
   if (!price) return null;
-  const resolved = resolvePrices(price, inputTokens);
+  const resolved = resolvePricesAt(price, inputTokens, Date.now());
   if (!resolved) return null;
   const [uncachedPrice, cachedPrice, cacheWritePrice, outputPrice] = resolved;
   const cacheWrite = Math.max(0, inputCacheWriteTokens ?? 0);

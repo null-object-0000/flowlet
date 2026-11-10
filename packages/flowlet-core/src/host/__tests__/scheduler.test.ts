@@ -50,11 +50,11 @@ function makeContext(overrides: JsonRow = {}): { ctx: WebContext; storage: Sqlit
   return { ctx, storage, dir };
 }
 
-test("storage cleanup clears expired bodies but keeps incomplete usage", async () => {
+test("storage cleanup clears expired frames but keeps incomplete usage", async () => {
   const { ctx, storage, dir } = makeContext();
   try {
-    // 完整用量（input/output tokens 都有）→ 应清 body
-    const completeId = storage.insertRequestLog({
+    // 完整用量（input/output tokens 都有）→ 应清理捕获帧
+    storage.insertRequestLog({
       request_id: "req-complete",
       client_protocol: "openai",
       upstream_protocol: "openai",
@@ -69,7 +69,7 @@ test("storage cleanup clears expired bodies but keeps incomplete usage", async (
       output_tokens: 5,
       total_tokens: 15,
     });
-    // 不完整用量 → body 必须保留
+    // 不完整用量 → 帧必须保留，便于数据修复
     storage.insertRequestLog({
       request_id: "req-partial",
       client_protocol: "openai",
@@ -78,23 +78,32 @@ test("storage cleanup clears expired bodies but keeps incomplete usage", async (
       path: "/v1/chat/completions",
       req_body_b64: Buffer.from("keep").toString("base64"),
     });
+
+    // 写入后：Body 在 .flcap 帧里，详情可 hydrate 出原始内容（request_logs 列保持 NULL）
+    const beforeComplete = storage.listRequestLogsByRequestId("req-complete")[0];
+    assert.equal(Buffer.from(String(beforeComplete.req_body_b64), "base64").toString("utf8"), "hello");
+    assert.equal(Buffer.from(String(beforeComplete.res_body_b64), "base64").toString("utf8"), "world");
+    const beforePartial = storage.listRequestLogsByRequestId("req-partial")[0];
+    assert.equal(Buffer.from(String(beforePartial.req_body_b64), "base64").toString("utf8"), "keep");
+
     // 把两条都挪到 40 天前
     storage.database().exec("UPDATE request_logs SET created_at = datetime('now', '-40 days')");
 
     const scheduler = createHostScheduler({ context: ctx, log: () => {} });
     await scheduler.runCleanupOnce();
 
-    const rows = storage
-      .database()
-      .prepare("SELECT request_id, req_body_b64, res_body_b64, req_body_cleanup_reason FROM request_logs ORDER BY request_id")
-      .all() as JsonRow[];
-    const complete = rows.find((row) => row.request_id === "req-complete")!;
-    const partial = rows.find((row) => row.request_id === "req-partial")!;
-    assert.equal(complete.req_body_b64, null, "完整用量的请求体应被清理");
+    const complete = storage.listRequestLogsByRequestId("req-complete")[0];
+    const partial = storage.listRequestLogsByRequestId("req-partial")[0];
+    assert.equal(complete.req_body_b64, null, "完整用量的请求体（帧）应被清理");
     assert.equal(complete.res_body_b64, null);
     assert.equal(complete.req_body_cleanup_reason, "retention");
-    assert.notEqual(partial.req_body_b64, null, "用量不完整的请求体必须保留，便于数据修复");
-    assert.ok(completeId);
+    assert.ok(complete.req_body_cleared_at, "清理后应写 cleared_at 标记");
+    assert.equal(
+      Buffer.from(String(partial.req_body_b64), "base64").toString("utf8"),
+      "keep",
+      "用量不完整的请求体必须保留，便于数据修复",
+    );
+    assert.equal(partial.req_body_cleared_at, null);
   } finally {
     storage.close();
     rmSync(dir, { recursive: true, force: true });

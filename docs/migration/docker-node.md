@@ -229,3 +229,20 @@ node scripts/e2e-node-host.mjs            # 端到端冒烟（含 mock 上游流
 | 验证 | 生产：`agent_session_metadata` 表存在；带 `x-claude-code-session-id` 的 Anthropic 流式请求后，DB 出现 `title=验证会话标题派生`、`project_path=/tmp/flowlet-sessionmeta-verify`、`source=derived`，请求日志 200 无错误；部署后 91 条请求 0 真实错误、0 `stream_cancelled`；UI chunk 与本地 `dist-web` 字节一致 |
 | 并发说明 | 13:32:58 另一个并发会话构建了 `flowlet:node-20261110-cliauth` 并于 13:35:02 覆盖线上镜像；该镜像构建自同一工作树（含本提交），实测新请求仍写入 `agent_session_metadata`，功能未丢失。当前线上 = `flowlet:node-20261110-cliauth` |
 | 回滚 | `flowlet_deploy.py deploy --tag flowlet:node-20261110-sessionmeta`（本次发布镜像）或 `flowlet:node-20261110-localaccess-channels`（发布前 stack 值）；DB schema 只增不改 |
+
+## CLI 浏览器授权（`flowlet login`）发布记录（2026-11-10 13:35）
+
+| 项 | 值 |
+| --- | --- |
+| 背景 | 生产是 OIDC-only（`FLOWLET_ADMIN_ALLOW_TOKEN_LOGIN=0`），管理 API 拒绝一切 Bearer，`flowlet pull --token=<管理凭据>` 必然 401。本次不放开管理鉴权面，改为给 CLI 一条独立作用域授权：浏览器 SSO 会话点一次「授权」→ loopback + PKCE 换 `flwcli_*` token（作用域 `credentials:read`，TTL 30 天，可撤销），`flowlet pull` 自动使用本机 `auth.json` |
+| 服务端 | 新表 `cli_auth_tokens`（只存 SHA-256）；`web/cli-auth.ts`；公开路由 `GET /api/auth/cli/start`（HTML 授权页）、`POST /api/auth/cli/exchange`；受保护命令 `create_cli_auth_code` / `list_cli_auth_tokens` / `revoke_cli_auth_token`；CLI token 仅允许 `export_service_credentials`，其它命令 403，且不能用于 `/api/session` |
+| CLI | `packages/flowlet-cred`：`flowlet login` / `flowlet logout`；`pull` 凭据优先级 `--token` > `FLOWLET_ADMIN_TOKEN` > 本机 `auth.json`（401 提示重新 login、403 提示作用域） |
+| 镜像 | `flowlet:node-20261110-cliauth`（`sha256:fe063d7b3ede…`，259 MB，Engine API `POST /build` 171s） |
+| canary | `flowlet-canary` 升级到该镜像后 9/9 通过：授权页参数错误 400；`create_cli_auth_code` 200；`exchange` 200 且 token 前缀 `flwcli_`；CLI token 导出 200、其它命令 403、`/api/session` 401；列表 1 条且不含明文/哈希；撤销 200，撤销后导出 401 |
+| 打包 CLI 端到端 | 从 canary `/downloads` 执行官方安装脚本（独立 `--prefix`/`--skills-dir`）→ 真实 `flowlet login --no-browser`（脚本扮演浏览器完成授权页 + 授权）→ `auth.json` 0600 → `flowlet pull --dry-run` 退出 0；终端输出与 `auth.json` 均未出现 token 明文 |
+| 部署 | 13:35:02（本地）经 Dockhand 仅替换 `services.flowlet.image`（`forceRecreate`），容器 healthy；compose 备份 `.agents/skills/flowlet-docker-deploy/.work/compose.before-20261110-133453.yaml` |
+| 生产验证 | 镜像 tag / healthy；`/api/auth/config` 仍为 `oidc` 且 `token_login=false`（静态管理 Bearer 仍被 401，未放开兜底）；授权页 200（含核准按钮、登录提示分支、`credentials:read`、`DENY`/`no-store`/CSP）；`exchange` 非法 code → 400 `invalid_grant`；`/v1/models` 4 个模型；`deepseek-v4.1-flash` 流式读到 `[DONE]`；`service_credentials` 1 条保留、`cli_auth_tokens` 表可读；自容器启动起请求日志 0 错误（仅历史 Hermes `/v1/props` 404 噪声） |
+| 前端 | 「服务凭据 → 本机接入」改为「登录并同步凭据」两步（login + pull）并新增「已授权的 CLI」列表/撤销；`flowlet pull` 不再携带 `--token` |
+| 回滚 | `flowlet_deploy.py deploy --tag flowlet:node-20261110-sessionmeta`（发布前 stack 值）；DB schema 只增不改，旧镜像可直接读回 |
+| 并发说明 | 本发布与 sessionmeta 流交替部署；当前线上 = `flowlet:node-20261110-cliauth`，该镜像同时含 sessionmeta 派生与 CLI 授权（sessionmeta 侧已实测派生未丢失） |
+| 未覆盖 | Rust Host（桌面/legacy headless）未实现该能力，桌面侧仍可用 `flowlet set`/`--token`；浏览器授权要求 CLI 与浏览器在同一台机器（loopback） |

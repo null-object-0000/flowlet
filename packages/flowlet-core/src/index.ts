@@ -19,6 +19,7 @@ import { loadModelCatalog } from "./catalog/index.ts";
 import { SqliteStorage } from "./storage/index.ts";
 import { createProxyController } from "./proxy/index.ts";
 import { createWebHost } from "./web/index.ts";
+import { AdminAuth } from "./web/auth.ts";
 import { createHostScheduler } from "./host/scheduler.ts";
 import {
   currentOsFamily,
@@ -41,8 +42,9 @@ function envOr(name: string, fallback: string): string {
 
 /** 与 Rust headless 完全一致的 env → HostOptions 解析。 */
 export function readHostOptions(env: NodeJS.ProcessEnv = process.env): HostOptions {
+  // 管理端凭据校验由 AdminAuth.from_env() 负责（与 Rust 一致：token 模式 ≥24 字符；
+  // OIDC 模式可空，仅 ALLOW_TOKEN_LOGIN 启用时才要求）。
   const adminToken = (env.FLOWLET_ADMIN_TOKEN ?? "").trim();
-  if (adminToken.length < 24) throw new Error("FLOWLET_ADMIN_TOKEN 必须至少包含 24 个字符");
   const dbPath = resolve(envOr("FLOWLET_DB_PATH", "flowlet-data/flowlet.sqlite"));
   const dataDir = dirname(dbPath);
   mkdirSync(dataDir, { recursive: true });
@@ -149,6 +151,8 @@ function parseAddr(addr: string): { host: string; port: number } {
 }
 
 export async function startHost(options: HostOptions): Promise<{ close(): Promise<void> }> {
+  // 与 Rust headless 顺序一致：先解析管理端鉴权配置（配置错误在打开数据库之前失败）。
+  const auth = AdminAuth.fromEnv();
   const dataDir = dirname(options.dbPath);
   const deviceIdentity = loadOrCreateDeviceIdentity(dataDir);
   const configJson = loadOrCreateConfig(options.configPath, join(REPO_ROOT, "config.json"));
@@ -169,7 +173,10 @@ export async function startHost(options: HostOptions): Promise<{ close(): Promis
   const clientToken =
     options.clientToken ||
     (current && current !== "flowlet-local-token" ? current : randomUUID());
-  if (clientToken === options.adminToken) throw new Error("管理凭据与模型调用密钥必须不同");
+  const staticAdminToken = auth.staticToken();
+  if (staticAdminToken !== null && staticAdminToken === clientToken) {
+    throw new Error("管理凭据与模型调用密钥必须不同");
+  }
   const bindConfig: ProxyBindConfig = {
     host: socket.host,
     port: socket.port,
@@ -202,6 +209,7 @@ export async function startHost(options: HostOptions): Promise<{ close(): Promis
     catalogDir: options.catalogDir,
     configPath: options.configPath,
     adminToken: options.adminToken,
+    auth,
     clientToken,
     staticDir: options.staticDir,
     publicProxyUrl: options.publicProxyUrl,

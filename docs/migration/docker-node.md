@@ -38,6 +38,25 @@
 避免了远端拉 Debian 源导致的构建卡顿；镜像内 `/app` 统一 `chmod -R a+rX`，
 因为本地工作区文件可能是 0600 而容器以 10001 运行。
 
+## 与线上版本的 1:1 验收口径
+
+1. **管理端功能对拍**：从线上容器只读提取 `/usr/local/bin/flowlet-server`（即当前线上 Rust 二进制），
+   加上线上 `/data` 的数据库与目录快照，作为 Rust oracle：
+
+   ```bash
+   # 提取（Docker Engine API，只读；产物在 .flowlet-dev-data/，已 gitignore）
+   # GET /containers/flowlet/archive?path=/usr/local/bin/flowlet-server
+   FLOWLET_RUST_HEADLESS=$PWD/.flowlet-dev-data/flowlet-server-online \
+   FLOWLET_PARITY_DB=$PWD/.flowlet-dev-data/prod-copy/flowlet.sqlite \
+   node scripts/web-parity.mjs
+   ```
+
+   验收线：命令差异 0 + HTTP 差异 0（包含 `/api/session`、`/api/auth/*` 的 SSO 鉴权面）。
+2. **数据层**：用同一份生产库快照比较 `usage_summary` / `usage_today_tokens` / `list_request_logs`
+   摘要（含 cost）、请求详情（.flcap 帧 hydrate）等。
+3. **容器冒烟**：用生产库快照起临时容器，验证 `/health`、鉴权、43 命令、`/v1/models`、静态界面。
+4. **SSO**：用本地 mock OIDC Provider 跑单元测试（真实 GitLab 登录需线上 client secret，不在本地验证）。
+
 ## 本地验证（无 docker CLI）
 
 本机没有 docker CLI，服务端镜像构建走 `10.100.217.60:2375` 的 Docker Engine API

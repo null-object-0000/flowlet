@@ -474,6 +474,28 @@ async function runHttpChecks(side) {
   });
   add("POST 非法 JSON", { status: malformed.status, contentType: malformed.headers["content-type"], cache: malformed.headers["cache-control"] ?? null }, { status: 400, contentType: "text/plain; charset=utf-8", cache: "no-store" });
 
+  // ── 管理端鉴权（SSO / token 模式）─────────────────────────────────────────
+  const authConfig = await request(side.baseUrl, "/api/auth/config");
+  add("GET /api/auth/config", { status: authConfig.status, json: authConfig.json, cache: authConfig.headers["cache-control"] ?? null }, { status: 200 });
+
+  const authConfigHead = await request(side.baseUrl, "/api/auth/config", { method: "HEAD" });
+  add("HEAD /api/auth/config", { status: authConfigHead.status, cache: authConfigHead.headers["cache-control"] ?? null }, { status: 200 });
+
+  const authLogin = await request(side.baseUrl, "/api/auth/login");
+  add("GET /api/auth/login（token 模式）", { status: authLogin.status, json: authLogin.json, location: authLogin.headers.location ?? null }, { status: 404 });
+
+  const authCallback = await request(side.baseUrl, "/api/auth/callback?code=x&state=y");
+  add("GET /api/auth/callback（无会话）", { status: authCallback.status, location: authCallback.headers.location ?? null, setCookie: Boolean(authCallback.headers["set-cookie"]) }, { status: 303 });
+
+  const logoutNoAuth = await request(side.baseUrl, "/api/auth/logout", { method: "POST" });
+  add("POST /api/auth/logout 无凭据", { status: logoutNoAuth.status, json: logoutNoAuth.json }, { status: 401 });
+
+  const logoutToken = await request(side.baseUrl, "/api/auth/logout", { method: "POST", headers: { authorization: `Bearer ${ADMIN_TOKEN}` } });
+  add("POST /api/auth/logout 带 token", { status: logoutToken.status, json: logoutToken.json, cache: logoutToken.headers["cache-control"] ?? null }, { status: 200 });
+
+  const sessionWithMode = await request(side.baseUrl, "/api/session", { headers: { authorization: `Bearer ${ADMIN_TOKEN}` } });
+  add("GET /api/session 鉴权（含 mode）", { status: sessionWithMode.status, json: sessionWithMode.json }, { status: 200 });
+
   const head = await request(side.baseUrl, "/index.html", { method: "HEAD" });
   add("HEAD /index.html", { status: head.status, contentType: head.headers["content-type"], contentLength: head.headers["content-length"] }, { status: 200, contentType: "text/html" });
 

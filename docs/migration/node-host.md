@@ -41,7 +41,7 @@ Node 专有（Rust headless 未实现，不参与对拍，由 Node 侧单测覆�
 
 - CLI 浏览器授权：`create_cli_auth_code` / `list_cli_auth_tokens` / `revoke_cli_auth_token`；
 - 原始 token 查看：`reveal_service_credential`（管理鉴权；CLI token 403）；
-- AI 生成环境前缀：`suggest_env_prefix_segment`（管理鉴权；调本机模型入口，每次点击计一次模型调用）；
+- AI 生成环境前缀：`POST /api/ai/env-prefix`（SSE，非命令）。管理鉴权 + CSRF；服务端流式调本机模型入口，逐条下发 `start` / `progress`（tokens、elapsedMs）/ `done`（segment、completionTokens、tokPerSec）/ `error` 事件；每次点击计一次模型调用；
 - 千问平台登录：`qwen_platform_status` / `qwen_platform_login_start` / `qwen_platform_login_poll` /
   `qwen_platform_logout` / `qwen_platform_sync`；
 - 数据完整性检查：`repair_agent_sessions` / `repair_captured_usage` / `repair_unknown_usage` /

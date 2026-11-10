@@ -23,6 +23,11 @@ import { CommandError } from "../types.ts";
 import type { SqliteStorage } from "../storage/index.ts";
 import { AdminAuth, type AuthResponse } from "./auth.ts";
 import { CLI_ALLOWED_COMMANDS, createCliAuth, type CliAuthStorage } from "./cli-auth.ts";
+import {
+  prepareEnvPrefixTarget,
+  streamEnvPrefixSegment,
+  type EnvPrefixStreamEvent,
+} from "./env-prefix.ts";
 import { dispatch } from "./commands.ts";
 import type { SecretBoxLike, WebContext } from "./context.ts";
 import {
@@ -292,6 +297,83 @@ export function createWebHost(options: WebHostOptions): WebHost {
         const message = error instanceof Error ? error.message : String(error);
         return sendJson(response, 400, { code: "invalid_request", message }, { noStore: true, head: false });
       }
+    }
+
+    // ── AI 生成环境前缀（SSE）：受保护、POST、逐条下发进度事件 ──────────────
+    if (pathname === "/api/ai/env-prefix") {
+      if (method !== "POST") {
+        request.resume();
+        return sendEmpty(response, 405, { allow: "POST" });
+      }
+      const context = auth.authenticate(request.headers);
+      if (context === null) {
+        request.resume();
+        return unauthorized(response);
+      }
+      if (!auth.verifyCsrf(request.headers, context)) {
+        request.resume();
+        return sendJson(
+          response,
+          403,
+          { code: "csrf_rejected", message: "请求校验失败，请刷新页面后重试" },
+          { noStore: false, head: false },
+        );
+      }
+      const body = await readJsonBody(request);
+      if (!body.ok) {
+        return sendText(response, body.status, body.text, { noStore: true, head: false });
+      }
+      const args = body.value;
+      if (args === null || typeof args !== "object" || Array.isArray(args)) {
+        return sendJson(
+          response,
+          400,
+          { code: "command_failed", message: "请求体必须是 JSON 对象" },
+          { noStore: true, head: false },
+        );
+      }
+      const record = args as Record<string, unknown>;
+      const text = (key: string): string => (typeof record[key] === "string" ? (record[key] as string) : "");
+      const input = {
+        provider: text("provider"),
+        providerDefault: text("providerDefault"),
+        name: text("name"),
+        note: typeof record.note === "string" ? (record.note as string) : null,
+        used: Array.isArray(record.used)
+          ? (record.used as unknown[]).filter((item): item is string => typeof item === "string")
+          : [],
+      };
+      // 先在写 SSE 头之前完成入参/模型校验：失败仍返回正常 JSON 错误。
+      try {
+        prepareEnvPrefixTarget(ctx, input);
+      } catch (error) {
+        if (error instanceof CommandError) {
+          return sendJson(
+            response,
+            error.status,
+            { code: error.code, message: error.message },
+            { noStore: true, head: false },
+          );
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        return sendJson(response, 400, { code: "command_failed", message }, { noStore: true, head: false });
+      }
+      response.writeHead(200, {
+        "content-type": "text/event-stream; charset=utf-8",
+        "cache-control": "no-store",
+        connection: "keep-alive",
+        "x-accel-buffering": "no",
+      });
+      const writeEvent = (event: EnvPrefixStreamEvent): void => {
+        if (response.writableEnded) return;
+        response.write(`data: ${JSON.stringify(event)}\n\n`);
+      };
+      try {
+        await streamEnvPrefixSegment(ctx, input, writeEvent);
+      } finally {
+        if (!response.writableEnded) response.end();
+      }
+      return;
     }
 
     // ── 受保护路由：/api/session、/api/auth/logout、/api/commands/{cmd} ──────

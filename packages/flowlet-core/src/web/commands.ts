@@ -54,7 +54,6 @@ import {
   test as testCredential,
   type ServiceCredentialInput,
 } from "./credentials.ts";
-import { suggestEnvPrefixSegment } from "./env-prefix.ts";
 import { fetchChannelModels, testChannelConnection, transientAccount } from "./model-sync.ts";
 import { getUpstream, requestErrorDetail } from "./upstream.ts";
 import { loadUaRules } from "../proxy/identity.ts";
@@ -600,19 +599,6 @@ export async function dispatch(ctx: WebContext, command: string, rawArgs: unknow
       return ctx.cliAuth.list();
     case "revoke_cli_auth_token":
       return ctx.cliAuth.revoke(argString(args, "id"));
-
-    // 环境前缀「AI 生成」：用已开放模型把名称/备注概括成片段（显式按钮触发，会计一次模型调用）。
-    case "suggest_env_prefix_segment":
-      return suggestEnvPrefixSegment(ctx, {
-        provider: argString(args, "provider"),
-        providerDefault: argString(args, "providerDefault"),
-        name: argString(args, "name"),
-        note: argOptionalString(args, "note"),
-        // `used` 是字符串数组（非结构体数组）；缺省/非数组按空处理，交给服务端截断。
-        used: Array.isArray(args["used"])
-          ? (args["used"] as unknown[]).filter((item): item is string => typeof item === "string")
-          : [],
-      });
 
     case "get_upstream_proxy_config":
       return { ...ctx.upstreamProxy };

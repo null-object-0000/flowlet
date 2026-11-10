@@ -1076,12 +1076,18 @@ const english: Record<string, string> = {
   "免费": "Free",
   "免费额度 {count} 个模型": "Free quota on {count} models",
   "免费剩余 {value} · 周期至 {date}": "{value} free left · cycle until {date}",
-  "API 按量付费 · 免费额度": "Pay-as-you-go · free quota",
   "未结清": "Unsettled",
   "未结清 {amount}": "Unsettled {amount}",
   "账单 {cycle}": "Bill {cycle}",
   "本月账单": "This month's bill",
   "免费模型见下方开放模型列表": "Free models are shown in the model list below",
+  // 千问账号合并面板（余额/免费额度 + Token Plan 订阅一次同步）
+  "千问平台资源": "Qwen platform resources",
+  "尚未同步账户余额与免费额度": "Balance and free quota have not been synced yet",
+  "正在同步千问平台资源…": "Syncing Qwen platform resources…",
+  "已通过 HTTP 同步千问平台资源": "Qwen platform resources synced over HTTP",
+  "通过千问平台登录后，余额、免费额度与订阅额度由官方 HTTP 接口同步，无需打开 WebView。": "Sign in to the Qwen platform to sync the balance, free quota, and subscription quota over the official HTTP API without a WebView.",
+  "余额、免费额度与订阅额度由官方 HTTP 接口同步，无需打开 WebView。": "The balance, free quota, and subscription quota are synced over the official HTTP API without a WebView.",
   // 千问平台登录（device flow）+ 官方 HTTP 同步
   "千问平台登录": "Qwen platform sign-in",
   "登录千问平台": "Sign in to Qwen platform",
@@ -1098,21 +1104,10 @@ const english: Record<string, string> = {
   "读取登录状态失败：{message}": "Failed to read sign-in status: {message}",
   "浏览器拦截了登录窗口，请允许弹出窗口后重试。": "The browser blocked the sign-in window. Allow pop-ups and try again.",
   "无法打开登录页面：{message}": "Could not open the sign-in page: {message}",
-  "通过千问平台登录后，余额与免费额度由官方 HTTP 接口同步，无需打开 WebView。": "Sign in to the Qwen platform to sync the balance and free quota over the official HTTP API without a WebView.",
-  "余额与免费额度由官方 HTTP 接口同步，无需打开 WebView。": "The balance and free quota are synced over the official HTTP API without a WebView.",
   "未登录千问平台，当前使用 WebView 控制台抓取；登录后可改为 HTTP 同步。": "Not signed in to the Qwen platform. Flowlet currently scrapes the WebView console; sign in to switch to HTTP sync.",
   "未登录千问平台，请先登录以获得 HTTP 同步。": "Not signed in to the Qwen platform. Sign in to enable HTTP sync.",
   "保存账号后可登录千问平台": "Save the account to sign in to the Qwen platform",
   "正在读取登录状态…": "Loading sign-in status…",
-  "正在同步余额与免费额度…": "Syncing balance and free quota…",
-  "已通过 HTTP 同步余额与免费额度": "Balance and free quota synced over HTTP",
-  // Token Plan 订阅账号复用同一套平台登录 + HTTP 同步
-  "通过千问平台登录后，订阅额度与重置卡由官方 HTTP 接口同步，无需打开 WebView。":
-    "Sign in to the Qwen platform to sync the subscription quota and reset cards over the official HTTP API without a WebView.",
-  "订阅额度与重置卡由官方 HTTP 接口同步，无需打开 WebView。":
-    "The subscription quota and reset cards are synced over the official HTTP API without a WebView.",
-  "正在同步订阅额度…": "Syncing subscription quota…",
-  "已通过 HTTP 同步订阅额度": "Subscription quota synced over HTTP",
   "HTTP 同步": "HTTP sync",
   "WebView 抓取": "WebView scraping",
   "套餐已过期": "Plan expired",
@@ -1182,7 +1177,6 @@ const english: Record<string, string> = {
   "资源包剩余比例": "Package remaining percentage",
   "待使用": "Pending",
   "尚未同步资源包，请点击“立即刷新”。": "No package data has been synced. Select Refresh now.",
-  "Token Plan 订阅信息": "Token Plan subscription",
   "Token Plan 订阅": "Token Plan subscription",
   "订阅": "Subscription",
   "订阅套餐，sk-sp 专属 Key，按 Credits 计量": "Subscription plan with a dedicated sk-sp key, billed in credits.",
@@ -1894,14 +1888,14 @@ const english: Record<string, string> = {
   "环境前缀": "Env prefix",
   "环境别名（Env 前缀）": "Environment alias (Env prefix)",
   "例如 {example}；留空使用默认 {prefix}": "e.g. {example}; leave blank for the default {prefix}",
-  "留空使用默认 {prefix}，也可点「自动生成」由名称/备注生成":
-    "Leave blank for the default {prefix}, or click \"Auto-generate\" to derive it from the name/note",
-  "自动生成": "Auto-generate",
+  "留空使用默认 {prefix}，或点「AI 生成」按名称/备注生成":
+    "Leave blank for the default {prefix}, or click \"AI generate\" to derive it from the name/note",
   "AI 生成": "AI generate",
-  "已用 {model} 生成：{prefix}": "Generated with {model}: {prefix}",
-  "AI 生成失败，已使用规则建议：{message}": "AI generation failed; rule-based suggestion applied: {message}",
-  "已按名称与备注自动生成，可直接修改；生成的环境变量：{keys}。":
-    "Generated from the name and note; you can edit it. Environment variables: {keys}.",
+  "已生成环境前缀：{prefix}": "Environment prefix generated: {prefix}",
+  "AI 生成失败：{message}": "AI generation failed: {message}",
+  "AI 生成中": "Generating with AI",
+  "已生成 {tokens} tokens": "{tokens} tokens generated",
+  "AI 已生成": "AI generation finished",
   "生成的环境变量：{keys}；同一服务的多实例需使用不同前缀（如 {example}）。":
     "Environment variables: {keys}. Multiple instances of the same service need different prefixes (e.g. {example}).",
   "生成的环境变量：{url} / {token}；请填写完整前缀（如 {example}），同一服务的多实例需使用不同前缀。":
@@ -1921,6 +1915,13 @@ const english: Record<string, string> = {
   "留空表示不修改现有密码": "Leave blank to keep the current password",
   "Beszel 没有长期 API Token：保存时会用邮箱 + 密码换取短期 token；编辑时留空表示保持原邮箱。":
     "Beszel has no long-lived API token: saving exchanges the email and password for a short-lived token; leave blank to keep the current email when editing.",
+  "密码 / Token（docker login 的密码；Harbor robot account 填其 token）":
+    "Password / Token (the password for docker login; Harbor robot accounts use their token)",
+  "例如：robot$project+name": "e.g. robot$project+name",
+  "粘贴密码或 Token（与用户名一起用于 docker login）":
+    "Paste the password or token (used with the username for docker login)",
+  "保存时请求镜像仓库的 /v2/ 接口验证登录（标准 Registry V2）；编辑时留空表示保持原用户名。":
+    "Saving verifies the login against the registry's /v2/ endpoint (standard Registry V2); leave blank to keep the current username when editing.",
   "环境前缀只能包含字母、数字和下划线，且以字母开头（最长 {max} 个字符）":
     "The env prefix may only contain letters, digits and underscores, must start with a letter, and is at most {max} characters.",
   "安装 CLI": "Install the CLI",

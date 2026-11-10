@@ -43,6 +43,7 @@ import {
   suggestEnvPrefix,
 } from "../../domains/credentials/envPrefix";
 import { LocalAccessSideSheet } from "../../features/credentials/LocalAccessSideSheet";
+import { streamEnvPrefix, type AiStreamEvent } from "../../platform/web/aiStream";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { isWebHost } from "../../platform/web/mode";
 import { PageHeader } from "../../shared/ui/PageHeader";
@@ -57,7 +58,7 @@ type Draft = {
   provider: CredentialProviderId;
   name: string;
   baseUrl: string;
-  /** 身份字段：Jenkins 用户名 / Beszel 登录邮箱（其它 provider 不用）。 */
+  /** 身份字段：Jenkins / OCI 镜像仓库用户名、Beszel 登录邮箱（其它 provider 不用）。 */
   username: string;
   token: string;
   note: string;
@@ -82,6 +83,7 @@ const PROVIDER_LABEL: Record<string, string> = {
   dockhand: "Dockhand",
   jenkins: "Jenkins",
   beszel: "Beszel",
+  registry: "OCI 镜像仓库",
 };
 
 /** 服务端 provider 元数据加载前/旧 Host 的兜底，保证表单文案马上可用。 */
@@ -122,7 +124,21 @@ const FALLBACK_PROVIDERS: CredentialProvider[] = [
     available: true,
     defaultEnvPrefix: "BESZEL",
   },
+  {
+    id: "registry",
+    label: "OCI 镜像仓库",
+    baseUrlHint: "https://hub.example.com（只填仓库地址，不要带路径）",
+    tokenLabel: "密码 / Token（docker login 的密码；Harbor robot account 填其 token）",
+    usernameLabel: "用户名",
+    available: true,
+    defaultEnvPrefix: "REGISTRY",
+  },
 ];
+
+/** 毫秒 → 秒（保留 1 位小数），用于 AI 生成进度展示。 */
+function formatSeconds(ms: number): string {
+  return `${(Math.max(0, ms) / 1000).toFixed(1)}s`;
+}
 
 /** 保存时实际校验的端点（与两套 Host 的 check 实现一致）。 */
 function checkEndpoint(provider: CredentialProviderId): string {
@@ -133,6 +149,9 @@ function checkEndpoint(provider: CredentialProviderId): string {
       return "Beszel /api/collections/users/auth-with-password";
     case "dockhand":
       return "Dockhand /api/environments";
+    case "registry":
+      // 标准 Registry V2 认证流程（Basic → WWW-Authenticate Bearer 质询 → token → 重试）。
+      return "镜像仓库 GET /v2/";
     default:
       return "GitLab /api/v4/user";
   }
@@ -144,30 +163,44 @@ function asCredentialProviderId(value: string): CredentialProviderId {
     case "dockhand":
     case "jenkins":
     case "beszel":
+    case "registry":
       return value;
     default:
       return "gitlab";
   }
 }
 
-/** provider 需要额外身份字段（当前为 Jenkins 用户名 / Beszel 邮箱）；旧 Host 元数据缺失时按 id 兜底。 */
+/** provider 需要额外身份字段（Jenkins / OCI 镜像仓库用户名、Beszel 邮箱）；旧 Host 元数据缺失时按 id 兜底。 */
 function usernameLabelFor(provider: CredentialProvider): string | null {
   const label = provider.usernameLabel?.trim();
   if (label) return label;
   if (provider.id === "beszel") return "邮箱";
-  return provider.id === "jenkins" ? "用户名" : null;
+  return provider.id === "jenkins" || provider.id === "registry" ? "用户名" : null;
 }
 
 /** 身份字段输入框的 placeholder。 */
 function usernamePlaceholderFor(providerId: string): string {
-  return providerId === "beszel" ? "例如：you@example.com" : "例如：jenkins-user";
+  switch (providerId) {
+    case "beszel":
+      return "例如：you@example.com";
+    case "registry":
+      // 允许 $ + _ -，便于粘贴 robot account 这类用户名。
+      return "例如：robot$project+name";
+    default:
+      return "例如：jenkins-user";
+  }
 }
 
-/** 身份字段下方的说明文案：Jenkins 是 Basic 认证，Beszel 是邮箱+密码换短期 token。 */
+/** 身份字段下方的说明文案：Jenkins 是 Basic 认证，Beszel 是邮箱+密码换短期 token，registry 用 /v2/ 验证。 */
 function usernameHintFor(providerId: string): string {
-  return providerId === "beszel"
-    ? "Beszel 没有长期 API Token：保存时会用邮箱 + 密码换取短期 token；编辑时留空表示保持原邮箱。"
-    : "Jenkins API Token 必须与该用户名的 Basic 认证一起使用；留空表示编辑时保持原用户名。";
+  switch (providerId) {
+    case "beszel":
+      return "Beszel 没有长期 API Token：保存时会用邮箱 + 密码换取短期 token；编辑时留空表示保持原邮箱。";
+    case "registry":
+      return "保存时请求镜像仓库的 /v2/ 接口验证登录（标准 Registry V2）；编辑时留空表示保持原用户名。";
+    default:
+      return "Jenkins API Token 必须与该用户名的 Basic 认证一起使用；留空表示编辑时保持原用户名。";
+  }
 }
 
 /** 密钥输入框的 placeholder（按 provider 与新建/编辑区分）。 */
@@ -182,6 +215,8 @@ function tokenPlaceholderFor(provider: CredentialProviderId, editing: boolean): 
       return "粘贴 API Token（与用户名一起使用）";
     case "beszel":
       return "粘贴 Beszel 登录密码";
+    case "registry":
+      return "粘贴密码或 Token（与用户名一起用于 docker login）";
     default:
       return "粘贴 Personal Access Token";
   }
@@ -197,13 +232,14 @@ export function CredentialsPage() {
   const [accessOpen, setAccessOpen] = useState(false);
   /** 正在查看的原始 token；关闭弹层即丢弃（不写缓存/不入日志）。 */
   const [revealed, setRevealed] = useState<{ name: string; token: string } | null>(null);
-  /**
-   * 环境前缀是否被用户手动改过：未改过时随名称/备注/服务类型自动生成，
-   * 一旦手动输入就不再覆盖（编辑已有凭据时也视为已手动设置，避免悄悄改名）。
-   */
-  const [envPrefixTouched, setEnvPrefixTouched] = useState(false);
-  /** 「AI 生成」按钮的进行中状态（一次点击 = 一次模型调用）。 */
-  const [aiPrefixLoading, setAiPrefixLoading] = useState(false);
+  /** 「AI 生成」的流式进度：tokens/tok/s/用时来自 SSE 事件，用于让用户看到真实生成进度。 */
+  const [aiPrefix, setAiPrefix] = useState<{
+    status: "idle" | "streaming" | "done";
+    model: string;
+    tokens: number;
+    elapsedMs: number;
+    tokPerSec: number;
+  }>({ status: "idle", model: "", tokens: 0, elapsedMs: 0, tokPerSec: 0 });
 
   const providers = useQuery({
     queryKey: queryKeys.credentials.providers(),
@@ -274,72 +310,91 @@ export function CredentialsPage() {
         resolveEnvPrefix(credential.envPrefix, defaultPrefixOf(credential.provider as CredentialProviderId)),
       );
 
-  /** 自动生成前缀所需上下文：provider 默认前缀 + 其它凭据已占用的前缀。 */
-  const autoEnvPrefix = (
-    providerId: CredentialProviderId,
-    name: string,
-    note: string,
-    currentId?: string,
-  ): string =>
-    suggestEnvPrefix({
-      providerDefault: defaultPrefixOf(providerId),
-      name,
-      note,
-      used: usedEnvPrefixes(currentId),
-    });
-
   /**
-   * 让已开放模型根据名称/备注生成前缀片段（显式点击才调用，会计一次模型调用）。
-   * 失败时回退规则建议，并在 Toast 里说明原因。
+   * 让已开放模型根据名称/备注生成前缀片段（显式点击，一次点击 = 一次模型调用）。
+   * 生成过程用 SSE 上报 token 数 / tok/s / 用时；失败只提示错误，不改动输入框。
    */
   const aiSuggestEnvPrefix = async () => {
-    if (!draft || aiPrefixLoading) return;
+    if (!draft || aiPrefix.status === "streaming") return;
     const providerDefault = defaultPrefixOf(draft.provider);
     const used = usedEnvPrefixes(draft.id);
-    setAiPrefixLoading(true);
+    setAiPrefix({ status: "streaming", model: "", tokens: 0, elapsedMs: 0, tokPerSec: 0 });
+
+    let failed = false;
+    const handle = (event: AiStreamEvent): void => {
+      if (event.type === "start") {
+        setAiPrefix((current) => ({ ...current, model: event.model }));
+        return;
+      }
+      if (event.type === "progress") {
+        const tokPerSec =
+          event.elapsedMs > 0 ? Math.round((event.tokens / (event.elapsedMs / 1000)) * 10) / 10 : 0;
+        setAiPrefix({
+          status: "streaming",
+          model: targetModelRef,
+          tokens: event.tokens,
+          elapsedMs: event.elapsedMs,
+          tokPerSec,
+        });
+        return;
+      }
+      if (event.type === "done") {
+        // 片段走与手写同一套拼接与冲突避让，保证格式一致。
+        const prefix = suggestEnvPrefix({ providerDefault, name: event.segment, used });
+        setDraft((current) => (current ? { ...current, envPrefix: prefix } : current));
+        setAiPrefix({
+          status: "done",
+          model: event.model,
+          tokens: event.completionTokens,
+          elapsedMs: event.elapsedMs,
+          tokPerSec: event.tokPerSec,
+        });
+        Toast.success(t("已生成环境前缀：{prefix}", { prefix }));
+        return;
+      }
+      failed = true;
+      setAiPrefix({ status: "idle", model: "", tokens: 0, elapsedMs: 0, tokPerSec: 0 });
+      Toast.error(t("AI 生成失败：{message}", { message: event.message }));
+    };
+
+    // 闭包里跟踪当前模型名：progress 事件本身不带 model，用 start 事件记下来的值。
+    let targetModelRef = "";
+    const onEvent = (event: AiStreamEvent): void => {
+      if (event.type === "start") targetModelRef = event.model;
+      handle(event);
+    };
+
     try {
-      const suggestion = await credentialCommands.suggestEnvPrefixSegment({
-        provider: draft.provider,
-        providerDefault,
-        name: draft.name,
-        note: draft.note,
-        used,
-      });
-      // 片段走与手写/规则同一套拼接与冲突避让，保证格式一致。
-      const prefix = suggestEnvPrefix({
-        providerDefault,
-        name: suggestion.segment,
-        used,
-      });
-      setEnvPrefixTouched(true);
-      setDraft((current) => (current ? { ...current, envPrefix: prefix } : current));
-      Toast.success(
-        t("已用 {model} 生成：{prefix}", { model: suggestion.model, prefix }),
+      await streamEnvPrefix(
+        {
+          provider: draft.provider,
+          providerDefault,
+          name: draft.name,
+          note: draft.note,
+          used,
+        },
+        onEvent,
       );
+      if (!failed) {
+        setAiPrefix((current) =>
+          current.status === "streaming" ? { ...current, status: "done" } : current,
+        );
+      }
     } catch (error) {
-      const fallback = autoEnvPrefix(draft.provider, draft.name, draft.note, draft.id);
-      setEnvPrefixTouched(true);
-      setDraft((current) => (current ? { ...current, envPrefix: fallback } : current));
-      Toast.warning(
-        t("AI 生成失败，已使用规则建议：{message}", { message: errorMessage(error) }),
-      );
-    } finally {
-      setAiPrefixLoading(false);
+      setAiPrefix({ status: "idle", model: "", tokens: 0, elapsedMs: 0, tokPerSec: 0 });
+      Toast.error(t("AI 生成失败：{message}", { message: errorMessage(error) }));
     }
   };
 
   const openCreate = () => {
     setFormError("");
-    setEnvPrefixTouched(false);
-    setDraft({
-      ...EMPTY_DRAFT,
-      envPrefix: autoEnvPrefix(EMPTY_DRAFT.provider, "", ""),
-    });
+    setAiPrefix({ status: "idle", model: "", tokens: 0, elapsedMs: 0, tokPerSec: 0 });
+    setDraft({ ...EMPTY_DRAFT });
   };
 
   const openEdit = (credential: ServiceCredential) => {
     setFormError("");
-    setEnvPrefixTouched(true);
+    setAiPrefix({ status: "idle", model: "", tokens: 0, elapsedMs: 0, tokPerSec: 0 });
     setDraft({
       id: credential.id,
       provider: asCredentialProviderId(credential.provider),
@@ -396,7 +451,7 @@ export function CredentialsPage() {
   }, []);
 
   const credentials = list.data ?? [];
-  // 服务端按 gitlab → dockhand → jenkins → beszel 的顺序返回；加载失败/旧 Host 时退回本地兜底定义。
+  // 服务端按 gitlab → dockhand → jenkins → uptime-kuma → beszel → registry 的顺序返回；加载失败/旧 Host 时退回本地兜底定义。
   const providerOptions = providers.data && providers.data.length > 0 ? providers.data : FALLBACK_PROVIDERS;
   const selectedProvider = providerOptions.find((option) => option.id === draft?.provider) ?? FALLBACK_PROVIDERS[0]!;
   const selectedProviderLabel = PROVIDER_LABEL[selectedProvider.id] ?? selectedProvider.label;
@@ -404,21 +459,22 @@ export function CredentialsPage() {
   /** 身份字段的标题；null 表示该 provider 不需要额外身份字段。 */
   const selectedUsernameLabel = usernameLabelFor(selectedProvider);
   /**
-   * 身份字段缺失：provider 声明了用户名/邮箱时，新建必须填写（Jenkins / Beszel 均如此）。
-   * 编辑时留空表示保持原值（Host 语义）：Beszel 允许留空保留原邮箱；
+   * 身份字段缺失：provider 声明了用户名/邮箱时，新建必须填写（Jenkins / Beszel / OCI 镜像仓库均如此）。
+   * 编辑时留空表示保持原值（Host 语义）：Beszel / OCI 镜像仓库允许留空保留原值；
    * Jenkins 沿用既有交互，编辑时仍要求填写用户名。
    */
   const usernameMissing =
     selectedUsernameLabel !== null &&
     !draft?.username.trim() &&
-    (draft?.id === undefined || selectedProvider.id !== "beszel");
+    (draft?.id === undefined ||
+      (selectedProvider.id !== "beszel" && selectedProvider.id !== "registry"));
   /** 编辑器的环境前缀预览：空值 → provider 默认，非空 → 大写。 */
   const previewPrefix = resolveEnvPrefix(draft?.envPrefix, selectedProviderDefaultEnvPrefix);
   const previewEnvKeys = envKeysForProvider(previewPrefix, selectedProvider.id);
   /** 前缀示例按 provider 默认前缀展开，提醒用户填写完整前缀而不是只填别名。 */
   const envPrefixExample = `${selectedProviderDefaultEnvPrefix}_NA`;
   const envPrefixInvalid = draft !== null && !isValidEnvPrefixInput(draft.envPrefix);
-  /** 生成的环境变量名文案（Jenkins 多 `_USER`，Beszel 为 `_EMAIL` / `_PASSWORD`）。 */
+  /** 生成的环境变量名文案（Jenkins / registry 多 `_USER`，registry 的地址槽位是 `_HOST`，Beszel 为 `_EMAIL` / `_PASSWORD`）。 */
   const previewEnvKeyLabels = envKeyList(previewEnvKeys).join(" / ");
 
   /** 表格/预览用：旧 Host 未返回 envPrefix 时按 provider 默认前缀兜底。 */
@@ -680,17 +736,7 @@ export function CredentialsPage() {
               <Input
                 value={draft.name}
                 placeholder={t("例如：公司 {name}", { name: selectedProviderLabel })}
-                onChange={(value) =>
-                  setDraft((current) => {
-                    if (!current) return current;
-                    if (envPrefixTouched) return { ...current, name: value };
-                    return {
-                      ...current,
-                      name: value,
-                      envPrefix: autoEnvPrefix(current.provider, value, current.note, current.id),
-                    };
-                  })
-                }
+                onChange={(value) => setDraft((current) => (current ? { ...current, name: value } : current))}
               />
             </div>
             <div className={styles.field}>
@@ -705,16 +751,9 @@ export function CredentialsPage() {
                   disabled: !option.available,
                 }))}
                 onChange={(value) =>
-                  setDraft((current) => {
-                    if (!current) return current;
-                    const provider = value as CredentialProviderId;
-                    if (envPrefixTouched) return { ...current, provider };
-                    return {
-                      ...current,
-                      provider,
-                      envPrefix: autoEnvPrefix(provider, current.name, current.note, current.id),
-                    };
-                  })
+                  setDraft((current) =>
+                    current ? { ...current, provider: value as CredentialProviderId } : current,
+                  )
                 }
               />
               <Typography.Text type="tertiary">{t(selectedProvider.tokenLabel)}</Typography.Text>
@@ -745,61 +784,53 @@ export function CredentialsPage() {
             <div className={styles.field}>
               <div className={styles.fieldLabelRow}>
                 <label>{t("环境别名（Env 前缀）")}</label>
-                <div className={styles.fieldLabelActions}>
+                {isWebHost && (
                   <Button
                     size="small"
                     theme="borderless"
                     icon={<IconAIWandLevel1 />}
-                    loading={aiPrefixLoading}
+                    loading={aiPrefix.status === "streaming"}
                     disabled={!draft.name.trim()}
                     onClick={() => void aiSuggestEnvPrefix()}
                   >
                     {t("AI 生成")}
                   </Button>
-                  <Button
-                    size="small"
-                    theme="borderless"
-                    onClick={() => {
-                      setEnvPrefixTouched(false);
-                      setDraft((current) =>
-                        current
-                          ? {
-                              ...current,
-                              envPrefix: autoEnvPrefix(
-                                current.provider,
-                                current.name,
-                                current.note,
-                                current.id,
-                              ),
-                            }
-                          : current,
-                      );
-                    }}
-                  >
-                    {t("自动生成")}
-                  </Button>
-                </div>
+                )}
               </div>
               <Input
                 value={draft.envPrefix}
-                placeholder={t("留空使用默认 {prefix}，也可点「自动生成」由名称/备注生成", {
+                placeholder={t("留空使用默认 {prefix}，或点「AI 生成」按名称/备注生成", {
                   prefix: selectedProviderDefaultEnvPrefix,
                 })}
-                onChange={(value) => {
-                  setEnvPrefixTouched(true);
-                  setDraft((current) => (current ? { ...current, envPrefix: value } : current));
-                }}
+                onChange={(value) =>
+                  setDraft((current) => (current ? { ...current, envPrefix: value } : current))
+                }
               />
+              {aiPrefix.status !== "idle" ? (
+                <div className={styles.aiProgress} role="status" aria-live="polite">
+                  {aiPrefix.status === "streaming" ? (
+                    <>
+                      <span className={styles.aiProgressDot} aria-hidden="true" />
+                      {t("AI 生成中")}
+                      {aiPrefix.model !== "" ? ` · ${aiPrefix.model}` : ""}
+                      {` · ${t("已生成 {tokens} tokens", { tokens: aiPrefix.tokens })}`}
+                      {aiPrefix.tokPerSec > 0 ? ` · ${aiPrefix.tokPerSec} tok/s` : ""}
+                      {` · ${formatSeconds(aiPrefix.elapsedMs)}`}
+                    </>
+                  ) : (
+                    <>
+                      {t("AI 已生成")}
+                      {` · ${aiPrefix.tokens} tokens`}
+                      {` · ${aiPrefix.tokPerSec} tok/s`}
+                      {` · ${formatSeconds(aiPrefix.elapsedMs)}`}
+                    </>
+                  )}
+                </div>
+              ) : null}
               {envPrefixInvalid ? (
                 <Typography.Text type="danger" size="small">
                   {t("环境前缀只能包含字母、数字和下划线，且以字母开头（最长 {max} 个字符）", {
                     max: ENV_PREFIX_MAX_LENGTH,
-                  })}
-                </Typography.Text>
-              ) : !envPrefixTouched && draft.envPrefix.trim() ? (
-                <Typography.Text type="tertiary" size="small">
-                  {t("已按名称与备注自动生成，可直接修改；生成的环境变量：{keys}。", {
-                    keys: previewEnvKeyLabels,
                   })}
                 </Typography.Text>
               ) : (
@@ -825,17 +856,7 @@ export function CredentialsPage() {
               <Input
                 value={draft.note}
                 placeholder={t("可选，例如用途或负责人")}
-                onChange={(value) =>
-                  setDraft((current) => {
-                    if (!current) return current;
-                    if (envPrefixTouched) return { ...current, note: value };
-                    return {
-                      ...current,
-                      note: value,
-                      envPrefix: autoEnvPrefix(current.provider, current.name, value, current.id),
-                    };
-                  })
-                }
+                onChange={(value) => setDraft((current) => (current ? { ...current, note: value } : current))}
               />
             </div>
             <div className={styles.switchRow}>

@@ -6,7 +6,6 @@ import type {
   ServiceCredential,
   ServiceCredentialInput,
   ServiceCredentialReveal,
-  EnvPrefixAiSuggestion,
 } from "./types";
 
 /** 服务凭据命令适配器：页面/feature 不直接拼命令名。 */
@@ -44,21 +43,6 @@ export const credentialCommands = {
 
   remove: (id: string): Promise<void> =>
     invokeCommand<void>("delete_service_credential", { id }).catch(toAppErr("credential_delete_failed")),
-
-  /**
-   * 让已开放模型根据名称/备注概括一个环境前缀片段（显式按钮触发，会计一次模型调用）。
-   * 失败时抛错，调用方回退到本地规则建议。
-   */
-  suggestEnvPrefixSegment: (input: {
-    provider: string;
-    providerDefault: string;
-    name: string;
-    note?: string;
-    used?: string[];
-  }): Promise<EnvPrefixAiSuggestion> =>
-    invokeCommand<EnvPrefixAiSuggestion>("suggest_env_prefix_segment", input).catch(
-      toAppErr("env_prefix_ai_failed"),
-    ),
 
   /**
    * 查看已保存凭据的原始 token：仅管理鉴权可用（CLI token 作用域禁止）。

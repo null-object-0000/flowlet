@@ -1,8 +1,9 @@
-// 「AI 生成环境前缀片段」（`suggest_env_prefix_segment`）测试。Owner: node-web.
+// 「AI 生成环境前缀」SSE 端点（`POST /api/ai/env-prefix`）测试。Owner: node-web.
 //
 // 运行：node --test packages/flowlet-core/src/web/__tests__/env-prefix-ai.test.ts
-// 覆盖：模型选择优先级、调本地模型入口的请求形状、输出清洗/校验、失败回退错误、
-// 没有可用模型、名称缺失，以及 CLI token 不能调用（保持只读作用域）。
+// 覆盖：模型选择优先级、请求形状（system/user prompt、stream、include_usage）、
+// 流式进度事件（start/progress/done 与 token 统计）、输出清洗失败、上游错误、
+// 无可用模型、缺名称、未鉴权/CLI token 拒绝。
 import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -81,11 +82,10 @@ describe("exposedModelNames / pickSuggestionModel / parseSegment", () => {
 
   it("cleans model output into a legal uppercase segment", () => {
     assert.equal(parseSegment("NA_PROD"), "NA_PROD");
-    assert.equal(parseSegment("  `na prod`  "), "NA"); // 空格结尾的词不再拼接
+    assert.equal(parseSegment("  `na prod`  "), "NA");
     assert.equal(parseSegment("```text\nSELF\n```"), "SELF");
     assert.equal(parseSegment("北美生产"), null);
     assert.equal(parseSegment(""), null);
-    // 超长片段被截断在 20 字符内
     const long = parseSegment("north_america_production_instance");
     assert.ok(long !== null && long.length <= 20, String(long));
   });
@@ -98,10 +98,30 @@ interface ModelCall {
   body: JsonRow;
 }
 
-function startMockModel(responder: (call: ModelCall) => { status: number; body: string }): Promise<{
+type MockReply =
+  | { kind: "json"; status: number; body: string }
+  | { kind: "sse"; status: number; chunks: string[]; delayMs?: number };
+
+function sseChunks(deltas: Array<{ content?: string; reasoning?: string }>, completionTokens?: number): string[] {
+  const chunks = deltas.map((delta) => {
+    const payload: JsonRow = { choices: [{ index: 0, delta: {} }] };
+    const inner = (payload.choices as JsonRow[])[0]!.delta as JsonRow;
+    if (delta.reasoning !== undefined) inner.reasoning_content = delta.reasoning;
+    if (delta.content !== undefined) inner.content = delta.content;
+    return `data: ${JSON.stringify(payload)}\n\n`;
+  });
+  if (completionTokens !== undefined) {
+    chunks.push(
+      `data: ${JSON.stringify({ choices: [], usage: { completion_tokens: completionTokens } })}\n\n`,
+    );
+  }
+  chunks.push("data: [DONE]\n\n");
+  return chunks;
+}
+
+function startMockModel(reply: MockReply | ((call: ModelCall) => MockReply)): Promise<{
   port: number;
   calls: ModelCall[];
-  close: () => Promise<void>;
 }> {
   return new Promise((resolve) => {
     const calls: ModelCall[] = [];
@@ -112,13 +132,35 @@ function startMockModel(responder: (call: ModelCall) => { status: number; body: 
         request.on("end", () => {
           const body = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}") as JsonRow;
           const call: ModelCall = {
-            authorization: typeof request.headers.authorization === "string" ? request.headers.authorization : undefined,
+            authorization:
+              typeof request.headers.authorization === "string" ? request.headers.authorization : undefined,
             body,
           };
           calls.push(call);
-          const result = responder(call);
-          response.writeHead(result.status, { "content-type": "application/json" });
-          response.end(result.body);
+          const result = typeof reply === "function" ? reply(call) : reply;
+          if (result.kind === "json") {
+            response.writeHead(result.status, { "content-type": "application/json" });
+            response.end(result.body);
+            return;
+          }
+          response.writeHead(result.status, {
+            "content-type": "text/event-stream; charset=utf-8",
+            "cache-control": "no-store",
+          });
+          const delay = result.delayMs ?? 0;
+          const writeNext = (index: number): void => {
+            if (index >= result.chunks.length) {
+              response.end();
+              return;
+            }
+            response.write(result.chunks[index]);
+            if (delay === 0) {
+              writeNext(index + 1);
+            } else {
+              setTimeout(() => writeNext(index + 1), delay);
+            }
+          };
+          writeNext(0);
         });
       },
     );
@@ -126,39 +168,20 @@ function startMockModel(responder: (call: ModelCall) => { status: number; body: 
       const address = server.address();
       const port = typeof address === "object" && address ? address.port : 0;
       cleanups.push(() => new Promise<void>((done) => server.close(() => done())));
-      resolve({
-        port,
-        calls,
-        close: () => new Promise<void>((done) => server.close(() => done())),
-      });
+      resolve({ port, calls });
     });
   });
 }
 
-function chatCompletion(content: string): { status: number; body: string } {
-  return {
-    status: 200,
-    body: JSON.stringify({
-      id: "chatcmpl-test",
-      object: "chat.completion",
-      choices: [{ index: 0, message: { role: "assistant", content }, finish_reason: "stop" }],
-    }),
-  };
-}
-
 interface HostOptions {
-  modelResponder?: (call: ModelCall) => { status: number; body: string };
-  virtualModels?: JsonRow[];
+  reply?: MockReply | ((call: ModelCall) => MockReply);
   routes?: JsonRow[];
+  virtualModels?: JsonRow[];
 }
 
-async function startHost(options: HostOptions = {}): Promise<{
-  baseUrl: string;
-  calls: ModelCall[];
-}> {
+async function startHost(options: HostOptions = {}): Promise<{ baseUrl: string; calls: ModelCall[] }> {
   clearEnv();
   const webPort = await freePort();
-  const modelPort = await freePort();
   process.env.FLOWLET_ADMIN_AUTH_MODE = "token";
   process.env.FLOWLET_ADMIN_TOKEN = ADMIN_TOKEN;
   process.env.FLOWLET_PUBLIC_WEB_URL = `http://127.0.0.1:${webPort}`;
@@ -170,25 +193,29 @@ async function startHost(options: HostOptions = {}): Promise<{
   const configPath = path.join(workDir, "config.json");
   writeFileSync(configPath, "{}\n");
 
-  // proxy.bindConfig 指向 mock 模型入口端口（127.0.0.1:<port>）。
-  const mock = await startMockModel(options.modelResponder ?? (() => chatCompletion("NA_PROD")));
-  // 用同一个端口取代占位：mock 需要监听在指定端口时改造，这里直接用 mock 的端口。
+  const mock = await startMockModel(
+    options.reply ?? {
+      kind: "sse",
+      status: 200,
+      chunks: sseChunks(
+        [{ reasoning: "思考" }, { content: "NA" }, { content: "_PROD" }],
+        3,
+      ),
+    },
+  );
   const bindConfig = {
     host: "127.0.0.1",
     port: mock.port,
     allow_lan: false,
     default_client_token: CLIENT_TOKEN,
   };
-
-  const virtualModels: JsonRow[] = options.virtualModels ?? [];
   const snapshot: JsonRow = {
     channels: [],
     accounts: [],
     routes:
-      options.routes ??
-      [{ virtual_model_id: "deepseek-v4.1-flash", client_protocol: "openai", enabled: 1 }],
+      options.routes ?? [{ virtual_model_id: "deepseek-v4.1-flash", client_protocol: "openai", enabled: 1 }],
     rules: [],
-    virtual_models: virtualModels,
+    virtual_models: options.virtualModels ?? [],
   };
 
   const tokens = new Map<string, JsonRow>();
@@ -204,7 +231,13 @@ async function startHost(options: HostOptions = {}): Promise<{
       return [];
     }
     insertCliAuthToken(row: JsonRow): JsonRow {
-      const stored = { ...row, token_hash: row.tokenHash, expires_at: row.expiresAt, created_at: "x", last_used_at: null };
+      const stored = {
+        ...row,
+        token_hash: row.tokenHash,
+        expires_at: row.expiresAt,
+        created_at: "x",
+        last_used_at: null,
+      };
       tokens.set(String(stored.token_hash), stored);
       return stored;
     }
@@ -265,29 +298,6 @@ async function startHost(options: HostOptions = {}): Promise<{
   return { baseUrl: `http://127.0.0.1:${webPort}`, calls: mock.calls };
 }
 
-async function post(
-  baseUrl: string,
-  command: string,
-  body: Record<string, unknown>,
-  token?: string,
-): Promise<{ status: number; json: JsonRow | null; text: string }> {
-  const headers: Record<string, string> = { "content-type": "application/json" };
-  if (token !== undefined) headers.authorization = `Bearer ${token}`;
-  const response = await fetch(`${baseUrl}/api/commands/${command}`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-  });
-  const text = await response.text();
-  let json: JsonRow | null = null;
-  try {
-    json = JSON.parse(text) as JsonRow;
-  } catch {
-    json = null;
-  }
-  return { status: response.status, json, text };
-}
-
 const INPUT = {
   provider: "dockhand",
   providerDefault: "DOCKHAND",
@@ -296,78 +306,141 @@ const INPUT = {
   used: ["DOCKHAND_SELF"],
 };
 
-describe("HTTP：suggest_env_prefix_segment", () => {
-  it("calls the exposed model through the local proxy and returns a cleaned segment", async () => {
-    const { baseUrl, calls } = await startHost();
-    const result = await post(baseUrl, "suggest_env_prefix_segment", INPUT, ADMIN_TOKEN);
-    assert.equal(result.status, 200, result.text);
-    assert.equal(result.json?.segment, "NA_PROD");
-    assert.equal(result.json?.model, "deepseek-v4.1-flash");
+/** 读 SSE 响应，返回解析后的事件数组。 */
+async function readEvents(response: Response): Promise<JsonRow[]> {
+  const text = await response.text();
+  const events: JsonRow[] = [];
+  for (const block of text.split("\n\n")) {
+    const line = block.trim();
+    if (!line.startsWith("data:")) continue;
+    events.push(JSON.parse(line.slice("data:".length).trim()) as JsonRow);
+  }
+  return events;
+}
 
+async function postStream(
+  baseUrl: string,
+  body: Record<string, unknown>,
+  token?: string,
+): Promise<{ status: number; contentType: string; events: JsonRow[]; text: string }> {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (token !== undefined) headers.authorization = `Bearer ${token}`;
+  const response = await fetch(`${baseUrl}/api/ai/env-prefix`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("text/event-stream")) {
+    const text = await response.text();
+    return { status: response.status, contentType, events: [], text };
+  }
+  const events = await readEvents(response);
+  return { status: response.status, contentType, events, text: "" };
+}
+
+describe("HTTP：POST /api/ai/env-prefix（SSE）", () => {
+  it("streams start/progress/done with token stats from the local model", async () => {
+    const { baseUrl, calls } = await startHost({
+      reply: {
+        kind: "sse",
+        status: 200,
+        delayMs: 80,
+        chunks: sseChunks(
+          [{ reasoning: "思考" }, { content: "NA" }, { content: "_PROD" }],
+          3,
+        ),
+      },
+    });
+    const result = await postStream(baseUrl, INPUT, ADMIN_TOKEN);
+    assert.equal(result.status, 200);
+    assert.match(result.contentType, /text\/event-stream/);
+
+    const types = result.events.map((event) => event.type);
+    assert.equal(types[0], "start");
+    assert.equal(types[types.length - 1], "done");
+    assert.ok(types.includes("progress"), "长一点的生成应至少有一个进度事件");
+
+    const start = result.events[0]!;
+    assert.equal(start.model, "deepseek-v4.1-flash");
+    const progresses = result.events.filter((event) => event.type === "progress");
+    // tokens 单调递增
+    const counters = progresses.map((event) => Number(event.tokens));
+    assert.deepEqual(
+      counters,
+      [...counters].sort((a, b) => a - b),
+    );
+    assert.ok(Math.max(...counters) >= 1);
+
+    const done = result.events[result.events.length - 1]!;
+    assert.equal(done.segment, "NA_PROD");
+    assert.equal(done.completionTokens, 3);
+    assert.equal(typeof done.elapsedMs, "number");
+    assert.equal(typeof done.tokPerSec, "number");
+
+    // 请求形状：client token 鉴权、流式、带 usage、prompt 含名称/备注/占用前缀
     assert.equal(calls.length, 1);
     const call = calls[0]!;
     assert.equal(call.authorization, `Bearer ${CLIENT_TOKEN}`);
     assert.equal(call.body.model, "deepseek-v4.1-flash");
-    assert.equal(call.body.stream, false);
+    assert.equal(call.body.stream, true);
+    assert.deepEqual(call.body.stream_options, { include_usage: true });
     const messages = call.body.messages as Array<{ role: string; content: string }>;
     assert.equal(messages[0]!.role, "system");
     assert.match(messages[1]!.content, /实例名称：公司北美 Dockhand 正式/);
+    assert.match(messages[1]!.content, /备注：生产环境/);
     assert.match(messages[1]!.content, /已占用前缀：DOCKHAND_SELF/);
   });
 
-  it("falls back with a readable error when the model output is not usable", async () => {
+  it("emits an error event when the model output is unusable", async () => {
     const { baseUrl } = await startHost({
-      modelResponder: () => chatCompletion("北美生产环境"),
+      reply: { kind: "sse", status: 200, chunks: sseChunks([{ content: "北美生产环境" }]) },
     });
-    const result = await post(baseUrl, "suggest_env_prefix_segment", INPUT, ADMIN_TOKEN);
-    assert.equal(result.status, 502);
-    assert.match(String(result.json?.message ?? ""), /回退规则/);
+    const result = await postStream(baseUrl, INPUT, ADMIN_TOKEN);
+    assert.equal(result.status, 200);
+    const last = result.events[result.events.length - 1]!;
+    assert.equal(last.type, "error");
+    assert.match(String(last.message), /没有给出可用的英文片段/);
   });
 
-  it("reports upstream failures and missing models without leaking internals", async () => {
+  it("emits an error event on upstream failure, and rejects before streaming when no model", async () => {
     const failing = await startHost({
-      modelResponder: () => ({ status: 500, body: '{"error":{"message":"upstream boom"}}' }),
+      reply: { kind: "json", status: 500, body: '{"error":{"message":"upstream boom"}}' },
     });
-    const failed = await post(failing.baseUrl, "suggest_env_prefix_segment", INPUT, ADMIN_TOKEN);
-    assert.equal(failed.status, 502);
-    assert.match(String(failed.json?.message ?? ""), /模型返回 HTTP 500/);
+    const failed = await postStream(failing.baseUrl, INPUT, ADMIN_TOKEN);
+    const failedLast = failed.events[failed.events.length - 1]!;
+    assert.equal(failedLast.type, "error");
+    assert.match(String(failedLast.message), /模型返回 HTTP 500/);
 
     const empty = await startHost({ routes: [], virtualModels: [] });
-    const noModel = await post(empty.baseUrl, "suggest_env_prefix_segment", INPUT, ADMIN_TOKEN);
+    const noModel = await postStream(empty.baseUrl, INPUT, ADMIN_TOKEN);
     assert.equal(noModel.status, 409);
-    assert.match(String(noModel.json?.message ?? ""), /没有可用的开放模型/);
+    assert.match(noModel.text, /没有可用的开放模型/);
 
-    const missingName = await post(
-      empty.baseUrl,
-      "suggest_env_prefix_segment",
-      { ...INPUT, name: "  " },
-      ADMIN_TOKEN,
-    );
-    assert.equal(missingName.status, 400);
-    assert.match(String(missingName.json?.message ?? ""), /填写名称/);
+    const missingName = await startHost();
+    const bad = await postStream(missingName.baseUrl, { ...INPUT, name: "  " }, ADMIN_TOKEN);
+    assert.equal(bad.status, 400);
+    assert.match(bad.text, /填写名称/);
   });
 
   it("requires admin auth; CLI token cannot spend model calls", async () => {
     const { baseUrl, calls } = await startHost();
-    const anonymous = await post(baseUrl, "suggest_env_prefix_segment", INPUT);
+    const anonymous = await postStream(baseUrl, INPUT);
     assert.equal(anonymous.status, 401);
 
-    // 用公开端点换一把 CLI token，再尝试调用 → 403 且没有模型调用
     const verifier = randomBytes(32).toString("base64url");
     const challenge = createHash("sha256").update(verifier).digest("base64url");
-    const issued = await post(
-      baseUrl,
-      "create_cli_auth_code",
-      {
+    const issue = await fetch(`${baseUrl}/api/commands/create_cli_auth_code`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${ADMIN_TOKEN}` },
+      body: JSON.stringify({
         redirectUri: "http://127.0.0.1:45999/cb",
         state: "state-ai-1",
         codeChallenge: challenge,
         name: "agent-box",
-      },
-      ADMIN_TOKEN,
-    );
-    assert.equal(issued.status, 200, issued.text);
-    const redirect = new URL(String(issued.json?.redirectUrl ?? ""));
+      }),
+    });
+    const redirect = new URL(String(((await issue.json()) as JsonRow).redirectUrl ?? ""));
     const code = redirect.searchParams.get("code") ?? "";
     const exchange = await fetch(`${baseUrl}/api/auth/cli/exchange`, {
       method: "POST",
@@ -377,8 +450,8 @@ describe("HTTP：suggest_env_prefix_segment", () => {
     const token = String(((await exchange.json()) as JsonRow).token ?? "");
     assert.ok(token.startsWith("flwcli_"));
 
-    const forbidden = await post(baseUrl, "suggest_env_prefix_segment", INPUT, token);
-    assert.equal(forbidden.status, 403);
+    const forbidden = await postStream(baseUrl, INPUT, token);
+    assert.equal(forbidden.status, 401);
     assert.equal(calls.length, 0, "CLI token 不应触发模型调用");
   });
 });

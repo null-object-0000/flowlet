@@ -11,7 +11,6 @@ const commands = vi.hoisted(() => ({
   test: vi.fn(),
   remove: vi.fn(),
   reveal: vi.fn(),
-  suggestEnvPrefixSegment: vi.fn(),
   listCliAuthTokens: vi.fn(),
   revokeCliAuthToken: vi.fn(),
 }));
@@ -19,6 +18,12 @@ const commands = vi.hoisted(() => ({
 const webHost = vi.hoisted(() => ({ value: true }));
 
 vi.mock("../../domains/credentials/commands", () => ({ credentialCommands: commands }));
+const streamEnvPrefix = vi.fn();
+
+vi.mock("../../platform/web/aiStream", () => ({
+  streamEnvPrefix: (...args: unknown[]) => streamEnvPrefix(...args),
+}));
+
 vi.mock("../../platform/web/mode", () => ({
   get isWebHost() {
     return webHost.value;
@@ -60,6 +65,15 @@ const providers = [
     usernameLabel: "邮箱",
     available: true,
     defaultEnvPrefix: "BESZEL",
+  },
+  {
+    id: "registry",
+    label: "OCI 镜像仓库",
+    baseUrlHint: "https://hub.example.com（只填仓库地址，不要带路径）",
+    tokenLabel: "密码 / Token（docker login 的密码；Harbor robot account 填其 token）",
+    usernameLabel: "用户名",
+    available: true,
+    defaultEnvPrefix: "REGISTRY",
   },
 ];
 
@@ -122,6 +136,23 @@ const credentials = [
     enabled: true,
     envPrefix: "BESZEL",
     secretHint: "••••7g8h",
+    createdAt: "2026-11-01T00:00:00Z",
+    updatedAt: "2026-11-01T00:00:00Z",
+    lastVerifiedAt: null,
+    lastError: null,
+  },
+  {
+    id: "cred-registry",
+    name: "公司镜像仓库",
+    provider: "registry",
+    baseUrl: "https://hub.example.com",
+    // OCI 镜像仓库：username 存 docker login 的用户名（robot account 也是普通用户名）。
+    username: "robot$project+pull",
+    kind: "cli_token",
+    note: null,
+    enabled: true,
+    envPrefix: "REGISTRY",
+    secretHint: "••••9i0j",
     createdAt: "2026-11-01T00:00:00Z",
     updatedAt: "2026-11-01T00:00:00Z",
     lastVerifiedAt: null,
@@ -210,77 +241,80 @@ describe("CredentialsPage env prefix", () => {
   });
 });
 
-describe("CredentialsPage env prefix auto-generation", () => {
-  it("prefills a non-conflicting prefix from name/note until the user edits it", async () => {
+describe("CredentialsPage env prefix (AI streaming)", () => {
+  it("does not auto-fill while typing; only the AI button writes the prefix", async () => {
     renderPage();
-    // 等待已有凭据列表加载完成：自动生成需要避开它们已占用的前缀。
     await screen.findByText("公司-北美-线上");
     fireEvent.click(await screen.findByRole("button", { name: /Add credential/ }));
     const prefixInput = (await screen.findByPlaceholderText(
       /Leave blank for the default GITLAB/,
     )) as HTMLInputElement;
-    // 已有凭据占用了 GITLAB，默认建议自动避让为 GITLAB_2
-    expect(prefixInput.value).toBe("GITLAB_2");
+    expect(prefixInput.value).toBe("");
+    expect(screen.queryByRole("button", { name: /Auto-generate/ })).toBeNull();
 
     const nameInput = (await screen.findByPlaceholderText(/For example: Company/)) as HTMLInputElement;
     fireEvent.change(nameInput, { target: { value: "自建 sz 实例" } });
-    await waitFor(() => expect(prefixInput.value).toBe("GITLAB_SZ"));
-
-    // 手动改过之后不再被名称覆盖
-    fireEvent.change(prefixInput, { target: { value: "MY_OWN" } });
-    fireEvent.change(nameInput, { target: { value: "另一个 na 实例" } });
-    await waitFor(() => expect(prefixInput.value).toBe("MY_OWN"));
-
-    // 「自动生成」重新按名称/备注生成
-    fireEvent.click(screen.getByRole("button", { name: /Auto-generate/ }));
-    await waitFor(() => expect(prefixInput.value).toBe("GITLAB_NA"));
+    await waitFor(() => expect(nameInput.value).toBe("自建 sz 实例"));
+    expect(prefixInput.value).toBe("");
   });
-});
 
-describe("CredentialsPage AI env prefix", () => {
-  it("uses the model suggestion when clicked, and stays disabled until a name is filled", async () => {
-    commands.suggestEnvPrefixSegment.mockResolvedValue({
-      segment: "NA_PROD",
-      model: "deepseek-v4.1-flash",
-    });
+  it("streams tokens/tok-per-sec progress and fills the prefix on done", async () => {
+    streamEnvPrefix.mockImplementation(
+      async (_input: unknown, onEvent: (event: Record<string, unknown>) => void) => {
+        onEvent({ type: "start", model: "deepseek-v4.1-flash" });
+        onEvent({ type: "progress", tokens: 5, elapsedMs: 400 });
+        onEvent({ type: "progress", tokens: 12, elapsedMs: 900 });
+        onEvent({
+          type: "done",
+          segment: "NA_PROD",
+          model: "deepseek-v4.1-flash",
+          completionTokens: 24,
+          elapsedMs: 1200,
+          tokPerSec: 20,
+        });
+      },
+    );
     renderPage();
     await screen.findByText("公司-北美-线上");
     fireEvent.click(await screen.findByRole("button", { name: /Add credential/ }));
-
-    const aiButton = screen.getByRole("button", { name: /AI generate/ });
-    expect(aiButton).toBeDisabled();
-
     const nameInput = (await screen.findByPlaceholderText(/For example: Company/)) as HTMLInputElement;
     fireEvent.change(nameInput, { target: { value: "公司北美 Dockhand 正式" } });
-    await waitFor(() => expect(aiButton).not.toBeDisabled());
+    fireEvent.click(await screen.findByRole("button", { name: /AI generate/ }));
 
-    fireEvent.click(aiButton);
-    await waitFor(() => expect(commands.suggestEnvPrefixSegment).toHaveBeenCalledTimes(1));
+    // 进度区先出现在生成过程中，最终落成完成态
+    const progress = await screen.findByRole("status");
+    await waitFor(() => expect(progress.textContent).toContain("AI generation finished"));
+    expect(progress.textContent).toContain("24 tokens");
+    expect(progress.textContent).toContain("20 tok/s");
+
     const prefixInput = (await screen.findByPlaceholderText(
       /Leave blank for the default GITLAB/,
     )) as HTMLInputElement;
     await waitFor(() => expect(prefixInput.value).toBe("GITLAB_NA_PROD"));
-    // 请求里带上名称、备注与已占用的前缀，且不泄露 token
-    const payload = commands.suggestEnvPrefixSegment.mock.calls[0]![0] as Record<string, unknown>;
+    const payload = streamEnvPrefix.mock.calls[0]![0] as Record<string, unknown>;
     expect(payload.name).toBe("公司北美 Dockhand 正式");
     expect(payload.providerDefault).toBe("GITLAB");
-    expect(Array.isArray(payload.used)).toBe(true);
     expect(JSON.stringify(payload)).not.toMatch(/token/i);
   });
 
-  it("falls back to the rule-based suggestion when AI generation fails", async () => {
-    commands.suggestEnvPrefixSegment.mockRejectedValue(new Error("没有可用的开放模型"));
+  it("keeps the prefix empty and reports the model error when streaming fails", async () => {
+    streamEnvPrefix.mockImplementation(
+      async (_input: unknown, onEvent: (event: Record<string, unknown>) => void) => {
+        onEvent({ type: "start", model: "deepseek-v4.1-flash" });
+        onEvent({ type: "error", message: "没有可用的开放模型" });
+      },
+    );
     renderPage();
     await screen.findByText("公司-北美-线上");
     fireEvent.click(await screen.findByRole("button", { name: /Add credential/ }));
     const nameInput = (await screen.findByPlaceholderText(/For example: Company/)) as HTMLInputElement;
     fireEvent.change(nameInput, { target: { value: "campus sz box" } });
     fireEvent.click(await screen.findByRole("button", { name: /AI generate/ }));
-    await waitFor(() => expect(commands.suggestEnvPrefixSegment).toHaveBeenCalled());
+    await waitFor(() => expect(streamEnvPrefix).toHaveBeenCalled());
     const prefixInput = (await screen.findByPlaceholderText(
       /Leave blank for the default GITLAB/,
     )) as HTMLInputElement;
-    await waitFor(() => expect(prefixInput.value).toBe("GITLAB_CAMPUS_SZ_BOX"));
+    expect(prefixInput.value).toBe("");
   });
 });
 
@@ -478,10 +512,10 @@ describe("CredentialsPage beszel provider", () => {
     const baseUrl = screen.getByPlaceholderText("http://beszel.example.com:8090") as HTMLInputElement;
     const saveButton = screen.getByRole("button", { name: /Save and verify/ });
 
-    // 新建 beszel：邮箱 + 密码都是必填，自动前缀避让已有 BESZEL。
+    // 新建 beszel：邮箱 + 密码都是必填；前缀不再自动填充，留空预览按 provider 默认。
     expect(saveButton).toBeDisabled();
     expect(
-      screen.getByText(/BESZEL_2_URL \/ BESZEL_2_EMAIL \/ BESZEL_2_PASSWORD/),
+      screen.getByText(/BESZEL_URL \/ BESZEL_EMAIL \/ BESZEL_PASSWORD/),
     ).toBeInTheDocument();
 
     fireEvent.change(screen.getByPlaceholderText(/For example: Company Beszel/), {
@@ -523,5 +557,82 @@ describe("CredentialsPage beszel provider", () => {
     await waitFor(() => expect(commands.save).toHaveBeenCalled());
     const payload = commands.save.mock.calls[0]![0] as { username?: string };
     expect(payload.username).toBeUndefined();
+  });
+});
+
+describe("CredentialsPage registry provider", () => {
+  const sheet = () => document.querySelector(".semi-sidesheet") as HTMLElement;
+
+  it("shows the REGISTRY prefix and the docker login user in the table", async () => {
+    renderPage();
+    expect(await screen.findByText("REGISTRY_*")).toBeInTheDocument();
+    expect(screen.getByText("OCI 镜像仓库")).toBeInTheDocument();
+    // 镜像仓库的用户名（含 robot account 形态）与 Jenkins / Beszel 一样展示在地址下方。
+    expect(screen.getByText("@robot$project+pull")).toBeInTheDocument();
+  });
+
+  it("offers OCI 镜像仓库 in the provider dropdown and previews HOST / USER / TOKEN", async () => {
+    // 排除已占用的 REGISTRY 前缀，验证新建时的默认前缀就是 REGISTRY。
+    commands.list.mockResolvedValue(credentials.filter((credential) => credential.provider !== "registry"));
+    renderPage();
+    await screen.findByText("公司-北美-线上");
+    fireEvent.click(await screen.findByRole("button", { name: /Add credential/ }));
+    fireEvent.click(within(sheet()).getByText("GitLab"));
+    fireEvent.click(await screen.findByRole("option", { name: /OCI 镜像仓库/ }));
+    await waitFor(() => expect(within(sheet()).getAllByText("OCI 镜像仓库").length).toBeGreaterThan(0));
+
+    // 用户名输入框由 usernameLabel 驱动：registry 显示「用户名」并提示 robot account 形态。
+    const username = (await screen.findByPlaceholderText("e.g. robot$project+name")) as HTMLInputElement;
+    expect(username.value).toBe("");
+    expect(screen.getByText("Username")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Paste the password or token/)).toBeInTheDocument();
+
+    // 前缀不再自动填充（留空由 Host 用默认前缀）；地址槽位是 _HOST 而不是 _URL。
+    const prefixInput = (await screen.findByPlaceholderText(
+      /Leave blank for the default REGISTRY/,
+    )) as HTMLInputElement;
+    expect(prefixInput.value).toBe("");
+    expect(
+      screen.getByText(/REGISTRY_HOST \/ REGISTRY_USER \/ REGISTRY_TOKEN/),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText((content) => content.includes("/v2/")).length).toBeGreaterThan(0);
+  });
+
+  it("submits the username together with the registry credential", async () => {
+    commands.list.mockResolvedValue(credentials.filter((credential) => credential.provider !== "registry"));
+    commands.save.mockResolvedValue({ ...credentials[4] });
+    renderPage();
+    await screen.findByText("公司-北美-线上");
+    fireEvent.click(await screen.findByRole("button", { name: /Add credential/ }));
+    fireEvent.click(within(sheet()).getByText("GitLab"));
+    fireEvent.click(await screen.findByRole("option", { name: /OCI 镜像仓库/ }));
+    await waitFor(() => expect(within(sheet()).getAllByText("OCI 镜像仓库").length).toBeGreaterThan(0));
+
+    fireEvent.change(screen.getByPlaceholderText(/For example: Company OCI/), {
+      target: { value: "公司镜像仓库" },
+    });
+    fireEvent.change(screen.getByPlaceholderText(/hub\.example\.com/), {
+      target: { value: "https://hub.example.com" },
+    });
+    fireEvent.change(await screen.findByPlaceholderText("e.g. robot$project+name"), {
+      target: { value: "robot$project+pull" },
+    });
+    fireEvent.change(screen.getByPlaceholderText(/Paste the password or token/), {
+      target: { value: "registry-password" },
+    });
+
+    const saveButton = screen.getByRole("button", { name: /Save and verify/ });
+    await waitFor(() => expect(saveButton).not.toBeDisabled());
+    fireEvent.click(saveButton);
+
+    await waitFor(() =>
+      expect(commands.save).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: "registry",
+          username: "robot$project+pull",
+          token: "registry-password",
+        }),
+      ),
+    );
   });
 });

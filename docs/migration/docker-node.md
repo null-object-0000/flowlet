@@ -332,3 +332,20 @@ node scripts/e2e-node-host.mjs            # 端到端冒烟（含 mock 上游流
 | 镜像/部署 | `flowlet:node-20261110-aistream`（首版）→ `flowlet:node-20261110-aistream2`（含健壮性修复，226s，`sha256:e7486782…`）；15:28:35 蓝绿切换，回滚点 `flowlet:node-20261110-qwenmerge` |
 | 生产验证 | healthy；`/api/auth/config` 仍 oidc + `token_login=false`；未鉴权 `POST /api/ai/env-prefix` 401；UI bundle 含「AI 生成」「已生成 {tokens} tokens」「tok/s」；服务端含 `streamEnvPrefixSegment` 与推理兜底；自重启起请求无错误 |
 | 单测 | 服务端 `env-prefix-ai.test.ts` 6 条（SSE 事件序列与 token 统计、上游错误、无模型、缺名称、未鉴权/CLI token 拒绝、请求形状含 `stream`/`include_usage`）；前端凭据页 23 条（AI 流式进度/失败不改值、无自动生成、reveal、CLI 授权、providers） |
+
+## Responses 回放兼容（input.status 归一）发布记录（2026-11-10 18:03）
+
+| 项 | 值 |
+| --- | --- |
+| 问题 | 上游返回的 Responses item 可能带 `"status": null`（或空串/未知取值），客户端（DSH/pi-ai）把它原样回放进下一轮 `input` 后，严格校验的上游返回 400 `The parameter `input.status` specified in the request are not valid: unknown status: .`；坏 item 一旦进入历史，该会话后续每轮都被拒、重试无效（DSH 会话 `session-a07de002` turn 32/33、`session-20362b3a` turn 12 均命中） |
+| 改动 | Rust Host `proxy_http::normalize_responses_input_items` + Node Host `proxy::normalizeResponsesInputItems`：仅 Responses 协议，把 `input[*].status` 非法值归一为 `"completed"`、清掉 `encrypted_content: null`；合法 status、字符串 `input`、非 Responses 协议、无修改请求字节级透传；item 顺序/id/type/内容不变。调用点分别在候选循环前 / attempt 循环前各一次 |
+| 定位依据 | 用 pi-ai 同一转换器从会话重建 turn 32 step 22 的请求体（1718 items / 2.5 MB，69 个 `status: null`）直连 Flowlet 可稳定复现 400；只把 `status` 改 `completed` 或删键即 200；二分确认任一坏 item 均可触发 |
+| 镜像 | `flowlet:node-20261110-inputstatus2`（`sha256:2a0ec2a736e1`，265 MB），以当时运行镜像 `flowlet:node-20261110-multiorigin` 为基础 overlay 2 个源码文件（`proxy/http.ts`、`proxy/forward.ts`），不需要 npm/Rust 构建 |
+| 部署 | 18:03:07 起蓝绿切换：新容器先过 `/health` 与 `/v1/models`，旧容器优雅退出（563ms），使用端最长不可用 3.05s，切换总耗时 3.3s；egress 未重建 |
+| compose 备份 | `.agents/skills/flowlet-docker-deploy/.work/compose.before-20261110-180307.yaml` |
+| 回滚 | `flowlet_deploy.py deploy --tag flowlet:node-20261110-multiorigin` |
+| 生产验证 | 容器 `flowlet:node-20261110-inputstatus2` healthy；`/health` 200；`/api/auth/config` 仍 oidc；`/v1/models` 200；流式回归 3/3 读到 `[DONE]`；**重构的真实失败请求体（69 个 `status: null`）→ 200**（部署前稳定 400），干净 Responses 请求 200 |
+| 单测 | Rust `cargo test --lib core::proxy::` 184 passed（含新增 `normalize_responses_input_items_*` 2 条）；Node `node --test packages/flowlet-core/src/proxy/__tests__/proxy.test.ts` 36 passed（含新增 2 条）；`tsc -p packages/flowlet-core/tsconfig.json` 通过 |
+| 契约文档 | `AGENTS.md` §5、`docs/deepseek-harness-integration.md`、`docs/migration/proxy-core.md`（§3.11 / §4.1 第 11 行 / 附录 A）、`CHANGELOG.md` Unreleased 已同步；代码提交 `1fe1976` |
+| 并发说明 | 部署前 17:56–17:58 并行会话刚发布 `flowlet:node-20261110-multiorigin`，本镜像基于它构建、未回退其改动。若并行会话之后用早于本镜像的候选镜像再发布，会覆盖本兼容层；代码已在 git（`1fe1976`），按本记录 `build --paths proxy/http.ts,proxy/forward.ts` 即可重建 |
+| 遗留 | canary 容器仍为 `flowlet:node-20261110-multiorigin`，下次 canary 升级会自动跟进 |

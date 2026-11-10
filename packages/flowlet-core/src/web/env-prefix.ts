@@ -15,7 +15,9 @@ import type { WebContext } from "./context.ts";
 const SEGMENT_PATTERN = /^[A-Z0-9_]{1,20}$/;
 const MAX_INPUT_CHARS = 200;
 const MODEL_TIMEOUT_MS = 20_000;
-const MAX_TOKENS = 32;
+// 推理模型（deepseek-v4.x 等）会先输出 reasoning_content：预算太小会被截断成空 content，
+// 因此这里给足 512 token（输出本身很短，成本可忽略）。
+const MAX_TOKENS = 512;
 
 /** 优先用轻量模型做这种短任务；找不到时退回第一个已开放模型。 */
 const PREFERRED_MODEL = /flash|air|lightning|luna|terra|mini|small|haiku/i;
@@ -208,7 +210,9 @@ export async function suggestEnvPrefixSegment(
     throw new CommandError(
       502,
       "command_failed",
-      "模型没有给出可用的英文片段，已回退规则建议",
+      content.trim() === ""
+        ? "模型没有返回文本（可能被截断），已回退规则建议"
+        : "模型没有给出可用的英文片段，已回退规则建议",
     );
   }
   return { segment, model };

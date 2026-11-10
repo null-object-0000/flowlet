@@ -42,6 +42,7 @@ export function estimateCostAt(
   inputUncachedTokens: number | null,
   inputCacheWriteTokens: number | null,
   outputTokens: number | null,
+  atMs: number = Date.now(),
 ): CostBreakdown | null {
   if (!channelId || !upstreamModel) return null;
   const canonicalModel = canonicalModelKey(upstreamModel);
@@ -60,7 +61,7 @@ export function estimateCostAt(
     }
   }
   if (!price) return null;
-  const resolved = resolvePricesAt(price, inputTokens, Date.now());
+  const resolved = resolvePricesAt(price, inputTokens, atMs);
   if (!resolved) return null;
   const [uncachedPrice, cachedPrice, cacheWritePrice, outputPrice] = resolved;
   const cacheWrite = Math.max(0, inputCacheWriteTokens ?? 0);

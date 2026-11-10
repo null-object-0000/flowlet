@@ -84,6 +84,13 @@ import {
   type ModelPrice,
 } from "./usage.ts";
 import {
+  repairCapturedUsage,
+  repairUnknownUsage,
+  repairUsageCosts,
+} from "./repair.ts";
+import { repairAgentSessions, type AgentSessionRepairResult } from "./repair-sessions.ts";
+import type { UaClientRule } from "../proxy/identity.ts";
+import {
   deviceDailyUsage,
   deviceHourlyUsage,
   knownDevices,
@@ -511,6 +518,32 @@ export class SqliteStorage {
 
   usageTodaySummary(): JsonRow {
     return usageTodaySummary(this.#db);
+  }
+
+  // ─── 数据完整性检查（Rust repair_* commands） --------------------------------
+
+  /** Rust `repair_agent_sessions`：按已存 Header 与最新 UA 规则修复会话/客户端归属。 */
+  repairAgentSessions(timeRange: string, uaRules: UaClientRule[]): AgentSessionRepairResult {
+    return repairAgentSessions(this.#db, timeRange, uaRules);
+  }
+
+  /**
+   * Rust `repair_captured_usage` 的 Node 等价实现：从响应捕获帧重解析 usage 并回填。
+   * Node Host 没有 Agent 原生 transcript 适配器，因此不含 `repair_usage_from_native_sessions`
+   * 回退；只含 message_start 前缀的截断捕获会留给 unknown 占位行。
+   */
+  repairCapturedUsage(timeRange: string): number {
+    return repairCapturedUsage(this.#db, this.#prices, this.#captureStore, timeRange);
+  }
+
+  /** Rust `analyze_unknown_usage`：为仍无 usage 的请求建立 unknown 占位行。 */
+  repairUnknownUsage(timeRange: string): number {
+    return repairUnknownUsage(this.#db, timeRange);
+  }
+
+  /** Rust `recalculate_usage_costs`：按当前价格表重算 estimated_* 五列。 */
+  repairUsageCosts(timeRange: string): number {
+    return repairUsageCosts(this.#db, this.#prices, timeRange);
   }
 
   /** `get_upstream_proxy_config` / `set_upstream_proxy_config` 使用的 app_meta 键。 */

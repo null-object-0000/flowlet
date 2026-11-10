@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+### 新增
+
+- Web Host / Docker 管理台新增「设置 → 数据维护 → 数据完整性检查」四阶段修复：
+  `repair_agent_sessions`（按已存 Header 与最新 UA 规则修复会话/客户端归属）、
+  `repair_captured_usage`（从响应捕获帧重解析历史 usage 并按原始请求时间回填）、
+  `repair_unknown_usage`（为仍无法解析的请求生成 unknown 占位行，排除 count_tokens 与
+  Files API）、`repair_usage_costs`（按原始请求时间的分时价格重算费用五列）。
+  Node Host 只移植了捕获体回填路径，不含桌面端的 Agent 原生 transcript 回退
+  （`repair_usage_from_native_sessions`）：仅剩 `message_start` 前缀的截断捕获会保留为
+  unknown 占位，等待人工审计。
+
 ### 修复
 
 - 修复流式响应带 `content-encoding: gzip / deflate / br / zstd` 时用量丢失：代理此前把压缩

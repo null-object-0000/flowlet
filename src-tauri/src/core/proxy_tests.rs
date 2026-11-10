@@ -677,6 +677,75 @@ fn ensure_anthropic_thinking_passback_skips_inapplicable_requests() {
 }
 
 #[test]
+fn normalize_responses_input_items_fixes_invalid_status() {
+    let body = br#"{
+        "model": "deepseek-v4.1-flash",
+        "input": [
+            {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "hi"}]},
+            {"type": "reasoning", "id": "msg_6679bf3e", "summary": [], "status": null,
+             "encrypted_content": null,
+             "content": [{"type": "reasoning_text", "text": "thought"}]},
+            {"type": "message", "role": "assistant", "status": "completed",
+             "content": [{"type": "output_text", "text": "hello", "annotations": []}]},
+            {"type": "reasoning", "id": "rs_ok", "summary": [], "status": "completed"},
+            {"type": "function_call", "call_id": "c1", "name": "bash", "arguments": "{}", "status": ""},
+            {"type": "function_call", "call_id": "c2", "name": "bash", "arguments": "{}", "status": "bogus"},
+            {"type": "reasoning", "id": "rs_missing", "summary": []}
+        ]
+    }"#;
+    let rewritten = normalize_responses_input_items(body, &ProtocolType::Responses);
+    let value: serde_json::Value = serde_json::from_slice(&rewritten).unwrap();
+    let items = value["input"].as_array().unwrap();
+
+    // null → completed，并清掉 encrypted_content: null
+    assert_eq!(items[1]["status"], "completed");
+    assert!(items[1].get("encrypted_content").is_none());
+    // 合法 status 原样保留
+    assert_eq!(items[2]["status"], "completed");
+    assert_eq!(items[3]["status"], "completed");
+    // 空串 / 未知取值同样归一
+    assert_eq!(items[4]["status"], "completed");
+    assert_eq!(items[5]["status"], "completed");
+    // 未声明 status 的 item 不补字段（交给上游按缺省处理）
+    assert!(items[6].get("status").is_none());
+    // 不动其他字段与顺序
+    assert_eq!(value["model"], "deepseek-v4.1-flash");
+    assert_eq!(items[0]["type"], "message");
+    assert_eq!(items[1]["content"][0]["text"], "thought");
+}
+
+#[test]
+fn normalize_responses_input_items_passes_through_when_nothing_to_fix() {
+    let clean = br#"{"model":"m","input":[{"type":"message","role":"user","content":[{"type":"input_text","text":"hi"}]},{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"ok","annotations":[]}]}]}"#;
+    // 已含合法 status 且无 encrypted_content: null：字节级透传
+    assert_eq!(
+        normalize_responses_input_items(clean, &ProtocolType::Responses),
+        clean.to_vec()
+    );
+    // 非 Responses 协议：即使存在非法 status 也原样透传
+    let dirty =
+        br#"{"model":"m","input":[{"type":"reasoning","id":"r","status":null,"summary":[]}]}"#;
+    for protocol in [ProtocolType::OpenAi, ProtocolType::Anthropic] {
+        assert_eq!(
+            normalize_responses_input_items(dirty, &protocol),
+            dirty.to_vec()
+        );
+    }
+    // input 为字符串 / 无 input / 非法 JSON：原样透传
+    let cases: &[&[u8]] = &[
+        br#"{"model":"m","input":"hello"}"#,
+        br#"{"model":"m"}"#,
+        b"not json",
+    ];
+    for case in cases {
+        assert_eq!(
+            normalize_responses_input_items(case, &ProtocolType::Responses),
+            *case
+        );
+    }
+}
+
+#[test]
 fn should_try_next_status_handles_deepseek_402() {
     assert!(should_try_next_status(
         reqwest::StatusCode::PAYMENT_REQUIRED,

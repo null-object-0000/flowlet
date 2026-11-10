@@ -66,7 +66,7 @@
 | 文件 | 行数 | 测试数 | 职责 | 对外接口（被谁调用） | 关键数据结构 |
 |---|---:|---:|---|---|---|
 | `core/proxy.rs` | 2,444 | （见下） | 代理生命周期（Controller/Runtime）、axum 路由与中间件、`forward_request` 主流程、attempt 循环、流式包装、日志上下文、usage 入口、`/health`、Files API 转发 | `lib.rs` / `commands/proxy.rs` / `core/services.rs` / `bin/headless.rs` / `core/web` | `ProxySharedConfig`、`ProxyAppState`、`ProxyStatus`、`ProxyError`、`ProxyForwardError`、`RouteLogContext`、`UsageCapture`、`StreamDone`、`TimedStreamState` |
-| `core/proxy_http.rs` | 1,482 | 14 | CORS、入口路径识别、`/models` 与 `/v1/models/{id}` 响应构造、URL 拼接、请求头改写/剥离、客户端识别、`log_capture` 解析、模型名提取/改写、`reasoning_content` 回填、header 序列化/脱敏、body 截断/解压 | `proxy.rs`（主要）、`lib.rs`（`extract_log_capture`） | `FilesApiOp`、`ModelEntry`、`CandidateDetail`、`ModelsCnMatch` |
+| `core/proxy_http.rs` | 1,482 | 14 | CORS、入口路径识别、`/models` 与 `/v1/models/{id}` 响应构造、URL 拼接、请求头改写/剥离、客户端识别、`log_capture` 解析、模型名提取/改写、`reasoning_content` 回填、Responses `input[*].status` 归一、header 序列化/脱敏、body 截断/解压 | `proxy.rs`（主要）、`lib.rs`（`extract_log_capture`） | `FilesApiOp`、`ModelEntry`、`CandidateDetail`、`ModelsCnMatch` |
 | `core/proxy_routing.rs` | 390 | 0（被 `proxy_tests` 覆盖） | 候选匹配、排序、分组轮询、高级规则、Files 绑定账号、降级判定（状态码/body 文本）、网络错误分类 | `proxy.rs` | `CandidateSelection`、`RouteCandidate` 排序键 |
 | `core/proxy_anthropic_compat.rs` | 288 | 6 | Anthropic SSE `content_block_start` 缺失字段修复（thinking/tool_use），按行跨 chunk 状态机 | `proxy.rs::build_response` | `ContentBlockStartCompat` |
 | `core/proxy_tests.rs` | 5,759 | 138 | 端到端回归资产（起真实 `axum` mock 上游 + 直接调 `forward_request`；断言客户端响应、上游收到的请求、日志/用量落库、降级链） | `proxy.rs` 的 `#[path] mod proxy_tests` | `SpyUpstream`、`build_test_state`、`test_account`、`test_route` |
@@ -215,6 +215,14 @@
 
 ### 3.11 单次 attempt 的上游请求构造（`proxy.rs:1142-1236`）
 
+候选循环前先做一次与候选无关的归一：`normalize_responses_input_items(body, protocol)`
+（`proxy_http.rs`）：仅 `protocol==Responses` 时，把 `input[*].status` 的非法值
+（`null` / 空串 / 未知取值）改写为 `"completed"`，并删除 `encrypted_content: null`；
+合法 status、`input` 为字符串、其它协议与无需修改的请求字节级透传，无修改不重序列化。
+这是 Responses 回放兼容（客户端原样回放上游 item，各家 `status` 口径不一致；候选池
+跨上游时 A 家 item 会被回放到 B 家），详见 `AGENTS.md` §5 与
+`docs/deepseek-harness-integration.md`。
+
 对每个候选：
 
 1. `effective_model = candidate.upstream_model`；`rewrite_model(body, effective_model, protocol)`（`proxy_http.rs:1374-1427`）：先尝试**文本替换**两种 `"model":"x"`/`"model": "x"` 写法（保留原始字节），失败再整体重序列化（serde 默认 BTreeMap → key 字典序）。
@@ -338,6 +346,7 @@
 | 8 | 入站模型名按 `model-catalog.json` 归一后才匹配路由；未登记原名透传；日志 `public_model` 保留原值 | `model_catalog.rs:160-165`（`routing_model_id`）；`proxy.rs:883-888` | **必须保持** |
 | 9 | `/models` 只暴露规范 ID、按协议过滤、空列表合法 | `proxy_http.rs:437-524` | **必须保持** |
 | 10 | `virtual_model_id` 对外名、`upstream_model` 仅转发前替换 | `proxy.rs:1150-1151`、`proxy_http.rs:1374-1427` | **必须保持** |
+| 11 | Responses 回放兼容：`input[*].status` 非法值（null/空串/未知）→ `completed`，清 `encrypted_content: null`；仅 Responses 协议、无修改字节级透传 | `proxy_http.rs`（`normalize_responses_input_items`）；调用点 `proxy.rs` 候选循环前 | **必须保持**（本清单新增项，任务书未含） |
 
 **完整性判定**：任务书给的清单（SSE 透传/64KiB、压缩捕获解压、Anthropic 补字段、DeepSeek 回填、Responses 无状态、Files 单账号、错误透传、降级 attempt、日志旁路、幂等 start/stop、无账号也监听）**覆盖了 §5 的主体**，但**遗漏了以下源码中真实存在的受控改写**（迁移时必须一并实现，否则行为不等价）：
 
@@ -761,7 +770,7 @@ Files API 作为 P2：若时间够，实现 upload/list/delete 的"绑定账号 
 
 ### 附录 A：必须移植的验收场景清单（按测试名归类）
 
-> 共 138 个 `proxy_tests.rs` 测试 + 41 个其它文件单测。优先级：**P0** = 一天 spike 必须（20 个）；**P1** = 核心移植必须；**P2** = 边界/渠道特有。
+> 共 140 个 `proxy_tests.rs` 测试 + 41 个其它文件单测。优先级：**P0** = 一天 spike 必须（20 个）；**P1** = 核心移植必须；**P2** = 边界/渠道特有。
 > 断言要点从测试体与源码行为提炼；具体字段以原测试为准。
 
 #### A.1 协议探测 / URL / 模型改写 / 客户端与会话识别（P1，46 项；含 1 个 `proxy_http` 单测交叉）
@@ -778,6 +787,7 @@ Files API 作为 P2：若时间够，实现 upload/list/delete 的"绑定账号 
 | `rewrite_model_maps_openai_public_name` / `_maps_anthropic_public_name` / `_replaces_public_model_name` | model 字段改写（文本替换优先） |
 | `extract_model_strips_long_context_suffix` | `[1m]`/`[1M]` 剥离 |
 | `ensure_reasoning_content_passback_injects_empty_for_deepseek_reasoning` / `_skips_non_deepseek_and_other_protocols` | DeepSeek 回填门控与"已有值不改" |
+| `normalize_responses_input_items_fixes_invalid_status` / `_passes_through_when_nothing_to_fix` | Responses 回放兼容：null/空串/未知 status → `completed`、清 `encrypted_content: null`；非 Responses/字符串 input/无修改时字节级透传 |
 | `identify_client_by_ua_substring` / `identifies_codex_desktop_and_cli_by_ua` / `ua_no_match_returns_none` / `ua_skip_disabled_and_empty_pattern` | UA 规则 |
 | `agent_marker_header_identifies_pi_and_beats_ua_rules` / `_unknown_value_uses_value_as_name` / `_falls_back_to_ua_when_absent` | `x-flowlet-client` 优先级 |
 | `identifies_client_from_bearer_token` / `_from_x_api_key` / `rejects_unknown_token` | Host 鉴权 token 精确匹配 |

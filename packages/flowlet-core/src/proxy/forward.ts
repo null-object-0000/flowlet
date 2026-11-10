@@ -29,6 +29,7 @@ import {
   isResponsesPath,
   isStreamingResponse,
   modelDetailRequestId,
+  normalizeResponsesInputItems,
   requestReferencesFilesApi,
   rewriteModel,
   type HeaderMapLike,
@@ -939,6 +940,11 @@ async function runAttempts(params: AttemptParams): Promise<void> {
   let fallbackCount = skippedTotal;
   let lastError: ForwardError | null = null;
 
+  // Responses 回放兼容：客户端会把上游返回的 reasoning/message item 原样塞回 `input`，
+  // 其中 status 可能是 null/空串/未知取值，严格校验的上游直接 400；归一与候选无关，
+  // 循环前做一次，其余协议与无需修改的请求字节级透传。
+  const normalizedBodyBytes = normalizeResponsesInputItems(bodyBytes, protocol);
+
   for (let index = 0; index < candidates.length; index += 1) {
     const candidate = candidates[index];
     const account = accounts.find((item) => item.id === candidate.account_id);
@@ -946,7 +952,7 @@ async function runAttempts(params: AttemptParams): Promise<void> {
     if (!account || !channel) continue;
 
     const effectiveModel = candidate.upstream_model;
-    let routedBody = rewriteModel(bodyBytes, effectiveModel, protocol);
+    let routedBody = rewriteModel(normalizedBodyBytes, effectiveModel, protocol);
     routedBody = ensureReasoningContentPassback(
       routedBody,
       effectiveModel,

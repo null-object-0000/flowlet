@@ -172,7 +172,7 @@ use proxy_http::{
     ensure_anthropic_thinking_passback, ensure_config_file, ensure_reasoning_content_passback,
     extract_model, files_api_request, identify_client, identify_client_agent,
     is_model_list_request, is_streaming_response, load_ua_rules, model_detail_request_id,
-    rewrite_model, sanitize_headers,
+    normalize_responses_input_items, rewrite_model, sanitize_headers,
 };
 // 仅测试（proxy_tests）需要直接调用 UA 子串匹配；非测试构建不应引入以免告警。
 #[cfg(test)]
@@ -1139,6 +1139,12 @@ async fn forward_request(
     let client_id_for_routing = client_id;
     let client_name_for_routing = client_name;
     let request_type_str = request_type.as_str().to_string();
+
+    // Responses 回放兼容：客户端会把上游返回的 reasoning/message item 原样塞回
+    // `input`，其中 `status` 可能是 null / 空串 / 未知取值，校验严格的上游直接 400
+    // （`The parameter `input.status` specified in the request are not valid`）。
+    // 归一与候选无关，放在候选循环前做一次；其余协议与无需修改的请求字节级透传。
+    let body_bytes = normalize_responses_input_items(&body_bytes, &detected_protocol);
 
     for (index, candidate) in candidates.iter().enumerate() {
         let account = accounts.iter().find(|a| a.id == candidate.account_id);

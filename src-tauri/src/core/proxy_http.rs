@@ -1743,6 +1743,68 @@ pub(super) fn ensure_anthropic_thinking_passback(
     serde_json::to_vec(&value).unwrap_or_else(|_| body.to_vec())
 }
 
+// ─── Responses 回放兼容：input[*].status 归一 ──────────────────────────────────
+
+/// 部分上游返回的 Responses item（`reasoning` / `message` 等）带 `"status": null`
+/// （或空串、未知取值），客户端会把这些 item 原样塞回下一轮 `input`；校验严格的
+/// 上游直接返回 400：`The parameter `input.status` specified in the request are not
+/// valid: unknown status: .`
+///
+/// 这是「客户端忠实回放、上游校验口径不一致」的兼容问题：Responses item 允许客户端
+/// 在下一轮原样回传，而各家实现的 `status` 取值并不统一（`null`、缺失、`completed`、
+/// `in_progress`、`incomplete`）。Flowlet 的候选池又可能横跨不同上游——A 家吐出的
+/// item 会被回放到 B 家——因此必须在网关归一，而不是指望每个上游放宽校验或每个
+/// 客户端自己洗数据。
+///
+/// 规则：只修 `input[*].status` 的非法值（→ `"completed"`），并清掉
+/// `encrypted_content: null`；合法 status、`input` 为字符串、非 Responses 协议一律
+/// 原样透传。仅在确有修改时重序列化：这是「不随意改写请求结构」的受控例外——只补/
+/// 改编 item 的 `status` 与空 `encrypted_content`，不动 item 顺序、id、type 与内容。
+/// 修改该行为须同步 `AGENTS.md` 与 `docs/deepseek-harness-integration.md`。
+pub(super) fn normalize_responses_input_items(body: &[u8], protocol: &ProtocolType) -> Vec<u8> {
+    if *protocol != ProtocolType::Responses {
+        return body.to_vec();
+    }
+    let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return body.to_vec();
+    };
+    let Some(items) = value.get_mut("input").and_then(|v| v.as_array_mut()) else {
+        return body.to_vec();
+    };
+
+    const VALID_STATUSES: [&str; 3] = ["in_progress", "completed", "incomplete"];
+    let mut changed = false;
+    for item in items.iter_mut() {
+        let Some(item) = item.as_object_mut() else {
+            continue;
+        };
+        let valid_status = match item.get("status") {
+            // 未声明 status：交给上游按缺省处理，不主动补字段。
+            None => true,
+            Some(serde_json::Value::String(status)) => VALID_STATUSES.contains(&status.as_str()),
+            Some(_) => false,
+        };
+        if !valid_status {
+            item.insert(
+                "status".to_string(),
+                serde_json::Value::String("completed".to_string()),
+            );
+            changed = true;
+        }
+        if item
+            .get("encrypted_content")
+            .is_some_and(serde_json::Value::is_null)
+        {
+            item.remove("encrypted_content");
+            changed = true;
+        }
+    }
+    if !changed {
+        return body.to_vec();
+    }
+    serde_json::to_vec(&value).unwrap_or_else(|_| body.to_vec())
+}
+
 /// 判定上游模型是否为 DeepSeek 推理（thinking）模型。
 ///
 /// 以 model-catalog.json 的规范模型 ID 为准；上游变体（如 `deepseek-v4-flash-0731`、

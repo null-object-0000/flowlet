@@ -4,6 +4,25 @@
 
 ## [Unreleased]
 
+### 新增
+
+- **桌面端 Electron + Node/TS 重构（第一阶段）**：桌面端不再依赖 Rust/Tauri 承载业务逻辑，
+  改为 Electron 宿主（`packages/flowlet-desktop/`）+ 复用 `packages/flowlet-core` 的 Node
+  命令面与代理核心，渲染层直接加载现有 React 界面（`vite build --mode desktop` → `dist-desktop`），
+  命令通道走本机 `POST /api/commands/{command}`（随机管理 token 经 preload 注入，不落盘）；
+  Tauri/Rust 版本保留为回滚路径，Android 工程未改动。
+- 桌面命令层（`packages/flowlet-core/src/desktop/`）：在 Web Host 66 条命令之上补齐桌面独有
+  命令——Agent 接入 17 条（环境探测/全局配置 inspect→apply→restore/Codex/Antigravity/托管运行时）、
+  设置与维护 22 条 + 账号工作区 5 条、观测与会话 19 条（原生会话目录合并、DSH v0–v4 时间线、
+  后台任务、成本探测、目录预设同步）、跨设备同步 23 条（S3 SigV4 + LAN HMAC/ChaCha20 信封）；
+  覆盖度用 `node scripts/desktop-command-parity.mjs` 追踪（当前 144/154，剩余为控制台抓取批次）。
+- `packages/flowlet-desktop`：单实例、无边框窗口壳（CSS app-region 拖动 + IPC 伪缩放）、托盘
+  （关闭隐藏、仅托盘退出停代理）、窗口记忆、开机自启、`safeStorage` 凭据存储并兼容迁移 Rust
+  keyring 旧条目、`platform/keyring/agentRuntime/scrape/power` host channel、
+  electron-builder 打包（AppImage/deb/nsis/zip/dmg），以及 `desktop:dev/build/dist/smoke` 脚本。
+- 前端新增 `desktop` 运行模式（`src/platform/desktop/**`）：命令改走本机 HTTP、窗口能力经 preload
+  桥接、`isWebHost`/移动端/demo 语义不变。
+
 ### 变更
 
 - **Rust 服务端遗留物移出默认构建**：生产 Web Host 已由 Node Host 承载，因此 Rust `core::web`
@@ -57,6 +76,15 @@
 
 ### 修复
 
+- 修复 Responses 客户端回放历史 item 时被上游 400：部分上游返回的 `reasoning` / `message`
+  item 带 `"status": null`（或空串、未知取值），客户端（DSH/pi-ai 等）会把它们原样塞回
+  下一轮 `input`，校验严格的上游返回 `The parameter `input.status` specified in the request
+  are not valid: unknown status: .`；坏 item 一旦进入历史，该会话后续每一轮都会被拒、
+  重试无效（2026-11-10 DSH 会话 `session-a07de002` turn 32/33 即此形态）。Rust
+  （`proxy_http::normalize_responses_input_items`）与 Node Host
+  （`proxy::normalizeResponsesInputItems`）都在转发前把 `input[*].status` 的非法值归一为
+  `"completed"`、清掉 `encrypted_content: null`；合法 status、`input` 为字符串、非
+  Responses 协议、无需修改的请求保持字节级透传，item 的顺序 / id / type / 内容不变。
 - 修复流式响应带 `content-encoding: gzip / deflate / br / zstd` 时用量丢失：代理此前把压缩
   字节直接交给 TTFT 探针与 usage 累加器，解析不到 `usage` 事件，导致请求日志 Token / 费用
   显示 `—`、用量统计不计入（DeepSeek 官方 Anthropic 端点对 SSE 返回 gzip 时必现，历史日志中

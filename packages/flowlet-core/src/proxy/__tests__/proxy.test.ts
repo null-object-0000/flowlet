@@ -1393,6 +1393,96 @@ test("Responses 协议：非 POST 返回 405 responses_unsupported_method", asyn
   );
   assert.equal(upstream.requests.length, 0);
 });
+
+test("Responses 回放兼容：非法 input[*].status 在转发前归一", async () => {
+  const upstream = await startMockUpstream((_req, res) => jsonResponse(res, 200, { ok: true }));
+  const proxy = await startProxy({
+    upstreamPort: upstream.port,
+    routes: [routeRow({ client_protocol: "responses" })],
+  });
+  cleanups.push(async () => {
+    await proxy.controller.stop();
+    await upstream.close();
+  });
+
+  const body = JSON.stringify({
+    model: "deepseek-v4-pro",
+    input: [
+      { type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] },
+      // 上游曾返回的坏 item 形态：status: null + encrypted_content: null
+      {
+        type: "reasoning",
+        id: "msg_6679bf3e",
+        summary: [],
+        status: null,
+        encrypted_content: null,
+        content: [{ type: "reasoning_text", text: "thought" }],
+      },
+      {
+        type: "message",
+        role: "assistant",
+        status: "completed",
+        content: [{ type: "output_text", text: "hello", annotations: [] }],
+      },
+      { type: "function_call", call_id: "c1", name: "bash", arguments: "{}", status: "" },
+    ],
+  });
+  const response = await request(proxy.port, {
+    method: "POST",
+    path: "/v1/responses",
+    headers: { "content-type": "application/json" },
+    body,
+  });
+  assert.equal(response.status, 200);
+  assert.equal(upstream.requests.length, 1);
+
+  const forwarded = JSON.parse(upstream.requests[0].body.toString("utf8")) as JsonRow;
+  const items = forwarded.input as JsonRow[];
+  // null → completed，并清掉 encrypted_content: null
+  assert.equal(items[1].status, "completed");
+  assert.equal(Object.prototype.hasOwnProperty.call(items[1], "encrypted_content"), false);
+  // 合法 status 不动
+  assert.equal(items[2].status, "completed");
+  // 空串同样归一
+  assert.equal(items[3].status, "completed");
+  // item 顺序、id 与内容不动
+  assert.equal(items[1].id, "msg_6679bf3e");
+  assert.equal((items[1].content as JsonRow[])[0].text, "thought");
+});
+
+test("Responses 回放兼容：无需归一或非 Responses 协议时请求体逐字节不变", async () => {
+  const upstream = await startMockUpstream((_req, res) => jsonResponse(res, 200, { ok: true }));
+  const proxy = await startProxy({
+    upstreamPort: upstream.port,
+    routes: [routeRow({ client_protocol: "responses" })],
+  });
+  cleanups.push(async () => {
+    await proxy.controller.stop();
+    await upstream.close();
+  });
+
+  const clean = JSON.stringify({
+    model: "deepseek-v4-pro",
+    input: [
+      { type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] },
+      {
+        type: "message",
+        role: "assistant",
+        status: "completed",
+        content: [{ type: "output_text", text: "ok", annotations: [] }],
+      },
+    ],
+  });
+  const response = await request(proxy.port, {
+    method: "POST",
+    path: "/v1/responses",
+    headers: { "content-type": "application/json" },
+    body: clean,
+  });
+  assert.equal(response.status, 200);
+  assert.equal(upstream.requests[0].body.toString("utf8"), clean);
+});
+
 test("P1: Anthropic thinking 回填（当前用户轮补空块，已完成轮次不动）", async () => {
   const upstream = await startMockUpstream((_req, res) => jsonResponse(res, 200, { ok: true }));
   const proxy = await startProxy({

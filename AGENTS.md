@@ -72,6 +72,26 @@ Flowlet 不以通用企业级 LLM 网关为核心定位。
 
 Flowlet 采用前端优先的桌面应用架构。
 
+### 宿主形态（2026-11 起）
+
+桌面端正在从 Rust/Tauri 迁到 **Electron + Node/TS**，两条宿主共用同一份前端与命令契约：
+
+- **Electron 桌面宿主**（`packages/flowlet-desktop/`）：Electron main 在主进程内启动
+  `packages/flowlet-core` 的 `startHost()`（Node Host：SQLite/代理/本机 HTTP 命令 API/
+  静态 `dist-desktop`），窗口加载本机 HTTP 页面，命令经 `POST /api/commands/{command}`
+  （随机管理 token 由 preload 注入，不落盘）；平台能力（窗口/托盘/自启/凭据/抓取/电源/
+  托管运行时）由 main 实现为 `DesktopHostBridge`，命令层只通过
+  `ctx.desktop.host.invoke(channel, payload)` 调用，**禁止在命令层 import electron**；
+- **Tauri/Rust 宿主**（`src-tauri/`）：**回滚路径**，迁移完成前继续可用，不得删除；
+  Android 端仍在此路径，未迁移；
+- **Web/Docker Host**（`packages/flowlet-core`）：生产管理台，命令面 = Web 白名单 66 条；
+  桌面命令在 `packages/flowlet-core/src/desktop/` 注册，仅在 `ctx.desktop` 存在时生效，
+  Web Host 行为不变。
+
+桌面命令面覆盖度用 `node scripts/desktop-command-parity.mjs` 追踪（Rust
+`generate_handler!` ↔ Web Host + desktop 注册表），新增桌面命令必须同步该脚本报出的缺口，
+并保持命令名、camelCase 参数、返回字段风格与 Rust 逐条一致。
+
 ### React 前端负责
 
 - 产品状态判断；
@@ -222,6 +242,17 @@ Flowlet 当前支持：
   signature，已完成轮次不动。这是「不随意改写请求结构」的受控例外：按上游模型
   （canonical_model_key 归一后的 DeepSeek 推理模型）门控，仅对 Anthropic Messages 生效，
   其余请求与协议原样透传；新增/删除该行为须同步本说明与
+  `docs/deepseek-harness-integration.md`；
+* Responses 回放兼容：客户端（DSH/pi-ai 等）会把上游返回的 `reasoning` / `message` item
+  原样塞回下一轮 `input`，而部分上游给出的 item 带 `"status": null`（或空串、未知取值），
+  校验严格的上游直接返回 400：`The parameter `input.status` specified in the request are
+  not valid: unknown status: .`。同一规范模型的候选池可能横跨不同上游，A 家吐出的 item 会被
+  回放到 B 家；历史里一旦混入坏 item，客户端后续每一轮都会被拒（重试无效）。
+  Rust `normalize_responses_input_items` / Node Host `normalizeResponsesInputItems`
+  在转发前把 `input[*].status` 的非法值归一为 `"completed"`，并清掉
+  `encrypted_content: null`；合法 status、`input` 为字符串、非 Responses 协议一律原样透传，
+  无修改时不重序列化（字节级透传）。这是「不随意改写请求结构」
+  的受控例外：不动 item 的顺序、id、type 与内容；新增/删除该行为须同步本说明与
   `docs/deepseek-harness-integration.md`；
 * Responses 是独立的第三协议（`supported_protocols` 中的 `"responses"`），
   入站 `POST /v1/responses`（兼容裸根路径 `/responses`）按协议独立匹配路由，

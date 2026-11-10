@@ -151,6 +151,39 @@ Messages 生效。修改该行为须同步 `AGENTS.md` 第 5 节与本说明。
 `anthropic_thinking_route_injects_thinking_passback` —— 该用例模拟缺少 thinking 的
 assistant 工具调用历史，断言转发到上游的请求体已补齐空 thinking 块且其余内容不变。
 
+### Responses input.status 归一（代理层）
+
+Responses 协议允许客户端把上一轮返回的 item（`reasoning` / `message` / `function_call` 等）
+原样放进下一轮 `input` 回放。各家上游给出的 `status` 取值并不统一：有的写
+`"completed"` / `"in_progress"` / `"incomplete"`，有的写 `null`，个别还会丢字段；而校验
+严格的 Responses 上游只接受合法枚举，遇到 `null` 或空串直接返回 400：
+
+```text
+The parameter `input.status` specified in the request are not valid: unknown status: .
+```
+
+一旦历史里混入这种坏 item，客户端会**每一轮都把它回放出去**，于是该会话的后续请求全部
+被拒、重试无效（2026-11-10 DSH 会话 `session-a07de002` 即此形态：turn 26 起上游返回了
+69 个 `id` 形如 `msg_<uuid>`、`status: null`、`encrypted_content: null` 的 reasoning item，
+turn 32/33 连续 400；用同一请求体直连可稳定复现，把 `status: null` 改成 `"completed"`
+或删掉该键后立即 200）。Flowlet 的候选池又可能横跨不同上游，A 家吐出的 item 会被回放到
+B 家，因此这类差异必须在网关归一。
+
+Flowlet 在代理层处理：Rust Host 的 `normalize_responses_input_items`（`proxy_http.rs`，由
+`proxy.rs` 在候选循环前调用一次，与候选无关）与 Node Host 的
+`normalizeResponsesInputItems`（`packages/flowlet-core/src/proxy/http.ts`，由 `forward.ts`
+在 attempt 循环前调用一次）对 `POST /v1/responses` 请求的 `input[*]`：
+`status` 为 `null`、空串或未知取值时改写为 `"completed"`；`encrypted_content` 为 `null`
+时删除该键；合法 status 与未声明 status 的 item 不动，`input` 为字符串、非 Responses
+协议一律原样透传，没有任何修改时不重序列化（字节级透传）。该行为是「不随意改写请求结构」
+的受控例外：不动 item 的顺序、`id`、`type`、`summary` 与内容。修改该行为须同步
+`AGENTS.md` 第 5 节与本说明。
+
+该归一不能替代上游修复：`status: null` 仍是上游缺陷，网关只在转发前做兼容，使已经带上
+坏 item 的客户端历史可以继续使用。回归测试为 `proxy_tests.rs` 的
+`normalize_responses_input_items_*` 两组单元用例（null/空串/未知取值归一与
+`encrypted_content` 清理、非 Responses/字符串 input/无修改时原样透传）。
+
 一键接入直接修改 DSH 官方配置文件。Flowlet 使用与 DSH 相同的相邻 `<file>.lock` 独占锁协议，
 按叶子路径合并 `llm-pi-ai.providers.flowlet`、`agent-default-model.provider`、
 `agent-default-model.model` 与专用凭据，再通过临时文件替换完成原子写入；两份文件任一写入失败时

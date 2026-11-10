@@ -417,6 +417,47 @@ export function ensureAnthropicThinkingPassback(
   return Buffer.from(stringifySorted(value), "utf8");
 }
 
+// ─── Responses 回放兼容：input[*].status 归一 ────────────────────────────────
+
+/**
+ * 部分上游返回的 Responses item（`reasoning` / `message` 等）带 `"status": null`
+ *（或空串、未知取值），客户端会把这些 item 原样塞回下一轮 `input`，校验严格的
+ * 上游直接 400：`The parameter `input.status` specified in the request are not valid:
+ * unknown status: .`
+ *
+ * 这是「客户端忠实回放、上游校验口径不一致」的兼容问题；候选池跨上游时 A 家吐出的
+ * item 会被回放到 B 家，所以必须在网关归一。规则：只把 `input[*].status` 的非法值改成
+ * `"completed"`、清掉 `encrypted_content: null`；合法 status、`input` 为字符串、非
+ * Responses 协议一律原样透传，无修改时不重序列化。逐段对照 Rust
+ * `proxy_http::normalize_responses_input_items`。
+ */
+export function normalizeResponsesInputItems(body: Buffer, protocol: Protocol): Buffer {
+  if (protocol !== "responses") return body;
+  const value = parseJson(body);
+  if (!isRecord(value) || !Array.isArray(value.input)) return body;
+
+  const validStatuses = new Set(["in_progress", "completed", "incomplete"]);
+  let changed = false;
+  for (const item of asArray(value.input)) {
+    if (!isRecord(item)) continue;
+    if (Object.prototype.hasOwnProperty.call(item, "status")) {
+      if (typeof item.status !== "string" || !validStatuses.has(item.status)) {
+        item.status = "completed";
+        changed = true;
+      }
+    }
+    if (
+      Object.prototype.hasOwnProperty.call(item, "encrypted_content") &&
+      item.encrypted_content === null
+    ) {
+      delete item.encrypted_content;
+      changed = true;
+    }
+  }
+  if (!changed) return body;
+  return Buffer.from(stringifySorted(value), "utf8");
+}
+
 // ─── Response body capture helpers ──────────────────────────────────────────
 
 export function contentEncodingValue(headers: HeaderMapLike): string | null {

@@ -166,19 +166,47 @@ describe("CredentialsPage env prefix", () => {
     renderPage();
     await screen.findByText("公司-北美-线上");
     fireEvent.click(screen.getAllByRole("button", { name: /Edit/ })[0]!);
-    const input = (await screen.findByPlaceholderText(/e\.g\. DOCKHAND_NA/)) as HTMLInputElement;
+    const input = (await screen.findByPlaceholderText(/Leave blank for the default DOCKHAND/)) as HTMLInputElement;
     expect(input.value).toBe("DOCKHAND_NA");
     expect(screen.getByText(/DOCKHAND_NA_URL \/ DOCKHAND_NA_TOKEN/)).toBeInTheDocument();
   });
 
   it("uppercases the preview prefix while typing", async () => {
     renderPage();
+    await screen.findByText("公司-北美-线上");
     fireEvent.click(await screen.findByRole("button", { name: /Add credential/ }));
-    const input = (await screen.findByPlaceholderText(/e\.g\. GITLAB_NA/)) as HTMLInputElement;
+    const input = (await screen.findByPlaceholderText(/Leave blank for the default GITLAB/)) as HTMLInputElement;
     fireEvent.change(input, { target: { value: "self" } });
     await waitFor(() =>
       expect(screen.getByText(/SELF_URL \/ SELF_TOKEN/)).toBeInTheDocument(),
     );
+  });
+});
+
+describe("CredentialsPage env prefix auto-generation", () => {
+  it("prefills a non-conflicting prefix from name/note until the user edits it", async () => {
+    renderPage();
+    // 等待已有凭据列表加载完成：自动生成需要避开它们已占用的前缀。
+    await screen.findByText("公司-北美-线上");
+    fireEvent.click(await screen.findByRole("button", { name: /Add credential/ }));
+    const prefixInput = (await screen.findByPlaceholderText(
+      /Leave blank for the default GITLAB/,
+    )) as HTMLInputElement;
+    // 已有凭据占用了 GITLAB，默认建议自动避让为 GITLAB_2
+    expect(prefixInput.value).toBe("GITLAB_2");
+
+    const nameInput = (await screen.findByPlaceholderText(/For example: Company/)) as HTMLInputElement;
+    fireEvent.change(nameInput, { target: { value: "自建 sz 实例" } });
+    await waitFor(() => expect(prefixInput.value).toBe("GITLAB_SZ"));
+
+    // 手动改过之后不再被名称覆盖
+    fireEvent.change(prefixInput, { target: { value: "MY_OWN" } });
+    fireEvent.change(nameInput, { target: { value: "另一个 na 实例" } });
+    await waitFor(() => expect(prefixInput.value).toBe("MY_OWN"));
+
+    // 「自动生成」重新按名称/备注生成
+    fireEvent.click(screen.getByRole("button", { name: /Auto-generate/ }));
+    await waitFor(() => expect(prefixInput.value).toBe("GITLAB_NA"));
   });
 });
 
@@ -293,7 +321,7 @@ describe("CredentialsPage jenkins provider", () => {
     const username = (await screen.findByPlaceholderText(/jenkins-user/)) as HTMLInputElement;
     expect(username.value).toBe("ci-bot");
     expect(screen.getByText(/JENKINS_URL \/ JENKINS_USER \/ JENKINS_TOKEN/)).toBeInTheDocument();
-    expect(screen.getByText(/Jenkins \/me\/api\.json/)).toBeInTheDocument();
+    expect(screen.getAllByText((content) => content.includes("me/api/json")).length).toBeGreaterThan(0);
   });
 
   it("submits the username together with the credential", async () => {

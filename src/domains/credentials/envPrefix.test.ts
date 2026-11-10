@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   envKeysForPrefix,
+  envKeysForProvider,
   isValidEnvPrefixInput,
   providerDefaultEnvPrefix,
   resolveEnvPrefix,
+  suggestEnvPrefix,
 } from "./envPrefix";
 
 describe("providerDefaultEnvPrefix", () => {
@@ -15,6 +17,7 @@ describe("providerDefaultEnvPrefix", () => {
   it("falls back to the provider id when an old host omits defaultEnvPrefix", () => {
     expect(providerDefaultEnvPrefix({ id: "gitlab" })).toBe("GITLAB");
     expect(providerDefaultEnvPrefix({ id: "dockhand" })).toBe("DOCKHAND");
+    expect(providerDefaultEnvPrefix({ id: "jenkins" })).toBe("JENKINS");
     expect(providerDefaultEnvPrefix({ id: "custom" })).toBe("CUSTOM");
   });
 });
@@ -42,6 +45,21 @@ describe("envKeysForPrefix", () => {
   });
 });
 
+describe("envKeysForProvider", () => {
+  it("adds a JENKINS USER key only for basic-auth providers", () => {
+    expect(envKeysForProvider("JENKINS_NA", "jenkins")).toEqual({
+      url: "JENKINS_NA_URL",
+      user: "JENKINS_NA_USER",
+      token: "JENKINS_NA_TOKEN",
+    });
+    expect(envKeysForProvider("DOCKHAND_NA", "dockhand")).toEqual({
+      url: "DOCKHAND_NA_URL",
+      user: null,
+      token: "DOCKHAND_NA_TOKEN",
+    });
+  });
+});
+
 describe("isValidEnvPrefixInput", () => {
   it("accepts blank (default prefix) and valid prefixes", () => {
     expect(isValidEnvPrefixInput("")).toBe(true);
@@ -57,5 +75,62 @@ describe("isValidEnvPrefixInput", () => {
     expect(isValidEnvPrefixInput("NA-1")).toBe(false);
     expect(isValidEnvPrefixInput("_NA")).toBe(false);
     expect(isValidEnvPrefixInput("A".repeat(25))).toBe(false);
+  });
+});
+describe("suggestEnvPrefix", () => {
+  it("derives the prefix from ASCII fragments of the name", () => {
+    expect(suggestEnvPrefix({ providerDefault: "DOCKHAND", name: "公司 Dockhand NA" })).toBe("DOCKHAND_NA");
+    expect(suggestEnvPrefix({ providerDefault: "GITLAB", name: "gitlab sz 线上" })).toBe("GITLAB_SZ");
+    expect(suggestEnvPrefix({ providerDefault: "JENKINS", name: "Jenkins-build 01" })).toBe("JENKINS_BUILD_01");
+  });
+
+  it("falls back to the provider default for non-ASCII names", () => {
+    expect(suggestEnvPrefix({ providerDefault: "DOCKHAND", name: "公司-北美-线上" })).toBe("DOCKHAND");
+    expect(suggestEnvPrefix({ providerDefault: "GITLAB", name: "", note: "" })).toBe("GITLAB");
+  });
+
+  it("uses the note when the name has no usable fragment, and dedupes the default word", () => {
+    expect(suggestEnvPrefix({ providerDefault: "DOCKHAND", name: "北美", note: "dockhand self" })).toBe(
+      "DOCKHAND_SELF",
+    );
+    // 名称与备注片段都参与拼接，重复片段只保留一次。
+    expect(suggestEnvPrefix({ providerDefault: "GITLAB", name: "公司 sz", note: "sz 线上" })).toBe("GITLAB_SZ");
+  });
+
+  it("avoids prefixes already used by other credentials", () => {
+    expect(
+      suggestEnvPrefix({ providerDefault: "DOCKHAND", name: "北美", used: ["DOCKHAND"] }),
+    ).toBe("DOCKHAND_2");
+    expect(
+      suggestEnvPrefix({
+        providerDefault: "DOCKHAND",
+        name: "公司 Dockhand NA",
+        used: ["DOCKHAND_NA", "DOCKHAND_NA_2"],
+      }),
+    ).toBe("DOCKHAND_NA_3");
+    // 不同服务已占用同名时同样避让
+    expect(
+      suggestEnvPrefix({ providerDefault: "GITLAB", name: "NA", used: ["GITLAB_NA"] }),
+    ).toBe("GITLAB_NA_2");
+  });
+
+  it("keeps the result within 24 chars and always valid", () => {
+    const suggestion = suggestEnvPrefix({
+      providerDefault: "DOCKHAND",
+      name: "north america production instance one",
+    });
+    expect(suggestion.length).toBeLessThanOrEqual(24);
+    expect(suggestion).toMatch(/^[A-Z][A-Z0-9_]{0,23}$/);
+    expect(suggestion.endsWith("_")).toBe(false);
+
+    const conflict = suggestEnvPrefix({
+      providerDefault: "DOCKHAND",
+      name: "north america production instance one",
+      used: [suggestion],
+    });
+    expect(conflict.length).toBeLessThanOrEqual(24);
+    expect(conflict).toMatch(/^[A-Z][A-Z0-9_]{0,23}$/);
+    expect(conflict).not.toBe(suggestion);
+    expect(isValidEnvPrefixInput(conflict)).toBe(true);
   });
 });

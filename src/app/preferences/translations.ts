@@ -1887,6 +1887,13 @@ const english: Record<string, string> = {
   "环境前缀": "Env prefix",
   "环境别名（Env 前缀）": "Environment alias (Env prefix)",
   "例如 {example}；留空使用默认 {prefix}": "e.g. {example}; leave blank for the default {prefix}",
+  "留空使用默认 {prefix}，也可点「自动生成」由名称/备注生成":
+    "Leave blank for the default {prefix}, or click \"Auto-generate\" to derive it from the name/note",
+  "自动生成": "Auto-generate",
+  "已按名称与备注自动生成，可直接修改；生成的环境变量：{keys}。":
+    "Generated from the name and note; you can edit it. Environment variables: {keys}.",
+  "生成的环境变量：{keys}；同一服务的多实例需使用不同前缀（如 {example}）。":
+    "Environment variables: {keys}. Multiple instances of the same service need different prefixes (e.g. {example}).",
   "生成的环境变量：{url} / {token}；请填写完整前缀（如 {example}），同一服务的多实例需使用不同前缀。":
     "Environment variables: {url} / {token}. Enter the full prefix (e.g. {example}); multiple instances of the same service need different prefixes.",
   "生成的环境变量：{keys}；请填写完整前缀（如 {example}），同一服务的多实例需使用不同前缀。":
@@ -1897,6 +1904,13 @@ const english: Record<string, string> = {
   "粘贴 API Token（与用户名一起使用）": "Paste the API Token (used with the username)",
   "Jenkins API Token 必须与该用户名的 Basic 认证一起使用；留空表示编辑时保持原用户名。":
     "The Jenkins API token must be sent with this username via Basic auth; leave blank to keep the current username when editing.",
+  "邮箱": "Email",
+  "例如：you@example.com": "e.g. you@example.com",
+  "登录密码（Beszel 用户密码）": "Login password (Beszel user password)",
+  "粘贴 Beszel 登录密码": "Paste the Beszel login password",
+  "留空表示不修改现有密码": "Leave blank to keep the current password",
+  "Beszel 没有长期 API Token：保存时会用邮箱 + 密码换取短期 token；编辑时留空表示保持原邮箱。":
+    "Beszel has no long-lived API token: saving exchanges the email and password for a short-lived token; leave blank to keep the current email when editing.",
   "环境前缀只能包含字母、数字和下划线，且以字母开头（最长 {max} 个字符）":
     "The env prefix may only contain letters, digits and underscores, must start with a letter, and is at most {max} characters.",
   "安装 CLI": "Install the CLI",

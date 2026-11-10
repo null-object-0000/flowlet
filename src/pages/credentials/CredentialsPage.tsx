@@ -33,11 +33,13 @@ import type {
 } from "../../domains/credentials/types";
 import {
   ENV_PREFIX_MAX_LENGTH,
+  envKeyList,
   envKeysForPrefix,
   envKeysForProvider,
   isValidEnvPrefixInput,
   providerDefaultEnvPrefix,
   resolveEnvPrefix,
+  suggestEnvPrefix,
 } from "../../domains/credentials/envPrefix";
 import { LocalAccessSideSheet } from "../../features/credentials/LocalAccessSideSheet";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
@@ -54,7 +56,7 @@ type Draft = {
   provider: CredentialProviderId;
   name: string;
   baseUrl: string;
-  /** Basic 认证用户名（仅 Jenkins 使用）。 */
+  /** 身份字段：Jenkins 用户名 / Beszel 登录邮箱（其它 provider 不用）。 */
   username: string;
   token: string;
   note: string;
@@ -78,6 +80,7 @@ const PROVIDER_LABEL: Record<string, string> = {
   gitlab: "GitLab",
   dockhand: "Dockhand",
   jenkins: "Jenkins",
+  beszel: "Beszel",
 };
 
 /** 服务端 provider 元数据加载前/旧 Host 的兜底，保证表单文案马上可用。 */
@@ -109,6 +112,15 @@ const FALLBACK_PROVIDERS: CredentialProvider[] = [
     available: true,
     defaultEnvPrefix: "JENKINS",
   },
+  {
+    id: "beszel",
+    label: "Beszel",
+    baseUrlHint: "http://beszel.example.com:8090",
+    tokenLabel: "登录密码（Beszel 用户密码）",
+    usernameLabel: "邮箱",
+    available: true,
+    defaultEnvPrefix: "BESZEL",
+  },
 ];
 
 /** 保存时实际校验的端点（与两套 Host 的 check 实现一致）。 */
@@ -116,6 +128,8 @@ function checkEndpoint(provider: CredentialProviderId): string {
   switch (provider) {
     case "jenkins":
       return "Jenkins /me/api/json";
+    case "beszel":
+      return "Beszel /api/collections/users/auth-with-password";
     case "dockhand":
       return "Dockhand /api/environments";
     default:
@@ -123,11 +137,53 @@ function checkEndpoint(provider: CredentialProviderId): string {
   }
 }
 
-/** provider 需要基本认证用户名（当前只有 Jenkins）；旧 Host 元数据缺失时按 id 兜底。 */
+/** 把 Host 返回的 provider 字符串收窄为下拉可选的 id（未知类型回落 gitlab，避免下拉缺项）。 */
+function asCredentialProviderId(value: string): CredentialProviderId {
+  switch (value) {
+    case "dockhand":
+    case "jenkins":
+    case "beszel":
+      return value;
+    default:
+      return "gitlab";
+  }
+}
+
+/** provider 需要额外身份字段（当前为 Jenkins 用户名 / Beszel 邮箱）；旧 Host 元数据缺失时按 id 兜底。 */
 function usernameLabelFor(provider: CredentialProvider): string | null {
   const label = provider.usernameLabel?.trim();
   if (label) return label;
+  if (provider.id === "beszel") return "邮箱";
   return provider.id === "jenkins" ? "用户名" : null;
+}
+
+/** 身份字段输入框的 placeholder。 */
+function usernamePlaceholderFor(providerId: string): string {
+  return providerId === "beszel" ? "例如：you@example.com" : "例如：jenkins-user";
+}
+
+/** 身份字段下方的说明文案：Jenkins 是 Basic 认证，Beszel 是邮箱+密码换短期 token。 */
+function usernameHintFor(providerId: string): string {
+  return providerId === "beszel"
+    ? "Beszel 没有长期 API Token：保存时会用邮箱 + 密码换取短期 token；编辑时留空表示保持原邮箱。"
+    : "Jenkins API Token 必须与该用户名的 Basic 认证一起使用；留空表示编辑时保持原用户名。";
+}
+
+/** 密钥输入框的 placeholder（按 provider 与新建/编辑区分）。 */
+function tokenPlaceholderFor(provider: CredentialProviderId, editing: boolean): string {
+  if (editing) {
+    return provider === "beszel" ? "留空表示不修改现有密码" : "留空表示不修改现有 token";
+  }
+  switch (provider) {
+    case "dockhand":
+      return "粘贴 API Token";
+    case "jenkins":
+      return "粘贴 API Token（与用户名一起使用）";
+    case "beszel":
+      return "粘贴 Beszel 登录密码";
+    default:
+      return "粘贴 Personal Access Token";
+  }
 }
 
 export function CredentialsPage() {
@@ -140,6 +196,11 @@ export function CredentialsPage() {
   const [accessOpen, setAccessOpen] = useState(false);
   /** 正在查看的原始 token；关闭弹层即丢弃（不写缓存/不入日志）。 */
   const [revealed, setRevealed] = useState<{ name: string; token: string } | null>(null);
+  /**
+   * 环境前缀是否被用户手动改过：未改过时随名称/备注/服务类型自动生成，
+   * 一旦手动输入就不再覆盖（编辑已有凭据时也视为已手动设置，避免悄悄改名）。
+   */
+  const [envPrefixTouched, setEnvPrefixTouched] = useState(false);
 
   const providers = useQuery({
     queryKey: queryKeys.credentials.providers(),
@@ -196,21 +257,44 @@ export function CredentialsPage() {
       Toast.error(t("无法查看原始 token：{message}", { message: errorMessage(error) })),
   });
 
+  /** 自动生成前缀所需上下文：provider 默认前缀 + 其它凭据已占用的前缀。 */
+  const autoEnvPrefix = (
+    providerId: CredentialProviderId,
+    name: string,
+    note: string,
+    currentId?: string,
+  ): string => {
+    const providerDefault = (() => {
+      const provider = providerOptions.find((option) => option.id === providerId);
+      return provider ? providerDefaultEnvPrefix(provider) : providerId.toUpperCase();
+    })();
+    const used = (list.data ?? [])
+      .filter((credential) => credential.id !== currentId)
+      .map((credential) => {
+        const fallback = (() => {
+          const provider = providerOptions.find((option) => option.id === credential.provider);
+          return provider ? providerDefaultEnvPrefix(provider) : credential.provider.toUpperCase();
+        })();
+        return resolveEnvPrefix(credential.envPrefix, fallback);
+      });
+    return suggestEnvPrefix({ providerDefault, name, note, used });
+  };
+
   const openCreate = () => {
     setFormError("");
-    setDraft({ ...EMPTY_DRAFT });
+    setEnvPrefixTouched(false);
+    setDraft({
+      ...EMPTY_DRAFT,
+      envPrefix: autoEnvPrefix(EMPTY_DRAFT.provider, "", ""),
+    });
   };
 
   const openEdit = (credential: ServiceCredential) => {
     setFormError("");
+    setEnvPrefixTouched(true);
     setDraft({
       id: credential.id,
-      provider:
-        credential.provider === "dockhand"
-          ? "dockhand"
-          : credential.provider === "jenkins"
-            ? "jenkins"
-            : "gitlab",
+      provider: asCredentialProviderId(credential.provider),
       name: credential.name,
       baseUrl: credential.baseUrl,
       username: credential.username ?? "",
@@ -264,25 +348,30 @@ export function CredentialsPage() {
   }, []);
 
   const credentials = list.data ?? [];
-  // 服务端按 gitlab → dockhand 的顺序返回；加载失败/旧 Host 时退回本地兜底定义。
+  // 服务端按 gitlab → dockhand → jenkins → beszel 的顺序返回；加载失败/旧 Host 时退回本地兜底定义。
   const providerOptions = providers.data && providers.data.length > 0 ? providers.data : FALLBACK_PROVIDERS;
   const selectedProvider = providerOptions.find((option) => option.id === draft?.provider) ?? FALLBACK_PROVIDERS[0]!;
   const selectedProviderLabel = PROVIDER_LABEL[selectedProvider.id] ?? selectedProvider.label;
   const selectedProviderDefaultEnvPrefix = providerDefaultEnvPrefix(selectedProvider);
-  /** 用户名输入框的标题；null 表示该 provider 不需要用户名。 */
+  /** 身份字段的标题；null 表示该 provider 不需要额外身份字段。 */
   const selectedUsernameLabel = usernameLabelFor(selectedProvider);
-  /** Jenkins 等 Basic 认证 provider 必须填写用户名才能保存。 */
-  const usernameMissing = selectedUsernameLabel !== null && !draft?.username.trim();
+  /**
+   * 身份字段缺失：provider 声明了用户名/邮箱时，新建必须填写（Jenkins / Beszel 均如此）。
+   * 编辑时留空表示保持原值（Host 语义）：Beszel 允许留空保留原邮箱；
+   * Jenkins 沿用既有交互，编辑时仍要求填写用户名。
+   */
+  const usernameMissing =
+    selectedUsernameLabel !== null &&
+    !draft?.username.trim() &&
+    (draft?.id === undefined || selectedProvider.id !== "beszel");
   /** 编辑器的环境前缀预览：空值 → provider 默认，非空 → 大写。 */
   const previewPrefix = resolveEnvPrefix(draft?.envPrefix, selectedProviderDefaultEnvPrefix);
   const previewEnvKeys = envKeysForProvider(previewPrefix, selectedProvider.id);
   /** 前缀示例按 provider 默认前缀展开，提醒用户填写完整前缀而不是只填别名。 */
   const envPrefixExample = `${selectedProviderDefaultEnvPrefix}_NA`;
   const envPrefixInvalid = draft !== null && !isValidEnvPrefixInput(draft.envPrefix);
-  /** 生成的环境变量名文案（Jenkins 多一个 `_USER`）。 */
-  const previewEnvKeyLabels = [previewEnvKeys.url, previewEnvKeys.user, previewEnvKeys.token]
-    .filter((key): key is string => Boolean(key))
-    .join(" / ");
+  /** 生成的环境变量名文案（Jenkins 多 `_USER`，Beszel 为 `_EMAIL` / `_PASSWORD`）。 */
+  const previewEnvKeyLabels = envKeyList(previewEnvKeys).join(" / ");
 
   /** 表格/预览用：旧 Host 未返回 envPrefix 时按 provider 默认前缀兜底。 */
   const defaultEnvPrefixFor = (providerId: string): string => {
@@ -383,9 +472,9 @@ export function CredentialsPage() {
                     <Tooltip
                       content={
                         <div className={styles.envKeyTooltip}>
-                          <code>{keys.url}</code>
-                          {keys.user && <code>{keys.user}</code>}
-                          <code>{keys.token}</code>
+                          {envKeyList(keys).map((key) => (
+                            <code key={key}>{key}</code>
+                          ))}
                         </div>
                       }
                     >
@@ -543,7 +632,17 @@ export function CredentialsPage() {
               <Input
                 value={draft.name}
                 placeholder={t("例如：公司 {name}", { name: selectedProviderLabel })}
-                onChange={(value) => setDraft((current) => (current ? { ...current, name: value } : current))}
+                onChange={(value) =>
+                  setDraft((current) => {
+                    if (!current) return current;
+                    if (envPrefixTouched) return { ...current, name: value };
+                    return {
+                      ...current,
+                      name: value,
+                      envPrefix: autoEnvPrefix(current.provider, value, current.note, current.id),
+                    };
+                  })
+                }
               />
             </div>
             <div className={styles.field}>
@@ -558,9 +657,16 @@ export function CredentialsPage() {
                   disabled: !option.available,
                 }))}
                 onChange={(value) =>
-                  setDraft((current) =>
-                    current ? { ...current, provider: value as CredentialProviderId } : current,
-                  )
+                  setDraft((current) => {
+                    if (!current) return current;
+                    const provider = value as CredentialProviderId;
+                    if (envPrefixTouched) return { ...current, provider };
+                    return {
+                      ...current,
+                      provider,
+                      envPrefix: autoEnvPrefix(provider, current.name, current.note, current.id),
+                    };
+                  })
                 }
               />
               <Typography.Text type="tertiary">{t(selectedProvider.tokenLabel)}</Typography.Text>
@@ -570,13 +676,13 @@ export function CredentialsPage() {
                 <label>{t(selectedUsernameLabel)}</label>
                 <Input
                   value={draft.username}
-                  placeholder={t("例如：jenkins-user")}
+                  placeholder={t(usernamePlaceholderFor(draft.provider))}
                   onChange={(value) =>
                     setDraft((current) => (current ? { ...current, username: value } : current))
                   }
                 />
                 <Typography.Text type="tertiary" size="small">
-                  {t("Jenkins API Token 必须与该用户名的 Basic 认证一起使用；留空表示编辑时保持原用户名。")}
+                  {t(usernameHintFor(draft.provider))}
                 </Typography.Text>
               </div>
             )}
@@ -589,16 +695,40 @@ export function CredentialsPage() {
               />
             </div>
             <div className={styles.field}>
-              <label>{t("环境别名（Env 前缀）")}</label>
+              <div className={styles.fieldLabelRow}>
+                <label>{t("环境别名（Env 前缀）")}</label>
+                <Button
+                  size="small"
+                  theme="borderless"
+                  onClick={() => {
+                    setEnvPrefixTouched(false);
+                    setDraft((current) =>
+                      current
+                        ? {
+                            ...current,
+                            envPrefix: autoEnvPrefix(
+                              current.provider,
+                              current.name,
+                              current.note,
+                              current.id,
+                            ),
+                          }
+                        : current,
+                    );
+                  }}
+                >
+                  {t("自动生成")}
+                </Button>
+              </div>
               <Input
                 value={draft.envPrefix}
-                placeholder={t("例如 {example}；留空使用默认 {prefix}", {
-                  example: envPrefixExample,
+                placeholder={t("留空使用默认 {prefix}，也可点「自动生成」由名称/备注生成", {
                   prefix: selectedProviderDefaultEnvPrefix,
                 })}
-                onChange={(value) =>
-                  setDraft((current) => (current ? { ...current, envPrefix: value } : current))
-                }
+                onChange={(value) => {
+                  setEnvPrefixTouched(true);
+                  setDraft((current) => (current ? { ...current, envPrefix: value } : current));
+                }}
               />
               {envPrefixInvalid ? (
                 <Typography.Text type="danger" size="small">
@@ -606,9 +736,15 @@ export function CredentialsPage() {
                     max: ENV_PREFIX_MAX_LENGTH,
                   })}
                 </Typography.Text>
+              ) : !envPrefixTouched && draft.envPrefix.trim() ? (
+                <Typography.Text type="tertiary" size="small">
+                  {t("已按名称与备注自动生成，可直接修改；生成的环境变量：{keys}。", {
+                    keys: previewEnvKeyLabels,
+                  })}
+                </Typography.Text>
               ) : (
                 <Typography.Text type="tertiary" size="small">
-                  {t("生成的环境变量：{keys}；请填写完整前缀（如 {example}），同一服务的多实例需使用不同前缀。", {
+                  {t("生成的环境变量：{keys}；同一服务的多实例需使用不同前缀（如 {example}）。", {
                     keys: previewEnvKeyLabels,
                     example: envPrefixExample,
                   })}
@@ -620,15 +756,7 @@ export function CredentialsPage() {
               <Input
                 mode="password"
                 value={draft.token}
-                placeholder={
-                  draft.id
-                    ? t("留空表示不修改现有 token")
-                    : draft.provider === "dockhand"
-                      ? t("粘贴 API Token")
-                      : draft.provider === "jenkins"
-                        ? t("粘贴 API Token（与用户名一起使用）")
-                        : t("粘贴 Personal Access Token")
-                }
+                placeholder={t(tokenPlaceholderFor(draft.provider, draft.id !== undefined))}
                 onChange={(value) => setDraft((current) => (current ? { ...current, token: value } : current))}
               />
             </div>
@@ -637,7 +765,17 @@ export function CredentialsPage() {
               <Input
                 value={draft.note}
                 placeholder={t("可选，例如用途或负责人")}
-                onChange={(value) => setDraft((current) => (current ? { ...current, note: value } : current))}
+                onChange={(value) =>
+                  setDraft((current) => {
+                    if (!current) return current;
+                    if (envPrefixTouched) return { ...current, note: value };
+                    return {
+                      ...current,
+                      note: value,
+                      envPrefix: autoEnvPrefix(current.provider, current.name, value, current.id),
+                    };
+                  })
+                }
               />
             </div>
             <div className={styles.switchRow}>

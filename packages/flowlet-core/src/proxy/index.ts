@@ -28,15 +28,25 @@ export interface ProxyControllerOptions {
   /** config.json 路径：用于每请求 UA 规则与 log_capture 兜底。 */
   configPath?: string;
   upstreamTimeoutSeconds?: number;
+  /**
+   * 进程退出（dispose）时允许在途请求继续跑的宽限毫秒数，超时后强制断开。
+   * 只影响 Host 关闭；运行期 stop/start（管理台启停代理）仍等待在途自然结束。
+   */
+  shutdownAbortMs?: number;
 }
 
 export interface ProxyController {
   start(): Promise<void>;
   stop(): Promise<void>;
+  /** 进程退出：宽限 shutdownAbortMs 后强制断开在途连接，并关闭上游连接池。 */
+  dispose(): Promise<void>;
   status(): ProxyStatus;
   bindConfig(): ProxyBindConfig;
   setBindConfig(config: ProxyBindConfig): void;
 }
+
+/** 进程退出时在途请求的默认宽限：够短请求收尾，又不把容器停机拖成秒级。 */
+const DEFAULT_SHUTDOWN_ABORT_MS = 250;
 
 class ProxyControllerImpl implements ProxyController {
   #options: ProxyControllerOptions;
@@ -100,14 +110,48 @@ class ProxyControllerImpl implements ProxyController {
   }
 
   async stop(): Promise<void> {
+    // 运行期语义（与 Rust 一致）：等待 in-flight（含长 SSE）自然结束；空闲 keep-alive 直接断开。
+    await this.#closeServer(null);
+  }
+
+  async dispose(): Promise<void> {
+    // 进程退出语义：只给 shutdownAbortMs 宽限，之后强制断开在途连接，
+    // 避免容器 stop 被长流拖到 stop_grace_period（Docker 升级的总停机时间就是它）。
+    const abortMs = this.#options.shutdownAbortMs ?? DEFAULT_SHUTDOWN_ABORT_MS;
+    await this.#closeServer(Math.max(0, abortMs));
+    // 上游连接池关闭会等待 busy 连接变空闲：进程马上就要 exit，不能让它拖住停机。
+    // 给 250ms 尽量体面地关，超时由 process.exit 收尾。
+    await Promise.race([
+      this.#transport.close().catch(() => undefined),
+      new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 150);
+        timer.unref?.();
+      }),
+    ]);
+  }
+
+  #closeServer(abortMs: number | null): Promise<void> {
     const server = this.#server;
-    if (server === null) return; // 幂等
+    if (server === null) return Promise.resolve(); // 幂等
     this.#server = null;
     this.#startedAt = null;
-    await new Promise<void>((resolve) => {
-      server.close(() => resolve());
-      // 空闲 keep-alive 连接可直接断开；in-flight（含长 SSE）与 Rust 一样等待自然结束。
+    return new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = (): void => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+      server.close(() => finish());
+      // 空闲 keep-alive 连接可直接断开；abortMs === null 时 in-flight 等待自然结束。
       server.closeIdleConnections?.();
+      if (abortMs === null) return;
+      if (abortMs <= 0) {
+        server.closeAllConnections?.();
+        return;
+      }
+      // 不 unref：这 1s 内即使连接已空闲也要保证定时器一定触发，避免把停机拖到硬超时。
+      setTimeout(() => server.closeAllConnections?.(), abortMs);
     });
   }
 

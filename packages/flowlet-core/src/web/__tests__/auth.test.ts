@@ -6,7 +6,7 @@
 // PKCE、Bearer 兜底，以及启动期 env 校验（fail-closed）。
 import assert from "node:assert/strict";
 import { createHash, createSign, generateKeyPairSync } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -15,6 +15,7 @@ import { after, describe, it } from "node:test";
 
 import { AdminAuth, adminAuthConfigFromEnv } from "../auth.ts";
 import { createWebHost } from "../index.ts";
+import { FileAdminSessionStore } from "../session-store.ts";
 
 // ─── 基础设施 ───────────────────────────────────────────────────────────────
 
@@ -77,7 +78,7 @@ interface TestHost {
   close: () => Promise<void>;
 }
 
-async function startHost(env: Record<string, string>): Promise<TestHost> {
+async function startHost(env: Record<string, string>, sessionStoreFile?: string): Promise<TestHost> {
   clearAuthEnv();
   Object.assign(process.env, env);
   let port: number;
@@ -102,7 +103,8 @@ async function startHost(env: Record<string, string>): Promise<TestHost> {
   const configPath = path.join(workDir, "config.json");
   writeFileSync(configPath, "{}\n");
 
-  const auth = AdminAuth.fromEnv();
+  const sessionStore = sessionStoreFile === undefined ? null : new FileAdminSessionStore(sessionStoreFile);
+  const auth = AdminAuth.fromEnv(process.env, undefined, sessionStore);
   const bindConfig = {
     host: "127.0.0.1",
     port: 0,
@@ -354,10 +356,11 @@ function oidcEnv(provider: MockOidcProvider, publicWebUrl: string, extra: Record
 async function startOidcHost(
   provider: MockOidcProvider,
   extraEnv: Record<string, string> = {},
+  sessionStoreFile?: string,
 ): Promise<TestHost> {
   const port = await freePort();
   const publicUrl = `http://127.0.0.1:${port}`;
-  return startHost(oidcEnv(provider, publicUrl, extraEnv));
+  return startHost(oidcEnv(provider, publicUrl, extraEnv), sessionStoreFile);
 }
 
 interface LoginStart {
@@ -772,6 +775,49 @@ describe("OIDC 模式", () => {
     assert.equal(session.status, 401);
     assert.equal(session.json?.message, "会话无效");
     assert.equal(session.headers.get("cache-control"), "no-store");
+  });
+
+  it("会话持久化：同一会话文件在 host 重建后仍保持登录（Docker 升级场景）", async () => {
+    const provider = new MockOidcProvider();
+    await provider.start();
+    provider.userinfo = { sub: "user-1", email: "alice@corp.example" };
+    const storeDir = mkdtempSync(path.join(tmpdir(), "flowlet-session-store-"));
+    const storeFile = path.join(storeDir, "admin-sessions.json");
+    try {
+      const first = await startOidcHost(provider, {}, storeFile);
+      const session = await loginFlow(first, provider);
+      assert.ok(existsSync(storeFile), "登录成功后会话应写入持久化文件");
+      // 落盘的是会话 key 的 sha256，不应出现原始 cookie 值。
+      const raw = readFileSync(storeFile, "utf8");
+      assert.ok(!raw.includes(session.sessionCookie.split("=")[1] ?? "__never__"), "不得落盘原始 cookie");
+
+      // 模拟容器重启：旧 host 关闭，新 host 用同一个会话文件。
+      await first.close();
+      const second = await startOidcHost(provider, {}, storeFile);
+      const resumed = await request(second.baseUrl, "/api/session", {
+        headers: { cookie: session.sessionCookie },
+      });
+      assert.equal(resumed.status, 200);
+      const identity = (resumed.json?.identity ?? {}) as Record<string, unknown>;
+      assert.equal(identity.email, "alice@corp.example");
+      assert.equal(identity.provider, "GitLab");
+      const csrf = resumed.json?.csrf_token as string | undefined;
+      assert.ok(csrf, "恢复的会话应带回 CSRF token");
+      // 恢复后的会话仍可执行受保护命令（CSRF 校验通过）。
+      const command = await request(second.baseUrl, "/api/commands/ipc_ping", {
+        method: "POST",
+        headers: {
+          cookie: session.sessionCookie,
+          origin: second.baseUrl,
+          "x-csrf-token": csrf,
+          "content-type": "application/json",
+        },
+        body: "{}",
+      });
+      assert.equal(command.status, 200);
+    } finally {
+      rmSync(storeDir, { recursive: true, force: true });
+    }
   });
 });
 

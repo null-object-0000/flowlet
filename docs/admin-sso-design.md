@@ -914,7 +914,7 @@ CLI 授权补充路由（2026-11 新增，详见 5.1.1）：
 
 1. 配置：模式、必填项、issuer http 限制、名单与 `ALLOW_ANY` 互斥、TTL 关系、
    `ALLOWED_SUBS` 解析。
-2. 会话：创建/命中/空闲过期/绝对过期/轮换/上限淘汰/注销/重启即失效（重建 store）。
+2. 会话：创建/命中/空闲过期/绝对过期/轮换/上限淘汰/注销；Node Host（Docker / headless）把会话写穿到数据卷 `admin-sessions.json`，重启后仍有效（Rust 桌面/headless 仍为纯内存，重启即失效）。
 3. Cookie：https/http 名称与 `Secure` 组合；`__Host-` 前缀；清除头。
 4. CSRF：缺少/错误 `X-CSRF-Token` 403、Origin 不匹配 403、`Sec-Fetch-Site: cross-site`
    403、Bearer 不要求、会话轮换后旧 token 失效。

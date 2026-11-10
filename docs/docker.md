@@ -16,7 +16,7 @@ Web Host 与桌面端执行同一组后台维护任务：每 15 分钟做一次�
 
 本机 Agent 自动发现/写入配置、原生会话采集、桌面 WebView 控制台抓取和本机 OAuth 授权仍使用桌面端。Web 版不会扫描服务器上的个人 Agent 配置。
 
-「服务凭据」页面集中管理 Agent 接入所需的三方服务 token（provider：GitLab API v4，按 CE 10.8.7 实现；Dockhand 面板 API，Bearer Token）：token 经 ChaCha20-Poly1305 加密后存 SQLite，密钥文件 `secret.key` 在 `/data` 下并随命名卷备份；管理接口只返回 `••••1234` 掩码，保存时会实际请求上游校验（GitLab `GET /api/v4/user`、Dockhand `GET /api/environments`），失败不落库。同 provider 多实例用「环境别名（Env 前缀）」区分，`flowlet pull` 生成 `{PREFIX}_URL` / `{PREFIX}_TOKEN`（如三份 Dockhand 得到 `DOCKHAND_NA_URL` / `DOCKHAND_SZ_URL` / `DOCKHAND_SELF_URL`）。页面还提供「本机接入」下载引导：可直接下载 `install-flowlet.sh`、CLI 与 Skills 包（`/downloads/`），用一条 `curl ... | sh` 命令在 Agent 机器安装 `flowlet`。安装后在 Agent 机器上执行
+「服务凭据」页面集中管理 Agent 接入所需的三方服务 token（provider：GitLab API v4，按 CE 10.8.7 实现；Dockhand 面板 API，Bearer Token；Jenkins REST API，用户名 + API Token 的 Basic 认证）：token 经 ChaCha20-Poly1305 加密后存 SQLite，密钥文件 `secret.key` 在 `/data` 下并随命名卷备份；管理接口只返回 `••••1234` 掩码，保存时会实际请求上游校验（GitLab `GET /api/v4/user`、Dockhand `GET /api/environments`、Jenkins `GET /me/api/json`），失败不落库。同 provider 多实例用「环境别名（Env 前缀）」区分，`flowlet pull` 生成 `{PREFIX}_URL` / `{PREFIX}_TOKEN`（Jenkins 额外生成 `{PREFIX}_USER`；如三份 Dockhand 得到 `DOCKHAND_NA_URL` / `DOCKHAND_SZ_URL` / `DOCKHAND_SELF_URL`）。页面还提供「本机接入」下载引导：可直接下载 `install-flowlet.sh`、CLI 与 Skills 包（`/downloads/`），用一条 `curl ... | sh` 命令在 Agent 机器安装 `flowlet`。安装后在 Agent 机器上执行
 `flowlet login --server=http://<服务器地址>:20134`，在浏览器登录管理台并确认授权（loopback + PKCE；OIDC 实例走实例配置的登录方式），
 CLI 只保存一把 **仅能读服务凭据** 的本机授权（`~/.config/flowlet/credentials/auth.json`，30 天有效，
 可在管理台「服务凭据 → 本机接入 → 已授权的 CLI」撤销）；随后
@@ -52,8 +52,9 @@ docker compose logs -f flowlet
 
 管理凭据与模型调用密钥分别鉴权。管理凭据不能调用模型，调用密钥不能访问管理接口。未设置 `FLOWLET_CLIENT_TOKEN` 时，首次启动随机生成调用密钥并保存到数据卷，后续重启继续使用。
 token 模式的浏览器凭据仅保存在当前标签页的 sessionStorage 中；OIDC 模式改用 HttpOnly 会话 Cookie，
-重启容器会使所有管理会话失效，需要重新登录。HTTP 部署下 Cookie 不带 `Secure`，只应在可信内网使用；
-需要公网访问时请在入口配置 HTTPS。
+会话记录（Cookie 的 sha256、身份、CSRF token、过期时间）同时写入数据卷 `/data/admin-sessions.json`（0600），
+因此 Node Host 重启/升级后管理台仍然保持登录（Rust 回滚镜像为纯内存会话，切回后需要重新登录）。
+HTTP 部署下 Cookie 不带 `Secure`，只应在可信内网使用；需要公网访问时请在入口配置 HTTPS。
 
 构建时若 Debian 官方源较慢，可在 `.env` 中设置 `DEBIAN_MIRROR=http://mirrors.tuna.tsinghua.edu.cn` 后重新构建。替换范围仅限构建容器的软件源，仍使用 Debian 仓库签名验证；参见 [TUNA Debian 镜像说明](https://mirrors.tuna.tsinghua.edu.cn/help/debian/)。Docker Hub 基础镜像需要由宿主机拉取，`DEBIAN_MIRROR` 不替代 Docker 镜像仓库。
 
@@ -101,6 +102,33 @@ OIDC 模式不内置任何 client secret；GitLab 应用 Secret 只放在 `.env`
 > 注意：`--token` 仅适用于 token 模式（或显式 `FLOWLET_ADMIN_ALLOW_TOKEN_LOGIN=1` 的紧急兜底）。
 > 线上 OIDC-only 实例（20134）用它必然 401，而 `flowlet login` 不需要也不接受任何管理凭据。
 
+## 升级与停机窗口（Node Host）
+
+Docker 版升级只替换 `flowlet` 容器，**不重建 `flowlet-egress`**（经代理的 OpenAI 请求不会因升级中断）。
+默认发布路径（技能 `flowlet-docker-deploy`）是：
+
+1. 用当前运行镜像做基础层，把改动过的 `packages/flowlet-core/src` 文件 overlay 成新镜像（秒级，不做 npm/Rust 全量构建）；
+2. 更新 Dockhand stack 文件里的 `services.flowlet.image`，但**不触发 compose 重启**；
+3. 通过 Docker Engine API 创建新容器 → 停旧容器（新 Host 快速退出）→ 启动新容器 → `/health` 200 后接管 → 删除旧容器并把名字改回 `flowlet`。
+
+停机窗口由三部分组成（2026-11-10 生产实测）：
+
+| 阶段 | 耗时 |
+| --- | --- |
+| 旧容器 SIGTERM → 进程退出 | 约 0.7s（在途请求宽限 `FLOWLET_SHUTDOWN_ABORT_MS` 250ms，随后强制断开） |
+| Docker 端口/代理切换 | 约 0.3–0.4s |
+| 新容器启动 → 监听 `/health` | 约 1.3s |
+| **使用端实际不可用窗口** | **约 2–3s**（同一实例升级前为 30s，因为旧 Host 会等最长 SSE 自然结束直到 `stop_grace_period`） |
+
+注意：
+
+- 切换瞬间**在途的长 SSE 流会被中断**（宽限 250ms 之后强制断开）；短请求通常能在宽限内完成。
+  真正零中断需要「稳定入口反向代理 + 蓝绿双实例 + 旧实例排空」，当前未实施。
+- 不要在 Dockhand 面板上直接点 stack 重启：它会 `forceRecreate` 整个栈（含 egress），退化成 30s 级的
+  egress 重启窗口。发布用技能脚本的 `deploy` 子命令。
+- 回滚只换镜像 tag，不动数据卷：`python3 scripts/flowlet_deploy.py deploy --tag <旧 tag>`。
+- 发布前建议先 `canary --tag <新镜像>`：canary 实例（20234/20235，独立数据卷、token 模式）冒烟通过后再切生产。
+
 ## 配置与数据
 
 | 环境变量 | 默认值 / 用途 |
@@ -129,6 +157,8 @@ OIDC 模式不内置任何 client secret；GitLab 应用 Secret 只放在 `.env`
 | `FLOWLET_CONFIG_PATH` | 数据库同目录的 `config.json`，不存在时生成内置默认副本 |
 | `FLOWLET_STATIC_DIR` | `/app/ui` |
 | `FLOWLET_CATALOG_DIR` | `/data/catalogs`，价格目录同步文件持久化位置 |
+| `FLOWLET_SHUTDOWN_ABORT_MS` | 进程退出时在途请求的宽限毫秒数，默认 `250`；超时后强制断开连接，避免容器 stop 被长 SSE 拖到 `stop_grace_period` |
+| `FLOWLET_SHUTDOWN_HARD_EXIT_MS` | 关闭硬超时毫秒数，默认 `2000`；超过后直接退出进程 |
 | `RUST_LOG` | `info`（Rust 版；Node Host 不使用） |
 | `NODE_ENV` | `production`（Node Host） |
 

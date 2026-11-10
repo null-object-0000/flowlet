@@ -5,12 +5,15 @@
 // - oidc 模式：GitLab 等标准 OIDC 授权码登录 + 进程内 HttpOnly Cookie 会话 + CSRF，
 //   可选 ALLOW_TOKEN_LOGIN 兜底 Bearer。
 //
-// 只使用 node:crypto / 全局 fetch，不引入第三方依赖。所有状态在内存中，重启即失效
-// （v1 有意接受，见 docs/admin-sso-design.md §7.2）。
+// 只使用 node:crypto / 全局 fetch，不引入第三方依赖。会话默认在内存中；Node Host
+// （Docker / headless）会注入文件型 AdminSessionStore，把会话落到 `/data`，
+// 这样容器重启/升级不再把管理台登录态全部踢掉（见 web/session-store.ts）。
+// Rust 桌面/headless 仍为纯内存实现，行为差异只在「重启后是否重新登录」。
 import { createHash, createPublicKey, createHmac, randomUUID, timingSafeEqual, verify as cryptoVerify } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 import type { JsonRow } from "../types.ts";
+import type { AdminSessionStore, PersistedAdminSession } from "./session-store.ts";
 
 const ADMIN_COOKIE = "flowlet-admin";
 const ADMIN_COOKIE_SECURE = "__Host-flowlet-admin";
@@ -97,7 +100,12 @@ interface Session {
   createdMs: number;
   lastSeenMs: number;
   absoluteExpireMs: number;
+  /** 最近一次写回持久化存储的时间（0 = 尚未写回）；用于限流 lastSeen 落盘。 */
+  persistedAtMs: number;
 }
+
+/** lastSeen 落盘间隔：空闲超时是分钟级，60s 的精度足够，且避免每个请求都写文件。 */
+const SESSION_PERSIST_INTERVAL_MS = 60 * 1000;
 
 interface Transaction {
   nonce: string;
@@ -506,18 +514,27 @@ export class AdminAuth {
   #transactions = new Map<string, Transaction>();
   #discovery: Cached<DiscoveryDoc> | null = null;
   #jwks: Cached<Jwk[]> | null = null;
+  #sessionStore: AdminSessionStore | null;
 
-  private constructor(config: AdminAuthConfig) {
+  private constructor(config: AdminAuthConfig, sessionStore: AdminSessionStore | null = null) {
     this.config = config;
+    this.#sessionStore = sessionStore;
   }
 
-  static fromConfig(config: AdminAuthConfig): AdminAuth {
-    return new AdminAuth(config);
+  static fromConfig(config: AdminAuthConfig, sessionStore: AdminSessionStore | null = null): AdminAuth {
+    return new AdminAuth(config, sessionStore);
   }
 
-  /** Rust `AdminAuth::from_env`；fallbackToken 仅用于宿主程序化注入（测试/embedding）。 */
-  static fromEnv(env: NodeJS.ProcessEnv = process.env, fallbackToken?: string): AdminAuth {
-    return new AdminAuth(adminAuthConfigFromEnv(env, fallbackToken));
+  /**
+   * Rust `AdminAuth::from_env`；fallbackToken 仅用于宿主程序化注入（测试/embedding）。
+   * sessionStore 仅由 Node Host 注入：提供时 cookie 会话跨进程重启保留。
+   */
+  static fromEnv(
+    env: NodeJS.ProcessEnv = process.env,
+    fallbackToken?: string,
+    sessionStore: AdminSessionStore | null = null,
+  ): AdminAuth {
+    return new AdminAuth(adminAuthConfigFromEnv(env, fallbackToken), sessionStore);
   }
 
   mode(): AuthMode {
@@ -557,20 +574,65 @@ export class AdminAuth {
     const cookie = cookieValue(headers, this.adminCookieName());
     if (cookie === null) return null;
     const key = sha256Hex(cookie);
-    const session = this.#sessions.get(key);
-    if (!session) return null;
     const now = nowMs();
+    const session = this.#loadSession(key);
+    if (session === null) return null;
     if (now >= session.absoluteExpireMs || now - session.lastSeenMs > this.config.sessionIdleMs) {
       this.#sessions.delete(key);
+      this.#sessionStore?.remove(key);
       return null;
     }
     session.lastSeenMs = now;
+    this.#persistSession(key, session, now, false);
     return {
       viaCookie: true,
       csrfToken: session.csrfToken,
       identity: { ...session.identity, groups: [...session.identity.groups] },
       sessionKey: key,
     };
+  }
+
+  /** 内存优先；缺失时尝试从持久化存储恢复（容器重启后的第一次请求）。 */
+  #loadSession(key: string): Session | null {
+    const inMemory = this.#sessions.get(key);
+    if (inMemory !== undefined) return inMemory;
+    const store = this.#sessionStore;
+    if (store === null) return null;
+    const persisted = store.load(key);
+    if (persisted === null) return null;
+    const restored: Session = {
+      identity: { ...persisted.identity, groups: [...persisted.identity.groups] },
+      csrfToken: persisted.csrfToken,
+      createdMs: persisted.createdMs,
+      lastSeenMs: persisted.lastSeenMs,
+      absoluteExpireMs: persisted.absoluteExpireMs,
+      persistedAtMs: persisted.lastSeenMs,
+    };
+    this.#sessions.set(key, restored);
+    return restored;
+  }
+
+  /**
+   * 写回持久化存储。lastSeen 变更按 SESSION_PERSIST_INTERVAL_MS 限流；
+   * force=true 用于新建/销毁这类必须立即落盘的动作。
+   */
+  #persistSession(key: string, session: Session, now: number, force: boolean): void {
+    const store = this.#sessionStore;
+    if (store === null) return;
+    if (!force && now - session.persistedAtMs < SESSION_PERSIST_INTERVAL_MS) return;
+    session.persistedAtMs = now;
+    store.save({
+      key,
+      identity: { ...session.identity, groups: [...session.identity.groups] },
+      csrfToken: session.csrfToken,
+      createdMs: session.createdMs,
+      lastSeenMs: session.lastSeenMs,
+      absoluteExpireMs: session.absoluteExpireMs,
+    });
+  }
+
+  #sessionExpired(session: PersistedAdminSession, now: number): boolean {
+    return now >= session.absoluteExpireMs || now - session.lastSeenMs > this.config.sessionIdleMs;
   }
 
   verifyCsrf(
@@ -611,21 +673,30 @@ export class AdminAuth {
     for (const [sessionKey, session] of this.#sessions) {
       const expired =
         now >= session.absoluteExpireMs || now - session.lastSeenMs > this.config.sessionIdleMs;
-      if (expired) this.#sessions.delete(sessionKey);
+      if (expired) {
+        this.#sessions.delete(sessionKey);
+        this.#sessionStore?.remove(sessionKey);
+      }
     }
-    this.#sessions.set(key, {
+    this.#sessionStore?.prune((session) => this.#sessionExpired(session, now));
+    const session: Session = {
       identity: { ...identity, groups: [...identity.groups] },
       csrfToken: csrf,
       createdMs: now,
       lastSeenMs: now,
       absoluteExpireMs: now + this.config.sessionTtlMs,
-    });
+      persistedAtMs: now,
+    };
+    this.#sessions.set(key, session);
+    this.#persistSession(key, session, now, true);
     return { raw, csrf };
   }
 
   #destroySession(context: AuthContext): boolean {
     if (context.sessionKey === null) return false;
-    return this.#sessions.delete(context.sessionKey);
+    const removed = this.#sessions.delete(context.sessionKey);
+    this.#sessionStore?.remove(context.sessionKey);
+    return removed;
   }
 
   // ── OIDC discovery / JWKS ────────────────────────────────────────────────

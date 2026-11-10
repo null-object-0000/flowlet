@@ -21,6 +21,7 @@ import { SqliteStorage } from "./storage/index.ts";
 import { createProxyController } from "./proxy/index.ts";
 import { createWebHost } from "./web/index.ts";
 import { AdminAuth } from "./web/auth.ts";
+import { openAdminSessionStore } from "./web/session-store.ts";
 import { createHostScheduler } from "./host/scheduler.ts";
 import { SecretBox } from "./storage/secret-box.ts";
 import {
@@ -40,6 +41,17 @@ const REPO_ROOT = resolve(fileURLToPath(new URL("../../..", import.meta.url)));
 function envOr(name: string, fallback: string): string {
   const value = process.env[name];
   return value === undefined || value === "" ? fallback : value;
+}
+
+/** 进程退出相关的默认值：宽限 1s 让短请求收尾，5s 硬超时兜底。 */
+const DEFAULT_SHUTDOWN_ABORT_MS = 250;
+const DEFAULT_HARD_EXIT_MS = 2000;
+
+function readNonNegativeMs(raw: string | undefined, fallback: number): number {
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  return Math.floor(parsed);
 }
 
 /** 与 Rust headless 完全一致的 env → HostOptions 解析。 */
@@ -153,9 +165,11 @@ function parseAddr(addr: string): { host: string; port: number } {
 }
 
 export async function startHost(options: HostOptions): Promise<{ close(): Promise<void> }> {
-  // 与 Rust headless 顺序一致：先解析管理端鉴权配置（配置错误在打开数据库之前失败）。
-  const auth = AdminAuth.fromEnv();
   const dataDir = dirname(options.dbPath);
+  // 管理端 OIDC 会话持久化：容器重启/升级不再让所有管理台登录失效（token 模式不产生会话）。
+  const sessionStore = openAdminSessionStore(join(dataDir, "admin-sessions.json"));
+  // 与 Rust headless 顺序一致：先解析管理端鉴权配置（配置错误在打开数据库之前失败）。
+  const auth = AdminAuth.fromEnv(process.env, undefined, sessionStore);
   const deviceIdentity = loadOrCreateDeviceIdentity(dataDir);
   // 三方服务凭据的静态加密密钥：secret.key 随数据卷（Docker /data）持久化。
   const secrets = SecretBox.loadOrCreate(dataDir);
@@ -203,6 +217,7 @@ export async function startHost(options: HostOptions): Promise<{ close(): Promis
     clientToken,
     bindConfig,
     configPath: options.configPath,
+    shutdownAbortMs: readNonNegativeMs(process.env.FLOWLET_SHUTDOWN_ABORT_MS, DEFAULT_SHUTDOWN_ABORT_MS),
   });
   await proxy.start();
 
@@ -239,20 +254,55 @@ export async function startHost(options: HostOptions): Promise<{ close(): Promis
   scheduler?.start();
 
   let closing = false;
+  let signalled = false;
+  let signalledAt = 0;
   const close = async (): Promise<void> => {
     if (closing) return;
     closing = true;
+    const startedMs = Date.now();
     scheduler?.stop();
+    const schedulerMs = Date.now() - startedMs;
     await web.close();
-    await proxy.stop();
+    const webMs = Date.now() - startedMs - schedulerMs;
+    // dispose 而不是 stop：Docker 升级时容器 stop 不能等长 SSE 自然结束，
+    // 否则 stop_grace_period（30s）就是使用端的停机时间。
+    await proxy.dispose();
+    const proxyMs = Date.now() - startedMs - schedulerMs - webMs;
     storage.close();
+    const storageMs = Date.now() - startedMs - schedulerMs - webMs - proxyMs;
+    console.log(
+      `关闭阶段耗时：web ${webMs}ms / proxy ${proxyMs}ms / storage ${storageMs}ms / 合计 ${Date.now() - startedMs}ms`,
+    );
   };
 
-  const onSignal = (): void => {
-    void close().then(() => process.exit(0));
+  const onSignal = (signal: NodeJS.Signals): void => {
+    // 第二次信号 = 立即退出（运维手动 kill 时不用再等）。
+    if (signalled) {
+      console.error(`Flowlet Node Host 收到第二个 ${signal}，立即退出`);
+      process.exit(0);
+    }
+    signalled = true;
+    signalledAt = Date.now();
+    console.log(`Flowlet Node Host 收到 ${signal}，开始优雅关闭`);
+    const hardExitMs = readNonNegativeMs(process.env.FLOWLET_SHUTDOWN_HARD_EXIT_MS, DEFAULT_HARD_EXIT_MS);
+    const hardExit = setTimeout(() => {
+      console.error(`Flowlet Node Host 关闭超过 ${hardExitMs}ms，强制退出`);
+      process.exit(0);
+    }, hardExitMs);
+    hardExit.unref?.();
+    void close().then(
+      () => {
+        console.log(`关闭完成：收到 ${signal} 到进程退出 ${Date.now() - signalledAt}ms`);
+        process.exit(0);
+      },
+      (error: unknown) => {
+        console.error("Flowlet Node Host 关闭异常：", error instanceof Error ? error.message : error);
+        process.exit(0);
+      },
+    );
   };
-  process.once("SIGTERM", onSignal);
-  process.once("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
+  process.on("SIGINT", onSignal);
 
   return { close };
 }

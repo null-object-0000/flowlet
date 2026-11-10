@@ -261,3 +261,19 @@ node scripts/e2e-node-host.mjs            # 端到端冒烟（含 mock 上游流
 | 生产验证 | 镜像 tag / healthy；`/api/auth/config` 仍 oidc + `token_login=false`；未鉴权 `reveal_service_credential` 401；UI 包含 `reveal_service_credential` 与「查看原始 token」文案；`service_credentials` 1 条保留；`/v1/models` 200（4 个模型）、`deepseek-v4.1-flash` 流式 `[DONE]` |
 | 回滚 | `flowlet_deploy.py deploy --tag flowlet:node-20261110-logintext` |
 | 权限边界 | Rust Host（桌面）未实现该命令，桌面端调用失败并提示「无法查看原始 token」；CLI token 作用域不变（仍只能 `export_service_credentials`） |
+
+## 升级停机窗口优化（快速退出 + 会话持久化）发布记录（2026-11-10 14:16）
+
+| 项 | 值 |
+| --- | --- |
+| 背景 | 每次 Docker 升级都会重建容器：旧 Host 的 `proxy.stop()` 会等最长 SSE 自然结束，直到 `stop_grace_period` 30s 被 SIGKILL，使用端实测停机约 30s；Dockhand `forceRecreate` 还会连带重建 `flowlet-egress`，经代理的 OpenAI 请求同时 502 |
+| 内容 | ① Host 退出走 `proxy.dispose()`：关闭监听后只宽限 `FLOWLET_SHUTDOWN_ABORT_MS`（默认 250ms）就强制断开在途连接，`FLOWLET_SHUTDOWN_HARD_EXIT_MS`（默认 2000ms）兜底，第二次信号立即退出；上游连接池关闭限时 150ms，不再拖住停机。② OIDC 会话写穿到 `/data/admin-sessions.json`（0600，存 Cookie 的 sha256/身份/CSRF/过期时间），重启/升级不再把管理台登录态全部踢掉；token 模式不产生会话文件。③ 发布脚本改为「overlay 构建 + 仅替换 flowlet 容器」：更新 stack 文件但不触发 compose 重启，新容器先创建、旧容器停止后立刻启动新容器，egress 全程不重启 |
+| 镜像 | `flowlet:node-20261110-fastshutdown5`（`sha256:9124dbc20dd9`，249 MB，作为 `flowlet:node-20261110-usagerepair` 的 overlay） |
+| overlay 文件 | `src/index.ts`、`src/proxy/index.ts`、`src/web/auth.ts`、`src/web/session-store.ts`（新文件）；`flowlet:node-20261110-usagerepair` 里含当时尚未提交的 `reveal_service_credential`，未整树重建，只叠加本次改动 |
+| 部署 | 2026-11-10 14:16 起多次替换验证；`stack` 文件已指向新镜像，`/data` 卷不动 |
+| 实测窗口 | 旧容器 SIGTERM → 退出 **0.72s**（关闭阶段 web 1ms / proxy 485ms / storage 231ms）；新容器启动 → `/health` **1.37s**；使用端探测到不可用 **约 3.1s**（优化前同一实例 30–32s）。egress 未重建 |
+| 验证 | 每次替换后 `/health` 200、`/api/auth/config` = oidc、`/v1/models` 200、`deepseek-v4.1-flash` 流式 3/3 读到 `[DONE]`；`/data/admin-sessions.json` 由真实 GitLab 登录产生（一条会话，key 为 64 位 sha256，无原始 Cookie） |
+| 测试 | `node --test packages/flowlet-core/src`：224 tests / 0 fail（新增 `__tests__/shutdown.test.ts`：在途未完成请求下 SIGTERM <3s 退出且端口可立即重绑；`web/__tests__/session-store.test.ts`；auth 新增「同一会话文件跨 host 重建仍登录」）；`tsc -p packages/flowlet-core/tsconfig.json` 0 错误 |
+| 回滚 | `flowlet_deploy.py deploy --tag flowlet:node-20261110-fastshutdown4`（上一版）或 `flowlet:node-20261110-usagerepair`；Rust 镜像的回滚点仍是 `flowlet:docker-20261109-gitlab-sso`（会话为纯内存，切回需重新登录） |
+| 已知限制 | 切换瞬间在途长 SSE 会被中断（宽限 250ms 后强制断）；真正零中断需要入口反代 + 蓝绿双槽，未实施。通过 API 手动创建的容器带有旧 `com.docker.compose.config-hash` 标签，Dockhand 面板可能显示与栈文件不同步；下一次 compose 重启会自行重建 |
+

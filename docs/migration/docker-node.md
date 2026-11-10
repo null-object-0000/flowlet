@@ -216,3 +216,16 @@ node scripts/e2e-node-host.mjs            # 端到端冒烟（含 mock 上游流
 - `cleanupOldLogs` 删行后不额外 GC 已 `cleared` 的 orphan compacted 段（Rust 同样不回收）。
 - 与 Rust 保持一致、未额外实现：仅 RS256、`client_secret_basic`、无 `REQUIRE_EMAIL_VERIFIED`/`CA_FILE`/
   Sec-Fetch-Site 校验等（设计文档中列为 v1 非目标）。
+
+## 会话标题/项目派生发布记录（2026-11-10 13:31）
+
+| 项 | 值 |
+| --- | --- |
+| 内容 | Web Host「会话管理」的会话标题与项目目录由代理侧从请求体派生（`proxy/session-derive.ts` → `agent_session_metadata` 表 → 会话聚合 `LEFT JOIN`），规则见 [agent-session-metadata.md](../agent-session-metadata.md)；前端搜索框与 Web 说明同步 |
+| 代码 | 提交 `582117d`（同一提交含此前未提交、但已上线的 webchannels/服务凭据/CLI 工作树状态） |
+| 构建 | Docker Engine API `POST /build`（197s）→ `flowlet:node-20261110-sessionmeta`（`sha256:9c1374a8…`，260 MB） |
+| 部署 | 13:30:34 经 Dockhand 仅替换 `services.flowlet.image`（`forceRecreate`），05:31:06Z healthy；新容器冒烟（临时容器 + 空卷）通过 |
+| compose 备份 | `.agents/skills/flowlet-docker-deploy/.work/compose.before-20261110-133034.yaml` |
+| 验证 | 生产：`agent_session_metadata` 表存在；带 `x-claude-code-session-id` 的 Anthropic 流式请求后，DB 出现 `title=验证会话标题派生`、`project_path=/tmp/flowlet-sessionmeta-verify`、`source=derived`，请求日志 200 无错误；部署后 91 条请求 0 真实错误、0 `stream_cancelled`；UI chunk 与本地 `dist-web` 字节一致 |
+| 并发说明 | 13:32:58 另一个并发会话构建了 `flowlet:node-20261110-cliauth` 并于 13:35:02 覆盖线上镜像；该镜像构建自同一工作树（含本提交），实测新请求仍写入 `agent_session_metadata`，功能未丢失。当前线上 = `flowlet:node-20261110-cliauth` |
+| 回滚 | `flowlet_deploy.py deploy --tag flowlet:node-20261110-sessionmeta`（本次发布镜像）或 `flowlet:node-20261110-localaccess-channels`（发布前 stack 值）；DB schema 只增不改 |

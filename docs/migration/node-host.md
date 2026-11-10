@@ -22,7 +22,7 @@
 | 后台任务 | 余额同步（30s 后首次，每 5min）、存储清理（15min 后首次，每 15min）、目录同步（1h 后首次，每 1h）；已实现于 `host/scheduler.ts`（见 `docker-node.md` 的差异说明） |
 | 健康检查 | `GET /health` → 200 `{"status":"ok"}`（不经鉴权） |
 
-## 2. Web Host 命令契约（43 条，必须逐条等价）
+## 2. Web Host 命令契约（49 条，必须逐条等价）
 
 权威实现：`src-tauri/src/core/web/commands.rs` + `mod.rs`。
 - 鉴权：`Authorization: Bearer <admin_token>`，HMAC-SHA256 常量时间比较；失败 401 `{"code":"unauthorized","message":"管理凭据无效，请重新登录"}`；所有 API 响应 `Cache-Control: no-store`。
@@ -30,7 +30,9 @@
 - 错误：`(status, code, message)` → `{"code":..., "message":...}`；未知命令 501 `unsupported_in_web`。
 - 静态资源：SPA fallback 到 `index.html`；`/api/{*path}` 非命令路由必须 404，不能回退成功页面。
 
-43 条命令：`ipc_ping`、`list_channel_presets`、`list_channel_accounts`、`list_route_candidates`、`list_virtual_models`、`list_channel_models`、`save_channel_accounts`、`save_route_candidates`、`save_virtual_models`、`proxy_status`、`start_proxy`、`stop_proxy`、`get_proxy_bind_config`、`web_connection_info`、`set_proxy_bind_config`、`list_custom_scrape_channels`、`cleanup_old_logs`、`latest_balance_snapshots`、`save_balance_snapshot`、`query_balance`、`list_request_logs`、`list_known_devices`、`device_daily_usage`、`device_hourly_usage`、`list_request_log_clients`、`list_request_log_models`、`get_request_log_detail`、`list_agent_sessions`、`list_agent_session_children`、`account_routing_scores`、`usage_summary`、`usage_today_tokens`、`get_log_capture_config`、`set_log_capture_config`、`read_app_meta`、`write_app_meta`、`get_models_cn_catalog`、`get_models_dev_provider_catalog`、`get_models_cn_currencies`、`get_upstream_proxy_config`、`set_upstream_proxy_config`（另含 `web_connection_info`）。
+49 条命令（43 条基础 + 6 条服务凭据）：`ipc_ping`、`list_channel_presets`、`list_channel_accounts`、`list_route_candidates`、`list_virtual_models`、`list_channel_models`、`save_channel_accounts`、`save_route_candidates`、`save_virtual_models`、`proxy_status`、`start_proxy`、`stop_proxy`、`get_proxy_bind_config`、`web_connection_info`、`set_proxy_bind_config`、`list_custom_scrape_channels`、`cleanup_old_logs`、`latest_balance_snapshots`、`save_balance_snapshot`、`query_balance`、`list_request_logs`、`list_known_devices`、`device_daily_usage`、`device_hourly_usage`、`list_request_log_clients`、`list_request_log_models`、`get_request_log_detail`、`list_agent_sessions`、`list_agent_session_children`、`account_routing_scores`、`usage_summary`、`usage_today_tokens`、`get_log_capture_config`、`set_log_capture_config`、`read_app_meta`、`write_app_meta`、`get_models_cn_catalog`、`get_models_dev_provider_catalog`、`get_models_cn_currencies`、`get_upstream_proxy_config`、`set_upstream_proxy_config`、`list_credential_providers`、
+`list_service_credentials`、`save_service_credential`、`test_service_credential`、
+`delete_service_credential`、`export_service_credentials`（另含 `web_connection_info`）。
 
 ## 3. 代理契约（模型入口）
 
@@ -53,12 +55,14 @@ packages/flowlet-core/src/
   config/           [storage] config.json 读取/默认值合并/渠道预设初始化/RuntimeConfig 快照
   catalog/          [storage] model-catalog.json + models-cn/dev 目录读取与归一
   storage/          [storage] SQLite 打开/建表/迁移 + 全部读写方法；capture-store.ts（.flcap 帧）、
-                    prices.ts（目录派生价格表）
-  web/              [web] HTTP 服务、鉴权（token + OIDC SSO，auth.ts）、静态资源、43 命令 dispatch
+                    prices.ts（目录派生价格表）、secret-box.ts（ChaCha20-Poly1305）、
+                    credentials.ts（service_credentials 表 CRUD）
+  web/              [web] HTTP 服务、鉴权（token + OIDC SSO，auth.ts）、静态资源、49 命令 dispatch；
+                    gitlab.ts / credentials.ts（服务凭据）
   proxy/            [proxy] 模型入口、路由、转发、SSE、日志/用量落库
 scripts/
   web-parity.mjs    [web] Rust headless ↔ Node host 双实现对拍
-  e2e-node-host.mjs [docker] 端到端冒烟（mock 上游 + 43 命令 + 流式）
+  e2e-node-host.mjs [docker] 端到端冒烟（mock 上游 + 命令面 + 流式）；web-parity 另含 mock GitLab 凭据对拍
 Dockerfile          [docker] Node 运行时镜像（替换 Rust 构建阶段）
 docker-compose.yml  [docker] 保持 20134/20135/数据卷/环境变量不变
 ```
@@ -106,7 +110,7 @@ accountRoutingScores() / usageSummaryRange(startAt,endAt,groupBy,currentDeviceId
 ## 6. 验收（Docker 版本可替换 Rust 的判定）
 
 1. `npm run node:typecheck` 通过。
-2. 同一份数据副本：Node host 与 Rust `headless` 对 43 条命令逐条 `diff`（忽略时间戳/排序无关字段）差异清零 → `scripts/web-parity.mjs`。
+2. 同一份数据副本：Node host 与 Rust `headless` 对全部命令逐条 `diff`（忽略时间戳/排序/UUID 等无关字段）差异清零 → `scripts/web-parity.mjs`（当前 68 步，含 SSO 与服务凭据 mock GitLab）。
 3. Web UI 在 Node host 上打开，概览/模型服务/请求日志/用量页面数据与 Rust 版一致。
 4. 模型入口：mock 上游 + 真实上游各验证一次 `/v1/chat/completions` 流式、`/anthropic/v1/messages` 流式、`/v1/responses`；请求日志与用量落库字段与 Rust 一致。
 5. Docker 镜像可按现有部署契约构建并跑通 `/health` + 管理 API + 流式冒烟。

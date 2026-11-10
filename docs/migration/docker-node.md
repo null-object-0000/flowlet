@@ -57,7 +57,7 @@ OIDC 模式另验证 fail-closed（无会话/静态 token 均被拒）与不可�
    验收线：命令差异 0 + HTTP 差异 0（包含 `/api/session`、`/api/auth/*` 的 SSO 鉴权面）。
 2. **数据层**：用同一份生产库快照比较 `usage_summary` / `usage_today_tokens` / `list_request_logs`
    摘要（含 cost）、请求详情（.flcap 帧 hydrate）等。
-3. **容器冒烟**：用生产库快照起临时容器，验证 `/health`、鉴权、43 命令、`/v1/models`、静态界面。
+3. **容器冒烟**：用生产库快照起临时容器，验证 `/health`、鉴权、命令面（含服务凭据）、`/v1/models`、静态界面。
 4. **SSO**：用本地 mock OIDC Provider 跑单元测试（真实 GitLab 登录需线上 client secret，不在本地验证）。
 
 ## 本地验证（无 docker CLI）
@@ -101,12 +101,15 @@ node scripts/e2e-node-host.mjs            # 端到端冒烟（含 mock 上游流
 | GitLab OIDC SSO | `web/auth.ts`（30+ env 对齐、discovery/JWKS、RS256、PKCE/nonce、白名单、Cookie 会话、CSRF） | auth 单测 22/22；严格对拍 `/api/auth/*` 与 `/api/session` 0 差异；镜像 OIDC 模式冒烟 |
 | `.flcap` 捕获帧 | `storage/capture-store.ts`（FLCAP001 + 60B 头 + zstd + sha256 + 32MiB 分段 + compacted 重写） | 帧头/记录 JSON 逐字节一致；Rust↔Node 互读/互写/互清三场景全通过 |
 | 目录派生价格表 | `storage/prices.ts`（models-cn/models.dev/config 覆盖、分档、每日峰谷） | prod 目录构建 82 条；Rust 落库 cost 与 Node 重算完全相等 |
+| 三方服务凭据 | `storage/secret-box.ts`（ChaCha20-Poly1305，`secret.key` 随 `/data`）、`storage/credentials.ts`（service_credentials 表）、`web/gitlab.ts`（CE 10.8.7）、`web/credentials.ts`（6 条命令） | 单测 26 条；跨实现加解密（Node 写→Rust 导出 / Rust 写→Node 解密）通过；对拍含 mock GitLab 0 差异 |
 
 ## 残余差异（均为已知、非用户可见或与 Rust 一致）
 
 - zstd **压缩块字节**非逐字节一致（Rust libzstd 0.13.3 vs Node zlib 1.5.7，差 1 字节）；
   帧头里的长度按各自实际块写、checksum 覆盖原始 JSON，**跨语言互读已实测无损**。
 - 不写 `background_jobs` 后台任务日志（Rust 会写），改为结构化 stdout 行；不影响业务数据与页面。
+- `flowlet-cred` CLI 仍是 Rust 独立二进制（Agent 机器侧工具）；它通过
+  `POST /api/commands/export_service_credentials` 拉取凭据，Node Host 已实现同一契约，因此 CLI 无需移植即可继续使用。
 - `cleanupOldLogs` 删行后不额外 GC 已 `cleared` 的 orphan compacted 段（Rust 同样不回收）。
 - 与 Rust 保持一致、未额外实现：仅 RS256、`client_secret_basic`、无 `REQUIRE_EMAIL_VERIFIED`/`CA_FILE`/
   Sec-Fetch-Site 校验等（设计文档中列为 v1 非目标）。

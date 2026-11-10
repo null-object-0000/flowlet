@@ -277,3 +277,16 @@ node scripts/e2e-node-host.mjs            # 端到端冒烟（含 mock 上游流
 | 回滚 | `flowlet_deploy.py deploy --tag flowlet:node-20261110-fastshutdown4`（上一版）或 `flowlet:node-20261110-usagerepair`；Rust 镜像的回滚点仍是 `flowlet:docker-20261109-gitlab-sso`（会话为纯内存，切回需重新登录） |
 | 已知限制 | 切换瞬间在途长 SSE 会被中断（宽限 250ms 后强制断）；真正零中断需要入口反代 + 蓝绿双槽，未实施。通过 API 手动创建的容器带有旧 `com.docker.compose.config-hash` 标签，Dockhand 面板可能显示与栈文件不同步；下一次 compose 重启会自行重建 |
 
+
+## 环境前缀自动生成发布记录（2026-11-10 14:17）
+
+| 项 | 值 |
+| --- | --- |
+| 需求 | 「环境别名（Env 前缀）」不再要求手写：按已填的名称/备注自动生成，并对已有前缀自动避让 |
+| 规则 | 名称+备注中的 ASCII 片段拼成 `{provider 默认前缀}_{片段}`（「公司 Dockhand NA」→ `DOCKHAND_NA`）；纯中文名退化为默认前缀；与其它凭据冲突时追加 `_2`、`_3`；总长 ≤24 且满足 `^[A-Z][A-Z0-9_]{0,23}$`；与 provider 默认前缀同名的片段会被剔除（避免 `DOCKHAND_DOCKHAND`） |
+| 交互 | 新建时字段随名称/备注/服务类型实时更新，并提示「已按名称与备注自动生成，可直接修改」；手动输入后不再覆盖；输入框上方提供「自动生成」按钮可随时重新计算；编辑已有凭据时保留其已存前缀（视为手动设置），避免悄悄改名 |
+| 代码 | 判定函数 `suggestEnvPrefix` / `envPrefixSegment`（`src/domains/credentials/envPrefix.ts`）+ 表单接线（`CredentialsPage.tsx`）；单测 13 条（含冲突、纯中文、长度截断）+ 页面测试（预填避让、手动后不被覆盖、一键重算） |
+| 镜像 | `flowlet:node-20261110-autoprefix`（`sha256:2ba5f63d…`）：从当次一致的 HEAD `16fd9b5` + 本功能文件构建（工作树当时含并行会话未提交的 provider 扩展，刻意隔离） |
+| 部署 | 14:17:12 healthy；部署脚本本次走蓝绿切换（新容器 `/v1/models` 200 后 3.1s 完成，egress 未重建）；回滚点 `flowlet:node-20261110-fastshutdown5` |
+| 验证 | 生产 healthy；UI 包含「自动生成」「已按名称与备注自动生成」与既有「查看原始 token」「flowlet login」；`service_credentials` 3 条（`GITLAB` / `DOCKHAND_SELF` / `DOCKHAND_NA_PROD`）保留；重启后仅 Hermes `/v1/props` 404 噪声，无真实错误 |
+| 遗留 | 并行会话的 `89733c1`（快速退出 + 管理端会话持久化）已提交，但同一时刻其 Beszel/Uptime Kuma/Jenkins provider 仍为未提交 WIP，导致该 HEAD 自身 `tsc` 不通过（页面已引用未提交的 provider 类型）。因此本次镜像**未包含** `89733c1`；待该功能提交、HEAD 恢复可构建后，重新从 HEAD 构建即可同时带上两者 |

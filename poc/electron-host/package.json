@@ -1,0 +1,15 @@
+{
+  "name": "flowlet-electron-host-poc",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Flowlet migration PoC: Electron shell + Node command host that reuses the existing dist-web frontend",
+  "main": "main.mjs",
+  "scripts": {
+    "start": "electron .",
+    "server": "node server.mjs"
+  },
+  "devDependencies": {
+    "electron": "^45.2.3"
+  }
+}

@@ -1,0 +1,7 @@
+node_modules/
+.npm-cache/
+data/
+# 证据含真实账号数据（账号名/手机号/邮箱、上游抓取原文与一次性 token），禁止入库
+evidence/
+.electron-user-data/
+.electron-cache/

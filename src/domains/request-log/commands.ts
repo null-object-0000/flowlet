@@ -1,5 +1,5 @@
 import { invokeCommand, toAppError } from "../../platform/tauri/client";
-import type { RequestLogClient, RequestLogFilter, RequestLogModelOptions, RequestLogPage, RequestLogRow } from "./types";
+import type { RequestLogChannelAccountOptions, RequestLogClient, RequestLogFilter, RequestLogModelOptions, RequestLogPage, RequestLogRow } from "./types";
 
 export const requestLogCommands = {
   list: (filter: RequestLogFilter): Promise<RequestLogPage> =>
@@ -10,6 +10,7 @@ export const requestLogCommands = {
         status: filter.status,
         client_id: filter.clientId,
         channel_id: filter.channelId,
+        account_id: filter.accountId,
         search: filter.search,
         time_range: filter.timeRange,
         model: filter.model,
@@ -25,6 +26,9 @@ export const requestLogCommands = {
 
   models: (): Promise<RequestLogModelOptions> =>
     invokeCommand<RequestLogModelOptions>("list_request_log_models").catch(toRequestLogError("request_log_models_failed")),
+
+  channelAccounts: (): Promise<RequestLogChannelAccountOptions> =>
+    invokeCommand<RequestLogChannelAccountOptions>("list_request_log_channel_accounts").catch(toRequestLogError("request_log_channel_accounts_failed")),
 
   detail: (requestId: string): Promise<RequestLogRow[]> =>
     invokeCommand<RequestLogRow[]>("get_request_log_detail", { requestId }).catch(toRequestLogError("request_log_detail_failed")),

@@ -5,6 +5,7 @@ import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { agentSessionLabel, hermesSessionOrigin, type AgentSessionNativeSummary, type AgentSessionNativeUsage, type AgentSessionRow, type OpenCodePermissionRequest } from "../../domains/agent-session/types";
 import { useAgentSessionChildren, useAgentSessionNativeSummary, useOpenCodeSessionPermissions, useReplyOpenCodePermission } from "../../features/agent-sessions/useAgentSessions";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
+import { copyText } from "../../shared/ui/copyText";
 import { DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
 import { RefreshControl } from "../../shared/ui/RefreshControl";
 import { useRefreshControl } from "../../shared/ui/useRefreshControl";
@@ -13,6 +14,7 @@ import { formatCostAmount, formatNativeCost } from "../../shared/formatters/cost
 import { formatFullTimestamp, formatTimestamp } from "../../shared/formatters/datetime";
 import styles from "./AgentSessionDetailSideSheet.module.css";
 
+import { errorMessage } from "../../shared/errors/AppError";
 // 打开抽屉期间自动刷新当前 Tab 的间隔，与移动端会话详情抽屉（MobileSessionSheet）一致。
 const SESSION_AUTO_REFRESH_MS = 5_000;
 
@@ -215,7 +217,7 @@ function OpenCodeApprovalSection({ session, permissions }: { session: AgentSessi
       await reply.mutateAsync({ permissionId: request.id, decision });
       Toast.success(decision === "allow_once" ? t("已同意 OpenCode 本次操作") : t("已否决 OpenCode 操作"));
     } catch (error) {
-      Toast.error(t("OpenCode 操作提交失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
+      Toast.error(t("OpenCode 操作提交失败：{message}", { message: errorMessage(error) }));
     }
   };
 
@@ -329,7 +331,7 @@ function DetailItem({
   const { t } = useAppPreferences();
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(value);
+      await copyText(value);
       Toast.success(t("{label} 已复制", { label }));
     } catch {
       Toast.error(t("复制失败，请手动选择内容"));
@@ -516,7 +518,7 @@ function FlowletOnlyNotice() {
   return (
     <div className={styles.remoteNotice}>
       <strong>{t("仅 Flowlet 请求观测")}</strong>
-      <span>{t("Web 版从本实例的请求日志聚合会话，不读取服务器本机的 Agent 原生会话文件，因此不展示原生用量、原生时间线与实时权限确认。")}</span>
+      <span>{t("Web 版从本实例的请求日志聚合会话，不读取服务器本机的 Agent 原生会话文件，因此不展示原生用量、原生时间线与实时权限确认。会话标题与项目目录从请求体近似派生，客户端里手工改过的名称不会同步。")}</span>
     </div>
   );
 }

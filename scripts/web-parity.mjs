@@ -310,7 +310,7 @@ async function waitForHealth(url, processHandle, timeoutMs = 60_000) {
 
 function parseConfigForFilter(side) {
   // 只用于构造合法 LogsFilter 参数，不读取敏感字段。
-  return { page: 1, page_size: 25, status: "all", client_id: "", channel_id: "", search: "" };
+  return { page: 1, page_size: 25, status: "all", client_id: "", channel_id: "", account_id: "", search: "" };
 }
 
 function buildSteps(options = {}) {
@@ -328,6 +328,7 @@ function buildSteps(options = {}) {
   add("usage_today_tokens", {});
   add("list_request_log_clients", {});
   add("list_request_log_models", {});
+  add("list_request_log_channel_accounts", {});
   add("list_request_logs", {}, { prepare: () => ({ filter: parseConfigForFilter() }) });
   add("get_request_log_detail", { requestId: "parity-missing-request-id" });
   add("list_known_devices", {});

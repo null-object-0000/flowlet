@@ -691,6 +691,7 @@ const english: Record<string, string> = {
   "仅 Flowlet 观测": "Flowlet observation only",
   "仅 Flowlet 请求观测": "Flowlet request observation only",
   "Web 版从本实例的请求日志聚合会话，不读取服务器本机的 Agent 原生会话文件，因此不展示原生用量、原生时间线与实时权限确认。": "The Web host aggregates sessions from this instance's request logs and does not read local agent session files on the server, so native usage, native timeline, and live permission approval are not shown.",
+  "Web 版从本实例的请求日志聚合会话，不读取服务器本机的 Agent 原生会话文件，因此不展示原生用量、原生时间线与实时权限确认。会话标题与项目目录从请求体近似派生，客户端里手工改过的名称不会同步。": "The Web host aggregates sessions from this instance's request logs and does not read local agent session files on the server, so native usage, native timeline, and live permission approval are not shown. Session titles and project paths are approximated from request bodies, so names renamed in the client are not reflected.",
   "会话筛选": "Session filters",
   "运行状态": "Runtime status",
   "搜索会话 ID、父会话或模型": "Search session ID, parent session, or model",
@@ -1810,6 +1811,112 @@ const english: Record<string, string> = {
   "暂无可用模型": "No models available",
   "正在读取可用模型…": "Loading available models…",
   "当前没有可用的开放模型，请先在模型服务页开放模型。": "No exposed model is currently available. Expose a model on the Model Services page first.",
+
+  // 服务凭据（/credentials）
+  "服务凭据": "Service credentials",
+  "集中管理 Agent 接入所需的三方服务 token；保存前会实际校验实例与凭据": "Manage third-party service tokens used by Agent integrations; the instance and credential are verified before saving",
+  "添加凭据": "Add credential",
+  "Agent 机器上用 CLI 登录并同步到本地 .env：": "Sign in with the CLI on the Agent machine and sync to the local .env:",
+  "还没有服务凭据": "No service credentials yet",
+  "添加一个服务凭据后，Agent 就能通过 CLI 同步并使用它。": "Add a service credential and Agents can sync and use it through the CLI.",
+  "名称": "Name",
+  "服务": "Service",
+  "实例地址": "Instance URL",
+  "最近校验": "Last verified",
+  "从未校验": "Never verified",
+  "操作": "Actions",
+  "测试": "Test",
+  "编辑": "Edit",
+  "编辑服务凭据": "Edit service credential",
+  "添加服务凭据": "Add service credential",
+  "保存并校验": "Save and verify",
+  "服务类型": "Service type",
+  "例如：公司 {name}": "For example: Company {name}",
+  "备注": "Note",
+  "可选，例如用途或负责人": "Optional, e.g. purpose or owner",
+  "启用（停用后 CLI 同步会跳过）": "Enabled (CLI sync skips disabled credentials)",
+  "已保存": "Saved",
+  "已删除凭据": "Credential deleted",
+  "校验通过": "passed verification",
+  "校验失败": "failed verification",
+  "删除凭据": "Delete credential",
+  "删除后服务端会清除加密后的 token，已同步到 Agent 机器的 .env 不受影响。": "Deleting removes the encrypted token on the server; .env files already synced to Agent machines are not affected.",
+  "保存时会实际请求 {endpoint}；地址不可达或 token 无效时不会落库。内网自签证书请配置可信 CA。": "Saving performs a real request to {endpoint}; nothing is stored if the instance is unreachable or the token is invalid. Configure a trusted CA for internal self-signed certificates.",
+  "粘贴 Personal Access Token": "Paste the Personal Access Token",
+  "粘贴 API Token": "Paste the API Token",
+  "留空表示不修改现有 token": "Leave blank to keep the current token",
+  "Personal Access Token（需要 api scope）": "Personal Access Token (api scope required)",
+  "API Token（Dockhand 设置 → API 令牌）": "API Token (Dockhand settings → API tokens)",
+
+  // 服务凭据：多实例环境前缀 + 本机接入引导
+  "本机接入": "Local access",
+  "环境前缀": "Env prefix",
+  "环境别名（Env 前缀）": "Environment alias (Env prefix)",
+  "例如 {example}；留空使用默认 {prefix}": "e.g. {example}; leave blank for the default {prefix}",
+  "生成的环境变量：{url} / {token}；请填写完整前缀（如 {example}），同一服务的多实例需使用不同前缀。":
+    "Environment variables: {url} / {token}. Enter the full prefix (e.g. {example}); multiple instances of the same service need different prefixes.",
+  "环境前缀只能包含字母、数字和下划线，且以字母开头（最长 {max} 个字符）":
+    "The env prefix may only contain letters, digits and underscores, must start with a letter, and is at most {max} characters.",
+  "安装 CLI": "Install the CLI",
+  "在本机（Agent 所在机器）安装 flowlet 命令，需要 Node.js 22.6+。":
+    "Install the flowlet command on this machine (where the Agent runs). Node.js 22.6+ is required.",
+  "复制命令": "Copy command",
+  "安装命令已复制": "Install command copied",
+  "登录并同步凭据": "Sign in and sync credentials",
+  "两步完成：先用浏览器公司 SSO 授权本机 CLI，再同步启用中的服务凭据。本页不会收集管理凭据。":
+    "Two steps: authorize this machine's CLI with your company SSO in the browser, then sync the enabled service credentials. This page never collects admin credentials.",
+  "登录授权": "Sign in",
+  "登录命令已复制": "Sign-in command copied",
+  "打开浏览器用公司 SSO 授权；CLI 会拿到一把只能读取服务凭据的 token（30 天有效，可随时在下方撤销）。":
+    "Opens the browser for company SSO authorization. The CLI receives a token that can only read service credentials (valid for 30 days, revocable below at any time).",
+  "同步凭据": "Sync credentials",
+  "可重复执行，只同步启用中的服务凭据；已登录时无需再填任何管理凭据。":
+    "Safe to re-run; it only syncs enabled service credentials and needs no admin credential once signed in.",
+  "同步命令已复制": "Sync command copied",
+  "已授权的 CLI": "Authorized CLIs",
+  "这些授权来自 flowlet login，只能读取服务凭据；撤销后对应机器需要重新登录。":
+    "These authorizations come from flowlet login and can only read service credentials; after revoking, the machine must sign in again.",
+  "正在读取 CLI 授权…": "Loading CLI authorizations…",
+  "当前 Flowlet Host 暂不支持查看 CLI 授权列表；上面的登录与同步命令仍可使用，撤销请等服务端升级。":
+    "This Flowlet Host does not support listing CLI authorizations yet. The sign-in and sync commands above still work; wait for the server upgrade before revoking.",
+  "暂无 CLI 授权": "No CLI authorizations",
+  "未命名": "Unnamed",
+  "创建时间：{time}": "Created: {time}",
+  "到期时间：{time}": "Expires: {time}",
+  "最近使用：{time}": "Last used: {time}",
+  "从未使用": "Never used",
+  "撤销": "Revoke",
+  "撤销 CLI 授权": "Revoke CLI authorization",
+  "撤销后，该机器上的 flowlet pull 会返回 401，需要重新执行 flowlet login。":
+    "After revoking, flowlet pull on that machine returns 401 and requires running flowlet login again.",
+  "已撤销 CLI 授权": "CLI authorization revoked",
+  "撤销失败：{message}": "Revoke failed: {message}",
+  "安装 Skills": "Install Skills",
+  "下载 Skills 包后解压到你所用 Agent 的 skills 目录；本页不预设各客户端路径。":
+    "Download the Skills package and extract it into your Agent's skills directory. This page does not assume any client-specific path.",
+  "复制 Agent 提示词": "Copy Agent prompt",
+  "Agent 提示词已复制": "Agent prompt copied",
+  "下载 flowlet-skills.tar.gz": "Download flowlet-skills.tar.gz",
+  "包内为 flowlet-skills/flowlet-credentials/SKILL.md 与 README.md":
+    "The package contains flowlet-skills/flowlet-credentials/SKILL.md and README.md.",
+  "本机环境变量预览": "Local environment preview",
+  "同一个服务的多实例必须使用不同环境前缀，否则会生成相同的环境变量名。":
+    "Multiple instances of the same service must use different env prefixes, otherwise they generate identical environment variable names.",
+  "正在读取凭据…": "Loading credentials…",
+  "暂无已启用的服务凭据；添加并启用后会在这里显示对应的环境变量名。":
+    "No enabled service credentials yet. Add and enable one to see its environment variable names here.",
+  "前缀：{prefix}": "Prefix: {prefix}",
+  "下载产物": "Download artifacts",
+  "产物由当前 Flowlet 构建生成，随镜像一起发布。":
+    "Artifacts are generated by the current Flowlet build and shipped with the image.",
+  "正在读取下载信息…": "Loading download details…",
+  "无法读取下载信息：{message}。上面的安装与同步命令仍可直接使用。":
+    "Could not read download details: {message}. The install and sync commands above can still be used.",
+  "CLI 版本": "CLI version",
+  "生成时间：{time}": "Generated: {time}",
+
+  // 请求日志页「渠道账号」筛选
+  "全部渠道账号": "All channel accounts",
 };
 
 export type TranslationVariables = Record<string, string | number>;

@@ -65,6 +65,7 @@ interface StorageFacade {
   listRequestLogsByRequestId(requestId: string): JsonRow[];
   listRequestLogClients(): JsonRow[];
   listRequestLogModels(): JsonRow;
+  listRequestLogChannelAccounts(): JsonRow;
   cleanupOldLogs(keepDays: number): [number, number];
   listKnownDevices(identity: JsonRow): JsonRow[];
   deviceDailyUsage(currentDeviceId: string, deviceId?: string): JsonRow[];
@@ -135,7 +136,6 @@ const BALANCE_SNAPSHOT_REQUIRED = [
   "token_pack_remaining",
   "token_pack_expire_at",
   "token_packs",
-  "raw_scraped_json",
   "source",
   "synced_at",
   "remark",
@@ -150,7 +150,7 @@ function structArray(args: JsonRow, name: string, structName: string, required: 
 }
 
 const LOGS_FILTER_REQUIRED = ["page", "page_size", "status", "client_id", "channel_id", "search"];
-const LOGS_FILTER_OPTIONAL = ["time_range", "model", "model_kind", "start_at", "end_at", "token_status"];
+const LOGS_FILTER_OPTIONAL = ["time_range", "model", "model_kind", "start_at", "end_at", "token_status", "account_id"];
 
 function parseLogsFilter(args: JsonRow): JsonRow {
   const filter = argObject(args, "filter", "LogsFilter");
@@ -334,7 +334,7 @@ function parseServiceCredentialInput(args: JsonRow): ServiceCredentialInput {
       );
     }
   }
-  for (const field of ["id", "token", "kind", "note"]) {
+  for (const field of ["id", "token", "kind", "note", "envPrefix"]) {
     const item = value[field];
     if (item !== undefined && item !== null && typeof item !== "string") {
       throw CommandError.badRequest(
@@ -472,6 +472,8 @@ export async function dispatch(ctx: WebContext, command: string, rawArgs: unknow
       return s.listRequestLogClients();
     case "list_request_log_models":
       return s.listRequestLogModels();
+    case "list_request_log_channel_accounts":
+      return s.listRequestLogChannelAccounts();
     case "get_request_log_detail":
       return s.listRequestLogsByRequestId(argString(args, "requestId"));
 
@@ -545,6 +547,19 @@ export async function dispatch(ctx: WebContext, command: string, rawArgs: unknow
       return deleteCredential(ctx, argString(args, "id"));
     case "export_service_credentials":
       return exportCredentials(ctx);
+
+    // CLI 浏览器授权（`flowlet login`）：授权码由已登录会话签发，token 只读服务凭据。
+    case "create_cli_auth_code":
+      return ctx.cliAuth.authorize({
+        redirectUri: argString(args, "redirectUri"),
+        state: argString(args, "state"),
+        codeChallenge: argString(args, "codeChallenge"),
+        name: argOptionalString(args, "name"),
+      });
+    case "list_cli_auth_tokens":
+      return ctx.cliAuth.list();
+    case "revoke_cli_auth_token":
+      return ctx.cliAuth.revoke(argString(args, "id"));
 
     case "get_upstream_proxy_config":
       return { ...ctx.upstreamProxy };

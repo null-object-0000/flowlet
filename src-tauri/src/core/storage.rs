@@ -63,6 +63,8 @@ pub struct ServiceCredentialRow {
     pub secret_hint: String,
     pub kind: String,
     pub note: Option<String>,
+    /// 环境前缀（已归一大写）；旧行为 NULL，读取时按 provider 默认解析。
+    pub env_prefix: Option<String>,
     pub enabled: bool,
     pub created_at: String,
     pub updated_at: String,
@@ -960,6 +962,7 @@ impl Storage {
                 secret_hint        TEXT NOT NULL,
                 kind               TEXT NOT NULL DEFAULT 'cli_token',
                 note               TEXT,
+                env_prefix         TEXT,
                 enabled            INTEGER NOT NULL DEFAULT 1,
                 created_at         TEXT NOT NULL,
                 updated_at         TEXT NOT NULL,
@@ -1341,6 +1344,10 @@ impl Storage {
         )?;
 
         normalize_legacy_virtual_model_routes_schema(&connection)?;
+
+        // 服务凭据第二期：同一 provider 多实例用环境前缀区分环境变量名。
+        // 旧行保持 NULL，读取时按 provider 默认前缀解析，因此无需回填。
+        add_column_if_missing(&connection, "service_credentials", "env_prefix", "TEXT")?;
 
         add_column_if_missing(
             &connection,

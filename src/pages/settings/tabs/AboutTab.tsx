@@ -2,6 +2,7 @@ import { Button, Toast } from "@douyinfe/semi-ui-19";
 import { useState } from "react";
 import { useAppMeta } from "../../../features/settings/useAppMeta";
 import { SettingRow, SettingSection } from "../SettingRow";
+import { copyText } from "../../../shared/ui/copyText";
 import styles from "./AboutTab.module.css";
 import { useAppPreferences } from "../../../app/preferences/AppPreferences";
 
@@ -13,7 +14,7 @@ export function AboutTab() {
   const copyDiagnostics = async () => {
     const text = `Flowlet ${meta.data?.version ?? ""}\nOS: ${meta.data?.diagnostics?.os ?? ""}\nDatabase: ${meta.data?.diagnostics?.database ?? ""}\nProxy service: ${meta.data?.diagnostics?.proxy ?? ""}`;
     try {
-      await navigator.clipboard.writeText(text);
+      await copyText(text);
       Toast.success(t("诊断信息已复制"));
     } catch {
       Toast.success(t("诊断信息已生成"));

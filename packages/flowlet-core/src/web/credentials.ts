@@ -9,15 +9,23 @@ import { randomUUID } from "node:crypto";
 import type { JsonRow } from "../types.ts";
 import { CommandError } from "../types.ts";
 import type { WebContext } from "./context.ts";
+import {
+  DockhandClient,
+  DockhandError,
+  normalizeBaseUrl as normalizeDockhandBaseUrl,
+} from "./dockhand.ts";
 import { GitlabClient, GitlabError, normalizeBaseUrl } from "./gitlab.ts";
 
 export const PROVIDER_GITLAB = "gitlab";
+export const PROVIDER_DOCKHAND = "dockhand";
 
 export interface ServiceCredentialView {
   id: string;
   name: string;
   provider: string;
   baseUrl: string;
+  /** 第二期：解析后的环境变量前缀（大写）。旧行（env_prefix NULL）按 provider 默认返回。 */
+  envPrefix: string;
   kind: string;
   note: string | null;
   enabled: boolean;
@@ -34,6 +42,8 @@ export interface ServiceCredentialInput {
   provider: string;
   baseUrl: string;
   token?: string;
+  /** 环境别名（Env 前缀）；空/NULL → provider 默认前缀。 */
+  envPrefix?: string | null;
   kind?: string;
   note?: string;
   enabled?: boolean;
@@ -43,6 +53,8 @@ export interface CredentialCheck {
   ok: boolean;
   username: string | null;
   version: string | null;
+  /** provider 专属的补充说明（Dockhand 为「N 个环境」；GitLab 恒 null）。 */
+  detail: string | null;
   error: string | null;
 }
 
@@ -50,6 +62,7 @@ export interface ServiceCredentialExport {
   name: string;
   provider: string;
   baseUrl: string;
+  envPrefix: string;
   token: string;
 }
 
@@ -58,6 +71,8 @@ export interface CredentialProvider {
   label: string;
   baseUrlHint: string;
   tokenLabel: string;
+  /** 未设置 envPrefix 时生成的默认环境前缀（前端 placeholder/preview 用）。 */
+  defaultEnvPrefix: string;
   available: boolean;
 }
 
@@ -81,13 +96,82 @@ export function providers(): CredentialProvider[] {
       label: "GitLab",
       baseUrlHint: "https://gitlab.example.com",
       tokenLabel: "Personal Access Token（需要 api scope）",
+      defaultEnvPrefix: "GITLAB",
+      available: true,
+    },
+    {
+      id: PROVIDER_DOCKHAND,
+      label: "Dockhand",
+      baseUrlHint: "http://dockhand.example.com:3000",
+      tokenLabel: "API Token（Dockhand 设置 → API 令牌）",
+      defaultEnvPrefix: "DOCKHAND",
       available: true,
     },
   ];
 }
 
 export function isSupportedProvider(provider: string): boolean {
-  return provider === PROVIDER_GITLAB;
+  return provider === PROVIDER_GITLAB || provider === PROVIDER_DOCKHAND;
+}
+
+/** 按 provider 归一地址（两套 Host 的报错文案各自带 provider 前缀）。 */
+function normalizeProviderBaseUrl(provider: string, raw: string): string {
+  return provider === PROVIDER_DOCKHAND
+    ? normalizeDockhandBaseUrl(raw)
+    : normalizeBaseUrl(raw);
+}
+
+/** provider 默认环境前缀：gitlab → GITLAB、dockhand → DOCKHAND。 */
+export function defaultEnvPrefix(provider: string): string {
+  if (provider === PROVIDER_GITLAB) return "GITLAB";
+  if (provider === PROVIDER_DOCKHAND) return "DOCKHAND";
+  // save/test 会先做 provider 校验；这里只兜底旧库中可能存在的未知 provider 行。
+  return provider.trim().toUpperCase();
+}
+
+/**
+ * 环境前缀归一（phase2-spec §1.2，文案与 Rust `normalize_env_prefix` 一致）：
+ * - 空 → provider 默认前缀；
+ * - 只做 ASCII 大写（对应 Rust `to_ascii_uppercase`，避免 `ß`→`SS` 这类 Unicode 上标）；
+ * - 长度按 UTF-8 字节计（对应 Rust `String::len`）；
+ * - 正则 `^[A-Z][A-Z0-9_]{0,23}$`。
+ */
+export function normalizeEnvPrefix(raw: string | null | undefined, provider: string): string {
+  const trimmed = (raw ?? "").trim();
+  if (trimmed === "") return defaultEnvPrefix(provider);
+  const upper = trimmed.replace(/[a-z]/g, (char) => char.toUpperCase());
+  if (Buffer.byteLength(upper, "utf8") > 24) throw new Error("环境前缀不能超过 24 个字符");
+  if (!/^[A-Z][A-Z0-9_]{0,23}$/.test(upper)) {
+    throw new Error("环境前缀只能包含字母、数字和下划线，且以字母开头");
+  }
+  return upper;
+}
+
+/** 行里存的解析后前缀；旧行 `env_prefix` NULL 时按 provider 默认。 */
+function resolveEnvPrefix(row: JsonRow): string {
+  const stored = typeof row.env_prefix === "string" ? row.env_prefix : "";
+  return stored === "" ? defaultEnvPrefix(String(row.provider ?? "")) : stored;
+}
+
+/**
+ * 环境前缀唯一性校验（phase2-spec §1.2）：只在启用中的凭据间比较（不同 provider 也算冲突，
+ * 因为生成的环境变量名相同）。返回错误文案；无冲突返回 null。
+ * `selfId` 用于编辑时排除自己。
+ */
+export function validateEnvPrefixConflict(
+  rows: JsonRow[],
+  selfId: string | null,
+  provider: string,
+  rawPrefix: string,
+): string | null {
+  const prefix = normalizeEnvPrefix(rawPrefix, provider);
+  for (const row of rows) {
+    if (!Boolean(row.enabled)) continue;
+    if (selfId !== null && String(row.id ?? "") === selfId) continue;
+    if (resolveEnvPrefix(row) !== prefix) continue;
+    return `环境前缀已被「${String(row.name ?? "")}」占用：${prefix}（同一前缀会生成相同的环境变量名）`;
+  }
+  return null;
 }
 
 /** RFC3339 秒级 UTC（与 Rust `to_rfc3339_opts(SecondsFormat::Secs, true)` 一致）。 */
@@ -108,6 +192,7 @@ function viewOf(row: JsonRow): ServiceCredentialView {
     name: String(row.name ?? ""),
     provider: String(row.provider ?? ""),
     baseUrl: String(row.base_url ?? ""),
+    envPrefix: resolveEnvPrefix(row),
     kind: String(row.kind ?? "cli_token"),
     note: typeof row.note === "string" ? row.note : null,
     enabled: Boolean(row.enabled),
@@ -133,7 +218,7 @@ export async function checkGitlab(
   try {
     client = new GitlabClient(baseUrl, token, { insecure });
   } catch (error) {
-    return { ok: false, username: null, version: null, error: message(error) };
+    return { ok: false, username: null, version: null, detail: null, error: message(error) };
   }
   try {
     const user = await client.currentUser();
@@ -148,13 +233,49 @@ export async function checkGitlab(
     } catch {
       version = null;
     }
-    return { ok: true, username, version, error: null };
+    return { ok: true, username, version, detail: null, error: null };
   } catch (error) {
     return {
       ok: false,
       username: null,
       version: null,
+      detail: null,
       error: error instanceof GitlabError ? error.toString() : message(error),
+    };
+  }
+}
+
+/**
+ * 校验一个 Dockhand 凭据；返回结构化结果而不是抛错（与 Rust `check_dockhand` 一致）。
+ * Dockhand 没有「当前 token 用户」接口，username/version 恒为 null；认证通过即返回环境数量。
+ */
+export async function checkDockhand(
+  baseUrl: string,
+  token: string,
+  insecure: boolean,
+): Promise<CredentialCheck> {
+  let client: DockhandClient;
+  try {
+    client = new DockhandClient(baseUrl, token, { insecure });
+  } catch (error) {
+    return { ok: false, username: null, version: null, detail: null, error: message(error) };
+  }
+  try {
+    const environments = await client.environments();
+    return {
+      ok: true,
+      username: null,
+      version: null,
+      detail: `${environments.length} 个环境`,
+      error: null,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      username: null,
+      version: null,
+      detail: null,
+      error: error instanceof DockhandError ? error.toString() : message(error),
     };
   }
 }
@@ -176,14 +297,21 @@ export async function save(
   if (name === "") fail("凭据名称不能为空");
   if ([...name].length > 64) fail("凭据名称不能超过 64 个字符");
   if (!isSupportedProvider(input.provider)) {
-    fail(`暂不支持的服务类型：${input.provider}（当前只支持 gitlab）`);
+    fail(`暂不支持的服务类型：${input.provider}（当前支持 gitlab、dockhand）`);
   }
   let baseUrl: string;
   try {
-    baseUrl = normalizeBaseUrl(input.baseUrl);
+    baseUrl = normalizeProviderBaseUrl(input.provider, input.baseUrl);
   } catch (error) {
     return fail(message(error));
   }
+  let envPrefix: string;
+  try {
+    envPrefix = normalizeEnvPrefix(input.envPrefix ?? "", input.provider);
+  } catch (error) {
+    return fail(message(error));
+  }
+  const enabled = input.enabled ?? true;
   const kind =
     typeof input.kind === "string" && input.kind.trim() !== "" ? input.kind.trim() : "cli_token";
 
@@ -208,8 +336,23 @@ export async function save(
     return fail("新建凭据时必须填写 token");
   }
 
+  // 环境前缀唯一性：只在启用中的凭据间检查，避免 pull 生成同名环境变量把另一个实例覆盖。
+  // 放在网络校验之前，冲突属于纯配置错误，不必为必然失败的保存发请求。
+  if (enabled) {
+    const conflict = validateEnvPrefixConflict(
+      storage.listServiceCredentials(),
+      typeof input.id === "string" ? input.id : null,
+      input.provider,
+      envPrefix,
+    );
+    if (conflict !== null) return fail(conflict);
+  }
+
   // 先验证再落库：token 无效或实例不可达时不写坏数据。
-  const check = await checkGitlab(baseUrl, token, insecure);
+  const check =
+    input.provider === PROVIDER_DOCKHAND
+      ? await checkDockhand(baseUrl, token, insecure)
+      : await checkGitlab(baseUrl, token, insecure);
   if (!check.ok) {
     return fail(`校验失败，未保存：${check.error ?? "未知错误"}`);
   }
@@ -230,7 +373,8 @@ export async function save(
     secret_hint: maskSecret(token),
     kind,
     note: typeof input.note === "string" && input.note.trim() !== "" ? input.note.trim() : null,
-    enabled: input.enabled ?? true,
+    env_prefix: envPrefix,
+    enabled,
     created_at: existing !== null ? String(existing.created_at ?? timestamp) : timestamp,
     updated_at: timestamp,
     last_verified_at: verifiedAt,
@@ -255,8 +399,12 @@ export async function test(
     return fail(`凭据无法解密：${message(error)}`);
   }
   const provider = String(row.provider ?? "");
-  if (provider !== PROVIDER_GITLAB) fail(`暂不支持测试该服务类型：${provider}`);
-  const check = await checkGitlab(String(row.base_url ?? ""), token, insecure);
+  if (!isSupportedProvider(provider)) fail(`暂不支持测试该服务类型：${provider}`);
+  const baseUrl = String(row.base_url ?? "");
+  const check =
+    provider === PROVIDER_DOCKHAND
+      ? await checkDockhand(baseUrl, token, insecure)
+      : await checkGitlab(baseUrl, token, insecure);
   const verifiedAt = check.ok ? nowRfc3339() : null;
   storage.updateServiceCredentialVerification(id, verifiedAt, check.error);
   return check;
@@ -268,7 +416,7 @@ export function deleteCredential(ctx: WebContext, id: string): null {
   return null;
 }
 
-/** `flowlet-cred pull` 的导出：只导出启用中的凭据（含明文，仅在已鉴权接口返回）。 */
+/** `flowlet pull` 的导出：只导出启用中的凭据（含明文，仅在已鉴权接口返回）。 */
 export function exportCredentials(ctx: WebContext): ServiceCredentialExport[] {
   const rows = storageOf(ctx).listServiceCredentials().filter((row) => Boolean(row.enabled));
   const exports: ServiceCredentialExport[] = [];
@@ -283,6 +431,7 @@ export function exportCredentials(ctx: WebContext): ServiceCredentialExport[] {
       name: String(row.name ?? ""),
       provider: String(row.provider ?? ""),
       baseUrl: String(row.base_url ?? ""),
+      envPrefix: resolveEnvPrefix(row),
       token,
     });
   }
@@ -291,11 +440,12 @@ export function exportCredentials(ctx: WebContext): ServiceCredentialExport[] {
 
 /** 供 CLI 拉取时把服务凭据映射成 dotenv 键名（与 Rust `env_keys` 一致）。 */
 export function envKeys(item: ServiceCredentialExport): Array<[string, string, string]> {
-  if (item.provider === PROVIDER_GITLAB) {
-    return [
-      ["GITLAB_URL", item.baseUrl, "service"],
-      ["GITLAB_TOKEN", item.token, "cli_token"],
-    ];
-  }
-  return [];
+  // 未登记的 provider pull 侧跳过；旧服务端的导出可能没有 envPrefix，回退 provider 默认。
+  if (!isSupportedProvider(item.provider)) return [];
+  const prefix =
+    item.envPrefix.trim() === "" ? defaultEnvPrefix(item.provider) : item.envPrefix;
+  return [
+    [`${prefix}_URL`, item.baseUrl, "service"],
+    [`${prefix}_TOKEN`, item.token, "cli_token"],
+  ];
 }

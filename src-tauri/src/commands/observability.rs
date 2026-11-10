@@ -1,6 +1,6 @@
 use crate::core::config::{
-    LogCaptureConfig, LogFilterClient, LogsFilter, LogsPageResult, RequestLogModelOptions,
-    RequestLogRow,
+    LogCaptureConfig, LogFilterClient, LogsFilter, LogsPageResult, RequestLogChannelAccountOptions,
+    RequestLogModelOptions, RequestLogRow,
 };
 use crate::AppState;
 
@@ -295,6 +295,16 @@ pub(crate) fn list_request_log_models(
     state
         .storage
         .list_request_log_models()
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+pub(crate) fn list_request_log_channel_accounts(
+    state: tauri::State<'_, AppState>,
+) -> Result<RequestLogChannelAccountOptions, String> {
+    state
+        .storage
+        .list_request_log_channel_accounts()
         .map_err(|err| err.to_string())
 }
 

@@ -9,6 +9,7 @@ import { ChannelBrandLogo } from "../../features/channel-accounts/ChannelBrandLo
 import { useModelActions } from "../../features/exposed-models/useModelActions";
 import { useRouteCandidates } from "../../features/exposed-models/useModels";
 import { PageHeader } from "../../shared/ui/PageHeader";
+import { copyText } from "../../shared/ui/copyText";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import {
   buildModelServiceItems,
@@ -567,7 +568,7 @@ function ModelDetail({ model, accounts, channels, catalogJson, modelsDevCatalogJ
 
   const copyModelName = async () => {
     try {
-      await navigator.clipboard.writeText(model.publicModel);
+      await copyText(model.publicModel);
       Toast.success(t("已复制"));
     } catch {
       Toast.error(t("复制失败"));

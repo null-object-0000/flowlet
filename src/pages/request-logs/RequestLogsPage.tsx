@@ -6,7 +6,7 @@ import { DEFAULT_REQUEST_LOG_FILTER, type RequestLogFilter, type RequestLogRow, 
 import { ClearRequestLogsModal } from "../../features/request-logs/ClearRequestLogsModal";
 import { RequestLogDetailSideSheet } from "../../features/request-logs/RequestLogDetailSideSheet";
 import { calculateCacheHitRate, calculateOutputTokenRate, formatDuration, formatPercentage, formatTokenRate, isSuccessfulLog, safeLogText } from "../../features/request-logs/logPresentation";
-import { useRequestLogActions, useRequestLogClients, useRequestLogModels, useRequestLogs } from "../../features/request-logs/useRequestLogs";
+import { useRequestLogActions, useRequestLogChannelAccounts, useRequestLogClients, useRequestLogModels, useRequestLogs } from "../../features/request-logs/useRequestLogs";
 import { DesktopFilterToolbarView, RequestLogsView, type RequestLogsRowModel } from "@flowlet/product-ui";
 import { TokenBreakdownTooltip } from "../../shared/ui/TokenBreakdownTooltip";
 import { CostBreakdownTooltip } from "../../shared/ui/CostBreakdownTooltip";
@@ -22,6 +22,7 @@ import { formatCompactNumber, formatInteger } from "../../shared/formatters/numb
 import { TimePresetSelect, TimeScopeControl } from "../../shared/ui/TimeScopeControl";
 import { useResponsiveTablePageSize } from "../../shared/ui/useResponsiveTablePageSize";
 
+import { errorMessage } from "../../shared/errors/AppError";
 const TIME_OPTIONS: Array<{ value: RequestLogTimeRange; label: string }> = [
   { value: "1h", label: "最近 1 小时" },
   { value: "6h", label: "最近 6 小时" },
@@ -45,11 +46,20 @@ export function RequestLogsPage() {
   const logs = useRequestLogs(filter, refresh.autoRefresh);
   const models = useRequestLogModels();
   const clients = useRequestLogClients();
+  const channelAccounts = useRequestLogChannelAccounts();
   const actions = useRequestLogActions();
   const page = logs.data;
   const summary = page?.summary;
   const publicModels = models.data?.publicModels ?? [];
   const upstreamModels = models.data?.upstreamModels ?? [];
+  const filterChannels = channelAccounts.data?.channels ?? [];
+  const filterAccounts = channelAccounts.data?.accounts ?? [];
+  // 一个下拉同时承载渠道与账号两种粒度：账号是更窄的筛选，两者同时有值时以账号为准。
+  const channelAccountValue = filter.accountId
+    ? `account:${filter.accountId}`
+    : filter.channelId
+      ? `channel:${filter.channelId}`
+      : "__all__";
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -84,7 +94,7 @@ export function RequestLogsPage() {
       setClearOpen(false);
       Toast.success(t("已清理 {logs} 条请求日志、{usage} 条用量记录", { logs: deletedLogs, usage: deletedUsage }));
     } catch (error) {
-      Toast.error(t("日志清理失败：{message}", { message: safeLogText(error instanceof Error ? error.message : String(error)) }));
+      Toast.error(t("日志清理失败：{message}", { message: safeLogText(errorMessage(error)) }));
     }
   };
 
@@ -188,6 +198,11 @@ export function RequestLogsPage() {
                 ...publicModels.map((model) => ({ value: `public:${model}`, label: model, group: t("对外模型"), internalLabel: `${t("对外模型")} · ${model}` })),
                 ...upstreamModels.map((model) => ({ value: `upstream:${model}`, label: model, group: t("路由模型"), internalLabel: `${t("路由模型")} · ${model}` })),
               ] },
+              { key: "channelAccount", value: channelAccountValue, ariaLabel: t("渠道账号"), loading: channelAccounts.isLoading, width: 150, options: [
+                { value: "__all__", label: t("全部渠道账号") },
+                ...filterChannels.map((channel) => ({ value: `channel:${channel.id}`, label: channel.name || channel.id, group: t("渠道"), internalLabel: `${t("渠道")} · ${channel.name || channel.id}` })),
+                ...filterAccounts.map((account) => ({ value: `account:${account.id}`, label: account.name || account.id, group: t("账号"), internalLabel: `${account.channelName || account.channelId || "-"} · ${account.name || account.id}` })),
+              ] },
             ]}
             segments={{ value: filter.status, ariaLabel: t("状态"), options: (["all", "success", "error"] as RequestLogStatusFilter[]).map((status) => ({ value: status, label: t(status === "all" ? "全部" : status === "success" ? "成功" : "失败") })) }}
             onSearchChange={setSearchDraft}
@@ -200,6 +215,18 @@ export function RequestLogsPage() {
                   page: 1,
                 }));
                 return;
+              }
+              if (key === "channelAccount") {
+                  if (selected === "__all__") {
+                    apply({ channelId: "", accountId: "" });
+                    return;
+                  }
+                  const separator = selected.indexOf(":");
+                  const scope = selected.slice(0, separator);
+                  const id = selected.slice(separator + 1);
+                  // 渠道与账号互斥：选账号时清空 channelId，避免叠加成 AND 条件后无结果。
+                  apply(scope === "account" ? { accountId: id, channelId: "" } : { channelId: id, accountId: "" });
+                  return;
               }
               if (selected === "__all__") {
                   apply({ model: "", modelKind: "" });

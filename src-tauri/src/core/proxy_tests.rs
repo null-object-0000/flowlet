@@ -6017,3 +6017,436 @@ async fn vibetoken_models_list_respects_protocol_and_disabled_account() {
     let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(value["data"].as_array().unwrap().is_empty());
 }
+
+// ─── Streaming compressed SSE (usage / TTFT observability) ──────────────────
+//
+// reqwest 未启用自动解压，上游 SSE 若带 content-encoding 则字节流是压缩体。这里验证：
+// 观测链路（TTFT / usage / 终止标记）吃增量解压后的明文，而转发给客户端的原始字节、
+// content-encoding 头与请求日志的响应体捕获都保持既有语义。
+
+/// 带多字节 UTF-8 与 usage 的 OpenAI 兼容流式 SSE 原文。
+const COMPRESSED_STREAM_SSE_PLAIN: &str = concat!(
+    "data: {\"id\":\"chatcmpl-1\",\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\n",
+    "data: {\"id\":\"chatcmpl-1\",\"choices\":[{\"delta\":{\"content\":\"你好，世界 🌍\"}}]}\n\n",
+    "data: {\"id\":\"chatcmpl-1\",\"choices\":[{\"delta\":{\"content\":\" flowlet stream\"}}]}\n\n",
+    "data: {\"id\":\"chatcmpl-1\",\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":42,\"total_tokens\":52}}\n\n",
+    "data: [DONE]\n\n",
+);
+
+fn compressed_stream_expected_usage() -> ResponseUsage {
+    ResponseUsage {
+        input_tokens: Some(10),
+        input_cached_tokens: None,
+        input_uncached_tokens: None,
+        input_cache_write_tokens: None,
+        output_tokens: Some(42),
+        total_tokens: Some(52),
+    }
+}
+
+fn gzip_encode_bytes(bytes: &[u8]) -> Vec<u8> {
+    use flate2::{write::GzEncoder, Compression};
+    use std::io::Write;
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(bytes).unwrap();
+    encoder.finish().unwrap()
+}
+
+fn deflate_encode_bytes(bytes: &[u8]) -> Vec<u8> {
+    use flate2::{write::DeflateEncoder, Compression};
+    use std::io::Write;
+    let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(bytes).unwrap();
+    encoder.finish().unwrap()
+}
+
+fn zstd_encode_bytes(bytes: &[u8]) -> Vec<u8> {
+    zstd::stream::encode_all(bytes, 0).unwrap()
+}
+
+fn brotli_encode_bytes(bytes: &[u8]) -> Vec<u8> {
+    use std::io::Write;
+    let mut writer = brotli::CompressorWriter::new(Vec::new(), 4096, 5, 22);
+    writer.write_all(bytes).unwrap();
+    writer.into_inner()
+}
+
+fn compress_stream_sse(encoding: &str, plain: &[u8]) -> Vec<u8> {
+    match encoding {
+        "gzip" => gzip_encode_bytes(plain),
+        "deflate" => deflate_encode_bytes(plain),
+        "zstd" => zstd_encode_bytes(plain),
+        "br" => brotli_encode_bytes(plain),
+        other => panic!("unsupported test encoding: {other}"),
+    }
+}
+
+/// 直接驱动流式观测解压器，按 `chunk_sizes` 循环切分压缩字节喂入，返回拼回的明文；
+/// 同时断言每次喂入不会改写调用方持有的原始分块。
+fn reassemble_with_stream_decoder(
+    encoding: &str,
+    compressed: &[u8],
+    chunk_sizes: &[usize],
+) -> Vec<u8> {
+    use proxy_http::{StreamDecodedChunk, StreamUsageDecoder};
+
+    let mut decoder = StreamUsageDecoder::for_content_encoding(Some(encoding));
+    let mut assembled = Vec::new();
+    let mut offset = 0;
+    let mut index = 0;
+    while offset < compressed.len() {
+        let size = chunk_sizes[index % chunk_sizes.len()].max(1);
+        let end = (offset + size).min(compressed.len());
+        let original = compressed[offset..end].to_vec();
+        let chunk = compressed[offset..end].to_vec();
+        let mut decoded = Vec::new();
+        let outcome = decoder.decode_chunk(&chunk, &mut decoded);
+        match outcome {
+            StreamDecodedChunk::Passthrough => assembled.extend_from_slice(&chunk),
+            StreamDecodedChunk::Decoded => assembled.extend_from_slice(&decoded),
+            StreamDecodedChunk::Disabled => panic!("{encoding}: 合法压缩流不应停用观测解压"),
+        }
+        assert_eq!(original, chunk, "{encoding}: 观测解压不得改写原始输入字节");
+        offset = end;
+        index += 1;
+    }
+    let mut tail = Vec::new();
+    assert!(decoder.finish(&mut tail), "{encoding}: 完整压缩流 flush 应成功");
+    assembled.extend_from_slice(&tail);
+    assembled
+}
+
+/// 通过真实的 `capture_timed_stream` 跑一段压缩 SSE，返回（转发出的原始字节，StreamDone）。
+async fn run_compressed_stream_capture(
+    compressed: &[u8],
+    chunk_sizes: &[usize],
+    content_encoding: &str,
+) -> (Vec<u8>, StreamDone) {
+    let mut chunks = Vec::new();
+    let mut offset = 0;
+    let mut index = 0;
+    while offset < compressed.len() {
+        let size = chunk_sizes[index % chunk_sizes.len()].max(1);
+        let end = (offset + size).min(compressed.len());
+        chunks.push(Ok::<Bytes, reqwest::Error>(Bytes::copy_from_slice(
+            &compressed[offset..end],
+        )));
+        offset = end;
+        index += 1;
+    }
+    let capture = LogCaptureConfig::default();
+    let (tx_done, rx_done) = tokio::sync::oneshot::channel();
+    let stream = capture_timed_stream(
+        futures_util::stream::iter(chunks),
+        tx_done,
+        &capture,
+        Instant::now(),
+        Some(content_encoding.to_string()),
+        std::time::Duration::from_secs(1),
+        ActivityTracker::new().track(),
+    );
+    futures_util::pin_mut!(stream);
+    let mut forwarded = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        forwarded.extend_from_slice(&chunk.unwrap());
+    }
+    let done = rx_done.await.unwrap();
+    (forwarded, done)
+}
+
+fn decode_captured_body_base64(encoded: &str) -> Vec<u8> {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .unwrap()
+}
+
+#[test]
+fn stream_usage_decoder_gzip_reassembles_plaintext_usage_and_ttft_across_chunks() {
+    use proxy_http::{StreamDecodedChunk, StreamUsageDecoder};
+
+    let plain = COMPRESSED_STREAM_SSE_PLAIN.as_bytes();
+    let compressed = gzip_encode_bytes(plain);
+    // 极碎的分块：解压后必然出现被切断的 data 行与多字节 UTF-8 字符。
+    let chunk_sizes = [1usize, 2, 3, 5, 7, 11, 13, 17, 19, 23];
+    let mut decoder = StreamUsageDecoder::for_content_encoding(Some("gzip"));
+    let mut assembled = Vec::new();
+    let mut accumulator = StreamUsageAccumulator::default();
+    let mut ttft_probe = Vec::new();
+    let mut ttft_ms = None;
+    let started = Instant::now();
+    let mut offset = 0;
+    let mut index = 0;
+    while offset < compressed.len() {
+        let size = chunk_sizes[index % chunk_sizes.len()];
+        let end = (offset + size).min(compressed.len());
+        let original = compressed[offset..end].to_vec();
+        let chunk = compressed[offset..end].to_vec();
+        let mut decoded = Vec::new();
+        let outcome = decoder.decode_chunk(&chunk, &mut decoded);
+        assert_eq!(
+            outcome,
+            StreamDecodedChunk::Decoded,
+            "gzip 流应逐块解压而不是直接透传"
+        );
+        assert_eq!(original, chunk, "解压观测不得改写原始输入字节");
+        if !decoded.is_empty() {
+            assembled.extend_from_slice(&decoded);
+            accumulator.push(&decoded);
+            if ttft_ms.is_none() {
+                ttft_probe.extend_from_slice(&decoded);
+                if contains_sse_output_token(&ttft_probe) {
+                    ttft_ms = Some(started.elapsed().as_millis() as i64);
+                }
+            }
+        }
+        offset = end;
+        index += 1;
+    }
+    let mut tail = Vec::new();
+    assert!(decoder.finish(&mut tail), "完整 gzip 流 flush 应成功");
+    assembled.extend_from_slice(&tail);
+    accumulator.push(&tail);
+
+    assert_eq!(assembled, plain, "分块增量解压拼回的字节必须与原文一致");
+    let parsed = accumulator.finish_with_evidence();
+    assert_eq!(parsed.usage, Some(compressed_stream_expected_usage()));
+    assert!(parsed.has_completion_evidence, "应看到 [DONE] 终止证据");
+    let ttft_ms = ttft_ms.expect("TTFT 探针应在解压后的明文里看到输出 token");
+    assert!(ttft_ms >= 0);
+}
+
+#[test]
+fn stream_usage_decoder_reassembles_deflate_zstd_and_brotli() {
+    let plain = COMPRESSED_STREAM_SSE_PLAIN.as_bytes();
+    for (encoding, chunk_sizes) in [
+        ("deflate", &[1usize, 3, 6, 10, 15][..]),
+        ("zstd", &[2usize, 5, 9, 14][..]),
+        ("br", &[1usize, 4, 8, 12][..]),
+    ] {
+        let compressed = compress_stream_sse(encoding, plain);
+        let assembled = reassemble_with_stream_decoder(encoding, &compressed, chunk_sizes);
+        assert_eq!(assembled, plain, "{encoding}: 增量解压必须还原原文");
+    }
+}
+
+#[test]
+fn stream_usage_decoder_keeps_identity_and_unknown_encodings_as_passthrough() {
+    use proxy_http::{StreamDecodedChunk, StreamUsageDecoder};
+
+    let plain = COMPRESSED_STREAM_SSE_PLAIN.as_bytes();
+    for encoding in [None, Some("identity"), Some("compress")] {
+        let mut decoder = StreamUsageDecoder::for_content_encoding(encoding);
+        let mut out = Vec::new();
+        assert_eq!(
+            decoder.decode_chunk(plain, &mut out),
+            StreamDecodedChunk::Passthrough,
+            "{encoding:?}: 未压缩/未知编码应保持原始字节直通"
+        );
+        assert!(out.is_empty());
+        assert!(decoder.finish(&mut out));
+    }
+}
+
+#[tokio::test]
+async fn streaming_gzip_sse_produces_complete_usage_without_mutating_passthrough_bytes() {
+    let plain = COMPRESSED_STREAM_SSE_PLAIN.as_bytes();
+    let compressed = gzip_encode_bytes(plain);
+    let (forwarded, done) =
+        run_compressed_stream_capture(&compressed, &[3, 1, 7, 2, 11, 5], "gzip").await;
+
+    // 原始压缩字节原样转发，观测解压只作用于副本。
+    assert_eq!(forwarded, compressed);
+    assert_eq!(done.error_message, None);
+    assert_eq!(done.usage, Some(compressed_stream_expected_usage()));
+    assert_eq!(done.usage_status.as_deref(), Some("complete"));
+    assert_eq!(done.usage_source.as_deref(), Some("upstream_response"));
+    assert!(done.ttft_ms.is_some(), "压缩 SSE 也必须能算出 TTFT");
+
+    // 响应体捕获仍按 content-encoding 解压后落库（B64 明文）。
+    let captured = decode_captured_body_base64(&done.res_body_b64.unwrap());
+    assert_eq!(captured, plain);
+}
+
+#[tokio::test]
+async fn streaming_deflate_sse_produces_complete_usage() {
+    let plain = COMPRESSED_STREAM_SSE_PLAIN.as_bytes();
+    let compressed = deflate_encode_bytes(plain);
+    let (forwarded, done) =
+        run_compressed_stream_capture(&compressed, &[5, 2, 9, 4], "deflate").await;
+
+    assert_eq!(forwarded, compressed);
+    assert_eq!(done.usage, Some(compressed_stream_expected_usage()));
+    assert_eq!(done.usage_status.as_deref(), Some("complete"));
+    assert!(done.ttft_ms.is_some());
+}
+
+#[tokio::test]
+async fn streaming_zstd_sse_flushes_tail_usage_from_single_chunk() {
+    let plain = COMPRESSED_STREAM_SSE_PLAIN.as_bytes();
+    let compressed = zstd_encode_bytes(plain);
+    // 单块喂入：zstd write decoder 会把最后一块的解压输出留在内部缓冲，
+    // 必须依赖流结束时的 flush 才能拿到 usage 与 [DONE] 终止证据。
+    let (forwarded, done) =
+        run_compressed_stream_capture(&compressed, &[compressed.len()], "zstd").await;
+
+    assert_eq!(forwarded, compressed);
+    assert_eq!(done.usage, Some(compressed_stream_expected_usage()));
+    assert_eq!(done.usage_status.as_deref(), Some("complete"));
+    assert_eq!(done.usage_source.as_deref(), Some("upstream_response"));
+    assert!(done.ttft_ms.is_some());
+}
+
+#[tokio::test]
+async fn streaming_brotli_sse_produces_complete_usage() {
+    let plain = COMPRESSED_STREAM_SSE_PLAIN.as_bytes();
+    let compressed = brotli_encode_bytes(plain);
+    let (forwarded, done) =
+        run_compressed_stream_capture(&compressed, &[compressed.len()], "br").await;
+
+    assert_eq!(forwarded, compressed);
+    assert_eq!(done.usage, Some(compressed_stream_expected_usage()));
+    assert_eq!(done.usage_status.as_deref(), Some("complete"));
+    assert!(done.ttft_ms.is_some());
+}
+
+#[tokio::test]
+async fn streaming_corrupt_compressed_body_never_fabricates_usage() {
+    for encoding in ["gzip", "deflate", "zstd", "br"] {
+        let garbage = vec![0xABu8; 128];
+        let (forwarded, done) = run_compressed_stream_capture(&garbage, &[5, 7, 13], encoding).await;
+        assert_eq!(forwarded, garbage, "{encoding}: 转发字节必须原样");
+        assert_eq!(done.error_message, None, "{encoding}: 解压失败不得影响连接");
+        assert!(
+            done.usage.is_none(),
+            "{encoding}: 损坏压缩流不得产出 usage"
+        );
+        assert!(done.usage_status.is_none());
+    }
+}
+
+#[tokio::test]
+async fn streaming_truncated_compressed_body_stays_partial_without_panic() {
+    let plain = COMPRESSED_STREAM_SSE_PLAIN.as_bytes();
+    for encoding in ["gzip", "deflate", "zstd", "br"] {
+        let compressed = compress_stream_sse(encoding, plain);
+        let truncated = &compressed[..compressed.len() / 2];
+        let (forwarded, done) =
+            run_compressed_stream_capture(truncated, &[4, 9, 2, 6], encoding).await;
+        assert_eq!(forwarded, truncated, "{encoding}: 转发字节必须原样");
+        assert_eq!(done.error_message, None);
+        // 截断后不可能拿到流尾的 output usage；若观测到前缀 usage，只能是部分值。
+        if let Some(usage) = done.usage {
+            assert_ne!(
+                usage.output_tokens,
+                Some(42),
+                "{encoding}: 截断流不得伪造尾部 output usage"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn e2e_gzip_streaming_sse_records_usage_and_keeps_wire_bytes_raw() {
+    let plain = COMPRESSED_STREAM_SSE_PLAIN.as_bytes();
+    let compressed = gzip_encode_bytes(plain);
+    let upstream_body = compressed.clone();
+    let upstream = Router::new().route(
+        "/v1/chat/completions",
+        post(move || {
+            let body = upstream_body.clone();
+            async move {
+                (
+                    [
+                        (header::CONTENT_TYPE, "text/event-stream"),
+                        (header::CONTENT_ENCODING, "gzip"),
+                    ],
+                    body,
+                )
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move { axum::serve(listener, upstream).await.unwrap() });
+
+    let channel = dual_protocol_channel("custom", "Custom", &addr);
+    let state = build_test_state(
+        vec![channel],
+        vec![test_account("a", "custom", "key", 0)],
+        vec![test_route(
+            "r",
+            "deepseek-v4-pro",
+            "custom",
+            "a",
+            "deepseek-v4-pro",
+            ProtocolType::OpenAi,
+            0,
+        )],
+    );
+    state.capture.lock().unwrap().capture_res_body = true;
+    let storage = state.storage.clone();
+    let request = Request::builder()
+        .method("POST")
+        .uri("/v1/chat/completions")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            r#"{"model":"deepseek-v4-pro","stream":true,"messages":[]}"#,
+        ))
+        .unwrap();
+    let response = forward_request(state, request, ProtocolType::OpenAi)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::CONTENT_ENCODING)
+            .and_then(|value| value.to_str().ok()),
+        Some("gzip"),
+        "content-encoding 头必须原样转发"
+    );
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(body.as_ref(), compressed.as_slice(), "压缩 SSE 必须原样透传");
+
+    // 流结束后异步落库：轮询 usage_records（本机行 request_count >= 1）。
+    let rows = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let rows = storage
+                .usage_summary_range(None, None, "day", "test-device")
+                .unwrap();
+            if rows.iter().any(|row| row.request_count >= 1) {
+                break rows;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    let row = rows.iter().find(|row| row.request_count >= 1).unwrap();
+    assert_eq!(row.input_tokens, 10, "压缩 SSE 的 usage 必须落库");
+    assert_eq!(row.output_tokens, 42);
+    assert_eq!(row.known_tokens, 52);
+
+    // 请求日志的响应体捕获按 content-encoding 解压后落库，不回写线上字节。
+    let logs = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let rows = storage.list_request_logs().unwrap();
+            if rows.first().is_some_and(|log| log.res_body_b64.is_some()) {
+                break rows;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        logs[0].res_body_b64,
+        Some(encode_body_base64(plain)),
+        "响应体捕获必须是解压后的明文"
+    );
+
+    server.abort();
+}

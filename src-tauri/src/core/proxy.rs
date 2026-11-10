@@ -2162,6 +2162,34 @@ fn contains_stream_terminal_marker(bytes: &[u8]) -> bool {
         .any(|marker| bytes.windows(marker.len()).any(|window| window == *marker))
 }
 
+/// 用一块**明文**上游字节推进流式观测链路：TTFT 探针、usage 兜底缓冲、
+/// 增量 usage 解析与终止事件追踪。
+///
+/// 压缩响应传入增量解压后的字节，未压缩/未知编码响应传入原始字节——转发给
+/// 客户端的字节与 `content-encoding` 头始终不受影响。
+fn observe_plaintext_chunk(state: &mut TimedStreamState, plain: &[u8]) {
+    if state.ttft_ms.is_none()
+        && state.ttft_probe.len().saturating_add(plain.len()) <= MAX_TTFT_PROBE_BYTES
+    {
+        state.ttft_probe.extend_from_slice(plain);
+        if contains_sse_output_token(&state.ttft_probe) {
+            state.ttft_ms = Some(state.request_started_at.elapsed().as_millis() as i64);
+            state.ttft_probe.clear();
+        }
+    }
+    // 解压后的明文字节计入既有上限；超限后停用兜底缓冲（增量 accumulator 仍继续）。
+    if state.usage_body_enabled
+        && state.usage_body_buf.len().saturating_add(plain.len()) <= MAX_USAGE_CAPTURE_BYTES
+    {
+        state.usage_body_buf.extend_from_slice(plain);
+    } else {
+        state.usage_body_enabled = false;
+        state.usage_body_buf.clear();
+    }
+    state.usage_accumulator.push(plain);
+    track_stream_terminal_event(state, plain);
+}
+
 fn track_stream_terminal_event(state: &mut TimedStreamState, bytes: &[u8]) {
     if state.terminal_event_seen {
         return;
@@ -2192,6 +2220,8 @@ fn capture_timed_stream(
     activity_permit: ActivityPermit,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> {
     let inner = Box::pin(inner);
+    let usage_decoder =
+        proxy_http::StreamUsageDecoder::for_content_encoding(res_content_encoding.as_deref());
     let state = TimedStreamState {
         inner,
         done_sent: false,
@@ -2204,6 +2234,7 @@ fn capture_timed_stream(
         res_body_max: capture.max_body_bytes,
         capture_res_body: capture.capture_res_body,
         res_content_encoding,
+        usage_decoder,
         usage_body_buf: Vec::new(),
         usage_body_enabled: true,
         usage_accumulator: StreamUsageAccumulator::default(),
@@ -2221,31 +2252,23 @@ fn capture_timed_stream(
         }
         match tokio::time::timeout(state.idle_timeout, state.inner.next()).await {
             Ok(Some(Ok(bytes))) => {
-                if state.ttft_ms.is_none()
-                    && state.ttft_probe.len().saturating_add(bytes.len()) <= MAX_TTFT_PROBE_BYTES
-                {
-                    state.ttft_probe.extend_from_slice(&bytes);
-                    if contains_sse_output_token(&state.ttft_probe) {
-                        state.ttft_ms = Some(state.request_started_at.elapsed().as_millis() as i64);
-                        state.ttft_probe.clear();
+                // 观测链路（TTFT / usage / 终止标记）吃按 content-encoding 增量解压后的
+                // 明文；转发给客户端的原始 bytes 与 content-encoding 头保持不变。
+                let mut decoded = Vec::new();
+                match state.usage_decoder.decode_chunk(&bytes, &mut decoded) {
+                    proxy_http::StreamDecodedChunk::Passthrough => {
+                        observe_plaintext_chunk(&mut state, &bytes)
                     }
+                    proxy_http::StreamDecodedChunk::Decoded => {
+                        observe_plaintext_chunk(&mut state, &decoded)
+                    }
+                    proxy_http::StreamDecodedChunk::Disabled => {}
                 }
                 if state.capture_res_body
                     && state.res_body_buf.len().saturating_add(bytes.len()) <= state.res_body_max
                 {
                     state.res_body_buf.extend_from_slice(&bytes);
                 }
-                if state.usage_body_enabled
-                    && state.usage_body_buf.len().saturating_add(bytes.len())
-                        <= MAX_USAGE_CAPTURE_BYTES
-                {
-                    state.usage_body_buf.extend_from_slice(&bytes);
-                } else {
-                    state.usage_body_enabled = false;
-                    state.usage_body_buf.clear();
-                }
-                state.usage_accumulator.push(&bytes);
-                track_stream_terminal_event(&mut state, &bytes);
                 let piece = String::from_utf8_lossy(&bytes);
                 for line in piece.split('\n') {
                     let trimmed = line.trim_end_matches('\r');
@@ -2308,6 +2331,14 @@ fn send_stream_done(
     }
     state.done_sent = true;
     let duration_ms = state.request_started_at.elapsed().as_millis() as i64;
+    // 先 flush 观测解压器再判定 usage 完整性：gzip/br 的尾部输出（常见于
+    // `message_delta` 的 output usage）与 zstd 内部缓冲都可能在最后一块之后才产出。
+    // 解压失败/截断只影响观测解压（已解析部分保留），不影响转发、日志与连接。
+    let mut decoded_tail = Vec::new();
+    state.usage_decoder.finish(&mut decoded_tail);
+    if !decoded_tail.is_empty() {
+        observe_plaintext_chunk(state, &decoded_tail);
+    }
     let res_body_b64 = if !state.capture_res_body {
         None
     } else {
@@ -2377,6 +2408,9 @@ struct TimedStreamState {
     res_body_max: usize,
     capture_res_body: bool,
     res_content_encoding: Option<String>,
+    /// 流式观测解压器：按 content-encoding 把上游原始字节增量解压出一份**只读观测副本**，
+    /// 喂给 TTFT 探针 / usage 解析 / 终止事件追踪；转发字节与响应头不受影响。
+    usage_decoder: proxy_http::StreamUsageDecoder,
     usage_body_buf: Vec<u8>,
     usage_body_enabled: bool,
     usage_accumulator: StreamUsageAccumulator,
@@ -2395,6 +2429,7 @@ struct TimedStreamState {
 }
 
 impl Drop for TimedStreamState {
+    // 客户端断开时同样走 send_stream_done：其中先 flush 观测解压器、再判定 usage 完整性。
     fn drop(&mut self) {
         if self.done_sent {
             return;

@@ -24,8 +24,8 @@ pub const DIR_ENV_OVERRIDE: &str = "FLOWLET_CRED_DIR";
 
 const ENV_HEADER: &str = "\
 # Flowlet 全局凭据库
-# 由 `flowlet-cred` 维护；请在 CLI 中增删（原子写 + 0600），不要手工重排此文件。
-# 读取：Agent 可 cat 本文件；写入：请用 `flowlet-cred set KEY`。";
+# 由 `flowlet` 维护；请在 CLI 中增删（原子写 + 0600），不要手工重排此文件。
+# 读取：Agent 可 cat 本文件；写入：请用 `flowlet set KEY`。";
 
 /// 一条凭据的元数据（值本身只存在于 `.env`）。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

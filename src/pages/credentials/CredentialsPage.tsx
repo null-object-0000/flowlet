@@ -7,17 +7,32 @@ import {
   Empty,
   Input,
   Modal,
+  Select,
   SideSheet,
   Switch,
   Table,
   Tag,
   Toast,
+  Tooltip,
   Typography,
 } from "@douyinfe/semi-ui-19";
-import { IconCopy, IconDelete, IconEdit, IconPlus, IconRefresh } from "@douyinfe/semi-icons";
+import { IconDelete, IconDownload, IconEdit, IconPlus, IconRefresh } from "@douyinfe/semi-icons";
 import { credentialCommands } from "../../domains/credentials/commands";
-import type { ServiceCredential } from "../../domains/credentials/types";
+import type {
+  CredentialProvider,
+  CredentialProviderId,
+  ServiceCredential,
+} from "../../domains/credentials/types";
+import {
+  ENV_PREFIX_MAX_LENGTH,
+  envKeysForPrefix,
+  isValidEnvPrefixInput,
+  providerDefaultEnvPrefix,
+  resolveEnvPrefix,
+} from "../../domains/credentials/envPrefix";
+import { LocalAccessSideSheet } from "../../features/credentials/LocalAccessSideSheet";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
+import { isWebHost } from "../../platform/web/mode";
 import { PageHeader } from "../../shared/ui/PageHeader";
 import { queryKeys } from "../../shared/query-keys";
 import { errorMessage } from "../../shared/errors/AppError";
@@ -26,24 +41,55 @@ import styles from "./CredentialsPage.module.css";
 
 type Draft = {
   id?: string;
+  provider: CredentialProviderId;
   name: string;
   baseUrl: string;
   token: string;
   note: string;
   enabled: boolean;
+  /** 环境别名（Env 前缀）；空字符串表示使用 provider 默认前缀。 */
+  envPrefix: string;
 };
 
 const EMPTY_DRAFT: Draft = {
+  provider: "gitlab",
   name: "",
   baseUrl: "",
   token: "",
   note: "",
   enabled: true,
+  envPrefix: "",
 };
 
 const PROVIDER_LABEL: Record<string, string> = {
   gitlab: "GitLab",
+  dockhand: "Dockhand",
 };
+
+/** 服务端 provider 元数据加载前/旧 Host 的兜底，保证表单文案马上可用。 */
+const FALLBACK_PROVIDERS: CredentialProvider[] = [
+  {
+    id: "gitlab",
+    label: "GitLab",
+    baseUrlHint: "https://gitlab.example.com",
+    tokenLabel: "Personal Access Token（需要 api scope）",
+    available: true,
+    defaultEnvPrefix: "GITLAB",
+  },
+  {
+    id: "dockhand",
+    label: "Dockhand",
+    baseUrlHint: "http://dockhand.example.com:3000",
+    tokenLabel: "API Token（Dockhand 设置 → API 令牌）",
+    available: true,
+    defaultEnvPrefix: "DOCKHAND",
+  },
+];
+
+/** 保存时实际校验的端点（与两套 Host 的 check 实现一致）。 */
+function checkEndpoint(provider: CredentialProviderId): string {
+  return provider === "dockhand" ? "Dockhand /api/environments" : "GitLab /api/v4/user";
+}
 
 export function CredentialsPage() {
   const { language, t } = useAppPreferences();
@@ -51,6 +97,8 @@ export function CredentialsPage() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [formError, setFormError] = useState("");
   const [testingId, setTestingId] = useState<string | null>(null);
+  /** 「本机接入」引导抽屉：仅 Web Host 可打开。 */
+  const [accessOpen, setAccessOpen] = useState(false);
 
   const providers = useQuery({
     queryKey: queryKeys.credentials.providers(),
@@ -72,12 +120,14 @@ export function CredentialsPage() {
       credentialCommands.save({
         id: draft?.id,
         name: draft?.name ?? "",
-        provider: "gitlab",
+        provider: draft?.provider ?? "gitlab",
         baseUrl: draft?.baseUrl ?? "",
         token: draft?.token.trim() ? draft.token.trim() : undefined,
         kind: "cli_token",
         note: draft?.note.trim() ? draft.note.trim() : undefined,
         enabled: draft?.enabled ?? true,
+        // 空值表示使用 provider 默认前缀，由 Host 归一后落库。
+        envPrefix: draft?.envPrefix.trim() ? draft.envPrefix.trim() : undefined,
       }),
     onSuccess: async (credential) => {
       await invalidate();
@@ -106,11 +156,14 @@ export function CredentialsPage() {
     setFormError("");
     setDraft({
       id: credential.id,
+      provider: credential.provider === "dockhand" ? "dockhand" : "gitlab",
       name: credential.name,
       baseUrl: credential.baseUrl,
       token: "",
       note: credential.note ?? "",
       enabled: credential.enabled,
+      // Host 返回解析后的前缀；旧 Host 缺失时留空，placeholder 显示默认前缀。
+      envPrefix: credential.envPrefix ?? "",
     });
   };
 
@@ -119,9 +172,11 @@ export function CredentialsPage() {
     try {
       const check = await credentialCommands.test(credential.id);
       if (check.ok) {
-        const parts = [check.username ? `@${check.username}` : "", check.version ?? ""].filter(
-          Boolean,
-        );
+        const parts = [
+          check.username ? `@${check.username}` : "",
+          check.version ?? "",
+          check.detail ?? "",
+        ].filter(Boolean);
         Toast.success(`${credential.name} ${t("校验通过")}${parts.length ? ` · ${parts.join(" · ")}` : ""}`);
       } else {
         Toast.error(`${credential.name} ${t("校验失败")}：${check.error ?? t("未知错误")}`);
@@ -144,13 +199,33 @@ export function CredentialsPage() {
     });
   };
 
+  /**
+   * Agent 机器上用 `flowlet login` 走浏览器 SSO 授权，再 `flowlet pull` 同步；
+   * 页面只展示命令，不收集任何管理凭据。
+   */
   const syncCommand = useMemo(() => {
-    if (typeof window === "undefined") return "flowlet-cred pull --server=<Flowlet 地址>";
-    return `flowlet-cred pull --server=${window.location.origin}`;
+    if (typeof window === "undefined") return "flowlet login --server=<Flowlet 地址>";
+    return `flowlet login --server=${window.location.origin}`;
   }, []);
 
   const credentials = list.data ?? [];
-  const providerOptions = providers.data ?? [];
+  // 服务端按 gitlab → dockhand 的顺序返回；加载失败/旧 Host 时退回本地兜底定义。
+  const providerOptions = providers.data && providers.data.length > 0 ? providers.data : FALLBACK_PROVIDERS;
+  const selectedProvider = providerOptions.find((option) => option.id === draft?.provider) ?? FALLBACK_PROVIDERS[0]!;
+  const selectedProviderLabel = PROVIDER_LABEL[selectedProvider.id] ?? selectedProvider.label;
+  const selectedProviderDefaultEnvPrefix = providerDefaultEnvPrefix(selectedProvider);
+  /** 编辑器的环境前缀预览：空值 → provider 默认，非空 → 大写。 */
+  const previewPrefix = resolveEnvPrefix(draft?.envPrefix, selectedProviderDefaultEnvPrefix);
+  const previewEnvKeys = envKeysForPrefix(previewPrefix);
+  /** 前缀示例按 provider 默认前缀展开，提醒用户填写完整前缀而不是只填别名。 */
+  const envPrefixExample = `${selectedProviderDefaultEnvPrefix}_NA`;
+  const envPrefixInvalid = draft !== null && !isValidEnvPrefixInput(draft.envPrefix);
+
+  /** 表格/预览用：旧 Host 未返回 envPrefix 时按 provider 默认前缀兜底。 */
+  const defaultEnvPrefixFor = (providerId: string): string => {
+    const provider = providerOptions.find((option) => option.id === providerId);
+    return provider ? providerDefaultEnvPrefix(provider) : providerId.toUpperCase();
+  };
 
   return (
     <main className={styles.page}>
@@ -158,6 +233,11 @@ export function CredentialsPage() {
         title={t("服务凭据")}
         subtitle={t("集中管理 Agent 接入所需的三方服务 token；保存前会实际校验实例与凭据")}
       >
+        {isWebHost && (
+          <Button icon={<IconDownload />} onClick={() => setAccessOpen(true)}>
+            {t("本机接入")}
+          </Button>
+        )}
         <Button icon={<IconPlus />} theme="solid" onClick={openCreate}>
           {t("添加凭据")}
         </Button>
@@ -168,7 +248,7 @@ export function CredentialsPage() {
         closeIcon={null}
         description={
           <span className={styles.syncHint}>
-            {t("Agent 机器上用 CLI 同步到本地 .env：")}
+            {t("Agent 机器上用 CLI 登录并同步到本地 .env：")}
             <Typography.Text code copyable>
               {syncCommand}
             </Typography.Text>
@@ -182,7 +262,7 @@ export function CredentialsPage() {
         {credentials.length === 0 && !list.isLoading ? (
           <Empty
             title={t("还没有服务凭据")}
-            description={t("添加一个 GitLab 实例后，Agent 就能通过 CLI 同步并使用它。")}
+            description={t("添加一个服务凭据后，Agent 就能通过 CLI 同步并使用它。")}
           >
             <Button theme="solid" onClick={openCreate}>
               {t("添加凭据")}
@@ -219,6 +299,27 @@ export function CredentialsPage() {
                 title: t("实例地址"),
                 dataIndex: "baseUrl",
                 render: (value: string) => <Typography.Text ellipsis={{ showTooltip: true }}>{value}</Typography.Text>,
+              },
+              {
+                title: t("环境前缀"),
+                dataIndex: "envPrefix",
+                width: 150,
+                render: (_, row) => {
+                  const prefix = resolveEnvPrefix(row.envPrefix, defaultEnvPrefixFor(row.provider));
+                  const keys = envKeysForPrefix(prefix);
+                  return (
+                    <Tooltip
+                      content={
+                        <div className={styles.envKeyTooltip}>
+                          <code>{keys.url}</code>
+                          <code>{keys.token}</code>
+                        </div>
+                      }
+                    >
+                      <Typography.Text code>{prefix}_*</Typography.Text>
+                    </Tooltip>
+                  );
+                },
               },
               {
                 title: t("Token"),
@@ -298,7 +399,12 @@ export function CredentialsPage() {
             <Button
               theme="solid"
               loading={save.isPending}
-              disabled={!draft?.name.trim() || !draft?.baseUrl.trim() || (!draft?.id && !draft?.token.trim())}
+              disabled={
+                !draft?.name.trim() ||
+                !draft?.baseUrl.trim() ||
+                (!draft?.id && !draft?.token.trim()) ||
+                envPrefixInvalid
+              }
               onClick={() => {
                 setFormError("");
                 save.mutate();
@@ -316,31 +422,77 @@ export function CredentialsPage() {
               <label>{t("名称")}</label>
               <Input
                 value={draft.name}
-                placeholder={t("例如：公司 GitLab")}
+                placeholder={t("例如：公司 {name}", { name: selectedProviderLabel })}
                 onChange={(value) => setDraft((current) => (current ? { ...current, name: value } : current))}
               />
             </div>
             <div className={styles.field}>
               <label>{t("服务类型")}</label>
-              <Input value={PROVIDER_LABEL.gitlab} disabled />
-              <Typography.Text type="tertiary">
-                {providerOptions[0]?.tokenLabel ?? t("Personal Access Token（需要 api scope）")}
-              </Typography.Text>
+              <Select
+                value={draft.provider}
+                disabled={draft.id !== undefined}
+                style={{ width: "100%" }}
+                optionList={providerOptions.map((option) => ({
+                  value: option.id,
+                  label: option.label,
+                  disabled: !option.available,
+                }))}
+                onChange={(value) =>
+                  setDraft((current) =>
+                    current ? { ...current, provider: value as CredentialProviderId } : current,
+                  )
+                }
+              />
+              <Typography.Text type="tertiary">{t(selectedProvider.tokenLabel)}</Typography.Text>
             </div>
             <div className={styles.field}>
               <label>{t("实例地址")}</label>
               <Input
                 value={draft.baseUrl}
-                placeholder="https://gitlab.example.com"
+                placeholder={selectedProvider.baseUrlHint}
                 onChange={(value) => setDraft((current) => (current ? { ...current, baseUrl: value } : current))}
               />
+            </div>
+            <div className={styles.field}>
+              <label>{t("环境别名（Env 前缀）")}</label>
+              <Input
+                value={draft.envPrefix}
+                placeholder={t("例如 {example}；留空使用默认 {prefix}", {
+                  example: envPrefixExample,
+                  prefix: selectedProviderDefaultEnvPrefix,
+                })}
+                onChange={(value) =>
+                  setDraft((current) => (current ? { ...current, envPrefix: value } : current))
+                }
+              />
+              {envPrefixInvalid ? (
+                <Typography.Text type="danger" size="small">
+                  {t("环境前缀只能包含字母、数字和下划线，且以字母开头（最长 {max} 个字符）", {
+                    max: ENV_PREFIX_MAX_LENGTH,
+                  })}
+                </Typography.Text>
+              ) : (
+                <Typography.Text type="tertiary" size="small">
+                  {t("生成的环境变量：{url} / {token}；请填写完整前缀（如 {example}），同一服务的多实例需使用不同前缀。", {
+                    url: previewEnvKeys.url,
+                    token: previewEnvKeys.token,
+                    example: envPrefixExample,
+                  })}
+                </Typography.Text>
+              )}
             </div>
             <div className={styles.field}>
               <label>{t("Token")}</label>
               <Input
                 mode="password"
                 value={draft.token}
-                placeholder={draft.id ? t("留空表示不修改现有 token") : t("粘贴 Personal Access Token")}
+                placeholder={
+                  draft.id
+                    ? t("留空表示不修改现有 token")
+                    : draft.provider === "dockhand"
+                      ? t("粘贴 API Token")
+                      : t("粘贴 Personal Access Token")
+                }
                 onChange={(value) => setDraft((current) => (current ? { ...current, token: value } : current))}
               />
             </div>
@@ -363,12 +515,23 @@ export function CredentialsPage() {
               type="warning"
               closeIcon={null}
               description={t(
-                "保存时会实际请求 GitLab /api/v4/user；地址不可达或 token 无效时不会落库。内网自签证书请配置可信 CA。",
+                "保存时会实际请求 {endpoint}；地址不可达或 token 无效时不会落库。内网自签证书请配置可信 CA。",
+                { endpoint: checkEndpoint(draft.provider) },
               )}
             />
           </div>
         )}
       </SideSheet>
+
+      {isWebHost && (
+        <LocalAccessSideSheet
+          visible={accessOpen}
+          onClose={() => setAccessOpen(false)}
+          credentials={credentials}
+          providers={providerOptions}
+          credentialsLoading={list.isLoading}
+        />
+      )}
     </main>
   );
 }

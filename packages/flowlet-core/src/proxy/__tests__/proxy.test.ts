@@ -91,6 +91,7 @@ class FakeStorage {
   updates: { requestId: string; patch: JsonRow }[] = [];
   appMeta: Record<string, string> = {};
   channelModels: JsonRow[] = [];
+  sessionMetadata: JsonRow[] = [];
   insertRequestLog(row: JsonRow): string {
     this.logs.push({ ...row });
     return `log-${this.logs.length}`;
@@ -100,6 +101,9 @@ class FakeStorage {
   }
   updateRequestLogTiming(requestId: string, patch: JsonRow): void {
     this.updates.push({ requestId, patch: { ...patch } });
+  }
+  upsertAgentSessionMetadata(row: JsonRow): void {
+    this.sessionMetadata.push({ ...row });
   }
   upsertUsageRecordWithMetadata(row: JsonRow, status: string, source: string): void {
     this.usage.push({ ...row, usage_status: status, usage_source: source });
@@ -1186,6 +1190,61 @@ test("P0-18/19: 剥离本地 Agent 身份头，DSH 原生会话头透传", async
   assert.equal(seen.headers["user-agent"], "deepseek-harness/0.2.1");
   // context-1m beta 被剔除，其余 beta 保留。
   assert.equal(seen.headers["anthropic-beta"], "prompt-caching-2024-07-31");
+});
+
+test("会话元数据：按会话身份派生标题与项目路径并 upsert，无会话身份不写", async () => {
+  const upstream = await startMockUpstream((_req, res) => jsonResponse(res, 200, { ok: true }));
+  const proxy = await startProxy({ upstreamPort: upstream.port });
+  cleanups.push(async () => {
+    await proxy.controller.stop();
+    await upstream.close();
+  });
+
+  // 真实 Claude Code 请求形态：system 消息里带工作目录，user 消息里带环境提醒块。
+  const body = JSON.stringify({
+    model: "deepseek-v4-pro",
+    system: [
+      {
+        type: "text",
+        text: "# Environment\nPrimary working directory: /home/dev/projects/flowlet\nIs a git repository: true",
+      },
+    ],
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "<system-reminder>会话开始时的上下文提示</system-reminder>" },
+          { type: "text", text: "修复登录超时的重试逻辑" },
+        ],
+      },
+    ],
+  });
+  await request(proxy.port, {
+    method: "POST",
+    path: "/v1/chat/completions",
+    headers: {
+      "content-type": "application/json",
+      "x-claude-code-session-id": "claude-session-1",
+      "user-agent": "claude-cli/2.1.322 (external, sdk-cli)",
+    },
+    body,
+  });
+  assert.equal(proxy.storage.sessionMetadata.length, 1);
+  const meta = proxy.storage.sessionMetadata[0];
+  assert.equal(meta.agent_type, "claude-code");
+  assert.equal(meta.session_id, "claude-session-1");
+  assert.equal(meta.title, "修复登录超时的重试逻辑");
+  assert.equal(meta.project_path, "/home/dev/projects/flowlet");
+  assert.equal(meta.source, "derived");
+
+  // 未识别出会话身份（无会话头）时不写元数据：元数据必须能归属到具体会话行。
+  await request(proxy.port, {
+    method: "POST",
+    path: "/v1/chat/completions",
+    headers: { "content-type": "application/json" },
+    body: baseChatBody(),
+  });
+  assert.equal(proxy.storage.sessionMetadata.length, 1);
 });
 
 test("P0-20: 未开放模型详情返回 404 model_not_found", async () => {

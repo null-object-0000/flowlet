@@ -130,6 +130,7 @@ export function listRequestLogsPage(db: DatabaseSync, filter: JsonRow): JsonRow 
   const status: string = String(filter.status ?? "");
   const clientId: string = String(filter.client_id ?? "");
   const channelId: string = String(filter.channel_id ?? "");
+  const accountId: string = String(filter.account_id ?? "");
   const search: string = String(filter.search ?? "");
   const timeRange: string = String(filter.time_range ?? "");
   const model: string = String(filter.model ?? "");
@@ -158,6 +159,10 @@ export function listRequestLogsPage(db: DatabaseSync, filter: JsonRow): JsonRow 
   if (channelId !== "") {
     clauses.push("rl.channel_id = ?");
     params.push(channelId);
+  }
+  if (accountId !== "") {
+    clauses.push("rl.account_id = ?");
+    params.push(accountId);
   }
   if (model !== "") {
     if (modelKind === "public") {
@@ -384,6 +389,43 @@ export function listRequestLogModels(db: DatabaseSync): JsonRow {
       .all() as Array<Record<string, unknown>>
   ).map((row) => String(row.model));
   return { publicModels, upstreamModels };
+}
+
+/**
+ * Rust `list_request_log_channel_accounts`（筛选项：渠道 + 渠道账号，camelCase）。
+ * 账号名优先取当前 channel_accounts.name（改名后立即反映），回退日志落库的 account_name。
+ * 排序与 Rust 一致：未知名（空串）后置，再按名称、id。
+ */
+export function listRequestLogChannelAccounts(db: DatabaseSync): JsonRow {
+  const channels = (
+    db
+      .prepare(
+        `SELECT COALESCE(channel_id, '') AS id, COALESCE(MAX(channel_name), '') AS name
+         FROM request_logs
+         WHERE is_last_attempt = 1 AND COALESCE(channel_id, '') <> ''
+         GROUP BY COALESCE(channel_id, '') ORDER BY name = '', name, id`,
+      )
+      .all() as Array<Record<string, unknown>>
+  ).map((row) => ({ id: String(row.id), name: String(row.name) }));
+  const accounts = (
+    db
+      .prepare(
+        `SELECT COALESCE(rl.account_id, '') AS id,
+                COALESCE(MAX(ca.name), MAX(rl.account_name), '') AS name,
+                COALESCE(MAX(rl.channel_id), '') AS channel_id,
+                COALESCE(MAX(rl.channel_name), '') AS channel_name
+         FROM request_logs rl LEFT JOIN channel_accounts ca ON ca.id = rl.account_id
+         WHERE rl.is_last_attempt = 1 AND COALESCE(rl.account_id, '') <> ''
+         GROUP BY rl.account_id ORDER BY channel_name = '', channel_name, name = '', name, id`,
+      )
+      .all() as Array<Record<string, unknown>>
+  ).map((row) => ({
+    id: String(row.id),
+    name: String(row.name),
+    channelId: String(row.channel_id),
+    channelName: String(row.channel_name),
+  }));
+  return { channels, accounts };
 }
 
 /**

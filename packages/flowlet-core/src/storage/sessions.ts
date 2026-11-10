@@ -90,6 +90,54 @@ function matchingRootKeys(
   return roots;
 }
 
+/**
+ * 归一化会话派生元数据的一列（title / project_path）：
+ * 缺省、非字符串、纯空白一律转成 null。原因是 upsert 用 `COALESCE(excluded.x, 历史值)`，
+ * 空串不是 NULL，会覆盖掉历史值；归一成 null 才能保证「本次没解析出」不清空历史。
+ */
+function metadataText(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed === "" ? null : trimmed;
+}
+
+/**
+ * 写入一条会话派生元数据（docs/agent-session-metadata.md §2）。
+ *
+ * 与 Rust 的对齐关系：表结构/写入语义是 Node Host 与桌面 Rust 共用的 schema 契约，只是当前
+ * 仅 Node Host 写入（Rust 侧读不到该表时忽略）。SQL 逐句照搬文档：`ON CONFLICT DO UPDATE`
+ * 只 COALESCE 覆盖 title / project_path，并始终刷新 updated_at。
+ *
+ * - `agent_type` / `session_id` 为空直接 return：没有会话身份就没有可聚合的键，写进去只会
+ *   产生孤儿行（且代理侧不应因此报错）。
+ * - title / project_path 传空串/纯空白时归一成 NULL，否则 COALESCE 会把它当成有效值覆盖历史
+ *   （空串不等于 NULL）。
+ * - source 缺省 'derived'：语义是服务端近似派生；后续更可信来源可显式传 manual/agent。
+ * - 异常不在这里吞掉：写失败由调用方（proxy 侧）try/catch 兜底，主链路不受影响。
+ */
+export function upsertAgentSessionMetadata(db: DatabaseSync, row: JsonRow): void {
+  const agentType = typeof row.agent_type === "string" ? row.agent_type.trim() : "";
+  const sessionId = typeof row.session_id === "string" ? row.session_id.trim() : "";
+  if (!agentType || !sessionId) return;
+  const source =
+    typeof row.source === "string" && row.source.trim() !== "" ? row.source.trim() : "derived";
+  db.prepare(
+    `INSERT INTO agent_session_metadata (agent_type, session_id, title, project_path, source, updated_at)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+     ON CONFLICT(agent_type, session_id) DO UPDATE SET
+         title        = COALESCE(excluded.title, agent_session_metadata.title),
+         project_path = COALESCE(excluded.project_path, agent_session_metadata.project_path),
+         updated_at   = excluded.updated_at`,
+  ).run(
+    agentType,
+    sessionId,
+    metadataText(row.title),
+    metadataText(row.project_path),
+    source,
+    new Date().toISOString(),
+  );
+}
+
 /** Rust list_observed_agent_sessions：按 (agent_type, agent_session_id) 聚合请求观测。 */
 export function listObservedAgentSessions(db: DatabaseSync): JsonRow[] {
   const rows = db
@@ -116,9 +164,16 @@ export function listObservedAgentSessions(db: DatabaseSync): JsonRow[] {
           COALESCE(SUM(ur.estimated_input_uncached_cost), 0) AS estimated_input_uncached_cost,
           COALESCE(SUM(ur.estimated_input_cached_cost), 0) AS estimated_input_cached_cost,
           COALESCE(SUM(ur.estimated_input_cache_write_cost), 0) AS estimated_input_cache_write_cost,
-          COALESCE(SUM(ur.estimated_output_cost), 0) AS estimated_output_cost
+          COALESCE(SUM(ur.estimated_output_cost), 0) AS estimated_output_cost,
+          -- 会话派生元数据（docs/agent-session-metadata.md §3）：按 (agent_type, session_id)
+          -- LEFT JOIN 一对一，MAX 只为满足 GROUP BY 语法；缺失时为 NULL。
+          MAX(m.title) AS session_title,
+          MAX(m.project_path) AS session_project_path
       FROM request_logs rl
       LEFT JOIN usage_records ur ON ur.request_id = rl.request_id
+      LEFT JOIN agent_session_metadata m
+             ON m.agent_type = rl.agent_type
+            AND m.session_id = rl.agent_session_id
       WHERE rl.is_last_attempt = 1
         AND rl.agent_session_id IS NOT NULL
       GROUP BY rl.agent_type, rl.agent_session_id`,
@@ -131,8 +186,9 @@ export function listObservedAgentSessions(db: DatabaseSync): JsonRow[] {
       agentType: String(row.agent_type),
       sessionId: String(row.agent_session_id),
       runtimeStatus: "unknown",
-      title: null,
-      projectPath: null,
+      // 派生标题/项目路径来自 agent_session_metadata（缺失时保持 null，前端回退到目录名/id）。
+      title: row.session_title ?? null,
+      projectPath: row.session_project_path ?? null,
       parentSessionId: row.parent_agent_session_id ?? null,
       clientId: row.client_id ?? null,
       clientName: row.client_name ?? null,

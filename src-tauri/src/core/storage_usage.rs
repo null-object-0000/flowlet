@@ -5,9 +5,10 @@ use crate::core::channels_config::{canonical_model_key, official_channel_id_for_
 use crate::core::config::{
     AccountBalanceSnapshot, AccountStatsRow, AgentNativeUsageSummaryRow, AgentSessionFlowletUsage,
     AgentSessionRepairResult, AgentSessionRow, AgentSessionsFilter, AgentSessionsPageResult,
-    AgentUsageEvent, DeviceUsageBreakdownRow, LogFilterClient, LogsFilter, LogsPageResult,
-    LogsSummary, ModelPrice, RequestLogInput, RequestLogModelOptions, RequestLogRow,
-    UsageRecordInput, UsageSummaryRow, UsageTodaySummary,
+    AgentUsageEvent, DeviceUsageBreakdownRow, LogFilterAccount, LogFilterChannel, LogFilterClient,
+    LogsFilter, LogsPageResult, LogsSummary, ModelPrice, RequestLogChannelAccountOptions,
+    RequestLogInput, RequestLogModelOptions, RequestLogRow, UsageRecordInput, UsageSummaryRow,
+    UsageTodaySummary,
 };
 use crate::core::cost_ledger_source_probe::{GatewayProbeSnapshot, GatewayUsageSample};
 use crate::core::usage::{extract_captured_stream_usage, extract_response_usage};
@@ -1696,6 +1697,64 @@ impl Storage {
             public_models,
             upstream_models,
         })
+    }
+
+    /// 返回请求日志页「渠道 / 渠道账号」筛选项。
+    ///
+    /// 口径与 `list_request_log_clients` / `list_request_log_models` 一致：只统计
+    /// `is_last_attempt = 1` 的日志。名称优先取当前 `channel_accounts` 表（账号可能已改名），
+    /// 连表取不到时回退到请求时刻保存的日志快照。
+    pub fn list_request_log_channel_accounts(
+        &self,
+    ) -> Result<RequestLogChannelAccountOptions, StorageError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| StorageError::LockFailed)?;
+
+        let channels = connection
+            .prepare(
+                r#"
+                SELECT COALESCE(channel_id, '') AS id, COALESCE(MAX(channel_name), '') AS name
+                FROM request_logs
+                WHERE is_last_attempt = 1 AND COALESCE(channel_id, '') <> ''
+                GROUP BY COALESCE(channel_id, '')
+                ORDER BY name = '', name, id
+                "#,
+            )?
+            .query_map([], |row| {
+                Ok(LogFilterChannel {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                })
+            })?
+            .collect::<Result<Vec<LogFilterChannel>, _>>()?;
+
+        let accounts = connection
+            .prepare(
+                r#"
+                SELECT COALESCE(rl.account_id, '') AS id,
+                       COALESCE(MAX(ca.name), MAX(rl.account_name), '') AS name,
+                       COALESCE(MAX(rl.channel_id), '') AS channel_id,
+                       COALESCE(MAX(rl.channel_name), '') AS channel_name
+                FROM request_logs rl
+                LEFT JOIN channel_accounts ca ON ca.id = rl.account_id
+                WHERE rl.is_last_attempt = 1 AND COALESCE(rl.account_id, '') <> ''
+                GROUP BY rl.account_id
+                ORDER BY channel_name = '', channel_name, name = '', name, id
+                "#,
+            )?
+            .query_map([], |row| {
+                Ok(LogFilterAccount {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    channel_id: row.get(2)?,
+                    channel_name: row.get(3)?,
+                })
+            })?
+            .collect::<Result<Vec<LogFilterAccount>, _>>()?;
+
+        Ok(RequestLogChannelAccountOptions { channels, accounts })
     }
 
     pub fn list_request_logs_by_request_id(
@@ -3904,6 +3963,14 @@ impl Storage {
             Some("rl.channel_id = ?")
         };
 
+        // 渠道账号筛选：空串 = 不过滤。参数压入顺序必须与下面 clauses.push 顺序一致。
+        let account_clause = if filter.account_id.is_empty() {
+            None
+        } else {
+            refs.push(&filter.account_id);
+            Some("rl.account_id = ?")
+        };
+
         // 模型筛选按用户所选分组匹配对应维度：
         // - "public"：只匹配对外模型（public/virtual）；
         // - "upstream"：只匹配路由目标模型（upstream）；
@@ -3984,6 +4051,9 @@ impl Storage {
             clauses.push(c);
         }
         if let Some(c) = channel_clause {
+            clauses.push(c);
+        }
+        if let Some(c) = account_clause {
             clauses.push(c);
         }
         if let Some(c) = model_clause {

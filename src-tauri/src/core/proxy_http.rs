@@ -9,7 +9,7 @@ use axum::{
 };
 use base64::Engine;
 use std::collections::BTreeSet;
-use std::io::Read;
+use std::io::{Read, Write};
 
 pub(super) fn cors_preflight_response(request_headers: &HeaderMap) -> Response {
     let mut response = Response::new(Body::empty());
@@ -1034,6 +1034,189 @@ fn read_capped(mut reader: impl Read, max_out: usize) -> std::io::Result<Vec<u8>
         out.extend_from_slice(&buf[..n]);
     }
     Ok(out)
+}
+
+// ─── Streaming observability decode ─────────────────────────────────────────
+//
+// reqwest 未启用自动解压 feature，上游 SSE 若带 `content-encoding: gzip/deflate/br/zstd`
+// 则字节流是压缩体：TTFT 探针、`StreamUsageAccumulator` 与终止事件追踪都解析不到事件，
+// 于是 usage_records 缺失。下面这套增量解压器把同一份上游字节**另解压出一份观测副本**，
+// 只喂观测链路；转发给客户端的原始字节、`content-encoding` 头与响应体捕获（由
+// `prepare_captured_res_body` 统一解压）都保持完全不变。
+
+/// 单块上游字节解压后的明文上限（防压缩炸弹 / 异常分块导致无界内存）。
+/// 正常 SSE 分块只有数十 KB，远低于该值；超过时只停用观测解压，转发、日志与连接不受影响。
+pub(super) const MAX_DECODED_CHUNK_BYTES: usize = 8 * 1024 * 1024;
+
+/// 解压输出的接收器：最多缓存 [`MAX_DECODED_CHUNK_BYTES`]，超出部分丢弃并标记 overflow，
+/// 但始终向解压器报告写入成功，避免解压器因下游拒写而中断（它只需要一个能吞下全部写入的 sink）。
+#[derive(Default)]
+struct CappedDecodeSink {
+    buf: Vec<u8>,
+    overflowed: bool,
+}
+
+impl CappedDecodeSink {
+    fn take(&mut self) -> (Vec<u8>, bool) {
+        (
+            std::mem::take(&mut self.buf),
+            std::mem::replace(&mut self.overflowed, false),
+        )
+    }
+}
+
+impl Write for CappedDecodeSink {
+    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        let room = MAX_DECODED_CHUNK_BYTES.saturating_sub(self.buf.len());
+        if data.len() > room {
+            self.overflowed = true;
+            self.buf.extend_from_slice(&data[..room]);
+        } else {
+            self.buf.extend_from_slice(data);
+        }
+        Ok(data.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+fn drain_decode_sink(sink: &mut CappedDecodeSink, out: &mut Vec<u8>) -> bool {
+    let (mut produced, overflowed) = sink.take();
+    out.append(&mut produced);
+    overflowed
+}
+
+fn drive_decoder(
+    result: std::io::Result<()>,
+    sink: &mut CappedDecodeSink,
+    out: &mut Vec<u8>,
+) -> bool {
+    let overflowed = drain_decode_sink(sink, out);
+    result.is_err() || overflowed
+}
+
+enum StreamDecodeKind {
+    Identity,
+    Gzip(Box<flate2::write::GzDecoder<CappedDecodeSink>>),
+    Deflate(Box<flate2::write::DeflateDecoder<CappedDecodeSink>>),
+    Brotli(Box<brotli::DecompressorWriter<CappedDecodeSink>>),
+    Zstd(Box<zstd::stream::write::Decoder<'static, CappedDecodeSink>>),
+    /// 解压失败/超限后停用：不再向观测链路喂字节，但已解析出的部分保留。
+    Disabled,
+}
+
+/// 单块上游字节喂给观测链路时应该使用的字节来源。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum StreamDecodedChunk {
+    /// 未压缩/未知编码：直接使用原始字节（零拷贝，保持既有行为）。
+    Passthrough,
+    /// 已解压：明文写入调用方提供的缓冲（可能为空）。
+    Decoded,
+    /// 观测解压失败或已停用：本块不再喂观测链路。
+    Disabled,
+}
+
+/// 流式响应的观测用增量解压器。
+///
+/// 支持 gzip / x-gzip、deflate、br、zstd；`identity`/未知编码保持「不解压、原始字节
+/// 直接喂观测链路」的既有行为。每次 [`decode_chunk`](Self::decode_chunk) 返回本块
+/// 新产生的明文，流结束时用 [`finish`](Self::finish) flush 尾部（gzip CRC/长度校验、
+/// br 完成态、zstd 内部缓冲）。任何解压错误或单块明文超限都只会把自身切换成
+/// [`StreamDecodeKind::Disabled`]，不影响转发与日志。
+pub(super) struct StreamUsageDecoder {
+    kind: StreamDecodeKind,
+}
+
+impl StreamUsageDecoder {
+    pub(super) fn for_content_encoding(content_encoding: Option<&str>) -> Self {
+        let kind = match content_encoding {
+            Some("gzip") | Some("x-gzip") => StreamDecodeKind::Gzip(Box::new(
+                flate2::write::GzDecoder::new(CappedDecodeSink::default()),
+            )),
+            Some("deflate") => StreamDecodeKind::Deflate(Box::new(
+                flate2::write::DeflateDecoder::new(CappedDecodeSink::default()),
+            )),
+            Some("br") => StreamDecodeKind::Brotli(Box::new(brotli::DecompressorWriter::new(
+                CappedDecodeSink::default(),
+                4096,
+            ))),
+            Some("zstd") => match zstd::stream::write::Decoder::new(CappedDecodeSink::default()) {
+                Ok(decoder) => StreamDecodeKind::Zstd(Box::new(decoder)),
+                // 无法创建 zstd 上下文时退化为「只停用观测解压」，不影响转发。
+                Err(_) => StreamDecodeKind::Disabled,
+            },
+            // None / identity / 未知编码：保持原有行为，不解压。
+            _ => StreamDecodeKind::Identity,
+        };
+        Self { kind }
+    }
+
+    /// 解压一块上游原始字节，把本块新产生的明文字节 append 到 `out`。
+    pub(super) fn decode_chunk(&mut self, chunk: &[u8], out: &mut Vec<u8>) -> StreamDecodedChunk {
+        let failed = match &mut self.kind {
+            StreamDecodeKind::Identity => return StreamDecodedChunk::Passthrough,
+            StreamDecodeKind::Disabled => return StreamDecodedChunk::Disabled,
+            StreamDecodeKind::Gzip(decoder) => {
+                let result = decoder.write_all(chunk);
+                drive_decoder(result, decoder.get_mut(), out)
+            }
+            StreamDecodeKind::Deflate(decoder) => {
+                let result = decoder.write_all(chunk);
+                drive_decoder(result, decoder.get_mut(), out)
+            }
+            StreamDecodeKind::Brotli(decoder) => {
+                let result = decoder.write_all(chunk);
+                drive_decoder(result, decoder.get_mut(), out)
+            }
+            StreamDecodeKind::Zstd(decoder) => {
+                let result = decoder.write_all(chunk);
+                drive_decoder(result, decoder.get_mut(), out)
+            }
+        };
+        if failed {
+            // 只停用观测解压：已解压出的前缀仍然有效，转发字节不受影响。
+            self.kind = StreamDecodeKind::Disabled;
+        }
+        StreamDecodedChunk::Decoded
+    }
+
+    /// 流结束时 flush 解压器，把尾部残留明文 append 到 `out`。
+    ///
+    /// 返回 `true` 表示压缩流完整结束（gzip CRC/长度校验通过、br 正常结束、
+    /// zstd 无错误）；`false` 表示已停用或压缩流被截断/损坏——此时已解压前缀
+    /// 仍然有效，由 usage 完整性判定按 partial 语义处理。
+    pub(super) fn finish(&mut self, out: &mut Vec<u8>) -> bool {
+        let clean = match &mut self.kind {
+            StreamDecodeKind::Identity => true,
+            StreamDecodeKind::Disabled => false,
+            StreamDecodeKind::Gzip(decoder) => {
+                let result = decoder.try_finish();
+                let overflowed = drain_decode_sink(decoder.get_mut(), out);
+                result.is_ok() && !overflowed
+            }
+            StreamDecodeKind::Deflate(decoder) => {
+                let result = decoder.try_finish();
+                let overflowed = drain_decode_sink(decoder.get_mut(), out);
+                result.is_ok() && !overflowed
+            }
+            StreamDecodeKind::Brotli(decoder) => {
+                let result = decoder.close();
+                let overflowed = drain_decode_sink(decoder.get_mut(), out);
+                result.is_ok() && !overflowed
+            }
+            StreamDecodeKind::Zstd(decoder) => {
+                let result = decoder.flush();
+                let overflowed = drain_decode_sink(decoder.get_mut(), out);
+                result.is_ok() && !overflowed
+            }
+        };
+        // finish 结束后不允许再写入：flate2 的 try_finish 之后继续 write 可能 panic，
+        // 这里统一切换到 Disabled 让后续块直接跳过观测解压（幂等）。
+        self.kind = StreamDecodeKind::Disabled;
+        clean
+    }
 }
 
 /// 捕获响应体的统一入口：按 content-encoding 解压 → 截断到 UTF-8 边界 → base64。

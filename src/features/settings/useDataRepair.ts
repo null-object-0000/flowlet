@@ -4,6 +4,7 @@ import { dataRepairCommands } from "../../domains/data-repair/commands";
 import type { DataRepairResults, DataRepairStage, DataRepairState, DataRepairTimeRange } from "../../domains/data-repair/types";
 import { queryKeys } from "../../shared/query-keys";
 
+import { errorMessage } from "../../shared/errors/AppError";
 const stages: DataRepairStage[] = ["sessions", "capturedUsage", "unknownUsage", "costs"];
 
 const initialState: DataRepairState = {
@@ -70,7 +71,7 @@ export function useDataRepair() {
       setState({ status: "success", currentStage: null, completedStages, percent: 100, results, error: null });
       await refreshAffectedQueries();
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       setState({
         status: "error",
         currentStage: stages[completedStages.length] ?? null,

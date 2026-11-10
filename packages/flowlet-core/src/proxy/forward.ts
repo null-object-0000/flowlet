@@ -41,6 +41,7 @@ import {
   markAccountInvalid,
   markAccountRecovered,
   readCaptureConfig,
+  recordAgentSessionMetadata,
   recordRequestLog,
   recordRequestLogAndWait,
   recordUsage,
@@ -48,6 +49,7 @@ import {
   type LogCaptureConfig,
   type ProxyStorage,
 } from "./log.ts";
+import { deriveSessionMetadata } from "./session-derive.ts";
 import { asChannelModel, buildModelDetailResponse, buildModelListResponse } from "./models.ts";
 import {
   ACCOUNT_CREDENTIAL_HEALTHY,
@@ -597,6 +599,30 @@ function discardResponseBody(body: Readable): void {
   body.destroy();
 }
 
+/**
+ * 把请求体里能确认的会话标题 / 项目路径写入观测元数据（docs/agent-session-metadata.md）。
+ *
+ * 只在识别出 `(agent_type, session_id)` 时写：否则元数据无法归属到任何会话行。
+ * 两个值可以只命中一个（例如 DSH 的请求体里没有 cwd），此时另一个字段传 null，
+ * 由存储层的 COALESCE 保留历史值。
+ */
+function recordDerivedSessionMetadata(
+  storage: ProxyStorage,
+  agentSession: ReturnType<typeof extractAgentSession>,
+  bodyBytes: Buffer,
+): void {
+  if (agentSession === null) return;
+  const derived = deriveSessionMetadata(agentSession.agent_type, bodyBytes);
+  if (derived.title === null && derived.projectPath === null) return;
+  recordAgentSessionMetadata(storage, {
+    agent_type: agentSession.agent_type,
+    session_id: agentSession.session_id,
+    title: derived.title,
+    project_path: derived.projectPath,
+    source: "derived",
+  });
+}
+
 // ─── Model path ─────────────────────────────────────────────────────────────
 
 async function forwardModelRequest(
@@ -624,6 +650,10 @@ async function forwardModelRequest(
   const agentSession = extractAgentSession(headers);
   const config = resolveConfig(deps);
   const { channels, accounts, routes, rules } = config;
+
+  // 会话标题/项目路径只做观测补充：识别出会话身份就先 upsert，与本次请求是否命中路由无关。
+  // 未识别会话身份（如 GET /models）时不会写任何元数据行。
+  recordDerivedSessionMetadata(deps.storage, agentSession, bodyBytes);
 
   if (isModelListRequest(method, path)) {
     const response = buildModelListResponse(routes, accounts, channels, protocol, deps.identity);

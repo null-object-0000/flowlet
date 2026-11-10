@@ -1023,6 +1023,9 @@ function createSnapshotDraft(account: ChannelAccount, resource: ResourceDraft, m
     token_pack_remaining: null,
     token_pack_expire_at: null,
     token_packs: null,
+    // Rust `AccountBalanceSnapshot` 无 serde default；手动快照也必须带该字段（null 即可），
+    // 否则 Web Host 会报 `missing field raw_scraped_json`。
+    raw_scraped_json: null,
     source: "manual",
     synced_at: new Date().toISOString(),
     remark: null,

@@ -11,6 +11,7 @@ import {
   DESKTOP_WORKSPACE_PACKAGE_FORMAT,
 } from "../../../domains/account-workspace/syncPackage";
 import { serializeS3ConnectionPackage } from "../../../domains/device-sync/s3ConnectionPackage";
+import { copyText } from "../../../shared/ui/copyText";
 import type {
   DeviceUsageImportPreview,
   S3SyncConfigInput,
@@ -279,7 +280,7 @@ export function SyncTab() {
   const copyConnectionText = async () => {
     if (!sharePackage) return;
     try {
-      await navigator.clipboard.writeText(sharePackage.text);
+      await copyText(sharePackage.text);
       Toast.success(t(sharePackage.text.includes(DESKTOP_WORKSPACE_PACKAGE_FORMAT)
         ? "账号工作区连接文本已复制"
         : "S3 连接文本已复制"));

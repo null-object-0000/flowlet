@@ -147,7 +147,7 @@ impl GitlabClient {
         reqwest::Client::builder()
             .timeout(DEFAULT_TIMEOUT)
             .danger_accept_invalid_certs(self.insecure)
-            .user_agent(format!("flowlet-cred/{}", env!("CARGO_PKG_VERSION")))
+            .user_agent(format!("flowlet/{}", env!("CARGO_PKG_VERSION")))
             .build()
             .map_err(|error| format!("创建 HTTP 客户端失败：{error}"))
     }

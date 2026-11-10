@@ -5,6 +5,7 @@ import type { ProxyBindConfig, ProxyRuntimeState, ProxyStatus } from "../../doma
 import type { UsageTodaySummary } from "../../domains/usage/types";
 import { formatDuration, getProxyPhaseLabel } from "../../features/proxy-lifecycle/proxyStatusPresentation";
 import { formatFullTimestamp } from "../../shared/formatters/datetime";
+import { copyText } from "../../shared/ui/copyText";
 import { formatCompactNumber } from "../../shared/formatters/number";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 
@@ -38,24 +39,7 @@ export function OverviewServiceStrip({ status, phase, bindConfig, baseUrl, today
 
   const copy = async (value: string, kind: "endpoint" | "token") => {
     try {
-      if (navigator.clipboard) {
-        await navigator.clipboard.writeText(value);
-      } else {
-        // Clipboard API is unavailable on an HTTP intranet deployment.
-        const field = document.createElement("textarea");
-        field.value = value;
-        field.style.position = "fixed";
-        field.style.opacity = "0";
-        const previousFocus = document.activeElement;
-        document.body.append(field);
-        try {
-          field.select();
-          if (!document.execCommand("copy")) throw new Error("Copy unavailable");
-        } finally {
-          field.remove();
-          if (previousFocus instanceof HTMLElement) previousFocus.focus();
-        }
-      }
+      await copyText(value);
       Toast.success(kind === "endpoint"
         ? t("{label} 已复制", { label: t("客户端接入") })
         : t("{label} 已复制", { label: t("客户端 Token") }));

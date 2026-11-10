@@ -6,6 +6,7 @@ import { SettingRow, SettingSection } from "../SettingRow";
 import styles from "./MaintenanceTab.module.css";
 import { useAppPreferences } from "../../../app/preferences/AppPreferences";
 
+import { errorMessage } from "../../../shared/errors/AppError";
 const REPAIR_TIME_OPTIONS: Array<{ value: DataRepairTimeRange; label: string }> = [
   { value: "all", label: "全部时间" },
   { value: "7d", label: "最近 7 天" },
@@ -40,7 +41,7 @@ export function MaintenanceTab() {
 
   const startRepair = () => {
     repair.run(repairTimeRange).catch((error) => {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       Toast.error(t("本地数据修复失败：{message}", { message }));
     });
   };

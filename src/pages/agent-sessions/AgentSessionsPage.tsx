@@ -229,7 +229,7 @@ export function AgentSessionsPage({ hostMode = "desktop" }: { hostMode?: AgentSe
           toolbar={(
             <DesktopFilterToolbarView
               ariaLabel={t("会话筛选")}
-              search={{ value: searchDraft, placeholder: webHost ? t("搜索会话 ID 或父会话") : t("搜索会话标题、ID 或项目目录"), width: 280 }}
+              search={{ value: searchDraft, placeholder: t("搜索会话标题、ID 或项目目录"), width: 280 }}
               selects={[
                 { key: "client", insetLabel: t("客户端"), value: filter.agentType || "__all__", ariaLabel: t("客户端"), width: 210, options: [
                   { value: "__all__", label: t("全部客户端") },

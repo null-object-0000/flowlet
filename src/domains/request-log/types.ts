@@ -9,6 +9,8 @@ export type RequestLogFilter = {
   status: RequestLogStatusFilter;
   clientId: string;
   channelId: string;
+  /** 按具体渠道账号筛选；与 channelId 互斥（同时有值时以账号为先，UI 保证只选一个）。 */
+  accountId: string;
   search: string;
   timeRange: RequestLogTimeRange;
   model: string;
@@ -105,6 +107,18 @@ export type RequestLogPage = {
 
 export type RequestLogClient = { id: string; name: string };
 
+/** 「渠道账号」筛选下拉中的渠道项。 */
+export type RequestLogFilterChannel = { id: string; name: string };
+
+/** 「渠道账号」筛选下拉中的账号项，带上所属渠道用于分组展示。 */
+export type RequestLogFilterAccount = { id: string; name: string; channelId: string; channelName: string };
+
+/** `list_request_log_channel_accounts` 命令的返回值。 */
+export type RequestLogChannelAccountOptions = {
+  channels: RequestLogFilterChannel[];
+  accounts: RequestLogFilterAccount[];
+};
+
 export type RequestLogModelOptions = {
   /** 对外模型（public/virtual_model），即客户端请求时使用的模型名。 */
   publicModels: string[];
@@ -118,6 +132,7 @@ export const DEFAULT_REQUEST_LOG_FILTER: RequestLogFilter = {
   status: "all",
   clientId: "",
   channelId: "",
+  accountId: "",
   search: "",
   timeRange: "all",
   model: "",

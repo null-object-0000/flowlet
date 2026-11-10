@@ -900,6 +900,7 @@ fn run_desktop() {
             commands::list_agent_session_clients,
             commands::list_request_log_clients,
             commands::list_request_log_models,
+            commands::list_request_log_channel_accounts,
             commands::get_request_log_detail,
             commands::get_log_capture_config,
             commands::set_log_capture_config,

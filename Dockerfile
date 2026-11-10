@@ -14,6 +14,8 @@ COPY tsconfig.json vite.config.ts index.html ./
 COPY src ./src
 COPY public ./public
 COPY model-catalog.json plugin-registry.json ./
+# 本机接入下载产物（CLI / Skills tar + 安装脚本）由 build:web 末尾的脚本生成，需提前 COPY。
+COPY scripts/build-local-access.mjs scripts/install-flowlet.sh ./scripts/
 RUN npm run build:web
 
 # 只安装 flowlet-core 的运行时依赖（undici）；服务端其余全部使用 Node 内置模块。

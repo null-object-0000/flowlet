@@ -166,6 +166,23 @@ export function mergeBuiltinConfig(external: ChannelsConfig, builtin: ChannelsCo
 }
 
 /**
+ * 把合并后的 `ChannelsConfig` 还原成 config.json 的 `channels_config` 结构。
+ *
+ * Web 命令层（`createWebHost`）与 Rust 一样必须使用「已合并内置模板」的渠道配置：
+ * 数据卷里的 `/data/config.json` 通常是旧版本写入的，缺少后续版本新增的渠道，
+ * 直接用它会导致 `fetch_channel_models` 报「缺少运行时模板」、`query_balance`
+ * 拼出空 Base URL（`Invalid URL`）。见 `web/index.ts` 的 `WebHostOptions.channelsConfig`。
+ */
+export function channelsConfigToJson(config: ChannelsConfig): JsonRow {
+  return {
+    channels: config.presets,
+    prices: config.prices,
+    default_exposed_models: config.default_exposed_models,
+    endpoints: config.endpoints,
+  };
+}
+
+/**
  * 加载渠道配置：外部 config.json 解析失败时回退内置默认（与 Rust
  * `load_channels_config_from` + `merge_builtin_config` 一致）。
  */

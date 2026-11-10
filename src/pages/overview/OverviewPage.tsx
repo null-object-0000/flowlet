@@ -10,6 +10,7 @@ import { AccountActionOverlay, type AccountActionRequest } from "../../features/
 import { CodexAccountSideSheet } from "../../features/channel-accounts/CodexAccountSideSheet";
 import { useRouteCandidates } from "../../features/exposed-models/useModels";
 import { useProxyBindConfig } from "../../features/proxy-lifecycle/useProxyBindConfig";
+import { copyText } from "../../shared/ui/copyText";
 import { useProxyOverviewLifecycle } from "../../features/proxy-lifecycle/useProxyOverviewLifecycle";
 import { useTodayTokens } from "../../features/usage/useTodayTokens";
 import { OverviewGrid } from "./OverviewGrid";
@@ -52,7 +53,7 @@ export function OverviewPage() {
       );
       Toast.success(t(enabled ? "账号已启用" : "账号已停用"));
     } catch (error) {
-      Toast.error(t("保存失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
+      Toast.error(t("保存失败：{message}", { message: errorMessage(error) }));
     }
   };
 
@@ -142,7 +143,7 @@ export function OverviewPage() {
           running={proxy.status.data?.running === true}
           onCopy={async (value, message) => {
             try {
-              await navigator.clipboard.writeText(value);
+              await copyText(value);
             } catch {
               // ignore clipboard errors, message still shows intent
             }

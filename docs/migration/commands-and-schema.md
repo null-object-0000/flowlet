@@ -9,10 +9,10 @@
 
 | 指标 | 数值 | 说明 |
 |---|---|---|
-| 桌面端 Tauri 命令 | **141** | `invoke_handler` 注册 141 条，定义于 `commands/` 9 个文件，全部经 `commands/mod.rs` 重导出 |
+| 桌面端 Tauri 命令 | **142** | `invoke_handler` 注册 142 条，定义于 `commands/` 9 个文件，全部经 `commands/mod.rs` 重导出 |
 | 移动端 Tauri 命令 | **17** | `mobile_commands.rs`，`#[cfg(mobile)]` 独立注册，与桌面无编译重叠 |
-| 命令注册总数 | **158** | 141 + 17（`generate_handler!` 两个列表） |
-| 迁移难度 | A **34** / B **85** / C **15** / D **7** | A 纯逻辑/网络/文件、B SQLite、C 平台能力、D Tauri 专有 IPC（webview/事件/注入回调） |
+| 命令注册总数 | **159** | 142 + 17（`generate_handler!` 两个列表） |
+| 迁移难度 | A **34** / B **86** / C **15** / D **7** | A 纯逻辑/网络/文件、B SQLite、C 平台能力、D Tauri 专有 IPC（webview/事件/注入回调） |
 | SQLite 表 | **25** | 全部在 `core/storage.rs::migrate()` 中 `CREATE TABLE IF NOT EXISTS` |
 | 显式索引 | **19** | 含 1 个 UNIQUE；另有 122 个列由幂等 `ALTER TABLE ... ADD COLUMN` 补齐 |
 | schema 版本机制 | **无 `PRAGMA user_version`** | 以 `app_meta.schema_version='2026.08.02'` + 幂等补列 + 一次性数据迁移标记实现 |
@@ -31,7 +31,7 @@
 - 权威注册表：`src-tauri/src/lib.rs` 的 `generate_handler![...]`（桌面 800–942 行，移动 1036–1054 行）。
 - `src-tauri/src/commands/mod.rs` 只做 9 个子模块 `pub(super) use ...::*` 重导出，因此注册路径统一为 `commands::<name>`；命令实现拆到 `account_workspace / agent / channels / device_sync / maintenance / observability / proxy / scrape / usage`。
 - 桌面与移动是**两套独立状态**：桌面 `AppState`（持有 `FlowletServices`、抓取 webview map、托盘、LAN 状态、退出标记）vs 移动 `MobileAppState`（仅 `Storage + JobRuntime`）。移动端复用 `Storage` 与 `core/device_sync`、`core/lan_sync`。
-- 另有一条**非 Tauri 宿主**：`src-tauri/src/bin/headless.rs`（axum Web Host），不经 `invoke_handler`，而是走 `core/web/commands.rs` 的**显式命令白名单（46 条命令，另有 host 专用 `web_connection_info` 与拒绝回退 `unsupported_in_web`）**。Node 迁移若同时覆盖 headless/Docker 形态，需要把该白名单一并实现为 HTTP 管理 API。
+- 另有一条**非 Tauri 宿主**：`src-tauri/src/bin/headless.rs`（axum Web Host），不经 `invoke_handler`，而是走 `core/web/commands.rs` 的**显式命令白名单（52 条命令，含 host 专用 `web_connection_info`；拒绝回退 `unsupported_in_web`）**。Node 迁移若同时覆盖 headless/Docker 形态，需要把该白名单一并实现为 HTTP 管理 API。
 - 前端边界：`src/platform/tauri/client.ts::invokeCommand` 统一加超时与错误归一，`src/domains/*/commands.ts` 是唯一拼写命令名的位置（共 158 处 `invokeCommand` 调用）；Web Host 模式下自动改走 `src/platform/web/client.ts`。
 
 ## 2. 领域分布与热度
@@ -43,13 +43,13 @@
 | `channels.rs` | 9 | 渠道 / 账号 / 路由 / 模型配置 | 0 | 9 | 0 | 0 | channel (27) / model (27) |
 | `proxy.rs` | 6 | 代理生命周期 | 3 | 1 | 2 | 0 | proxy (15) |
 | `usage.rs` | 8 | 用量与费用 | 0 | 8 | 0 | 0 | usage (16) / data-repair (2) |
-| `observability.rs` | 22 | 请求日志 / Agent 会话 / 后台任务 | 6 | 16 | 0 | 0 | request-log (7) / agent-session (11) / background-task (5) |
+| `observability.rs` | 23 | 请求日志 / Agent 会话 / 后台任务 | 6 | 17 | 0 | 0 | request-log (7) / agent-session (11) / background-task (5) |
 | `device_sync.rs` | 26 | 设备用量与跨设备同步 | 3 | 22 | 1 | 0 | device-sync (18) |
 | `maintenance.rs` | 24 | 配置 / 元数据 / 存储维护 / 自启动 / 诊断 | 8 | 13 | 3 | 0 | settings (14) |
 | `scrape.rs` | 24 | 模型目录 / 余额 / 预设同步 / 控制台抓取 | 6 | 11 | 0 | 7 | channel (27) / model (27) / cost-ledger (0) |
 | `agent.rs` | 17 | Agent 接入 / 环境 / 全局配置 / Codex / Antigravity | 8 | 0 | 9 | 0 | agent (34) |
 | `account_workspace.rs` | 5 | 账号工作区（S3 工作区同步） | 0 | 5 | 0 | 0 | account-workspace (2) |
-| **合计** | **141** | — | **34** | **85** | **15** | **7** | — |
+| **合计** | **142** | — | **34** | **86** | **15** | **7** | — |
 
 **领域迁移顺序建议（依赖方向）**
 
@@ -60,7 +60,7 @@
 5. `agent.rs`：Agent 接入读写本机文件，独立性强，但子进程/OAuth 属 C 类，跟随平台层批次。
 6. `account_workspace.rs`：S3 工作区，低频，最后。
 
-## 3. 桌面端命令清单（141）
+## 3. 桌面端命令清单（142）
 
 > 「参数（JS 侧）」已按 Tauri 默认规则把 Rust `snake_case` 形参转为前端必须传的 `camelCase` 键名；`tauri::State`/`AppHandle`/`WebviewWindow` 注入参数不出现于 JS 调用。所有命令均无 `#[tauri::command(rename_all = ...)]` 覆盖。
 > 返回类型为 Rust 声明；字段命名风格见 §5.2。错误统一为 `Result<T, String>`（`ipc_ping`/`get_app_version`/`get_app_data_dir`/`get_app_diagnostics`/`log_from_frontend` 例外，直接返回 JSON/字符串/void）。
@@ -103,7 +103,7 @@
 | 7 | `agent_native_usage_summary` | — | `Vec<AgentNativeUsageSummaryRow>` | B | 中 | Agent 原生用量逐事件聚合（camelCase）。 |
 | 8 | `usage_today_tokens` | — | `UsageTodaySummary` | B | 高 | 概览页今日 Token 单条聚合；字段 snake_case。 |
 
-### 3.4 `observability.rs` — 请求日志 / Agent 会话 / 后台任务（22 条）
+### 3.4 `observability.rs` — 请求日志 / Agent 会话 / 后台任务（23 条）
 
 | # | 命令 | 参数（JS camelCase） | 返回类型 | 难度 | 热度 | 备注 |
 |---|---|---|---|---|---|---|
@@ -126,9 +126,10 @@
 | 17 | `list_agent_session_clients` | — | `Vec<LogFilterClient>` | B | 中 | 会话客户端筛选项。 |
 | 18 | `list_request_log_clients` | — | `Vec<LogFilterClient>` | B | 中 | 日志客户端筛选项。 |
 | 19 | `list_request_log_models` | — | `RequestLogModelOptions` | B | 中 | 日志模型筛选项（camelCase）。 |
-| 20 | `get_request_log_detail` | requestId: string | `Vec<RequestLogRow>` | B | 高 | 按 request_id 取全部 attempt。 |
-| 21 | `get_log_capture_config` | — | `LogCaptureConfig` | A | 中 | 进程内捕获配置副本。 |
-| 22 | `set_log_capture_config` | config: LogCaptureConfig | `()` | B | 中 | 写 app_meta.log_capture_config + 更新进程内。 |
+| 20 | `list_request_log_channel_accounts` | — | `RequestLogChannelAccountOptions` | B | 中 | 日志渠道账号筛选项（camelCase；channels + accounts）。 |
+| 21 | `get_request_log_detail` | requestId: string | `Vec<RequestLogRow>` | B | 高 | 按 request_id 取全部 attempt。 |
+| 22 | `get_log_capture_config` | — | `LogCaptureConfig` | A | 中 | 进程内捕获配置副本。 |
+| 23 | `set_log_capture_config` | config: LogCaptureConfig | `()` | B | 中 | 写 app_meta.log_capture_config + 更新进程内。 |
 
 ### 3.5 `device_sync.rs` — 设备用量与跨设备同步（26 条）
 
@@ -289,7 +290,7 @@
 
 ### 5.1 参数命名：一律 camelCase
 
-所有 141 条桌面命令的形参都是 Rust `snake_case`，且没有任何命令使用 `#[tauri::command(rename_all = "snake_case")]`。Tauri v2 默认把命令参数名转为 **camelCase** 传给 Rust，因此前端现在的调用形如：
+所有 142 条桌面命令的形参都是 Rust `snake_case`，且没有任何命令使用 `#[tauri::command(rename_all = "snake_case")]`。Tauri v2 默认把命令参数名转为 **camelCase** 传给 Rust，因此前端现在的调用形如：
 
 ```ts
 invokeCommand("save_s3_sync_config", { config })
@@ -344,7 +345,7 @@ Rust 结构体的 serde 属性决定 IPC JSON 字段风格。核心配置类型�
 
 **页面注入 JS → 命令（D 类，Tauri 专有）**：`core/scrape_console.rs` 向抓取用 WebviewWindow 注入脚本，脚本内 `globalThis.__TAURI_INTERNALS__.invoke('handle_scrape_interceptor_ready' | 'handle_intercepted_response', ...)` 直接回调 Rust。Electron 等价物只能是 `webContents.executeJavaScript` + `ipcRenderer`/`contextBridge` 或 `session.webRequest`/`debugger` 网络拦截，**不能靠 1:1 命令移植**。
 
-**Web Host（headless / Docker）命令白名单**：`core/web/commands.rs::dispatch` 显式放行 46 条命令（`list_channel_presets`、`save_channel_accounts`、`start_proxy`、`list_request_logs`、`usage_summary`…），另有 `web_connection_info` 与拒绝回退 `unsupported_in_web`；管理凭据（`FLOWLET_ADMIN_TOKEN`）与模型调用凭据（client token）分离鉴权。若 Electron 版仍要出 Docker Host，这 46 条需要一组 HTTP 路由而非 IPC。
+**Web Host（headless / Docker）命令白名单**：`core/web/commands.rs::dispatch` 显式放行 52 条命令（含 host 专用 `web_connection_info`，如 `list_channel_presets`、`save_channel_accounts`、`start_proxy`、`list_request_logs`、`usage_summary`…），另有拒绝回退 `unsupported_in_web`；管理凭据（`FLOWLET_ADMIN_TOKEN`）与模型调用凭据（client token）分离鉴权。若 Electron 版仍要出 Docker Host，这 52 条需要一组 HTTP 路由而非 IPC。
 
 ## 6. SQLite 现状（Node 必须逐列兼容）
 
@@ -388,6 +389,8 @@ Rust 结构体的 serde 属性决定 IPC JSON 字段风格。核心配置类型�
 | 23 | `agent_source_sync_state` | Agent 数据源同步状态 | agent_type PK、last_checked/synced_at、status、last_error、scanned/changed/failed_count | agent_type PK |
 | 24 | `background_jobs` | 后台任务主表 | job_type、title、trigger_source、status、stage、progress_current/total、summary_json(JSON)、error_message、时间戳 | id TEXT PK |
 | 25 | `background_job_events` | 后台任务事件流 | job_id、sequence、level、stage、message、detail_json(JSON) | id TEXT PK |
+
+**Node Host 额外建的表（Rust 基线之外的第 26 张）**：`agent_session_metadata`（PK(agent_type, session_id)、title、project_path、source、updated_at）。它由 Node Host 的代理侧从模型请求体派生会话标题/项目路径后写入，供 Docker 会话管理展示（规则见 [docs/agent-session-metadata.md](../agent-session-metadata.md)）；桌面 Rust 不写该表、读到未知表忽略，回滚安全。该表只增不改，新建库与老库升级都由 `CREATE TABLE IF NOT EXISTS` 覆盖。
 
 **迁移中被删除的表（旧库升级时会遇到）**：`projects`、`project_tasks`、`recurring_tasks`、`recurring_task_runs`、`device_projects`（项目管理能力 2026-10 移除，`drop_project_management_schema` 先关外键再按子→父顺序 DROP）；`request_logs.stream_summary` 列被 `ALTER TABLE ... DROP COLUMN` 删除（要求 SQLite ≥ 3.35）。Node 侧若只建新库不需要处理，**但复用旧库时必须先跑同一套清理逻辑**，否则 UI 与查询会看到孤儿数据。
 
@@ -503,10 +506,10 @@ Rust 结构体的 serde 属性决定 IPC JSON 字段风格。核心配置类型�
 
 | 级别 | 定义 | 数量 | 占比 | 迁移策略 |
 |---|---|---|---|---|
-| **A** | 纯逻辑 / 纯网络 / 纯文件 IO：不碰 SQLite，不依赖 Tauri 窗口/托盘/webview/事件 | 34 | 24.1% | 直接 TS 重写（`fetch`/`undici`、`node:fs`、`node:path`、`node:crypto`），可先做、可单测 |
-| **B** | 依赖 SQLite 查询/写入（含 `app_meta` JSON 读写与后台任务表） | 85 | 60.3% | 跟随统一 `Storage` 数据访问层重写；优先保证 SQL 与 schema 逐字对齐 |
+| **A** | 纯逻辑 / 纯网络 / 纯文件 IO：不碰 SQLite，不依赖 Tauri 窗口/托盘/webview/事件 | 34 | 23.9% | 直接 TS 重写（`fetch`/`undici`、`node:fs`、`node:path`、`node:crypto`），可先做、可单测 |
+| **B** | 依赖 SQLite 查询/写入（含 `app_meta` JSON 读写与后台任务表） | 86 | 60.6% | 跟随统一 `Storage` 数据访问层重写；优先保证 SQL 与 schema 逐字对齐 |
 | **C** | 依赖平台能力：托盘、自启动、窗口、子进程、系统凭据、文件监听、本机服务生命周期 | 15 | 10.6% | 用 Electron 主进程能力替换（`Tray`/`auto-launch`/`BrowserWindow`/`child_process`/`safeStorage`/`chokidar`/`http server`），需先定壳 |
-| **D** | 依赖 Tauri 专有 IPC：webview 窗口 + 注入 JS + `__TAURI_INTERNALS__.invoke` 回调、`emit` 事件 | 7 | 5.0% | 需重新设计抓取架构（`session.webRequest`/`debugger`/隐藏 `BrowserWindow` + preload bridge），风险最高，建议 v1 砍掉或降级为手动余额 |
+| **D** | 依赖 Tauri 专有 IPC：webview 窗口 + 注入 JS + `__TAURI_INTERNALS__.invoke` 回调、`emit` 事件 | 7 | 4.9% | 需重新设计抓取架构（`session.webRequest`/`debugger`/隐藏 `BrowserWindow` + preload bridge），风险最高，建议 v1 砍掉或降级为手动余额 |
 
 > D 类只有 7 条命令，但背后是 `scrape.rs` 约 2,400 行 webview 驱动逻辑（注入脚本、拦截器就绪握手、slot 引擎、交互式登录窗口）。**不要按命令数低估**。
 
@@ -603,7 +606,7 @@ Rust 结构体的 serde 属性决定 IPC JSON 字段风格。核心配置类型�
 | `latest_balance_snapshots` | `scrape.rs` | B | 高 |
 | `account_stats` | `scrape.rs` | B | 低 |
 
-### 批次 5 — B · 请求日志 / 会话 / 后台任务（15 条；A0/B15/C0/D0）
+### 批次 5 — B · 请求日志 / 会话 / 后台任务（16 条；A0/B16/C0/D0）
 
 **排序理由**：日志分页与详情、Agent 会话列表/子会话/Flowlet 用量、后台任务与同步状态。依赖第 3、4 批的表与索引。
 
@@ -623,6 +626,7 @@ Rust 结构体的 serde 属性决定 IPC JSON 字段风格。核心配置类型�
 | `list_agent_session_clients` | `observability.rs` | B | 中 |
 | `list_request_log_clients` | `observability.rs` | B | 中 |
 | `list_request_log_models` | `observability.rs` | B | 中 |
+| `list_request_log_channel_accounts` | `observability.rs` | B | 中 |
 | `get_request_log_detail` | `observability.rs` | B | 高 |
 
 ### 批次 6 — B · 设备用量与共享设备（14 条；A0/B14/C0/D0）
@@ -725,7 +729,7 @@ Rust 结构体的 serde 属性决定 IPC JSON 字段风格。核心配置类型�
 | `scrape_balance` | `scrape.rs` | D | 中 |
 | `sync_scrape_balances` | `scrape.rs` | D | 中 |
 
-**批次总量校验**：16+18+14+13+15+14+13+16+15+7 = **141**。
+**批次总量校验**：16+18+14+13+16+14+13+16+15+7 = **142**。
 
 **移动端批次 M1（不在本次范围）**：17 条（A1/B16），语义与桌面重叠，若保留 Tauri 移动端则几乎不需要改；若统一到 Node，需要单独评估移动端运行时（Electron 不支持）。
 
@@ -739,7 +743,7 @@ Rust 结构体的 serde 属性决定 IPC JSON 字段风格。核心配置类型�
 | 4 | 请求体外部捕获帧格式（§6.7） | 旧请求详情不可读 | 迁库脚本必须处理 `.flcap`，或保留只读打开能力 |
 | 5 | `AppState` 里的非 DB 运行时状态（抓取 webview map、LAN 状态、agent runtime manager、托盘句柄、退出标记） | 行为差异难发现 | Node 侧定义等价主进程单例并在批次 9 集中回归 |
 | 6 | `start_proxy` 幂等 / 关窗隐藏 / 托盘退出 的产品契约 | 运行时可退化为「关窗即退出」 | 写进 Electron 壳的验收标准（AGENTS.md §3） |
-| 7 | Web Host 46 条白名单 + 管理/模型双凭据分离 | Docker 形态功能缺失或越权 | 若保留 Docker Host，HTTP 路由与 IPC 双实现，鉴权分离 |
+| 7 | Web Host 52 条白名单 + 管理/模型双凭据分离 | Docker 形态功能缺失或越权 | 若保留 Docker Host，HTTP 路由与 IPC 双实现，鉴权分离 |
 | 8 | 22 条前端零字符串引用命令（含 2 条注入 JS 回调） | 白搬工作量 | 按 §3.10 剔除/后置，需产品确认 |
 | 9 | `storage_tests.rs`（4,402 行）中手写的旧 schema 建表 fixture 只抽查未逐条核对 | 迁移后回归覆盖下降 | Node 侧至少等价覆盖 schema 迁移与「旧库升级」fixture |
 | 10 | 未确认：Electron 是否继续支持 Windows 便携版（exe 旁 DB/config、WebView 数据目录、AppUserModelID toast） | 路径与通知行为 | 需在壳设计阶段确认并写入迁移验收 |
@@ -748,7 +752,7 @@ Rust 结构体的 serde 属性决定 IPC JSON 字段风格。核心配置类型�
 
 **附：命令计数口径**
 
-- 桌面 141 = `commands/` 下 `#[tauri::command]` 定义数（与 `lib.rs` 注册列表逐一比对无缺漏、无多余）。
+- 桌面 142 = `commands/` 下 `#[tauri::command]` 定义数（与 `lib.rs` 注册列表逐一比对无缺漏、无多余）。
 - 移动 17 = `mobile_commands.rs` 定义/注册数。
-- A/B/C/D 合计 34+85+15+7=141；移动 A1/B16=17。
+- A/B/C/D 合计 34+86+15+7=142；移动 A1/B16=17。
 - 领域分布与批次分布均为脚本生成，已校验恒等（见 §8 末尾）。

@@ -29,6 +29,14 @@ import {
   upsertServiceCredential,
 } from "./credentials.ts";
 import {
+  deleteCliAuthToken,
+  deleteExpiredCliAuthTokens,
+  findCliAuthTokenByHash,
+  insertCliAuthToken,
+  listCliAuthTokens,
+  touchCliAuthToken,
+} from "./cli-auth.ts";
+import {
   cleanupOrphanBalanceSnapshots,
   ensureMissingPresets,
   ensurePresetBalanceQuery,
@@ -59,6 +67,7 @@ import {
 } from "./config.ts";
 import {
   insertRequestLog,
+  listRequestLogChannelAccounts,
   listRequestLogClients,
   listRequestLogModels,
   listRequestLogsByRequestId,
@@ -84,11 +93,15 @@ import {
   agentSessionFlowletUsage,
   listObservedAgentSessionChildren,
   listObservedAgentSessionsPage,
+  upsertAgentSessionMetadata,
 } from "./sessions.ts";
 
 const ACCOUNT_CREDENTIAL_HEALTHY = "healthy";
 const ACCOUNT_CREDENTIAL_INVALID_KEY = "invalid_key";
 const UPSTREAM_PROXY_META_KEY = "upstream_proxy_config";
+
+/** 模块级 upsert（代理侧若只有 DatabaseSync、没有 SqliteStorage 门面时可直接用）。 */
+export { upsertAgentSessionMetadata } from "./sessions.ts";
 
 export class SqliteStorage {
   #db: DatabaseSync;
@@ -198,6 +211,40 @@ export class SqliteStorage {
   /** Rust `delete_service_credential`：返回是否删除成功。 */
   deleteServiceCredential(id: string): boolean {
     return deleteServiceCredential(this.#db, id);
+  }
+
+  // ─── CLI 浏览器授权 token（cli_auth_tokens，Node Host 专有） ----------------
+
+  /** 新增一行；token 明文由调用方哈希后传入。 */
+  insertCliAuthToken(row: {
+    id?: string;
+    name: string;
+    tokenHash: string;
+    scope: string;
+    expiresAt: string;
+  }): JsonRow {
+    return insertCliAuthToken(this.#db, row);
+  }
+
+  listCliAuthTokens(): JsonRow[] {
+    return listCliAuthTokens(this.#db);
+  }
+
+  findCliAuthTokenByHash(tokenHash: string): JsonRow | null {
+    return findCliAuthTokenByHash(this.#db, tokenHash);
+  }
+
+  touchCliAuthToken(id: string): void {
+    touchCliAuthToken(this.#db, id);
+  }
+
+  deleteCliAuthToken(id: string): boolean {
+    return deleteCliAuthToken(this.#db, id);
+  }
+
+  /** 清理过期行，返回删除行数。 */
+  deleteExpiredCliAuthTokens(): number {
+    return deleteExpiredCliAuthTokens(this.#db);
   }
 
   // ─── channels / accounts / routes / models ----------------------------------
@@ -332,6 +379,11 @@ export class SqliteStorage {
     return listRequestLogModels(this.#db);
   }
 
+  /** Rust `list_request_log_channel_accounts`：渠道 + 渠道账号筛选项（camelCase）。 */
+  listRequestLogChannelAccounts(): JsonRow {
+    return listRequestLogChannelAccounts(this.#db);
+  }
+
   /** Rust cleanup_old_logs：返回 [日志行数, 用量行数]。 */
   cleanupOldLogs(keepDays: number): [number, number] {
     return cleanupOldLogs(this.#db, this.#captureStore, keepDays);
@@ -409,6 +461,18 @@ export class SqliteStorage {
   }
 
   // ─── observed agent sessions ------------------------------------------------
+
+  /**
+   * 会话派生元数据 upsert（docs/agent-session-metadata.md §2）。
+   *
+   * 设计成**同步**方法：代理在请求主链路上调用，行对象只含 4 个键，单条 INSERT…ON CONFLICT
+   * 是微秒级操作，没必要为它引入异步边界。写失败（锁表/磁盘）让异常抛给 proxy 侧统一的
+   * try/catch 兜底——派生元数据只是展示增强，不能影响转发主链路。
+   * 行键（snake_case，与数据库列一致）：agent_type / session_id / title / project_path / source(可选)。
+   */
+  upsertAgentSessionMetadata(row: JsonRow): void {
+    upsertAgentSessionMetadata(this.#db, row);
+  }
 
   listObservedAgentSessionsPage(filter: JsonRow): JsonRow {
     return listObservedAgentSessionsPage(this.#db, filter);

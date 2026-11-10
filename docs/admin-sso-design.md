@@ -165,6 +165,31 @@ sequenceDiagram
 OIDC 模式下可显式打开兜底：`FLOWLET_ADMIN_ALLOW_TOKEN_LOGIN=1` 时，同时接受
 `FLOWLET_ADMIN_TOKEN` 的 Bearer 登录（仅用于紧急运维，文档要求平时关闭）。
 
+### 5.1.1 CLI 凭据同步的授权（不放开管理 Bearer）
+
+OIDC-only 实例上，Agent 机器不能再用 `flowlet pull --token=<管理凭据>` 同步服务凭据——静态
+Bearer 在 OIDC 模式被拒，而为了同步去开 `ALLOW_TOKEN_LOGIN` 会把一把长期管理凭据扩散到所有
+Agent 机器，等于绕过本次 SSO 改造。方案是**一套独立的 CLI 授权面**，不触碰管理鉴权面：
+
+| 项 | 约定 |
+| --- | --- |
+| 授权入口 | `GET /api/auth/cli/start`（公开的最小 HTML 页）→ 页面先 `GET /api/session` 判断模式 |
+| 签发 | `POST /api/commands/create_cli_auth_code`：**必须**是已登录管理台的浏览器会话（Cookie + CSRF），不接受 CLI 直接调用 |
+| 换 token | `POST /api/auth/cli/exchange`（公开）：一次性授权码 + PKCE S256 verifier → `flwcli_…` |
+| 作用域 | 固定 `credentials:read`：仅允许 `POST /api/commands/export_service_credentials`，其它命令 403 |
+| 存储 | `cli_auth_tokens` 表只存 token 的 SHA-256 哈希，`name` / `scope` / 时间戳；无明文 |
+| TTL / 撤销 | 30 天；`list_cli_auth_tokens` / `revoke_cli_auth_token`，UI「服务凭据 → 本机接入 → 已授权的 CLI」逐条撤销 |
+| 回调 | 只允许 loopback（`127.0.0.1` / `localhost` / `[::1]`），防止 CLI 变成开放重定向器 |
+
+要点：
+
+- CLI token **不是**管理凭据，不参与 Cookie 会话与 CSRF 校验（不是 Cookie，浏览器不会自动携带），
+  也没有任何管理台权限（不能登录、不能改配置、不能看日志）。
+- 它**不依赖** `ALLOW_TOKEN_LOGIN`；开关仍是 `0`，紧急兜底语义不变。
+- 授权码 32 字节随机、120 秒有效、exchange 一次即删；每次登录都签发新 token，旧 token 由用户
+  在 UI 撤销。
+- 详见 [`credential-cli.md`](./credential-cli.md) §4。
+
 ### 5.2 环境变量（v1 全部走环境变量，不改 `config.json`）
 
 | 变量 | 默认值 | 说明 |
@@ -733,6 +758,21 @@ Cookie 会话引入了 CSRF 面，采用**服务端会话绑定 CSRF token + Ori
 - 迁移路径（后续可选）：token 模式也改为“凭据换 Cookie”，届时再单独评审；本期不做，
   避免把低优先级的安全改造与 SSO 上线混在一起。
 
+### 7.6 非管理凭据（CLI）与 Cookie/CSRF 的关系
+
+`flowlet login` 签发的 CLI token 与本节的管理会话是**两条互不相交的鉴权路径**：
+
+| 请求 | 鉴权 |
+| --- | --- |
+| 浏览器管理台 `POST /api/commands/*`（Cookie 会话） | 会话 Cookie + CSRF + Origin 校验（见 7.3） |
+| CLI `POST /api/commands/export_service_credentials`（`Authorization: Bearer flwcli_…`） | 查 `cli_auth_tokens` 表哈希、校验未过期、作用域 `credentials:read`；**不做 CSRF/Origin 校验**（凭据不在 Cookie 中） |
+| CLI token 调其它命令 | 403 `{"code":"forbidden","message":"CLI 凭据仅可用于凭据同步"}` |
+| `/api/session`、`/api/auth/logout` 等非命令路由 | 不接受 CLI token（仍走管理鉴权逻辑） |
+
+因此 CLI token 泄漏的影响面被限制在「读服务凭据」：它既不能登录管理台，也不能改账号/配置、
+看请求日志，且 TTL 30 天、可按条撤销。管理 Bearer 兜底（`ALLOW_TOKEN_LOGIN`）与该机制无关，
+OIDC 实例保持关闭。
+
 ## 8. 身份、审计与授权
 
 ### 8.1 身份与展示
@@ -790,6 +830,18 @@ Logging 的最小集：
 - `/api/auth/config` 只暴露显示名与路径，不暴露 issuer 细节以外的配置（可暴露 issuer 主机名
   用于运维辨识，不暴露 client id/secret）；
 - 未认证访问 `/api/commands/*` 或 `/api/session` 仍返回 401 JSON，永不回退 HTML。
+
+CLI 授权补充路由（2026-11 新增，详见 5.1.1）：
+
+| 路由 | 鉴权 | 说明 |
+| --- | --- | --- |
+| `GET /api/auth/cli/start` | 无 | 校验 `redirect_uri`（仅 loopback）/`state`/`code_challenge`，返回最小授权页；不合法 400 HTML |
+| `POST /api/commands/create_cli_auth_code` | 管理会话（Cookie + CSRF）或 token 模式 Bearer | 返回 `{redirectUrl}`（追加 `code` 与 `state`） |
+| `POST /api/auth/cli/exchange` | 无 | `{code, codeVerifier}` → `{token, expiresAt}`；失败 400 `invalid_grant` |
+| `POST /api/commands/list_cli_auth_tokens` | 管理凭据 | 列表（不含 token/哈希） |
+| `POST /api/commands/revoke_cli_auth_token` | 管理凭据 | `{id}` → `null`，不存在也幂等返回 `null` |
+
+`/api/auth/cli/*` 响应同样 `no-store`，且**不**写入任何 Cookie；授权页不依赖 SPA、内联 JS/CSS。
 
 ### 9.2 错误码
 
@@ -975,6 +1027,11 @@ RBAC（viewer）、操作级审计表、RP-initiated logout、SQLite 会话持�
    提供只读的“当前 SSO 配置”展示页（不含 secret）？
 7. **依赖体积**：`openidconnect` 4.1 会引入 RSA/ECDSA 等纯 Rust 加密依赖并进入桌面二进制
    （预计小幅增加）。可接受，还是要在 M0 先做一次体积/编译时长 spike 再定？
+
+**已解决（2026-11-10）**：Agent 机器如何在 OIDC-only 实例上同步服务凭据。结论是**不**打开
+管理 Bearer 兜底、**不**把管理凭据下发给 Agent 机器，而是新增独立的 CLI 授权面（浏览器 SSO
+→ 作用域 `credentials:read` 的 30 天 token → `flowlet pull` 自动使用），见 5.1.1 与
+[`credential-cli.md`](./credential-cli.md) §4。`ALLOW_TOKEN_LOGIN` 保持默认关闭，紧急兜底语义不变。
 
 ## 15. 参考资料
 

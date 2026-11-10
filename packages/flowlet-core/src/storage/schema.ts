@@ -2,6 +2,10 @@
 //
 // Rust 没有 `PRAGMA user_version`：每次启动执行「CREATE TABLE IF NOT EXISTS +
 // 幂等补列 + 重建表迁移 + 一次性数据归一」。这里逐条照搬，索引/列/默认值不改。
+//
+// 例外：`agent_session_metadata`（docs/agent-session-metadata.md §2）当前仅由 Node Host
+// 写入（服务端从请求体派生标题/项目路径）。表结构仍按同一契约维护、只增不改，桌面 Rust
+// 旧版本读到未知表会忽略；后续 Rust 侧补建时字段必须与本文件完全一致。
 import type { DatabaseSync } from "node:sqlite";
 import { modelCatalog, type ModelIdentity } from "../catalog/index.ts";
 
@@ -231,6 +235,7 @@ CREATE TABLE IF NOT EXISTS service_credentials (
     secret_hint        TEXT NOT NULL,
     kind               TEXT NOT NULL DEFAULT 'cli_token',
     note               TEXT,
+    env_prefix         TEXT,
     enabled            INTEGER NOT NULL DEFAULT 1,
     created_at         TEXT NOT NULL,
     updated_at         TEXT NOT NULL,
@@ -240,6 +245,21 @@ CREATE TABLE IF NOT EXISTS service_credentials (
 
 CREATE INDEX IF NOT EXISTS idx_service_credentials_provider
     ON service_credentials(provider, enabled);
+
+-- CLI 浏览器授权签发的凭据同步 token（flowlet login）：只存 SHA-256 哈希，
+-- 作用域固定 credentials:read，仅允许 export_service_credentials。
+CREATE TABLE IF NOT EXISTS cli_auth_tokens (
+    id           TEXT PRIMARY KEY,
+    name         TEXT NOT NULL DEFAULT '',
+    token_hash   TEXT NOT NULL UNIQUE,
+    scope        TEXT NOT NULL DEFAULT 'credentials:read',
+    created_at   TEXT NOT NULL,
+    expires_at   TEXT NOT NULL,
+    last_used_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_cli_auth_tokens_expires
+    ON cli_auth_tokens(expires_at);
 
 CREATE TABLE IF NOT EXISTS known_devices (
     device_id               TEXT PRIMARY KEY,
@@ -372,6 +392,20 @@ CREATE TABLE IF NOT EXISTS agent_session_snapshots (
     usage_ids_json TEXT NOT NULL DEFAULT '[]',
     cursor_guard TEXT NOT NULL DEFAULT '',
     synced_at TEXT NOT NULL,
+    PRIMARY KEY (agent_type, session_id)
+);
+
+CREATE TABLE IF NOT EXISTS agent_session_metadata (
+    -- 会话派生元数据（docs/agent-session-metadata.md §2）：Node Host 从模型请求体派生
+    -- 标题/项目路径并 upsert；老库启动时由 IF NOT EXISTS 自动补建，不建额外索引
+    -- （主键已覆盖会话聚合的 LEFT JOIN）。
+    agent_type   TEXT NOT NULL,
+    session_id   TEXT NOT NULL,
+    title        TEXT,
+    project_path TEXT,
+    -- 'derived' = 服务端近似派生（非用户手工命名）；后续更可信来源用优先级覆盖。
+    source       TEXT NOT NULL DEFAULT 'derived',
+    updated_at   TEXT NOT NULL,
     PRIMARY KEY (agent_type, session_id)
 );
 
@@ -564,6 +598,7 @@ const ADDED_COLUMNS: ReadonlyArray<readonly [string, string, string]> = [
   ["usage_records", "analyzed_at", "TEXT"],
   ["channel_presets", "enabled", "INTEGER NOT NULL DEFAULT 1"],
   ["usage_records", "created_at", "TEXT NOT NULL DEFAULT ''"],
+  ["service_credentials", "env_prefix", "TEXT"],
 ];
 
 /** Rust 里 `for column in [...]` 循环补的 device_daily_usage 原生列。 */

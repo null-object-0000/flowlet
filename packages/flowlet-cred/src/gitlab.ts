@@ -9,7 +9,7 @@
 import { Agent, request } from "undici";
 
 const DEFAULT_TIMEOUT_MS = 20_000;
-const USER_AGENT = "flowlet-cred/0.2.0";
+const USER_AGENT = "flowlet/0.2.0";
 
 export interface ProjectSummary {
   id: number;

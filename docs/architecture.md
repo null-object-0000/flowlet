@@ -113,6 +113,8 @@ Tauri、WebKitGTK、窗口和控制台抓取模块。`build:web` 复用 React �
 `platform/web/client.ts` 转成同源 HTTP POST，经 `core::web` 的显式命令白名单执行；未知命令
 返回 501，不能通过 HTTP 调用任意桌面命令。Web Host 挂载渠道、模型、请求日志、会话管理、用量统计
 与用量洞察页面；会话管理只聚合本实例请求日志的观测会话（不读取服务端本机 Agent 原生会话文件），
+标题与项目目录由代理侧从请求体派生（`agent_session_metadata`，见
+[agent-session-metadata.md](agent-session-metadata.md)）而非读取原生会话，
 并为用量页面提供只读的设备目录与设备日/小时用量命令。桌面 Host 与 Web Host 共用
 `core::host_scheduler` 的周期任务：每 15 分钟执行一次存储清理（Body 过期/超限 + 余额快照保留），
 每 1 小时同步 models-cn 与 models.dev 目录；设置页保存的 `log_capture` 通过共享

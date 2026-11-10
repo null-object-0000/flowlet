@@ -9,6 +9,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DeviceIdentity, HostOptions, ProxyBindConfig } from "./types.ts";
 import {
+  channelsConfigToJson,
   loadChannelsConfig,
   loadOrCreateConfig,
   loadRuntimeSnapshot,
@@ -160,6 +161,9 @@ export async function startHost(options: HostOptions): Promise<{ close(): Promis
   const secrets = SecretBox.loadOrCreate(dataDir);
   const configJson = loadOrCreateConfig(options.configPath, join(REPO_ROOT, "config.json"));
   const channelsConfig = loadChannelsConfig(configJson);
+  // Web 命令层必须拿到与代理/运行时同一份「已合并内置模板」的渠道配置：数据卷里的
+  // config.json 可能早于当前版本，缺渠道会让 fetch_channel_models / query_balance 失败。
+  const webChannelsConfig = channelsConfigToJson(channelsConfig);
 
   const storage = new SqliteStorage(options.dbPath);
   // 上游代理配置必须在构建运行时快照之前读取：账号 use_upstream_proxy 的迁移依赖它。
@@ -214,6 +218,7 @@ export async function startHost(options: HostOptions): Promise<{ close(): Promis
     bindConfig,
     catalogDir: options.catalogDir,
     configPath: options.configPath,
+    channelsConfig: webChannelsConfig,
     adminToken: options.adminToken,
     auth,
     secrets,

@@ -1,27 +1,177 @@
 // 测试用 mock 服务器（独立子进程，避免 spawnSync 阻塞同进程 HTTP 服务）。
 // 用法：node mock-server.ts '{"mode":"gitlab",...}'；启动后 stdout 打印 PORT <n>。
+import { createHash, randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 
 interface MockOptions {
-  mode: "gitlab" | "flowlet-web";
+  mode: "gitlab" | "flowlet-web" | "dockhand";
   versionStatus?: number;
   hiddenVersion?: boolean;
   projectPages?: Array<Array<Record<string, unknown>>>;
   entries?: Array<Record<string, string>>;
   gitlabToken?: string;
   adminToken?: string;
+  dockhandToken?: string;
+  /**
+   * flowlet-web：启用浏览器授权端点（/api/auth/cli/start、/api/auth/cli/exchange），
+   * 并接受 CLI token 调 export_service_credentials。默认关闭，既有 pull 用例行为不变。
+   */
+  cliAuth?: boolean;
+  /** flowlet-web：固定的 CLI token（测试可断言它没有出现在 CLI 输出里）。 */
+  cliToken?: string;
+  /** flowlet-web：即使 cliAuth 开启也对该 CLI token 返回 403（模拟作用域不足）。 */
+  cliForbidden?: boolean;
 }
 
 const options = JSON.parse(process.argv[2] ?? "{}") as MockOptions;
 const GITLAB_TOKEN = options.gitlabToken ?? "glpat-test-fixture-token-1a2b";
 const ADMIN_TOKEN = options.adminToken ?? "flowlet-admin-token-0123456789";
+const DOCKHAND_TOKEN = options.dockhandToken ?? "dockhand-test-fixture-token-9x8y";
+const CLI_TOKEN = options.cliToken ?? `flwcli_${"T".repeat(43)}`;
+
+/** 授权码 → PKCE challenge（120 秒有效、一次性，与 Node Host 契约一致）。 */
+const cliAuthCodes = new Map<string, { challenge: string; expiresAt: number }>();
+
+// Dockhand 1.0.57 实测响应形状（fixture 只放 mock，绝不访问真实实例）。
+const DOCKHAND_ENVIRONMENTS = [
+  { id: 2, name: "[CentOS] 10.100.217.60", host: "10.100.217.60", port: 2375, protocol: "http" },
+  { id: 1, name: "本机", host: "127.0.0.1", port: 2375, protocol: "http" },
+];
+const DOCKHAND_STACKS = [
+  { name: "flowlet", containers: ["flowlet", "flowlet-egress"], containerDetails: [] },
+  { name: "tools", containers: ["registry"], containerDetails: [] },
+];
 
 const server = createServer((request, response) => {
   if (options.mode === "flowlet-web") {
+    const url = new URL(request.url ?? "/", "http://localhost");
+    const sendJson = (status: number, value: unknown): void => {
+      const body = Buffer.from(JSON.stringify(value), "utf8");
+      response.writeHead(status, {
+        "content-type": "application/json",
+        "content-length": String(body.length),
+        "cache-control": "no-store",
+      });
+      response.end(body);
+    };
+    const sendHtml = (status: number, html: string): void => {
+      const body = Buffer.from(html, "utf8");
+      response.writeHead(status, {
+        "content-type": "text/html; charset=utf-8",
+        "content-length": String(body.length),
+      });
+      response.end(body);
+    };
+
+    if (options.cliAuth === true) {
+      // GET /api/auth/cli/start：校验参数、生成一次性授权码，直接 302 回 loopback。
+      // 真实浏览器会先渲染授权页再点授权；测试里「浏览器」只关心最终回调，故 mock 直接跳转。
+      if (
+        url.pathname === "/api/auth/cli/start" &&
+        (request.method === "GET" || request.method === "HEAD")
+      ) {
+        const redirectUri = url.searchParams.get("redirect_uri") ?? "";
+        const state = url.searchParams.get("state") ?? "";
+        const challenge = url.searchParams.get("code_challenge") ?? "";
+        const method = url.searchParams.get("code_challenge_method") ?? "S256";
+        let redirect: URL | null = null;
+        try {
+          redirect = new URL(redirectUri);
+        } catch {
+          redirect = null;
+        }
+        const loopbackHosts = new Set(["127.0.0.1", "localhost", "[::1]"]);
+        const valid =
+          redirect !== null &&
+          redirect.protocol === "http:" &&
+          loopbackHosts.has(redirect.hostname) &&
+          state.length >= 1 &&
+          state.length <= 512 &&
+          /^[A-Za-z0-9_-]{43}$/.test(challenge) &&
+          method === "S256";
+        if (!valid) {
+          sendHtml(400, "<!doctype html><meta charset=utf-8><h1>参数不合法</h1>");
+          return;
+        }
+        const code = randomBytes(32).toString("base64url");
+        cliAuthCodes.set(code, { challenge, expiresAt: Date.now() + 120_000 });
+        const target = new URL(redirect!.toString());
+        target.searchParams.set("code", code);
+        target.searchParams.set("state", state);
+        response.writeHead(302, {
+          location: target.toString(),
+          "cache-control": "no-store",
+          "content-length": "0",
+        });
+        response.end();
+        return;
+      }
+
+      // POST /api/auth/cli/exchange：校验 code + PKCE S256，签发固定 fixture token。
+      if (url.pathname === "/api/auth/cli/exchange" && request.method === "POST") {
+        const chunks: Buffer[] = [];
+        request.on("data", (chunk: Buffer) => chunks.push(chunk));
+        request.on("end", () => {
+          let body: Record<string, unknown> = {};
+          try {
+            const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+            if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+              body = parsed as Record<string, unknown>;
+            }
+          } catch {
+            sendJson(400, { code: "invalid_request", message: "请求体不是合法 JSON" });
+            return;
+          }
+          const code = typeof body.code === "string" ? body.code : "";
+          const verifier = typeof body.codeVerifier === "string" ? body.codeVerifier : "";
+          if (code === "" || verifier === "") {
+            sendJson(400, { code: "invalid_request", message: "缺少 code 或 codeVerifier" });
+            return;
+          }
+          const entry = cliAuthCodes.get(code);
+          if (entry === undefined || entry.expiresAt < Date.now()) {
+            sendJson(400, { code: "invalid_grant", message: "授权码无效或已过期" });
+            return;
+          }
+          const challenge = createHash("sha256").update(verifier, "utf8").digest("base64url");
+          if (challenge !== entry.challenge) {
+            sendJson(400, { code: "invalid_grant", message: "授权码无效或已过期" });
+            return;
+          }
+          cliAuthCodes.delete(code);
+          sendJson(200, {
+            token: CLI_TOKEN,
+            expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+              .toISOString()
+              .replace(/\.\d{3}Z$/, "Z"),
+          });
+        });
+        return;
+      }
+    }
+
+    // 既有行为：命令端点（export_service_credentials）只认管理 token；
+    // cliAuth 模式下额外接受 /api/auth/cli/exchange 签发的 CLI token（作用域 credentials:read）。
     const chunks: Buffer[] = [];
     request.on("data", (chunk: Buffer) => chunks.push(chunk));
     request.on("end", () => {
-      const authorized = request.headers.authorization === `Bearer ${ADMIN_TOKEN}`;
+      const bearer = request.headers.authorization;
+      const authorized =
+        bearer === `Bearer ${ADMIN_TOKEN}` ||
+        (options.cliAuth === true && bearer === `Bearer ${CLI_TOKEN}`);
+      if (options.cliForbidden === true && bearer === `Bearer ${CLI_TOKEN}`) {
+        const forbidden = Buffer.from(
+          JSON.stringify({ code: "forbidden", message: "CLI 凭据仅可用于凭据同步" }),
+          "utf8",
+        );
+        response.writeHead(403, {
+          "content-type": "application/json",
+          "content-length": String(forbidden.length),
+          "cache-control": "no-store",
+        });
+        response.end(forbidden);
+        return;
+      }
       const payload = authorized
         ? (options.entries ?? [])
         : { code: "unauthorized", message: "管理凭据无效，请重新登录" };
@@ -29,10 +179,69 @@ const server = createServer((request, response) => {
       response.writeHead(authorized ? 200 : 401, {
         "content-type": "application/json",
         "content-length": String(body.length),
+        "cache-control": "no-store",
       });
       response.end(body);
     });
     return;
+  }
+
+  if (options.mode === "dockhand") {
+    // Dockhand：Bearer token + `?env=<id>`；/health 匿名可访问，其它资源接口需认证。
+    const url = new URL(request.url ?? "/", "http://localhost");
+    const authorized = request.headers.authorization === `Bearer ${DOCKHAND_TOKEN}`;
+    const send = (status: number, value: unknown): void => {
+      const body = Buffer.from(JSON.stringify(value), "utf8");
+      response.writeHead(status, {
+        "content-type": "application/json",
+        "content-length": String(body.length),
+      });
+      response.end(body);
+    };
+    const pathname = url.pathname;
+    if (pathname === "/api/health") {
+      return send(200, { status: "ok", timestamp: "2026-11-10T00:00:00Z" });
+    }
+    if (pathname === "/api/environments") {
+      if (!authorized) return send(401, { message: "Unauthorized" });
+      return send(200, DOCKHAND_ENVIRONMENTS);
+    }
+    if (pathname === "/api/system") {
+      if (!authorized) return send(401, { message: "Unauthorized" });
+      if (url.searchParams.get("env") === null) return send(400, { message: "Missing env parameter" });
+      return send(200, {
+        docker: { version: "27.3.1", serverVersion: "27.3.1" },
+        host: { name: "fixture-host" },
+        runtime: { os: "linux" },
+        database: { size: 0 },
+        stats: { containers: 2 },
+      });
+    }
+    if (pathname === "/api/stacks") {
+      if (!authorized) return send(401, { message: "Unauthorized" });
+      if (url.searchParams.get("env") === null) return send(400, { message: "Missing env parameter" });
+      return send(200, DOCKHAND_STACKS);
+    }
+    if (pathname === "/api/echo") {
+      // 透传测试用：回显 method + 解析后的 JSON body。
+      if (!authorized) return send(401, { message: "Unauthorized" });
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        const text = Buffer.concat(chunks).toString("utf8");
+        let body: unknown = null;
+        if (text.trim() !== "") {
+          try {
+            body = JSON.parse(text);
+          } catch {
+            body = text;
+          }
+        }
+        send(200, { method: request.method ?? "GET", body });
+      });
+      return;
+    }
+    return send(404, { message: "Not Found" });
   }
 
   const url = new URL(request.url ?? "/", "http://localhost");

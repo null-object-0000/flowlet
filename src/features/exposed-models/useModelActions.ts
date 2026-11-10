@@ -5,6 +5,7 @@ import type { RouteCandidate } from "../../domains/model/types";
 import { queryKeys } from "../../shared/query-keys";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 
+import { errorMessage } from "../../shared/errors/AppError";
 type ToggleInput = {
   routes: RouteCandidate[];
   routeIds: string[];
@@ -50,7 +51,7 @@ export function useModelActions() {
     },
     onError: (error, _input, context) => {
       if (context?.previous) queryClient.setQueryData(queryKeys.model.candidates(), context.previous);
-      Toast.error(t("模型状态保存失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
+      Toast.error(t("模型状态保存失败：{message}", { message: errorMessage(error) }));
     },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.model.candidates(), exact: true });
@@ -74,7 +75,7 @@ export function useModelActions() {
     },
     onError: (error, _input, context) => {
       if (context?.previous) queryClient.setQueryData(queryKeys.model.candidates(), context.previous);
-      Toast.error(t("路由优先级保存失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
+      Toast.error(t("路由优先级保存失败：{message}", { message: errorMessage(error) }));
     },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.model.candidates(), exact: true });
@@ -98,7 +99,7 @@ export function useModelActions() {
     },
     onError: (error, _input, context) => {
       if (context?.previous) queryClient.setQueryData(queryKeys.model.candidates(), context.previous);
-      Toast.error(t("路由保存失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
+      Toast.error(t("路由保存失败：{message}", { message: errorMessage(error) }));
     },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.model.candidates(), exact: true });

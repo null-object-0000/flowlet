@@ -8,6 +8,7 @@ import { AccountEditorDrawer, type AccountEditorMode, type AccountResourceSnapsh
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 
+import { errorMessage } from "../../shared/errors/AppError";
 const { Text } = Typography;
 
 export type AccountActionRequest =
@@ -86,7 +87,7 @@ export function AccountActionOverlay(props: Props) {
       Toast.success(t("渠道账号与资源信息已保存，代理配置已热更新"));
       onClose();
     } catch (error) {
-      Toast.error(t("保存失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
+      Toast.error(t("保存失败：{message}", { message: errorMessage(error) }));
     }
   };
 
@@ -97,7 +98,7 @@ export function AccountActionOverlay(props: Props) {
       Toast.success(t("账号已删除"));
       onClose();
     } catch (error) {
-      Toast.error(t("保存失败：{message}", { message: error instanceof Error ? error.message : String(error) }));
+      Toast.error(t("保存失败：{message}", { message: errorMessage(error) }));
     }
   };
 

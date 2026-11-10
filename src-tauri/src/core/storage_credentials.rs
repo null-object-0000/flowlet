@@ -13,7 +13,7 @@ impl Storage {
             .map_err(|_| StorageError::LockFailed)?;
         let mut statement = connection.prepare(
             "SELECT id, name, provider, base_url, secret_ciphertext, secret_hint, kind, note,
-                    enabled, created_at, updated_at, last_verified_at, last_error
+                    env_prefix, enabled, created_at, updated_at, last_verified_at, last_error
              FROM service_credentials
              ORDER BY created_at ASC, name ASC",
         )?;
@@ -28,11 +28,12 @@ impl Storage {
                     secret_hint: row.get(5)?,
                     kind: row.get(6)?,
                     note: row.get(7)?,
-                    enabled: row.get::<_, i64>(8)? != 0,
-                    created_at: row.get(9)?,
-                    updated_at: row.get(10)?,
-                    last_verified_at: row.get(11)?,
-                    last_error: row.get(12)?,
+                    env_prefix: row.get(8)?,
+                    enabled: row.get::<_, i64>(9)? != 0,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
+                    last_verified_at: row.get(12)?,
+                    last_error: row.get(13)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -50,7 +51,7 @@ impl Storage {
         let row = connection
             .query_row(
                 "SELECT id, name, provider, base_url, secret_ciphertext, secret_hint, kind, note,
-                        enabled, created_at, updated_at, last_verified_at, last_error
+                        env_prefix, enabled, created_at, updated_at, last_verified_at, last_error
                  FROM service_credentials WHERE id = ?1",
                 params![id],
                 |row| {
@@ -63,11 +64,12 @@ impl Storage {
                         secret_hint: row.get(5)?,
                         kind: row.get(6)?,
                         note: row.get(7)?,
-                        enabled: row.get::<_, i64>(8)? != 0,
-                        created_at: row.get(9)?,
-                        updated_at: row.get(10)?,
-                        last_verified_at: row.get(11)?,
-                        last_error: row.get(12)?,
+                        env_prefix: row.get(8)?,
+                        enabled: row.get::<_, i64>(9)? != 0,
+                        created_at: row.get(10)?,
+                        updated_at: row.get(11)?,
+                        last_verified_at: row.get(12)?,
+                        last_error: row.get(13)?,
                     })
                 },
             )
@@ -86,8 +88,8 @@ impl Storage {
         connection.execute(
             "INSERT INTO service_credentials (
                 id, name, provider, base_url, secret_ciphertext, secret_hint, kind, note,
-                enabled, created_at, updated_at, last_verified_at, last_error
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                env_prefix, enabled, created_at, updated_at, last_verified_at, last_error
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
              ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 provider = excluded.provider,
@@ -96,6 +98,7 @@ impl Storage {
                 secret_hint = excluded.secret_hint,
                 kind = excluded.kind,
                 note = excluded.note,
+                env_prefix = excluded.env_prefix,
                 enabled = excluded.enabled,
                 updated_at = excluded.updated_at,
                 last_verified_at = excluded.last_verified_at,
@@ -109,6 +112,7 @@ impl Storage {
                 row.secret_hint,
                 row.kind,
                 row.note,
+                row.env_prefix,
                 if row.enabled { 1 } else { 0 },
                 row.created_at,
                 row.updated_at,
@@ -170,6 +174,7 @@ mod tests {
             secret_hint: "••••a1b2".to_string(),
             kind: "cli_token".to_string(),
             note: Some("公司实例".to_string()),
+            env_prefix: None,
             enabled: true,
             created_at: "2026-11-10T00:00:00Z".to_string(),
             updated_at: "2026-11-10T00:00:00Z".to_string(),
@@ -223,6 +228,91 @@ mod tests {
 
         assert!(storage.delete_service_credential("cred-1").unwrap());
         assert!(!storage.delete_service_credential("cred-1").unwrap());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn persists_env_prefix_and_keeps_legacy_null() {
+        let (storage, dir) = temp_storage("env-prefix");
+        storage
+            .upsert_service_credential(&sample("cred-3"))
+            .unwrap();
+        let mut prefixed = sample("cred-4");
+        prefixed.provider = "dockhand".to_string();
+        prefixed.env_prefix = Some("DOCKHAND_NA".to_string());
+        storage.upsert_service_credential(&prefixed).unwrap();
+
+        let rows = storage.list_service_credentials().unwrap();
+        assert_eq!(rows.len(), 2);
+        let legacy = rows.iter().find(|row| row.id == "cred-3").unwrap();
+        assert_eq!(legacy.env_prefix, None);
+        let stored = storage.get_service_credential("cred-4").unwrap().unwrap();
+        assert_eq!(stored.env_prefix.as_deref(), Some("DOCKHAND_NA"));
+
+        // UPSERT 必须同步覆盖前缀，否则改名/改前缀后 pull 生成的环境变量名会错。
+        let mut updated = stored.clone();
+        updated.env_prefix = Some("DOCKHAND_SZ".to_string());
+        storage.upsert_service_credential(&updated).unwrap();
+        let stored = storage.get_service_credential("cred-4").unwrap().unwrap();
+        assert_eq!(stored.env_prefix.as_deref(), Some("DOCKHAND_SZ"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn migrates_legacy_table_without_recreating_it() {
+        let dir = std::env::temp_dir().join(format!(
+            "flowlet-cred-migrate-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|value| value.as_nanos())
+                .unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("flowlet.sqlite");
+        // 第一期的旧表没有 env_prefix；迁移只能 ALTER ADD COLUMN，不能重建表，
+        // 因此旧行必须在迁移后仍然可读。
+        {
+            let connection = rusqlite::Connection::open(&db).unwrap();
+            connection
+                .execute_batch(
+                    "CREATE TABLE service_credentials (
+                        id                 TEXT PRIMARY KEY,
+                        name               TEXT NOT NULL,
+                        provider           TEXT NOT NULL,
+                        base_url           TEXT NOT NULL,
+                        secret_ciphertext  TEXT NOT NULL,
+                        secret_hint        TEXT NOT NULL,
+                        kind               TEXT NOT NULL DEFAULT 'cli_token',
+                        note               TEXT,
+                        enabled            INTEGER NOT NULL DEFAULT 1,
+                        created_at         TEXT NOT NULL,
+                        updated_at         TEXT NOT NULL,
+                        last_verified_at   TEXT,
+                        last_error         TEXT
+                    );
+                    INSERT INTO service_credentials (
+                        id, name, provider, base_url, secret_ciphertext, secret_hint, kind,
+                        created_at, updated_at
+                    ) VALUES (
+                        'legacy-1', '旧 GitLab', 'gitlab', 'https://gitlab.example.com',
+                        'v1:fake', '••••a1b2', 'cli_token',
+                        '2026-11-10T00:00:00Z', '2026-11-10T00:00:00Z'
+                    );",
+                )
+                .unwrap();
+        }
+
+        let storage = Storage::open(&db).unwrap();
+        let rows = storage.list_service_credentials().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "legacy-1");
+        assert_eq!(rows[0].env_prefix, None);
+        drop(storage);
+
+        // 重复打开（迁移再次执行）必须幂等。
+        let storage = Storage::open(&db).unwrap();
+        assert_eq!(storage.list_service_credentials().unwrap().len(), 1);
         let _ = std::fs::remove_dir_all(dir);
     }
 

@@ -8,6 +8,7 @@ import { cliInstalledVersion, isNewerVersion } from "../../domains/agent/version
 import type { AgentEnvironmentReport, AgentGlobalConfigOptions, AgentLatestVersionReport, AgentSurface } from "../../domains/agent/types";
 import { AGENT_PLUGINS, agentPlugin } from "../../domains/pluginRegistry";
 import { errorMessage } from "../../shared/errors/AppError";
+import { copyText } from "../../shared/ui/copyText";
 import {
   useAgentEnvironments,
   useAgentGlobalConfig,
@@ -35,7 +36,7 @@ export function OverviewAgentAccessCard({ baseUrl, clientToken }: Props) {
 
   const copy = async (value: string, message: string) => {
     try {
-      await navigator.clipboard.writeText(value);
+      await copyText(value);
       Toast.success(message);
     } catch (error) {
       Toast.error(t("复制失败：{message}", { message: errorMessage(error) }));

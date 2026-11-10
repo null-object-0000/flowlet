@@ -22,6 +22,7 @@ import type {
 import { CommandError } from "../types.ts";
 import type { SqliteStorage } from "../storage/index.ts";
 import { AdminAuth, type AuthResponse } from "./auth.ts";
+import { CLI_ALLOWED_COMMANDS, createCliAuth, type CliAuthStorage } from "./cli-auth.ts";
 import { dispatch } from "./commands.ts";
 import type { SecretBoxLike, WebContext } from "./context.ts";
 import {
@@ -41,6 +42,12 @@ export interface WebHostOptions {
   bindConfig: ProxyBindConfig;
   catalogDir: string;
   configPath: string;
+  /**
+   * 已合并内置渠道模板的 `channels_config`（由 index.ts 的 `loadChannelsConfig` 产出）。
+   * 缺省时退回读取 configPath 的原始值；生产入口必须传入，否则数据卷里过旧的
+   * config.json 会让 `fetch_channel_models` / `query_balance` 找不到渠道。
+   */
+  channelsConfig?: JsonRow;
   adminToken: string;
   /** index.ts 在打开 DB 之前创建的 AdminAuth（fail-fast）；缺省时自己 fromEnv。 */
   auth?: AdminAuth;
@@ -117,6 +124,21 @@ function sendEmpty(
   response.end();
 }
 
+/** CLI 授权页：独立 HTML（不依赖 SPA），禁止缓存/嵌框/外链资源。 */
+function sendHtml(response: ServerResponse, status: number, html: string, head: boolean): void {
+  const body = Buffer.from(html, "utf8");
+  response.writeHead(status, {
+    "content-type": "text/html; charset=utf-8",
+    "content-length": String(body.length),
+    "cache-control": "no-store",
+    "x-frame-options": "DENY",
+    "referrer-policy": "no-referrer",
+    "content-security-policy":
+      "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'",
+  });
+  response.end(head ? undefined : body);
+}
+
 /** 读取 body；超过 4 MiB → 413，非法 JSON → 400（文本错误与 axum JsonRejection 对齐）。 */
 async function readJsonBody(
   request: IncomingMessage,
@@ -188,6 +210,7 @@ function writeAuthResponse(
 export function createWebHost(options: WebHostOptions): WebHost {
   const config = readConfigJson(options.configPath);
   const auth = options.auth ?? AdminAuth.fromEnv(process.env, options.adminToken);
+  const cliAuth = createCliAuth(options.storage as unknown as CliAuthStorage);
   const ctx: WebContext = {
     storage: options.storage,
     proxy: options.proxy,
@@ -200,11 +223,12 @@ export function createWebHost(options: WebHostOptions): WebHost {
     publicProxyUrl: options.publicProxyUrl,
     deviceIdentity: options.deviceIdentity,
     config,
-    channelsConfig: readChannelsConfig(config),
+    channelsConfig: options.channelsConfig ?? readChannelsConfig(config),
     logCapture: resolveLogCaptureConfig(options.storage, config),
     upstreamProxy: resolveUpstreamProxyConfig(options.storage, config),
     customScrapeChannels: null,
     secrets: options.secrets,
+    cliAuth,
   };
 
   let server: Server | null = null;
@@ -235,6 +259,41 @@ export function createWebHost(options: WebHostOptions): WebHost {
       return writeAuthResponse(response, payload, head, false);
     }
 
+    // ── CLI 浏览器授权公开路由（`flowlet login`） ──────────────────────────
+    // 授权页要能在「未登录」时打开并给出可读提示，因此不套管理鉴权；
+    // 真正的授权动作是受保护的 POST /api/commands/create_cli_auth_code。
+    if (pathname === "/api/auth/cli/start") {
+      if (method !== "GET" && method !== "HEAD") {
+        return sendEmpty(response, 405, { allow: "GET,HEAD" });
+      }
+      const page = cliAuth.startPage(url.searchParams);
+      return sendHtml(response, page.status, page.html, head);
+    }
+    if (pathname === "/api/auth/cli/exchange") {
+      if (method !== "POST") {
+        request.resume();
+        return sendEmpty(response, 405, { allow: "POST" });
+      }
+      const body = await readJsonBody(request);
+      if (!body.ok) {
+        return sendText(response, body.status, body.text, { noStore: true, head: false });
+      }
+      try {
+        return sendJson(response, 200, cliAuth.exchange(body.value), { noStore: true, head: false });
+      } catch (error) {
+        if (error instanceof CommandError) {
+          return sendJson(
+            response,
+            error.status,
+            { code: error.code, message: error.message },
+            { noStore: true, head: false },
+          );
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        return sendJson(response, 400, { code: "invalid_request", message }, { noStore: true, head: false });
+      }
+    }
+
     // ── 受保护路由：/api/session、/api/auth/logout、/api/commands/{cmd} ──────
     const commandEncoded = pathname.startsWith("/api/commands/")
       ? pathname.slice("/api/commands/".length)
@@ -247,13 +306,25 @@ export function createWebHost(options: WebHostOptions): WebHost {
       const allowedMethods = isSession ? "GET,HEAD" : "POST";
       const methodAllowed =
         isSession ? method === "GET" || method === "HEAD" : method === "POST";
+      // 命令名先解码，CLI token 作用域判断与 dispatch 用同一份。
+      let command = commandEncoded ?? "";
+      if (isCommandRoute) {
+        try {
+          command = decodeURIComponent(commandEncoded as string);
+        } catch {
+          /* 保留原文 */
+        }
+      }
       const context = auth.authenticate(request.headers);
-      if (context === null) {
+      // CLI 凭据兜底：仅命令路由、仅 flwcli_ 前缀；它没有 Cookie，因此不参与 CSRF。
+      const cliToken =
+        context === null && isCommandRoute ? cliAuth.authenticate(request.headers) : null;
+      if (context === null && cliToken === null) {
         request.resume();
         return unauthorized(response, methodAllowed ? {} : { allow: allowedMethods });
       }
       // axum 中间件：非 GET/HEAD/OPTIONS 先校验 CSRF（在方法路由之前），失败返回 403 且无 no-store。
-      if (method !== "GET" && method !== "HEAD" && method !== "OPTIONS") {
+      if (context !== null && method !== "GET" && method !== "HEAD" && method !== "OPTIONS") {
         if (!auth.verifyCsrf(request.headers, context)) {
           request.resume();
           return sendJson(
@@ -272,21 +343,31 @@ export function createWebHost(options: WebHostOptions): WebHost {
         });
       }
 
-      if (isSession) {
-        return writeAuthResponse(response, auth.sessionHandler(context), head, true);
-      }
-      if (isLogout) {
+      if (isSession || isLogout) {
+        // 非命令路由不接受 CLI 凭据（上面 cliToken 也只为命令路由计算）。
+        if (context === null) {
+          request.resume();
+          return unauthorized(response);
+        }
+        if (isSession) {
+          return writeAuthResponse(response, auth.sessionHandler(context), head, true);
+        }
         request.resume();
         return writeAuthResponse(response, auth.logoutHandler(context), head, true);
       }
 
-      // 命令路由：auth 通过后才读取 body（与 axum extractor 顺序一致）。
-      let command = commandEncoded as string;
-      try {
-        command = decodeURIComponent(commandEncoded as string);
-      } catch {
-        /* 保留原文 */
+      // CLI 凭据只读服务凭据：其它命令一律 403（不能改配置、不能读日志）。
+      if (cliToken !== null && !CLI_ALLOWED_COMMANDS.has(command)) {
+        request.resume();
+        return sendJson(
+          response,
+          403,
+          { code: "forbidden", message: "CLI 凭据仅可用于凭据同步（export_service_credentials）" },
+          { noStore: true, head: false },
+        );
       }
+
+      // 命令路由：鉴权通过后才读取 body（与 axum extractor 顺序一致）。
       const body = await readJsonBody(request);
       if (!body.ok) {
         return sendText(response, body.status, body.text, { noStore: true, head: false });

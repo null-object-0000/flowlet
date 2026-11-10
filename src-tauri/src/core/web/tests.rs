@@ -504,6 +504,7 @@ fn log_filter() -> crate::core::config::LogsFilter {
         status: "all".into(),
         client_id: String::new(),
         channel_id: String::new(),
+        account_id: String::new(),
         search: String::new(),
         time_range: "all".into(),
         model: String::new(),
@@ -512,6 +513,63 @@ fn log_filter() -> crate::core::config::LogsFilter {
         end_at: String::new(),
         token_status: "all".into(),
     }
+}
+
+#[tokio::test]
+async fn request_log_channel_account_options_command_is_web_exposed() {
+    let f = Fixture::new().await;
+    let storage = &f.state.services.storage;
+    let mut log = device_usage_request_log("web-channel-account-options");
+    log.channel_id = Some("deepseek".to_string());
+    log.channel_name = Some("DeepSeek".to_string());
+    log.account_id = Some("web-account".to_string());
+    log.account_name = Some("Web 账号".to_string());
+    storage.insert_request_log(&log).unwrap();
+
+    let options: Value = f
+        .command("list_request_log_channel_accounts", json!({}))
+        .await
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(options["channels"][0]["id"], "deepseek");
+    assert_eq!(options["channels"][0]["name"], "DeepSeek");
+    assert_eq!(options["accounts"][0]["id"], "web-account");
+    assert_eq!(options["accounts"][0]["name"], "Web 账号");
+    assert_eq!(options["accounts"][0]["channelId"], "deepseek");
+    assert_eq!(options["accounts"][0]["channelName"], "DeepSeek");
+
+    // Web 端与桌面端共用同一筛选语义：按账号筛选只命中该账号的末次 attempt。
+    // `LogsFilter` 只实现 Deserialize（与 IPC 入参方向一致），因此这里直接构造 JSON。
+    let page: Value = f
+        .command(
+            "list_request_logs",
+            json!({"filter": {
+                "page": 1,
+                "page_size": 10,
+                "status": "all",
+                "client_id": "",
+                "channel_id": "",
+                "account_id": "web-account",
+                "search": "",
+                "time_range": "all",
+                "model": "",
+                "model_kind": "",
+                "start_at": "",
+                "end_at": "",
+                "token_status": "all",
+            }}),
+        )
+        .await
+        .error_for_status()
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(page["total"], 1);
+    assert_eq!(page["rows"][0]["request_id"], "web-channel-account-options");
 }
 
 #[tokio::test]

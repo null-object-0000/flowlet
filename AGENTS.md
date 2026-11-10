@@ -857,5 +857,6 @@ src/
 | `docs/architecture.md` | 总体架构与核心模型 | 架构分层、核心数据模型变化时 |
 | `docs/roadmap.md` | 产品路线图 | 优先级或阶段目标调整时 |
 | `docs/custom-scrape-discovery.md` | 自定义渠道资源用量抓取的文件夹发现机制（设计） | 该机制落地实现、schema 变更或抓取/同步接入点变化时 |
+| `docs/agent-session-metadata.md` | Web Host 会话标题/项目目录的服务端派生规则与存储契约 | 派生规则、`agent_session_metadata` 表结构或会话聚合口径变化时 |
 
 修改代码前先检查对应文档是否仍然准确；若已过时，一并更新。

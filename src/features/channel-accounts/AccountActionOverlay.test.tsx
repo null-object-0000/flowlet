@@ -695,3 +695,85 @@ it("creates a ChatGPT API account using a project key independently of subscript
   await user.click(screen.getByRole("button", { name: "保存账号" }));
   expect(onSaveAccounts).toHaveBeenCalledWith([expect.objectContaining({ channel_id: "openai-api", api_key: "sk-project-test", exposed_models: null, resource_sync_mode: "manual" })]);
 });
+
+it("sends a complete snapshot payload (raw_scraped_json) when saving a manual balance", async () => {
+  const user = userEvent.setup();
+  const onSaveAccounts = vi.fn<(accounts: ChannelAccount[]) => Promise<void>>().mockResolvedValue();
+  const onSaveBalanceSnapshot = vi.fn().mockResolvedValue(undefined);
+  const deepseekPreset = {
+    id: "deepseek",
+    name: "DeepSeek",
+    openai_base_url: "https://api.deepseek.com/v1",
+    anthropic_base_url: "https://api.deepseek.com/anthropic",
+  } as ChannelPreset;
+
+  render(
+    <AccountActionOverlay
+      request={{ kind: "create", channelId: "deepseek" }}
+      accounts={[]}
+      snapshots={[]}
+      presets={[deepseekPreset]}
+      busy={false}
+      onClose={vi.fn()}
+      onSaveAccounts={onSaveAccounts}
+      onTestConnection={vi.fn().mockResolvedValue(undefined)}
+      onSaveBalanceSnapshot={onSaveBalanceSnapshot}
+      onSyncBalance={vi.fn().mockResolvedValue(undefined)}
+      onScrape={vi.fn().mockResolvedValue(undefined)}
+    />,
+  );
+
+  expect(await screen.findByText("新增渠道账号")).toBeInTheDocument();
+  await user.type(screen.getByLabelText("API Key"), "sk-deepseek-test");
+  await user.type(screen.getByLabelText("账户余额"), "12.5");
+  await user.click(screen.getByRole("button", { name: "保存账号" }));
+
+  expect(onSaveAccounts).toHaveBeenCalled();
+  expect(onSaveBalanceSnapshot).toHaveBeenCalledWith(expect.objectContaining({
+    balance: 12.5,
+    source: "manual",
+    // Rust `AccountBalanceSnapshot` 无 serde default：手动快照必须显式带 null，
+    // 否则 Web Host 会报 `missing field raw_scraped_json`。
+    raw_scraped_json: null,
+  }));
+});
+
+it("shows the real message when a command rejects with a plain AppError object", async () => {
+  const user = userEvent.setup();
+  const message = "参数 snapshot: missing field raw_scraped_json";
+  const deepseekAccount = {
+    ...account,
+    id: "account-deepseek",
+    channel_id: "deepseek",
+    resource_mode: "pay_as_you_go",
+    resource_sync_mode: "manual",
+  } as ChannelAccount;
+  const deepseekPreset = {
+    id: "deepseek",
+    name: "DeepSeek",
+    openai_base_url: "https://api.deepseek.com/v1",
+  } as ChannelPreset;
+  render(
+    <AccountActionOverlay
+      request={{ kind: "edit", accountId: deepseekAccount.id }}
+      accounts={[deepseekAccount]}
+      snapshots={[]}
+      presets={[deepseekPreset]}
+      busy={false}
+      onClose={vi.fn()}
+      onSaveAccounts={vi.fn().mockResolvedValue(undefined)}
+      onTestConnection={vi.fn().mockResolvedValue(undefined)}
+      // Web Host 命令失败是普通对象 {code,message}，不是 Error 实例。
+      onSaveBalanceSnapshot={vi.fn().mockRejectedValue({ code: "account_balance_save_failed", message, retryable: false })}
+      onSyncBalance={vi.fn().mockResolvedValue(undefined)}
+      onScrape={vi.fn().mockResolvedValue(undefined)}
+    />,
+  );
+
+  expect(await screen.findByText("编辑 DeepSeek 渠道账号")).toBeInTheDocument();
+  await user.type(screen.getByLabelText("账户余额"), "12.5");
+  await user.click(screen.getByRole("button", { name: "保存修改" }));
+
+  expect(await screen.findByText(/保存失败：参数 snapshot: missing field/)).toBeInTheDocument();
+  expect(screen.queryByText(/\[object Object\]/)).not.toBeInTheDocument();
+});

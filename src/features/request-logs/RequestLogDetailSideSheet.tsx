@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { Button, CodeHighlight, JsonViewer, SideSheet, Tabs, Tag, Toast, Tooltip } from "@douyinfe/semi-ui-19";
 import { IconCopy, IconExternalOpen, IconRefresh } from "@douyinfe/semi-icons";
 import type { RequestLogRow } from "../../domains/request-log/types";
+import { copyText } from "../../shared/ui/copyText";
 import {
   calculateCacheHitRate,
   calculateOutputTokenRate,
@@ -173,7 +174,7 @@ function DetailItem({ label, value, wide = false, copyable = false, onOpen }: { 
   const { t } = useAppPreferences();
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(value);
+      await copyText(value);
       Toast.success(t("{label} 已复制", { label }));
     } catch {
       Toast.error(t("复制失败，请手动选择内容"));
@@ -264,7 +265,7 @@ function CapturedSection({ title, value }: { title: string; value: string }) {
   const viewerHeight = title.includes("Headers") ? 220 : 300;
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(value);
+      await copyText(value);
       Toast.success(t("{title} 已复制", { title }));
     } catch {
       Toast.error(t("复制失败，请手动选择内容"));

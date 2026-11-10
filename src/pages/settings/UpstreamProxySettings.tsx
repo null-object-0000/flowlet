@@ -6,6 +6,7 @@ import { useUpstreamProxySetting } from "../../features/settings/useUpstreamProx
 import { SettingRow, SettingSection } from "./SettingRow";
 import styles from "./UsageCostDisplaySettings.module.css";
 
+import { errorMessage } from "../../shared/errors/AppError";
 export function UpstreamProxySettings() {
   const { t } = useAppPreferences();
   const upstreamProxy = useUpstreamProxySetting();
@@ -23,7 +24,7 @@ export function UpstreamProxySettings() {
       await upstreamProxy.mutation.mutateAsync({ ...current, ...patch });
       Toast.success(t("设置已自动保存"));
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       Toast.error(t("保存失败：{message}", { message }));
     }
   };

@@ -29,6 +29,15 @@ export function useRequestLogModels() {
   });
 }
 
+/** 「渠道账号」筛选下拉的选项来源：渠道列表 + 带所属渠道的账号列表。 */
+export function useRequestLogChannelAccounts() {
+  return useQuery({
+    queryKey: queryKeys.requestLog.channelAccounts(),
+    queryFn: () => requestLogCommands.channelAccounts(),
+    staleTime: 5 * 60_000,
+  });
+}
+
 export function useRequestLogDetail(requestId: string | null) {
   return useQuery({
     queryKey: queryKeys.requestLog.detail(requestId ?? ""),

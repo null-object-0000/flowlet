@@ -6,6 +6,7 @@ import { useUsageCostDisplaySetting } from "../../features/settings/useUsageCost
 import { SettingRow, SettingSection } from "./SettingRow";
 import styles from "./UsageCostDisplaySettings.module.css";
 
+import { errorMessage } from "../../shared/errors/AppError";
 /**
  * 「费用展示」设置区块：统一货币折算、展示币种、固定汇率与汇率备注。
  * 桌面端设置页与 Web（Docker）设置页共用；配置读写分别走 config.json
@@ -30,7 +31,7 @@ export function UsageCostDisplaySettings() {
       await usageCost.mutation.mutateAsync({ ...current, ...patch });
       Toast.success(t("设置已自动保存"));
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       Toast.error(t("保存失败：{message}", { message }));
     }
   };

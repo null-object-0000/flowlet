@@ -27,6 +27,7 @@ pub mod custom_scrape;
 pub mod device_identity;
 pub mod device_sync;
 pub mod device_usage;
+pub mod dockhand;
 pub mod gitlab;
 pub mod host_scheduler;
 pub mod job_runtime;

@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Flowlet global credential store CLI (Node port of the Rust flowlet-cred; no Rust runtime required)",
   "bin": {
-    "flowlet-cred": "./bin/flowlet-cred.mjs"
+    "flowlet": "./bin/flowlet.mjs"
   },
   "exports": {
     ".": "./src/cli.ts",
@@ -15,6 +15,9 @@
   "scripts": {
     "test": "node --test src/__tests__/",
     "compat": "node scripts/compat.mjs"
+  },
+  "engines": {
+    "node": ">=22.6"
   },
   "dependencies": {
     "undici": "^7.16.0"

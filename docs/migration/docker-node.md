@@ -58,6 +58,70 @@ OIDC 模式另验证 fail-closed（无会话/静态 token 均被拒）与不可�
 容器内确认 `service_credentials` 表、`/data/secret.key`、`.flcap` ready 帧可读；新请求日志无错误、无 `stream_cancelled`。
 切换后 10 分钟真实客户端流量：30 条请求（`/v1/chat/completions`、`/anthropic/v1/messages`），**0 错误、0 stream_cancelled**。
 
+## 请求日志渠道账号筛选发布记录（2026-11-10 12:32）
+
+| 项 | 值 |
+| --- | --- |
+| 功能 | 请求日志新增「渠道账号」筛选（渠道 / 具体账号两种粒度）；新增只读命令 `list_request_log_channel_accounts`，`list_request_logs` 入参新增 `account_id` |
+| canary 镜像 | `flowlet:node-20261110-logfilters`；容器 `flowlet-canary`（20234/20235，token 模式、独立数据卷） |
+| 生产切换前镜像（回滚点） | `flowlet:docker-20261110-nodehost` |
+| 生产镜像 | `flowlet:node-20261110-logfilters`（Node Host，`sha256:4a9342d3…`，259 MB） |
+| 方式 | canary 先用 Docker Engine API 重建容器验收；生产由 Dockhand stack `flowlet` 仅替换 `services.flowlet.image`（`forceRecreate`），`/data` 卷不动 |
+| compose 备份 | `.agents/skills/flowlet-docker-deploy/.work/compose.before-20261110-123218.yaml` |
+| 回滚 | `flowlet_deploy.py deploy --tag flowlet:docker-20261110-nodehost` |
+
+验证：canary **27/27 通过**（筛选项形状与 camelCase、按账号/渠道过滤、Nonexistent=0、
+流式请求可按其账号筛回、UI bundle 含新命令与「全部渠道账号」文案）；
+生产 **16/16 通过**（镜像 tag、healthy、oidc 鉴权不变、未登录 401、SPA、
+`/v1/models`、`deepseek-v4.1-flash` 流式 `[DONE]`、新日志 `route_reason=direct`、
+账号过滤 SQL、捕获帧 ready、无意外错误）。构建走 Engine API `POST /build`（≈156s，复用 npm 层缓存）。
+
+### 附带修复：`/data` 所有权（Node Host 迁移遗留）
+
+Rust 版线上镜像 `USER root`，Node Host 镜像 `USER 10001:10001`。2026-11-10 10:39 切换到 Node Host 后，
+`/data/request-captures` 下由 root 创建的历史目录/帧（共 1141 项）使新请求 `.flcap` 捕获全部
+`EACCES` 失败（请求详情 body 缺失），`/data/flowlet-device.json` 也为 root 所有。
+本次发布期间以 root exec 执行 `find /data -not -user 10001 -exec chown 10001:10001 {} +`
+修复生产与 canary 数据卷；修复后新请求捕获恢复 `state=ready`（04:36 UTC 起 15+ 条 ready、0 failed）。
+历史 `failed` 捕获记录无法重写，仍按原样展示。该问题与本次功能改动无关，早于本次发布即存在。
+
+## 服务凭据多实例 / 本机接入 / 保存账号修复发布记录（2026-11-10 13:03）
+
+| 项 | 值 |
+| --- | --- |
+| 内容 | ① 服务凭据新增 Dockhand provider、同 provider 多实例（环境前缀 `env_prefix` 列 + `{PREFIX}_URL/TOKEN` + CLI `--profile`）、Web Host「本机接入」下载安装引导（`/downloads/`：CLI tar / Skills tar / `install-flowlet.sh` / manifest）；② CLI 更名 `flowlet`（Node 22.6+ 兼容自检）；③ 修复「保存渠道账号」失败：手动余额快照补 `raw_scraped_json`，Rust serde 加 `default`、Node required 列表放开；④ 前端统一 `copyText` 回退（HTTP 内网 `navigator.clipboard` 缺失）与 `errorMessage` 展示（不再出现 `[object Object]`） |
+| 生产切换前镜像（回滚点） | `flowlet:node-20261110-logfilters` |
+| 生产镜像 | `flowlet:node-20261110-dockhand-localaccess`（`sha256:94e8c85b478b`，260 MB） |
+| 方式 | Docker Engine API `POST /build`（上下文 9.8 MB gzip，35 步，≈171s）；Dockhand stack `flowlet` 仅替换 `services.flowlet.image`（`forceRecreate`），`/data` 卷不动 |
+| compose 备份 | `.agents/skills/flowlet-docker-deploy/.work/compose.before-20261110-130313.yaml` |
+| 回滚 | `flowlet_deploy.py deploy --tag flowlet:node-20261110-logfilters` |
+
+验证：容器 healthy；`/health` 200；`/api/auth/config` = oidc（token_login:false）；未登录 `/api/session` 401；
+SPA 200 且新 bundle 与本地 `dist-web` 字节一致（含「本机接入」「环境前缀」「install-flowlet.sh」）；
+`/downloads/{manifest.json,flowlet-cli.tar.gz,flowlet-skills.tar.gz,install-flowlet.sh}` 全部 200 且字节数与 manifest 一致；
+`/v1/models` 200（4 模型）；`deepseek-v4.1-flash` `/v1/chat/completions` 流式 3/3、`/anthropic/v1/messages` 流式 2/2 均读到结束事件；
+生产库副本确认 `channel_accounts` 14、路由 46、`service_credentials` 1 行且新列 `env_prefix` 存在、`channel_account_workspace_links` 14、余额快照 723；
+容器内 `commands.ts` 的 `BALANCE_SNAPSHOT_REQUIRED` 已不含 `raw_scraped_json`；日志仅 1 条常态 `balance-sync 3/4`，
+OIDC 登录成功记录正常，无 EACCES/panic/其他错误。
+
+## Web 命令层渠道模板合并 + 老前端保存兼容（2026-11-10 13:24）
+
+| 项 | 值 |
+| --- | --- |
+| 内容 | ① `startHost` 把 `loadChannelsConfig` 合并内置模板后的 `channels_config` 传给 `createWebHost`（`WebHostOptions.channelsConfig`）——数据卷 `/data/config.json` 早于当前版本时，Web 命令层曾报「渠道 openai-api/vibetoken 缺少运行时模板」「余额同步 请求失败: Invalid URL」；② 线上镜像以 13:03 发布的 `flowlet:node-20261110-dockhand-localaccess` 为基座补齐该修复，同时带回 13:03 的前端 `errorMessage`/`copyText`/「本机接入」bundle 与 Node 侧 `BALANCE_SNAPSHOT_REQUIRED` 放开（此前线上跑的是更早的 `logfilters`，老前端提交的手动余额草稿缺 `raw_scraped_json`，保存渠道账号报 400 且错误对象被渲染成 `[object Object]`） |
+| 生产切换前镜像（回滚点） | `flowlet:node-20261110-snapshotfix`（= logfilters + 渠道合并 + 快照兼容补丁） |
+| 生产镜像 | `flowlet:node-20261110-localaccess-channels`（`sha256:98bdecd2aa8b`，247 MB） |
+| 方式 | 以运行中镜像创建 helper 容器 → `PUT /containers/{id}/archive` 覆盖 3 个源码文件（`config/index.ts`、`index.ts`、`web/index.ts`）→ `POST /commit`；Dockhand stack 仅替换 `services.flowlet.image`（`forceRecreate`），`/data` 不动 |
+| 镜像基线说明 | 工作树含未完成的 cli-auth / credentials WIP（`web/__tests__/cli-auth.test.ts` 当前 `require is not defined` 失败），**未整树重建**，只把已确认的修复叠加到已发布镜像上 |
+| compose 备份 | `.agents/skills/flowlet-docker-deploy/.work/compose.before-20261110-132408.yaml` |
+| 回滚 | `flowlet_deploy.py deploy --tag flowlet:node-20261110-snapshotfix` |
+
+验证：canary 用生产数据副本（旧 `config.json` 只有 7 个渠道）跑通 `fetch_channel_models(openai-api)`=96、
+`fetch_channel_models(vibetoken)`=65、`query_balance(vibetoken)`=10.85 CNY、缺 `raw_scraped_json` 的
+`save_balance_snapshot`=200、`save_channel_accounts`=200；线上 healthy、`/health` 200、SPA 200、
+容器日志 `balance-sync 4/4`，容器内 `commands.ts` 已无 `raw_scraped_json` 必填、`index.ts` 含 `channelsConfigToJson`。
+
+
 ## 体验实例（canary）
 
 为便于验收，在远端 Docker 上另起了一个独立容器（**不进入 Dockhand stack、不影响线上**）：
@@ -66,7 +130,7 @@ OIDC 模式另验证 fail-closed（无会话/静态 token 均被拒）与不可�
 | --- | --- |
 | 容器 / 卷 | `flowlet-canary` / `flowlet-canary-data`（数据卷 = 线上 `/data` 的本地副本，含 .flcap 帧） |
 | 端口 | `20234` (Web) / `20235` (模型入口) |
-| 镜像 | `flowlet:node-20261110-credentials`（49 条命令 / SSO / .flcap / 价格表 / 服务凭据） |
+| 镜像 | `flowlet:node-20261110-localaccess-channels`（= 13:03 发布镜像 + Web 命令层渠道模板合并；token 模式） |
 | 登录 | token 模式（管理凭据仅存在于部署时生成的本机 env，不入库） |
 | 后台任务 | 关闭（`FLOWLET_DISABLE_BACKGROUND_TASKS=1`，避免与线上重复同步） |
 
@@ -140,8 +204,15 @@ node scripts/e2e-node-host.mjs            # 端到端冒烟（含 mock 上游流
 - zstd **压缩块字节**非逐字节一致（Rust libzstd 0.13.3 vs Node zlib 1.5.7，差 1 字节）；
   帧头里的长度按各自实际块写、checksum 覆盖原始 JSON，**跨语言互读已实测无损**。
 - 不写 `background_jobs` 后台任务日志（Rust 会写），改为结构化 stdout 行；不影响业务数据与页面。
-- `flowlet-cred` CLI 仍是 Rust 独立二进制（Agent 机器侧工具）；它通过
-  `POST /api/commands/export_service_credentials` 拉取凭据，Node Host 已实现同一契约，因此 CLI 无需移植即可继续使用。
+- CLI 已由 Node 版接管：用户侧命令统一为 `flowlet`（`packages/flowlet-cred/`，旧名
+  `flowlet-cred` 不再保留别名），通过 `POST /api/commands/export_service_credentials`
+  拉取凭据；Rust legacy 二进制 `flowlet-cred` 仅保留做兼容性对拍，Agent 机器不再需要。
+  Web Host 的「服务凭据 → 本机接入」提供 `flowlet` 安装脚本与 Skills 下载
+  （见 `docs/credential-cli.md` §11）。
+- CLI 浏览器授权（`flowlet login`，Node Host 专有）：OIDC-only 实例不再需要把管理凭据交给
+  Agent 机器，`flowlet pull` 自动使用本机 `auth.json` 授权；授权/撤销见
+  `docs/credential-cli.md` §4 与 `docs/migration/node-host.md` §2.1。Rust Host 未实现该能力，
+  且不参与对拍。
 - `cleanupOldLogs` 删行后不额外 GC 已 `cleared` 的 orphan compacted 段（Rust 同样不回收）。
 - 与 Rust 保持一致、未额外实现：仅 RS256、`client_secret_basic`、无 `REQUIRE_EMAIL_VERIFIED`/`CA_FILE`/
   Sec-Fetch-Site 校验等（设计文档中列为 v1 非目标）。

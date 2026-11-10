@@ -1,4 +1,4 @@
-// 全局凭据库：dotenv + 元数据 sidecar。Owner: node-web（flowlet-cred）。
+// 全局凭据库：dotenv + 元数据 sidecar。Owner: node-web（flowlet）.
 //
 // 权威实现：src-tauri/src/core/credential_store.rs（728 行）逐行为等价：
 // - 单一事实源是 credentials.env 文本（Agent 可直接 cat/source）；
@@ -28,8 +28,8 @@ export const DIR_ENV_OVERRIDE = "FLOWLET_CRED_DIR";
 
 const ENV_HEADER = [
   "# Flowlet 全局凭据库",
-  "# 由 `flowlet-cred` 维护；请在 CLI 中增删（原子写 + 0600），不要手工重排此文件。",
-  "# 读取：Agent 可 cat 本文件；写入：请用 `flowlet-cred set KEY`。",
+  "# 由 `flowlet` 维护；请在 CLI 中增删（原子写 + 0600），不要手工重排此文件。",
+  "# 读取：Agent 可 cat 本文件；写入：请用 `flowlet set KEY`。",
 ].join("\n");
 
 export type EnvLine =
@@ -183,12 +183,14 @@ function restrictFile(target: string): void {
   chmodSync(target, 0o600);
 }
 
-function restrictDir(dir: string): void {
+/** 目录权限 0700（auth.json 等本机密钥文件复用同一约束）。 */
+export function restrictDir(dir: string): void {
   if (process.platform === "win32") return;
   chmodSync(dir, 0o700);
 }
 
-function writeAtomic(target: string, content: string): void {
+/** tmp + rename + 0600 的原子写（auth.json 与 credentials.env 共用同一语义）。 */
+export function writeAtomic(target: string, content: string): void {
   const parent = path.dirname(target);
   mkdirSync(parent, { recursive: true });
   const temp = path.join(parent, `.${path.basename(target)}.tmp-${process.pid}`);
@@ -384,7 +386,7 @@ export class CredentialStore {
     report.push(`目录：${this.dir}`);
     report.push(`环境文件：${this.envPath()}`);
     if (!this.exists()) {
-      report.push("状态：尚未初始化（运行 `flowlet-cred init`）");
+      report.push("状态：尚未初始化（运行 `flowlet init`）");
       return report;
     }
     report.push(`凭据数：${this.pairs().length}`);

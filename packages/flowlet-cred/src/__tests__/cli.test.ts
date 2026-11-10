@@ -1,4 +1,4 @@
-// flowlet-cred Node CLI 端到端测试。Owner: node-web。
+// flowlet（Node CLI）端到端测试。Owner: node-web。
 //
 // 运行：node --test packages/flowlet-cred/src/__tests__/
 // 全部用例通过 spawn 真实 CLI 进程（与 Agent 实际用法一致），并使用独立临时目录 +
@@ -28,11 +28,12 @@ const MOCK_SERVER = path.resolve(HERE, "mock-server.ts");
 const RUST_CLI = "/home/nichangen/代码/self-code/flowlet/src-tauri/target/debug/flowlet-cred";
 
 const GITLAB_TOKEN = "glpat-test-fixture-token-1a2b";
+const DOCKHAND_TOKEN = "dockhand-test-fixture-token-9x8y";
 const ADMIN_TOKEN = "flowlet-admin-token-0123456789";
 const HEADER = [
   "# Flowlet 全局凭据库",
-  "# 由 `flowlet-cred` 维护；请在 CLI 中增删（原子写 + 0600），不要手工重排此文件。",
-  "# 读取：Agent 可 cat 本文件；写入：请用 `flowlet-cred set KEY`。",
+  "# 由 `flowlet` 维护；请在 CLI 中增删（原子写 + 0600），不要手工重排此文件。",
+  "# 读取：Agent 可 cat 本文件；写入：请用 `flowlet set KEY`。",
 ].join("\n");
 
 const processes: Array<import("node:child_process").ChildProcess> = [];
@@ -224,7 +225,7 @@ describe("本地凭据库", () => {
     assert.ok(!result.stdout.includes("value-two"));
     assert.equal(cli(dir, ["run", "--with=SECRET_ONE", "--", process.execPath, "-e", "process.exit(7)"]).status, 7);
     assert.equal(cli(dir, ["run", "--", "true"]).stderr, "run 需要 --with=A,B 指定要注入的凭据名\n");
-    assert.equal(cli(dir, ["run", "--with=SECRET_ONE", "true"]).stderr, "run 需要 `--` 分隔符，例如：flowlet-cred run --with=GITHUB_PAT -- gh pr list\n");
+    assert.equal(cli(dir, ["run", "--with=SECRET_ONE", "true"]).stderr, "run 需要 `--` 分隔符，例如：flowlet run --with=GITHUB_PAT -- gh pr list\n");
     assert.equal(cli(dir, ["run", "--with=MISSING", "--", "true"]).stderr, "凭据不存在：MISSING\n");
   });
 
@@ -364,6 +365,231 @@ describe("gitlab 子命令", () => {
   });
 });
 
+  it("gitlab --profile：组合前缀键名、status/env 使用对应实例、clear 只删该 profile", async () => {
+    const mock = await startMock({ mode: "gitlab" });
+    const dir = tempDir();
+    const ok = cli(dir, ["gitlab", "set", `--url=${mock.baseUrl}`, "--profile=work"], { input: GITLAB_TOKEN });
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.equal(
+      ok.stdout,
+      `已保存 GitLab 凭据（profile: WORK）：${mock.baseUrl}/api/v4\n用户：Fixture User (@fixture) id=7\n`,
+    );
+    const meta = JSON.parse(metaFile(dir)) as Record<string, Record<string, unknown>>;
+    assert.equal(meta.GITLAB_WORK_URL!.kind, "service");
+    assert.equal(meta.GITLAB_WORK_TOKEN!.kind, "cli_token");
+    assert.equal(cli(dir, ["get", "GITLAB_WORK_URL", "--reveal"]).stdout, `${mock.baseUrl}\n`);
+    // 默认前缀与 profile 完全独立：没配默认前缀时提示仍指向 flowlet gitlab set。
+    assert.match(
+      cli(dir, ["gitlab", "env"]).stderr,
+      /尚未配置 GitLab 地址，先运行 flowlet gitlab set --url=\.\.\./,
+    );
+    const status = cli(dir, ["gitlab", "status", "--profile=work"]);
+    assert.match(status.stdout, /^API：http:\/\/127\.0\.0\.1:\d+\/gitlab\/api\/v4$/m);
+    assert.match(status.stdout, /用户：Fixture User \(@fixture\) id=7/);
+    const env = cli(dir, ["gitlab", "env", "--profile=work"]);
+    assert.match(env.stderr, /注意：下面输出包含明文 token/);
+    assert.equal(env.stdout, `GITLAB_WORK_URL=${mock.baseUrl}\nGITLAB_WORK_TOKEN=${GITLAB_TOKEN}\n`);
+    // projects/api 也按 profile 取实例。
+    const projects = cli(dir, ["gitlab", "projects", "--profile=work", "--json"]);
+    assert.deepEqual(JSON.parse(projects.stdout), []);
+    assert.equal(
+      (JSON.parse(cli(dir, ["gitlab", "api", "/user", "--profile=work"]).stdout) as { username: string }).username,
+      "fixture",
+    );
+    // clear 只删该 profile，不碰其它前缀。
+    assert.equal(
+      cli(dir, ["gitlab", "clear", "--profile=work"]).stdout,
+      "已移除 GitLab 凭据（profile: WORK）\n",
+    );
+    assert.equal(
+      cli(dir, ["gitlab", "clear", "--profile=work"]).stdout,
+      "没有可移除的 GitLab 凭据（profile: WORK）\n",
+    );
+    assert.match(cli(dir, ["gitlab", "env", "--profile=work"]).stderr, /--profile=WORK/);
+    mock.close();
+  });
+
+  it("gitlab --profile：别名转大写、非法别名报错", async () => {
+    const mock = await startMock({ mode: "gitlab" });
+    const dir = tempDir();
+    const ok = cli(dir, ["gitlab", "set", `--url=${mock.baseUrl}`, "--profile=team_a"], { input: GITLAB_TOKEN });
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.equal(cli(dir, ["get", "GITLAB_TEAM_A_URL", "--reveal"]).stdout, `${mock.baseUrl}\n`);
+    assert.equal(
+      cli(dir, ["gitlab", "status", "--profile=1bad"]).stderr,
+      "--profile 只能包含字母、数字和下划线，且以字母开头\n",
+    );
+    assert.equal(
+      cli(dir, ["gitlab", "status", "--profile=too-long-alias-exceeding-24-chars"]).stderr,
+      "--profile 只能包含字母、数字和下划线，且以字母开头\n",
+    );
+    mock.close();
+  });
+
+// ─── Dockhand 子命令 ───────────────────────────────────────────────────────
+
+describe("dockhand 子命令", () => {
+  it("dockhand set：先校验后落库，URL 归一/去 /api 后缀，KIND/备注写入", async () => {
+    const mock = await startMock({ mode: "dockhand" });
+    const dir = tempDir();
+    const ok = cli(dir, ["dockhand", "set", `--url=${mock.baseUrl}/api/`], { input: DOCKHAND_TOKEN });
+    assert.equal(ok.status, 0, ok.stderr);
+    assert.equal(ok.stdout, `已保存 Dockhand 凭据：${mock.baseUrl}/api\n环境：2 个\n`);
+    const meta = JSON.parse(metaFile(dir)) as Record<string, Record<string, unknown>>;
+    assert.equal(meta.DOCKHAND_URL!.kind, "service");
+    assert.equal(meta.DOCKHAND_URL!.note, "dockhand 面板地址");
+    assert.equal(meta.DOCKHAND_TOKEN!.kind, "cli_token");
+    assert.equal(meta.DOCKHAND_TOKEN!.note, "dockhand API token");
+    assert.equal(cli(dir, ["get", "DOCKHAND_URL", "--reveal"]).stdout, `${mock.baseUrl}\n`);
+    assert.equal(cli(dir, ["get", "DOCKHAND_TOKEN", "--reveal"]).stdout, `${DOCKHAND_TOKEN}\n`);
+    mock.close();
+  });
+
+  it("dockhand set：token 无效时不落库", async () => {
+    const mock = await startMock({ mode: "dockhand" });
+    const dir = tempDir();
+    const failed = cli(dir, ["dockhand", "set", `--url=${mock.baseUrl}`], { input: "wrong-dockhand-token" });
+    assert.equal(failed.status, 1);
+    assert.equal(
+      failed.stderr,
+      "Dockhand API 401: Unauthorized（token 无效或已过期，请到 Dockhand 生成新的 API Token）\n" +
+        "未保存。请检查实例地址、token 是否有效（Dockhand 设置 → API 令牌）。\n",
+    );
+    assert.ok(!existsSync(path.join(dir, "credentials.env")) || !envFile(dir).includes("DOCKHAND_URL"));
+    mock.close();
+  });
+
+  it("dockhand status：health/环境列表/Docker 版本；未配置时提示", async () => {
+    const mock = await startMock({ mode: "dockhand" });
+    const dir = tempDir();
+    cli(dir, ["dockhand", "set", `--url=${mock.baseUrl}`], { input: DOCKHAND_TOKEN });
+    assert.equal(
+      cli(dir, ["dockhand", "status"]).stdout,
+      `API：${mock.baseUrl}/api\n` +
+        "健康：ok\n" +
+        "环境：2 个\n" +
+        "   2  [CentOS] 10.100.217.60  http://10.100.217.60:2375\n" +
+        "   1  本机  http://127.0.0.1:2375\n" +
+        "Docker 版本：27.3.1\n",
+    );
+    mock.close();
+    const empty = cli(tempDir(), ["dockhand", "status"]);
+    assert.equal(empty.status, 1);
+    assert.match(empty.stderr, /尚未配置 Dockhand 地址/);
+  });
+
+  it("dockhand envs：文本与 --json", async () => {
+    const mock = await startMock({ mode: "dockhand" });
+    const dir = tempDir();
+    cli(dir, ["dockhand", "set", `--url=${mock.baseUrl}`], { input: DOCKHAND_TOKEN });
+    assert.equal(
+      cli(dir, ["dockhand", "envs"]).stdout,
+      "   2  [CentOS] 10.100.217.60  http://10.100.217.60:2375\n   1  本机  http://127.0.0.1:2375\n",
+    );
+    const json = JSON.parse(cli(dir, ["dockhand", "envs", "--json"]).stdout) as Array<Record<string, unknown>>;
+    assert.deepEqual(json, [
+      { id: 2, name: "[CentOS] 10.100.217.60", host: "10.100.217.60", port: 2375, protocol: "http" },
+      { id: 1, name: "本机", host: "127.0.0.1", port: 2375, protocol: "http" },
+    ]);
+    mock.close();
+  });
+
+  it("dockhand stacks：--env 必填/整数校验、文本与 --json", async () => {
+    const mock = await startMock({ mode: "dockhand" });
+    const dir = tempDir();
+    cli(dir, ["dockhand", "set", `--url=${mock.baseUrl}`], { input: DOCKHAND_TOKEN });
+    assert.equal(cli(dir, ["dockhand", "stacks"]).stderr, "缺少 --env，例如 --env=2\n");
+    assert.equal(cli(dir, ["dockhand", "stacks", "--env=abc"]).stderr, "--env 需要整数，例如 --env=2\n");
+    assert.equal(cli(dir, ["dockhand", "stacks", "--env=2"]).stdout, "flowlet  2 个容器\ntools  1 个容器\n");
+    const json = JSON.parse(cli(dir, ["dockhand", "stacks", "--env=2", "--json"]).stdout) as Array<{
+      name: string;
+      containers: string[];
+    }>;
+    assert.deepEqual(json.map((stack) => [stack.name, stack.containers.length]), [["flowlet", 2], ["tools", 1]]);
+    mock.close();
+  });
+
+  it("dockhand api：默认 GET、显式方法、/api 前缀与 query、POST 透传、绝对 URL 拒绝", async () => {
+    const mock = await startMock({ mode: "dockhand" });
+    const dir = tempDir();
+    cli(dir, ["dockhand", "set", `--url=${mock.baseUrl}`], { input: DOCKHAND_TOKEN });
+    assert.equal((JSON.parse(cli(dir, ["dockhand", "api", "/environments"]).stdout) as unknown[]).length, 2);
+    assert.equal(
+      (JSON.parse(cli(dir, ["dockhand", "api", "GET", "/api/health"]).stdout) as { status: string }).status,
+      "ok",
+    );
+    assert.equal((JSON.parse(cli(dir, ["dockhand", "api", "/stacks?env=2"]).stdout) as unknown[]).length, 2);
+    const echoed = JSON.parse(
+      cli(dir, ["dockhand", "api", "POST", "/echo", '--data={"hello":1}']).stdout,
+    ) as { method: string; body: unknown };
+    assert.deepEqual(echoed, { method: "POST", body: { hello: 1 } });
+    assert.equal(
+      cli(dir, ["dockhand", "api", "GET", "https://evil.example.com/x"]).stderr,
+      "API 路径必须是相对路径（如 /environments），不接受绝对 URL\n",
+    );
+    assert.match(cli(dir, ["dockhand", "api", "POST", "/echo", "--data=not-json"]).stderr, /--data 不是合法 JSON/);
+    mock.close();
+  });
+
+  it("dockhand env/clear：先检查是否已配置，clear 移除两把键", async () => {
+    const mock = await startMock({ mode: "dockhand" });
+    const dir = tempDir();
+    assert.match(cli(dir, ["dockhand", "env"]).stderr, /尚未配置 Dockhand 地址/);
+    cli(dir, ["dockhand", "set", `--url=${mock.baseUrl}`], { input: DOCKHAND_TOKEN });
+    const env = cli(dir, ["dockhand", "env"]);
+    assert.match(env.stderr, /注意：下面输出包含明文 token/);
+    assert.equal(env.stdout, `DOCKHAND_URL=${mock.baseUrl}\nDOCKHAND_TOKEN=${DOCKHAND_TOKEN}\n`);
+    assert.equal(cli(dir, ["dockhand", "clear"]).stdout, "已移除 Dockhand 凭据\n");
+    assert.equal(cli(dir, ["dockhand", "clear"]).stdout, "没有可移除的 Dockhand 凭据\n");
+    mock.close();
+  });
+});
+
+  it("dockhand --profile：多实例独立键名，status/envs/stacks/api 用对应 profile，clear 只删该 profile", async () => {
+    const na = await startMock({ mode: "dockhand" });
+    const sz = await startMock({ mode: "dockhand" });
+    const dir = tempDir();
+    assert.equal(
+      cli(dir, ["dockhand", "set", `--url=${na.baseUrl}`, "--profile=na"], { input: DOCKHAND_TOKEN }).stdout,
+      `已保存 Dockhand 凭据（profile: NA）：${na.baseUrl}/api\n环境：2 个\n`,
+    );
+    assert.equal(
+      cli(dir, ["dockhand", "set", `--url=${sz.baseUrl}`, "--profile=sz"], { input: DOCKHAND_TOKEN }).status,
+      0,
+    );
+    const naStatus = cli(dir, ["dockhand", "status", "--profile=na"]).stdout;
+    assert.ok(naStatus.startsWith(`API：${na.baseUrl}/api\n健康：ok\n环境：2 个\n`), naStatus);
+    const szStatus = cli(dir, ["dockhand", "status", "--profile=sz"]).stdout;
+    assert.ok(szStatus.startsWith(`API：${sz.baseUrl}/api\n`), szStatus);
+    assert.equal(
+      cli(dir, ["dockhand", "envs", "--profile=na"]).stdout,
+      "   2  [CentOS] 10.100.217.60  http://10.100.217.60:2375\n   1  本机  http://127.0.0.1:2375\n",
+    );
+    assert.equal(
+      cli(dir, ["dockhand", "stacks", "--env=2", "--profile=sz"]).stdout,
+      "flowlet  2 个容器\ntools  1 个容器\n",
+    );
+    assert.equal(
+      (JSON.parse(cli(dir, ["dockhand", "api", "/environments", "--profile=na"]).stdout) as unknown[]).length,
+      2,
+    );
+    const naEnv = cli(dir, ["dockhand", "env", "--profile=na"]);
+    assert.match(naEnv.stderr, /注意：下面输出包含明文 token/);
+    assert.equal(naEnv.stdout, `DOCKHAND_NA_URL=${na.baseUrl}\nDOCKHAND_NA_TOKEN=${DOCKHAND_TOKEN}\n`);
+    // 默认前缀与 profile 独立：未配置默认凭据时提示仍指向 flowlet dockhand set。
+    assert.match(cli(dir, ["dockhand", "env"]).stderr, /尚未配置 Dockhand 地址，先运行 flowlet dockhand set/);
+    // clear 只删 NA prefix。
+    assert.equal(
+      cli(dir, ["dockhand", "clear", "--profile=na"]).stdout,
+      "已移除 Dockhand 凭据（profile: NA）\n",
+    );
+    assert.match(cli(dir, ["dockhand", "env", "--profile=na"]).stderr, /--profile=NA/);
+    const szEnv = cli(dir, ["dockhand", "env", "--profile=sz"]).stdout;
+    assert.ok(szEnv.startsWith(`DOCKHAND_SZ_URL=${sz.baseUrl}\n`), szEnv);
+    na.close();
+    sz.close();
+  });
+
 // ─── pull（Flowlet Web Host → 本地 .env） ──────────────────────────────────
 
 describe("pull", () => {
@@ -392,6 +618,72 @@ describe("pull", () => {
     web.close();
   });
 
+  it("dockhand 条目映射为 DOCKHAND_URL / DOCKHAND_TOKEN", async () => {
+    const web = await startMock({
+      mode: "flowlet-web",
+      entries: [
+        { name: "主实例", provider: "gitlab", baseUrl: "https://gitlab.example.com", token: "glpat-pulled-1" },
+        {
+          name: "预发面板",
+          provider: "dockhand",
+          baseUrl: "http://dockhand.example.com:3000",
+          token: "dck-pulled-1",
+        },
+      ],
+    });
+    const dir = tempDir();
+    cli(dir, ["init"]);
+    const pulled = cli(dir, ["pull", `--server=${web.baseUrl}`, `--token=${ADMIN_TOKEN}`]);
+    assert.equal(pulled.status, 0, pulled.stderr);
+    assert.match(pulled.stdout, /已写入 DOCKHAND_URL（来自 dockhand \/ 预发面板）/);
+    assert.match(pulled.stdout, /已写入 DOCKHAND_TOKEN（来自 dockhand \/ 预发面板）/);
+    assert.match(pulled.stdout, /完成：写入 4 个键 → /);
+    assert.equal(cli(dir, ["get", "DOCKHAND_URL", "--reveal"]).stdout, "http://dockhand.example.com:3000\n");
+    assert.equal(cli(dir, ["get", "DOCKHAND_TOKEN", "--reveal"]).stdout, "dck-pulled-1\n");
+    const meta = JSON.parse(metaFile(dir)) as Record<string, Record<string, unknown>>;
+    assert.equal(meta.DOCKHAND_URL!.kind, "service");
+    assert.equal(meta.DOCKHAND_TOKEN!.kind, "cli_token");
+    assert.equal(meta.DOCKHAND_TOKEN!.note, "dockhand / 预发面板");
+    web.close();
+  });
+
+  it("pull 使用导出条目的 envPrefix（多实例），旧服务端缺失时回退 provider 大写", async () => {
+    const web = await startMock({
+      mode: "flowlet-web",
+      entries: [
+        {
+          name: "北美",
+          provider: "dockhand",
+          baseUrl: "http://na.dockhand.example.com:3000",
+          token: "dck-na-pulled",
+          envPrefix: "DOCKHAND_NA",
+        },
+        {
+          name: "旧服务端",
+          provider: "gitlab",
+          baseUrl: "https://gitlab.example.com",
+          token: "glpat-old",
+        },
+      ],
+    });
+    const dir = tempDir();
+    const pulled = cli(dir, ["pull", `--server=${web.baseUrl}`, `--token=${ADMIN_TOKEN}`]);
+    assert.equal(pulled.status, 0, pulled.stderr);
+    assert.match(pulled.stdout, /已写入 DOCKHAND_NA_URL（来自 dockhand \/ 北美）/);
+    assert.match(pulled.stdout, /已写入 DOCKHAND_NA_TOKEN（来自 dockhand \/ 北美）/);
+    assert.match(pulled.stdout, /已写入 GITLAB_URL（来自 gitlab \/ 旧服务端）/);
+    assert.match(pulled.stdout, /完成：写入 4 个键 → /);
+    assert.equal(
+      cli(dir, ["get", "DOCKHAND_NA_URL", "--reveal"]).stdout,
+      "http://na.dockhand.example.com:3000\n",
+    );
+    assert.equal(cli(dir, ["get", "GITLAB_URL", "--reveal"]).stdout, "https://gitlab.example.com\n");
+    const meta = JSON.parse(metaFile(dir)) as Record<string, Record<string, unknown>>;
+    assert.equal(meta.DOCKHAND_NA_TOKEN!.kind, "cli_token");
+    assert.equal(meta.DOCKHAND_NA_TOKEN!.note, "dockhand / 北美");
+    web.close();
+  });
+
   it("--dry-run 不写文件；401 与空列表行为；环境变量凭据兜底", async () => {
     const web = await startMock({
       mode: "flowlet-web",
@@ -412,7 +704,7 @@ describe("pull", () => {
     );
     assert.equal(
       cli(dir, ["pull", `--server=${web.baseUrl}`], { env: { FLOWLET_ADMIN_TOKEN: undefined } }).stderr,
-      "缺少管理凭据：用 --token=... 或设置 FLOWLET_ADMIN_TOKEN\n",
+      `缺少凭据：先运行 flowlet login --server=${web.baseUrl}（或 --token=管理凭据 / FLOWLET_ADMIN_TOKEN）\n`,
     );
     assert.equal(cli(dir, ["pull", `--server=${web.baseUrl}`], { env: { FLOWLET_ADMIN_TOKEN: ADMIN_TOKEN } }).status, 0);
     assert.equal(cli(dir, ["pull", "--server=ftp://x"]).stderr, "--server 必须是 http 或 https 地址\n");

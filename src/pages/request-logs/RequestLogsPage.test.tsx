@@ -24,6 +24,13 @@ vi.mock("../../features/request-logs/useRequestLogs", () => ({
   useRequestLogs: (...args: unknown[]) => mocks.useLogs(...args),
   useRequestLogClients: () => ({ data: [{ id: "claude-code", name: "Claude Code" }], isLoading: false }),
   useRequestLogModels: () => ({ data: { publicModels: ["flowlet-pro"], upstreamModels: ["LongCat-2.0"] }, isLoading: false }),
+  useRequestLogChannelAccounts: () => ({
+    data: {
+      channels: [{ id: "longcat", name: "LongCat" }],
+      accounts: [{ id: "account-1", name: "主账号", channelId: "longcat", channelName: "LongCat" }],
+    },
+    isLoading: false,
+  }),
   useRequestLogDetail: (...args: unknown[]) => mocks.useDetail(...args),
   useRequestLogActions: () => ({ cleanup: { mutateAsync: mocks.cleanup, isPending: false } }),
 }));
@@ -95,6 +102,37 @@ describe("RequestLogsPage", () => {
     await waitFor(() => expect(mocks.useLogs).toHaveBeenLastCalledWith(expect.objectContaining({
       model: "flowlet-pro",
       modelKind: "public",
+      page: 1,
+    }), true));
+  });
+
+  it("applies channel and account filters through the third toolbar select", async () => {
+    const user = userEvent.setup();
+    render(<RequestLogsPage />);
+
+    const filterToolbar = screen.getByRole("region", { name: "日志筛选" });
+    // 既有 select 顺序必须保持 client、model、channelAccount：model 仍是索引 1。
+    const channelAccountSelect = within(filterToolbar).getAllByRole("combobox")[2];
+    expect(channelAccountSelect).toHaveTextContent("全部渠道账号");
+    expect(within(filterToolbar).getAllByRole("combobox")[1]).toHaveTextContent("全部模型");
+
+    await user.click(channelAccountSelect);
+    expect(await screen.findByText("渠道 · LongCat")).toBeInTheDocument();
+    await user.click(await screen.findByText("LongCat · 主账号"));
+
+    await waitFor(() => expect(mocks.useLogs).toHaveBeenLastCalledWith(expect.objectContaining({
+      accountId: "account-1",
+      channelId: "",
+      page: 1,
+    }), true));
+
+    // 选择「全部渠道账号」必须同时清空渠道与账号两个字段。
+    await user.click(within(filterToolbar).getAllByRole("combobox")[2]);
+    await user.click(await screen.findByText("全部渠道账号"));
+
+    await waitFor(() => expect(mocks.useLogs).toHaveBeenLastCalledWith(expect.objectContaining({
+      accountId: "",
+      channelId: "",
       page: 1,
     }), true));
   });

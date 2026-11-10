@@ -6,6 +6,7 @@ import type {
   RuntimeConfigStore,
 } from "../types.ts";
 import type { SqliteStorage } from "../storage/index.ts";
+import type { CliAuth } from "./cli-auth.ts";
 import type { LogCaptureConfig, UpstreamProxyConfig } from "./config-state.ts";
 
 /** 与 node-storage `SecretBox` 结构兼容的静态加密接口（密文格式 v1:...）。 */
@@ -37,4 +38,6 @@ export interface WebContext {
   customScrapeChannels?: JsonRow[] | null;
   /** 三方服务凭据的静态加密（index.ts 传入 SecretBox，数据卷 secret.key）。 */
   secrets: SecretBoxLike;
+  /** CLI 浏览器授权（`flowlet login`）：授权码、token 签发与作用域校验。 */
+  cliAuth: CliAuth;
 }

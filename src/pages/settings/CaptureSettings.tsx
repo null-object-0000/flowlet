@@ -4,6 +4,7 @@ import { SettingRow, SettingSection, SettingBadge } from "./SettingRow";
 import styles from "./CaptureSettings.module.css";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 
+import { errorMessage } from "../../shared/errors/AppError";
 /**
  * 内容捕获与保留策略设置区块。
  *
@@ -23,7 +24,7 @@ export function CaptureSettings() {
       await logCapture.mutation.mutateAsync(updated);
       Toast.success(t("设置已自动保存"));
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       Toast.error(t("保存失败：{message}", { message }));
     }
   };

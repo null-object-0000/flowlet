@@ -2,15 +2,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ensureLanguage, highlightToHtml } from "./syntaxHighlight";
 import styles from "./MarkdownCodeBlock.module.css";
+import { copyText } from "./copyText";
 
 export function MarkdownCodeBlock({ code, language }: { code: string; language?: string }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
   const [html, setHtml] = useState<string | null | undefined>(undefined);
   const copy = useCallback(() => {
-    if (copied || !navigator.clipboard) return;
+    if (copied) return;
     const text = rootRef.current?.querySelector("pre")?.textContent ?? code;
-    void navigator.clipboard.writeText(text).then(() => {
+    void copyText(text).then(() => {
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1_000);
     }).catch(() => undefined);

@@ -16,6 +16,8 @@ export interface ServiceCredentialRow {
   secret_hint: string;
   kind: string;
   note: string | null;
+  /** 第二期：环境变量前缀（大写）；旧行为 NULL，读取时按 provider 默认解析。 */
+  env_prefix: string | null;
   enabled: boolean;
   created_at: string;
   updated_at: string;
@@ -24,7 +26,7 @@ export interface ServiceCredentialRow {
 }
 
 const SELECT_COLUMNS = `id, name, provider, base_url, secret_ciphertext, secret_hint, kind, note,
-       enabled, created_at, updated_at, last_verified_at, last_error`;
+       env_prefix, enabled, created_at, updated_at, last_verified_at, last_error`;
 
 function rowFromRecord(row: Record<string, unknown>): JsonRow {
   return {
@@ -36,6 +38,7 @@ function rowFromRecord(row: Record<string, unknown>): JsonRow {
     secret_hint: String(row.secret_hint),
     kind: String(row.kind),
     note: row.note ?? null,
+    env_prefix: typeof row.env_prefix === "string" ? row.env_prefix : null,
     enabled: Number(row.enabled) !== 0,
     created_at: String(row.created_at),
     updated_at: String(row.updated_at),
@@ -73,8 +76,8 @@ export function upsertServiceCredential(db: DatabaseSync, row: JsonRow): void {
   db.prepare(
     `INSERT INTO service_credentials (
         id, name, provider, base_url, secret_ciphertext, secret_hint, kind, note,
-        enabled, created_at, updated_at, last_verified_at, last_error
-     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+        env_prefix, enabled, created_at, updated_at, last_verified_at, last_error
+     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
      ON CONFLICT(id) DO UPDATE SET
         name = excluded.name,
         provider = excluded.provider,
@@ -83,6 +86,7 @@ export function upsertServiceCredential(db: DatabaseSync, row: JsonRow): void {
         secret_hint = excluded.secret_hint,
         kind = excluded.kind,
         note = excluded.note,
+        env_prefix = excluded.env_prefix,
         enabled = excluded.enabled,
         updated_at = excluded.updated_at,
         last_verified_at = excluded.last_verified_at,
@@ -96,6 +100,7 @@ export function upsertServiceCredential(db: DatabaseSync, row: JsonRow): void {
     String(row.secret_hint),
     String(row.kind ?? "cli_token"),
     row.note ?? null,
+    typeof row.env_prefix === "string" && row.env_prefix !== "" ? row.env_prefix : null,
     row.enabled === false ? 0 : 1,
     String(row.created_at),
     String(row.updated_at),
@@ -137,6 +142,16 @@ export function maskSecret(secret: string): string {
   return `••••${chars.slice(chars.length - 4).join("")}`;
 }
 
+/**
+ * Rust `service_credentials::default_env_prefix` 的存储层副本（仅用于 to_view 的旧行兜底）。
+ * 业务校验路径以 web/credentials.ts 为准，避免 storage 反向依赖 web 层。
+ */
+function defaultEnvPrefix(provider: unknown): string {
+  if (provider === "gitlab") return "GITLAB";
+  if (provider === "dockhand") return "DOCKHAND";
+  return String(provider ?? "").trim().toUpperCase();
+}
+
 /** Rust `service_credentials::to_view`：列表视图（camelCase，不含密文）。 */
 export function toServiceCredentialView(row: JsonRow): JsonRow {
   return {
@@ -144,6 +159,10 @@ export function toServiceCredentialView(row: JsonRow): JsonRow {
     name: row.name,
     provider: row.provider,
     baseUrl: row.base_url,
+    envPrefix:
+      typeof row.env_prefix === "string" && row.env_prefix !== ""
+        ? row.env_prefix
+        : defaultEnvPrefix(row.provider),
     kind: row.kind,
     note: row.note ?? null,
     enabled: row.enabled,

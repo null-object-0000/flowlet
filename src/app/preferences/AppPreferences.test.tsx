@@ -67,6 +67,23 @@ describe("AppPreferencesProvider", () => {
     expect(translate("en-US", "添加 / 重新授权账号")).toBe("Add / reauthorize");
   });
 
+  it("translates service credential strings with provider placeholders", () => {
+    expect(translate("en-US", "服务凭据")).toBe("Service credentials");
+    expect(translate("en-US", "例如：公司 {name}", { name: "Dockhand" })).toBe("For example: Company Dockhand");
+    expect(
+      translate(
+        "en-US",
+        "保存时会实际请求 {endpoint}；地址不可达或 token 无效时不会落库。内网自签证书请配置可信 CA。",
+        { endpoint: "Dockhand /api/environments" },
+      ),
+    ).toBe(
+      "Saving performs a real request to Dockhand /api/environments; nothing is stored if the instance is unreachable or the token is invalid. Configure a trusted CA for internal self-signed certificates.",
+    );
+    expect(translate("en-US", "API Token（Dockhand 设置 → API 令牌）")).toBe(
+      "API Token (Dockhand settings → API tokens)",
+    );
+  });
+
   it("defaults the token unit to follow the interface language", () => {
     render(<AppPreferencesProvider><PreferenceProbe /></AppPreferencesProvider>);
     expect(getActiveTokenUnit()).toBe("auto");

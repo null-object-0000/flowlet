@@ -3,10 +3,8 @@ import { proxyCommands } from "../../domains/proxy/commands";
 import { compactDatabase } from "../../domains/settings/commands";
 import { queryKeys } from "../../shared/query-keys";
 import { suspendProxyAutoStart } from "../proxy-lifecycle/proxyAutoStartSuspension";
+import { errorMessage } from "../../shared/errors/AppError";
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 export function useStorageMaintenance() {
   const queryClient = useQueryClient();

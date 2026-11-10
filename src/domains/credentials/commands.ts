@@ -1,5 +1,6 @@
 import { invokeCommand, toAppError } from "../../platform/tauri/client";
 import type {
+  CliAuthToken,
   CredentialCheck,
   CredentialProvider,
   ServiceCredential,
@@ -41,4 +42,15 @@ export const credentialCommands = {
 
   remove: (id: string): Promise<void> =>
     invokeCommand<void>("delete_service_credential", { id }).catch(toAppErr("credential_delete_failed")),
+
+  /**
+   * 已授权的 CLI（`flowlet login` 签发，作用域 `credentials:read`）。
+   * 桌面 Rust Host 暂未实现该命令，调用会拒绝；UI 按「当前 Host 不支持」优雅降级。
+   */
+  listCliAuthTokens: (): Promise<CliAuthToken[]> =>
+    invokeCommand<CliAuthToken[]>("list_cli_auth_tokens").catch(toAppErr("cli_auth_tokens_failed")),
+
+  /** 撤销一把 CLI 授权；服务端幂等（不存在也返回成功）。 */
+  revokeCliAuthToken: (id: string): Promise<void> =>
+    invokeCommand<void>("revoke_cli_auth_token", { id }).catch(toAppErr("cli_auth_token_revoke_failed")),
 };

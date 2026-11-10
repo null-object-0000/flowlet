@@ -19,6 +19,7 @@ export const queryKeys = {
     all: ["credentials"] as const,
     list: () => [...queryKeys.credentials.all, "list"] as const,
     providers: () => [...queryKeys.credentials.all, "providers"] as const,
+    cliAuthTokens: () => [...queryKeys.credentials.all, "cli-auth-tokens"] as const,
   },
   channel: {
     all: ["channel"] as const,
@@ -61,6 +62,7 @@ export const queryKeys = {
     list: (filter: unknown) => [...queryKeys.requestLog.all, "list", filter] as const,
     clients: () => [...queryKeys.requestLog.all, "clients"] as const,
     models: () => [...queryKeys.requestLog.all, "models"] as const,
+    channelAccounts: () => [...queryKeys.requestLog.all, "channelAccounts"] as const,
     detail: (requestId: string) => [...queryKeys.requestLog.all, "detail", requestId] as const,
   },
   agentSession: {

@@ -186,6 +186,7 @@
 ### 3.7 客户端身份、会话与限流（`proxy.rs:839-917`）
 
 - `extract_agent_session(headers)`（`proxy.rs:122-124` → `agent_session_identity::from_http_headers`）：按 `AgentIdentityAdapter` registry 顺序尝试；标记头 `x-flowlet-client` 门控特定 adapter；产出 `{agent_type, session_id, parent_session_id}`。
+- **Node Host 新增的旁路观测（Rust 无对应实现，非等价项）**：识别出 `(agent_type, session_id)` 后，Node Host 还会从已经读入内存的请求体派生会话标题/项目路径（`proxy/session-derive.ts`）并 upsert 到 SQLite `agent_session_metadata`，供 Docker 会话管理展示；写入失败只 warn，不影响转发。规则与存储契约见 [docs/agent-session-metadata.md](../agent-session-metadata.md)。它不解析/剥离任何新 header，也不改变转发报文与请求日志字段。
 - **token 身份**（`proxy.rs:891-892`）：`identify_client` 命中即 `token_client_id="default"`；只用于限流 key 与高级规则 `match_client_id`，**不写日志/用量**。
 - **客户端身份**（`proxy.rs:894-899`）：`load_ua_rules(config_path)`（每次请求热读 `config.json`；`proxy_http.rs:891-910`：用户规则优先，按 id 补齐内置规则）→ `identify_client_agent`（`agent_identity_adapter.rs:44-63`）：`x-flowlet-client` 优先（值小写为 id，展示名取 plugin registry），否则 UA 子串匹配；不命中 → `(None, Some("未知"))`。
 - **限流**（`proxy.rs:901-917`）：只有识别到 token 时才消费；失败 429 + `Retry-After`，body `{"error":"rate limit exceeded"}`。`RateLimiter`（`rate_limiter.rs`）：每 client 一个桶，容量 = rpm，补充速率 = rpm/60 每秒（整秒粒度），`retry_after` = `ceil(1/refill)`。

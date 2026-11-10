@@ -241,6 +241,9 @@ pub async fn dispatch(state: &WebState, command: &str, args: Value) -> Result<Va
         }
         "list_request_log_clients" => read!(s.storage.list_request_log_clients()),
         "list_request_log_models" => read!(s.storage.list_request_log_models()),
+        "list_request_log_channel_accounts" => {
+            read!(s.storage.list_request_log_channel_accounts())
+        }
         "get_request_log_detail" => read!(s
             .storage
             .list_request_logs_by_request_id(&arg::<String>(&args, "requestId")?)),

@@ -28,6 +28,8 @@ export interface ProxyStorage {
   listChannelModels?(): JsonRow[];
   insertRequestLog?(row: JsonRow): void;
   insertUsageRecord?(row: JsonRow): void;
+  /** 会话标题/项目路径的观测元数据 upsert（docs/agent-session-metadata.md §2）。 */
+  upsertAgentSessionMetadata?(row: JsonRow): void;
   updateRequestLogTiming?(requestId: string, patch: JsonRow): void;
   upsertUsageRecordWithMetadata?(row: JsonRow, usageStatus: string, usageSource: string): void;
   updateAccountLastError?(accountId: string, message: string): void;
@@ -145,6 +147,20 @@ export function recordRequestLog(storage: ProxyStorage, row: JsonRow): void {
     storage.insertRequestLog?.(row);
   } catch (error) {
     warn("写入请求日志失败", error);
+  }
+}
+
+/**
+ * 写入会话元数据（标题 / 项目路径）。
+ *
+ * 与请求日志一样属于旁路观测：派生值只是近似值，写失败不得影响模型转发，
+ * 因此这里吞掉异常只记 warn。
+ */
+export function recordAgentSessionMetadata(storage: ProxyStorage, row: JsonRow): void {
+  try {
+    storage.upsertAgentSessionMetadata?.(row);
+  } catch (error) {
+    warn("写入会话元数据失败", error);
   }
 }
 

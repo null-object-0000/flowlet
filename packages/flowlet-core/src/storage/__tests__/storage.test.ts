@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { randomUUID } from "node:crypto";
 import { SqliteStorage } from "../index.ts";
+import { upsertAgentSessionMetadata } from "../sessions.ts";
 import { currentOsFamily, detectPlatform, resolvePlatform } from "../devices.ts";
 import {
   initializeChannelPresets,
@@ -168,6 +169,12 @@ test("真实库副本：直接打开、迁移幂等、形状正确且数据不�
     assert.ok(["openai", "anthropic", "responses"].includes(String(route.client_protocol)));
     assert.equal(typeof route.enabled, "boolean");
     assert.equal(storage.getAppMeta("schema_version"), "2026.08.02");
+    // 老库启动迁移必须自动补建 agent_session_metadata（CREATE TABLE IF NOT EXISTS，只增不改）。
+    const addedTable = storage
+      .database()
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'agent_session_metadata'")
+      .get() as { name?: string } | undefined;
+    assert.equal(addedTable?.name, "agent_session_metadata");
     // 迁移幂等：重复打开（不关闭首个连接，WAL 允许）后再读，数量一致。
     const second = storageFor(dbPath);
     assert.equal(second.listChannelAccounts().length, accounts.length);
@@ -322,6 +329,24 @@ test("请求日志：分页 / 详情 / 筛选项 / 今日用量", () => {
   const models = storage.listRequestLogModels();
   assert.deepEqual(models.publicModels, ["deepseek-v4-flash"]);
   assert.deepEqual(models.upstreamModels, ["deepseek-v4-flash"]);
+  // 渠道 / 渠道账号筛选项（账号名回退日志落库的 account_name，channel_accounts 无对应行）。
+  assert.deepEqual(storage.listRequestLogChannelAccounts(), {
+    channels: [{ id: "deepseek", name: "DeepSeek" }],
+    accounts: [
+      { id: "account-unit", name: "Unit", channelId: "deepseek", channelName: "DeepSeek" },
+    ],
+  });
+  // channel_accounts 存在同名行时账号名优先取当前名称（改名后立即反映）。
+  storage
+    .database()
+    .prepare(
+      `INSERT INTO channel_accounts (id, channel_id, name, api_key, created_at, updated_at)
+       VALUES ('account-unit', 'deepseek', 'Renamed Unit', 'sk-test', '2026-11-10T00:00:00Z', '2026-11-10T00:00:00Z')`,
+    )
+    .run();
+  assert.deepEqual(storage.listRequestLogChannelAccounts().accounts, [
+    { id: "account-unit", name: "Renamed Unit", channelId: "deepseek", channelName: "DeepSeek" },
+  ]);
 
   // 今日用量：单条聚合与分页汇总同口径。
   const today = storage.usageTodaySummary();
@@ -337,6 +362,44 @@ test("请求日志：分页 / 详情 / 筛选项 / 今日用量", () => {
   assert.equal(todayRow.request_count, 2);
   assert.equal(todayRow.known_tokens, 240);
   assert.equal(typeof todayRow.date, "string");
+
+  // 渠道账号筛选：非空 account_id 精确过滤；缺省 / 空串不过滤（旧请求兼容）。
+  seedRequestLog(storage, {
+    request_id: "req-other-account",
+    channel_id: "kimi",
+    channel_name: "Kimi",
+    account_id: "account-other",
+    account_name: "Other",
+  });
+  const baseFilter = {
+    page: 1,
+    page_size: 10,
+    status: "all",
+    client_id: "",
+    channel_id: "",
+    search: "",
+  };
+  const unitPage = storage.listRequestLogsPage({ ...baseFilter, account_id: "account-unit" });
+  assert.equal(unitPage.total, 2);
+  assert.ok(
+    (unitPage.rows as Array<Record<string, unknown>>).every((row) => row.account_id === "account-unit"),
+  );
+  const otherPage = storage.listRequestLogsPage({ ...baseFilter, account_id: "account-other" });
+  assert.equal(otherPage.total, 1);
+  assert.equal((otherPage.rows as Array<Record<string, unknown>>)[0].account_id, "account-other");
+  assert.equal((otherPage.rows as Array<Record<string, unknown>>)[0].account_name, "Other");
+  assert.equal(storage.listRequestLogsPage(baseFilter).total, 3);
+  assert.equal(storage.listRequestLogsPage({ ...baseFilter, account_id: "" }).total, 3);
+  // 筛选项合并全部渠道/账号，并按 (渠道名, 账号名, id) 排序。
+  const options = storage.listRequestLogChannelAccounts();
+  assert.deepEqual(
+    (options.channels as Array<Record<string, unknown>>).map((item) => item.id),
+    ["deepseek", "kimi"],
+  );
+  assert.deepEqual(options.accounts, [
+    { id: "account-unit", name: "Renamed Unit", channelId: "deepseek", channelName: "DeepSeek" },
+    { id: "account-other", name: "Other", channelId: "kimi", channelName: "Kimi" },
+  ]);
   storage.close();
 });
 
@@ -471,6 +534,178 @@ test("已观测 Agent 会话：列表/父会话筛选/子会话/用量", () => {
   assert.ok(usage);
   assert.equal(usage.totalTokens, 120);
   assert.equal(storage.agentSessionFlowletUsage("claude-code", "missing"), null);
+  storage.close();
+});
+
+test("agent_session_metadata：建表 / upsert / 会话聚合 JOIN 出 title 与 projectPath", () => {
+  const storage = storageFor(":memory:");
+  // (e) 新建库后表必须存在（老库由 migrate 里的 CREATE TABLE IF NOT EXISTS 补建）。
+  const table = storage
+    .database()
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'agent_session_metadata'")
+    .get() as { name?: string } | undefined;
+  assert.equal(table?.name, "agent_session_metadata");
+  const columns = storage
+    .database()
+    .prepare("SELECT name, type, [notnull], dflt_value, pk FROM pragma_table_info('agent_session_metadata') ORDER BY cid")
+    .all() as Array<Record<string, unknown>>;
+  assert.deepEqual(
+    columns.map((column) => column.name),
+    ["agent_type", "session_id", "title", "project_path", "source", "updated_at"],
+  );
+  // 主键是 (agent_type, session_id) 复合主键（pk 序号 1、2），source 默认 'derived'。
+  assert.equal(Number(columns.find((column) => column.name === "agent_type")?.pk), 1);
+  assert.equal(Number(columns.find((column) => column.name === "session_id")?.pk), 2);
+  assert.equal(columns.find((column) => column.name === "source")?.dflt_value, "'derived'");
+  assert.equal(Number(columns.find((column) => column.name === "title")?.notnull), 0);
+
+  // (a) 请求日志 + 元数据 → 列表返回 title / projectPath（此前硬编码 null）。
+  seedRequestLog(storage, {
+    request_id: "req-root",
+    agent_session_id: "session-root",
+    parent_agent_session_id: null,
+  });
+  storage.upsertAgentSessionMetadata({
+    agent_type: "claude-code",
+    session_id: "session-root",
+    title: "修复登录回调",
+    project_path: "/home/dev/work/flowlet",
+  });
+  const page = storage.listObservedAgentSessionsPage({ page: 1, page_size: 20 });
+  assert.equal(page.total, 1);
+  const root = (page.rows as Array<Record<string, unknown>>)[0];
+  assert.equal(root.title, "修复登录回调");
+  assert.equal(root.projectPath, "/home/dev/work/flowlet");
+  // source 缺省 derived，updated_at 由存储侧写入 ISO 时间。
+  const stored = storage
+    .database()
+    .prepare("SELECT source, updated_at FROM agent_session_metadata WHERE agent_type = ?1 AND session_id = ?2")
+    .get("claude-code", "session-root") as { source: string; updated_at: string };
+  assert.equal(stored.source, "derived");
+  assert.ok(!Number.isNaN(Date.parse(stored.updated_at)));
+
+  // (b) 按标题搜索命中，并能从子会话回溯到根会话。
+  seedRequestLog(storage, {
+    request_id: "req-child-meta",
+    agent_session_id: "session-child-meta",
+    parent_agent_session_id: "session-root",
+  });
+  const byTitle = storage.listObservedAgentSessionsPage({
+    page: 1,
+    page_size: 20,
+    search: "修复登录",
+  });
+  assert.equal(byTitle.total, 1);
+  assert.equal((byTitle.rows as Array<Record<string, unknown>>)[0].sessionId, "session-root");
+  // 子会话自身也带元数据时，搜索命中子会话同样向上追溯根会话。
+  storage.upsertAgentSessionMetadata({
+    agent_type: "claude-code",
+    session_id: "session-child-meta",
+    title: "子代理检索日志",
+    project_path: "/home/dev/work/flowlet",
+  });
+  const byChildTitle = storage.listObservedAgentSessionsPage({
+    page: 1,
+    page_size: 20,
+    search: "子代理",
+  });
+  assert.equal(byChildTitle.total, 1);
+  assert.equal((byChildTitle.rows as Array<Record<string, unknown>>)[0].sessionId, "session-root");
+  // 按项目路径过滤（前缀语义）与按路径搜索都必须命中。
+  const byProject = storage.listObservedAgentSessionsPage({
+    page: 1,
+    page_size: 20,
+    project_path: "/home/dev/work/flowlet",
+  });
+  assert.equal(byProject.total, 1);
+  assert.equal((byProject.rows as Array<Record<string, unknown>>)[0].sessionId, "session-root");
+  assert.equal(
+    storage.listObservedAgentSessionsPage({
+      page: 1,
+      page_size: 20,
+      project_path: "/home/dev/work/other",
+    }).total,
+    0,
+  );
+  const byProjectSearch = storage.listObservedAgentSessionsPage({
+    page: 1,
+    page_size: 20,
+    search: "work/flowlet",
+  });
+  assert.equal(byProjectSearch.total, 1);
+
+  // (c) 先写 title + project，再只写 title（project 为 null / 空串）→ project 不被清空。
+  storage.upsertAgentSessionMetadata({
+    agent_type: "claude-code",
+    session_id: "session-root",
+    title: "修复登录回调（改名）",
+    project_path: null,
+  });
+  let metadata = storage
+    .database()
+    .prepare("SELECT title, project_path FROM agent_session_metadata WHERE agent_type = ?1 AND session_id = ?2")
+    .get("claude-code", "session-root") as { title: string | null; project_path: string | null };
+  assert.equal(metadata.title, "修复登录回调（改名）");
+  assert.equal(metadata.project_path, "/home/dev/work/flowlet");
+  // 空串不是 NULL，必须先归一成 NULL，否则 COALESCE 会把它当成有效值覆盖历史。
+  storage.upsertAgentSessionMetadata({
+    agent_type: "claude-code",
+    session_id: "session-root",
+    title: "",
+    project_path: "",
+  });
+  metadata = storage
+    .database()
+    .prepare("SELECT title, project_path FROM agent_session_metadata WHERE agent_type = ?1 AND session_id = ?2")
+    .get("claude-code", "session-root") as { title: string | null; project_path: string | null };
+  assert.equal(metadata.title, "修复登录回调（改名）");
+  assert.equal(metadata.project_path, "/home/dev/work/flowlet");
+  // 模块级函数与门面方法共用同一实现。
+  upsertAgentSessionMetadata(storage.database(), {
+    agent_type: "claude-code",
+    session_id: "session-root",
+    title: "仅改标题",
+    project_path: null,
+  });
+  const afterOnlyTitle = storage
+    .database()
+    .prepare("SELECT title, project_path, source FROM agent_session_metadata WHERE agent_type = ?1 AND session_id = ?2")
+    .get("claude-code", "session-root") as { title: string | null; project_path: string | null; source: string };
+  assert.equal(afterOnlyTitle.title, "仅改标题");
+  assert.equal(afterOnlyTitle.project_path, "/home/dev/work/flowlet");
+  assert.equal(afterOnlyTitle.source, "derived");
+  // 空身份（agent_type / session_id 缺失）不写行，也不抛错。
+  storage.upsertAgentSessionMetadata({ agent_type: "", session_id: "session-root", title: "orphan" });
+  storage.upsertAgentSessionMetadata({ agent_type: "claude-code", title: "orphan" } as Record<string, unknown>);
+  const orphanCount = storage
+    .database()
+    .prepare("SELECT COUNT(1) AS total FROM agent_session_metadata WHERE title = 'orphan'")
+    .get() as { total: number };
+  assert.equal(orphanCount.total, 0);
+  storage.close();
+});
+
+test("agent_session_metadata：无会话身份的日志不受影响且不写表", () => {
+  const storage = storageFor(":memory:");
+  // (d) 未识别出 Agent 会话身份（agent_session_id 为 NULL）的日志不应产生元数据行。
+  seedRequestLog(storage, { request_id: "req-no-session", agent_session_id: null });
+  const page = storage.listObservedAgentSessionsPage({ page: 1, page_size: 20 });
+  assert.equal(page.total, 0, "无 agent_session_id 的日志不进入已观测会话目录");
+  const total = storage
+    .database()
+    .prepare("SELECT COUNT(1) AS total FROM agent_session_metadata")
+    .get() as { total: number };
+  assert.equal(total.total, 0, "表必须保持为空（代理侧不会为无会话身份的请求 upsert）");
+  // 请求日志本身仍可正常读取。
+  const logs = storage.listRequestLogsPage({
+    page: 1,
+    page_size: 10,
+    status: "all",
+    client_id: "",
+    channel_id: "",
+    search: "",
+  });
+  assert.equal(logs.total, 1);
   storage.close();
 });
 

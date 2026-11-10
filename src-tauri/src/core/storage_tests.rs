@@ -327,6 +327,7 @@ fn lists_paginated_request_logs_with_usage_join() {
             status: "all".to_string(),
             client_id: String::new(),
             channel_id: String::new(),
+            account_id: String::new(),
             search: String::new(),
             time_range: "1h".to_string(),
             model: String::new(),
@@ -349,6 +350,7 @@ fn model_filter(model: &str, kind: &str) -> LogsFilter {
         status: "all".to_string(),
         client_id: String::new(),
         channel_id: String::new(),
+        account_id: String::new(),
         search: String::new(),
         time_range: "all".to_string(),
         model: model.to_string(),
@@ -456,6 +458,124 @@ fn model_filter_matches_only_the_selected_dimension() {
         .list_request_logs_page(model_filter("LongCat-2.0", ""))
         .expect("legacy OR filter");
     assert_eq!(legacy.total, 1);
+}
+
+#[test]
+fn request_log_channel_account_options_and_account_filter() {
+    let connection = Connection::open_in_memory().expect("open in-memory sqlite");
+    let storage = Storage::from_connection_for_test(connection);
+    storage.migrate().expect("migrate request log schema");
+
+    // 账号 A：日志快照里是「主账号-旧名」，当前账号表已改名为「主账号-新名」。
+    let mut log_a = request_log_for_repair("req-acct-a", 0, true);
+    log_a.channel_id = Some("deepseek".to_string());
+    log_a.channel_name = Some("DeepSeek".to_string());
+    log_a.account_id = Some("acct-a".to_string());
+    log_a.account_name = Some("主账号-旧名".to_string());
+    storage
+        .insert_request_log(&log_a)
+        .expect("insert account-a log");
+
+    // 账号 B：账号已删除，只能回退日志快照名。
+    let mut log_b = request_log_for_repair("req-acct-b", 0, true);
+    log_b.channel_id = Some("longcat".to_string());
+    log_b.channel_name = Some("LongCat".to_string());
+    log_b.account_id = Some("acct-b".to_string());
+    log_b.account_name = Some("备用账号".to_string());
+    storage
+        .insert_request_log(&log_b)
+        .expect("insert account-b log");
+
+    // 无账号归属的末次 attempt：不应出现在账号筛选项里。
+    let mut log_unattributed = request_log_for_repair("req-no-account", 0, true);
+    log_unattributed.channel_id = Some("deepseek".to_string());
+    log_unattributed.channel_name = Some("DeepSeek".to_string());
+    log_unattributed.account_id = None;
+    log_unattributed.account_name = None;
+    storage
+        .insert_request_log(&log_unattributed)
+        .expect("insert unattributed log");
+
+    // 只出现在非末次 attempt 的渠道/账号：口径与 list_request_log_clients 一致，不应出现。
+    let mut stale = request_log_for_repair("req-stale-attempt", 1, false);
+    stale.channel_id = Some("kimi".to_string());
+    stale.channel_name = Some("Kimi".to_string());
+    stale.account_id = Some("acct-stale".to_string());
+    stale.account_name = Some("已弃用账号".to_string());
+    storage
+        .insert_request_log(&stale)
+        .expect("insert non-last attempt");
+
+    storage
+        .save_channel_accounts(&[ChannelAccount {
+            id: "acct-a".to_string(),
+            channel_id: "deepseek".to_string(),
+            name: "主账号-新名".to_string(),
+            api_key: "sk-test".to_string(),
+            ..Default::default()
+        }])
+        .expect("save renamed account");
+
+    let options = storage
+        .list_request_log_channel_accounts()
+        .expect("list channel account options");
+
+    assert_eq!(options.channels.len(), 2);
+    assert_eq!(options.channels[0].id, "deepseek");
+    assert_eq!(options.channels[0].name, "DeepSeek");
+    assert_eq!(options.channels[1].id, "longcat");
+    assert_eq!(options.channels[1].name, "LongCat");
+
+    assert_eq!(options.accounts.len(), 2);
+    // 名称优先取当前账号表。
+    assert_eq!(options.accounts[0].id, "acct-a");
+    assert_eq!(options.accounts[0].name, "主账号-新名");
+    assert_eq!(options.accounts[0].channel_id, "deepseek");
+    assert_eq!(options.accounts[0].channel_name, "DeepSeek");
+    // 账号已删除时回退日志快照名。
+    assert_eq!(options.accounts[1].id, "acct-b");
+    assert_eq!(options.accounts[1].name, "备用账号");
+    assert_eq!(options.accounts[1].channel_id, "longcat");
+    assert_eq!(options.accounts[1].channel_name, "LongCat");
+
+    // 序列化契约（Node/前端依赖）：accounts 使用 camelCase 的 channelId / channelName。
+    let json = serde_json::to_value(&options).expect("serialize channel account options");
+    assert_eq!(json["channels"][0]["id"], "deepseek");
+    assert_eq!(json["accounts"][0]["channelId"], "deepseek");
+    assert_eq!(json["accounts"][0]["channelName"], "DeepSeek");
+
+    // 按账号筛选只命中该账号的末次 attempt。
+    let page_a = storage
+        .list_request_logs_page(LogsFilter {
+            account_id: "acct-a".to_string(),
+            ..model_filter("", "")
+        })
+        .expect("filter by account-a");
+    assert_eq!(page_a.total, 1);
+    assert_eq!(page_a.rows[0].request_id, "req-acct-a");
+
+    let page_b = storage
+        .list_request_logs_page(LogsFilter {
+            account_id: "acct-b".to_string(),
+            ..model_filter("", "")
+        })
+        .expect("filter by account-b");
+    assert_eq!(page_b.total, 1);
+    assert_eq!(page_b.rows[0].request_id, "req-acct-b");
+
+    // 空串 = 不过滤（3 条末次 attempt；非末次 attempt 仍不参与）。
+    let all = storage
+        .list_request_logs_page(model_filter("", ""))
+        .expect("empty account filter does not filter");
+    assert_eq!(all.total, 3);
+
+    let missing = storage
+        .list_request_logs_page(LogsFilter {
+            account_id: "acct-missing".to_string(),
+            ..model_filter("", "")
+        })
+        .expect("filter by missing account");
+    assert_eq!(missing.total, 0);
 }
 
 #[test]
@@ -1103,6 +1223,7 @@ data: [DONE]
             status: "all".to_string(),
             client_id: String::new(),
             channel_id: String::new(),
+            account_id: String::new(),
             search: String::new(),
             time_range: "all".to_string(),
             model: String::new(),
@@ -1148,6 +1269,7 @@ data: [DONE]
             status: "all".to_string(),
             client_id: String::new(),
             channel_id: String::new(),
+            account_id: String::new(),
             search: String::new(),
             time_range: "all".to_string(),
             model: String::new(),

@@ -1119,6 +1119,8 @@ pub struct AccountBalanceSnapshot {
     // LongCat 多资源包原始数据（JSON 数组），按消耗顺序排列。单资源包场景为 None。
     pub token_packs: Option<String>,
     // 控制台抓取的完整拦截 payload(聚合模式为 {mode_key: raw, ...})。用于调试/未来重解析。
+    // `serde(default)`：手动维护余额的旧客户端/Web 前端可能不带该字段，缺省视为 None。
+    #[serde(default)]
     pub raw_scraped_json: Option<String>,
     pub source: String,
     pub synced_at: Option<String>,
@@ -1215,6 +1217,9 @@ pub struct LogsFilter {
     pub client_id: String,
     /// 渠道 ID 筛选（空串 = 不过滤）
     pub channel_id: String,
+    /// 渠道账号 ID 筛选（空串 = 不过滤）
+    #[serde(default)]
+    pub account_id: String,
     /// 路径 / request_id / error_message 模糊搜索
     pub search: String,
     /// 时间范围: "1h" | "6h" | "today" | "7d" | "all"
@@ -1270,6 +1275,30 @@ pub struct LogsPageResult {
 pub struct RequestLogModelOptions {
     pub public_models: Vec<String>,
     pub upstream_models: Vec<String>,
+}
+
+/// 请求日志页渠道筛选项。
+#[derive(Debug, Clone, Serialize)]
+pub struct LogFilterChannel {
+    pub id: String,
+    pub name: String,
+}
+
+/// 请求日志页渠道账号筛选项。`channel_id` / `channel_name` 用于前端按渠道分组。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogFilterAccount {
+    pub id: String,
+    pub name: String,
+    pub channel_id: String,
+    pub channel_name: String,
+}
+
+/// 请求日志页「渠道 / 渠道账号」筛选项集合。
+#[derive(Debug, Clone, Serialize)]
+pub struct RequestLogChannelAccountOptions {
+    pub channels: Vec<LogFilterChannel>,
+    pub accounts: Vec<LogFilterAccount>,
 }
 
 // ─── Usage Record Row ────────────────────────────────────────────────────────
@@ -1438,6 +1467,51 @@ pub struct AccountStatsRow {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 手动维护余额的前端可能不带 `raw_scraped_json`：`#[serde(default)]` 必须容忍
+    /// 缺失（None），否则保存账号会报 `missing field raw_scraped_json`。
+    #[test]
+    fn balance_snapshot_tolerates_missing_raw_scraped_json() {
+        let missing = serde_json::json!({
+            "id": "snapshot-1",
+            "account_id": "account-1",
+            "balance": 12.5,
+            "currency": "CNY",
+            "token_pack_total": null,
+            "token_pack_used": null,
+            "token_pack_remaining": null,
+            "token_pack_expire_at": null,
+            "token_packs": null,
+            "source": "manual",
+            "synced_at": "2026-11-10T00:00:00Z",
+            "remark": null,
+            "created_at": "2026-11-10T00:00:00Z",
+            "updated_at": "2026-11-10T00:00:00Z"
+        });
+        let snapshot: AccountBalanceSnapshot = serde_json::from_value(missing).unwrap();
+        assert_eq!(snapshot.raw_scraped_json, None);
+
+        let explicit: AccountBalanceSnapshot = serde_json::from_value(serde_json::json!({
+            "id": "snapshot-2",
+            "account_id": "account-1",
+            "balance": null,
+            "currency": null,
+            "token_pack_total": null,
+            "token_pack_used": null,
+            "token_pack_remaining": null,
+            "token_pack_expire_at": null,
+            "token_packs": null,
+            "raw_scraped_json": "{\"mode\":\"x\"}",
+            "source": "scrape",
+            "synced_at": null,
+            "remark": null,
+            "created_at": "2026-11-10T00:00:00Z",
+            "updated_at": "2026-11-10T00:00:00Z"
+        }))
+        .unwrap();
+        assert_eq!(explicit.raw_scraped_json.as_deref(), Some("{\"mode\":\"x\"}"));
+    }
+
 
     /// `usage_retention` 的解析必须对缺失、部分缺失和显式取值都稳健：旧配置里没有
     /// 这一段，不能因此启动失败，也不能默默退化成「不清理」。
@@ -2098,4 +2172,5 @@ impl UsageRetentionConfig {
                 .unwrap_or(defaults.balance_snapshot_max_per_account),
         }
     }
+
 }

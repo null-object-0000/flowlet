@@ -20,8 +20,10 @@ import {
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { SqliteStorage } from "../index.ts";
+import { addColumnIfMissing, migrate, tableHasColumn } from "../schema.ts";
 import { SecretBox, secretKeyPath } from "../secret-box.ts";
 import {
   credentialTimestamp,
@@ -263,6 +265,7 @@ function sampleRow(overrides: Record<string, unknown> = {}): Record<string, unkn
     updated_at: "2026-11-10T00:00:00Z",
     last_verified_at: null,
     last_error: null,
+    env_prefix: null,
     ...overrides,
   };
 }
@@ -273,7 +276,9 @@ test("service_credentials：CRUD / 排序 / enabled 往返 / verification 语义
     const storage = new SqliteStorage(path.join(dir, "flowlet.sqlite"));
     try {
       assert.deepEqual(storage.listServiceCredentials(), []);
-      storage.upsertServiceCredential(sampleRow({ id: "cred-b", name: "B", created_at: "2026-11-10T00:00:02Z" }));
+      storage.upsertServiceCredential(
+        sampleRow({ id: "cred-b", name: "B", created_at: "2026-11-10T00:00:02Z", env_prefix: "NA" }),
+      );
       storage.upsertServiceCredential(sampleRow({ id: "cred-a", name: "A", created_at: "2026-11-10T00:00:01Z", enabled: false }));
       storage.upsertServiceCredential(sampleRow({ id: "cred-c", name: "A", created_at: "2026-11-10T00:00:01Z" }));
       // ORDER BY created_at ASC, name ASC
@@ -287,6 +292,8 @@ test("service_credentials：CRUD / 排序 / enabled 往返 / verification 语义
       assert.equal(fetched.enabled, false);
       assert.equal(fetched.note, "公司实例");
       assert.equal(fetched.last_verified_at, null);
+      assert.equal(fetched.env_prefix, null);
+      assert.equal(storage.getServiceCredential("cred-b")!.env_prefix, "NA");
       assert.equal(storage.getServiceCredential("missing"), null);
 
       // upsert 不覆盖 created_at，其余字段更新。
@@ -338,7 +345,15 @@ test("密码掩码与视图：maskSecret / toServiceCredentialView 与 Rust 一�
   assert.equal(view.baseUrl, "https://gitlab.example.com");
   assert.equal(view.secretHint, "••••a1b2");
   assert.equal(view.createdAt, "2026-11-10T00:00:00Z");
+  assert.equal(view.envPrefix, "GITLAB");
   assert.equal("secret_ciphertext" in view, false);
+  assert.equal("env_prefix" in view, false);
+  // 旧行 NULL → provider 默认；新行用存下来的大写前缀。
+  assert.equal(toServiceCredentialView(sampleRow({ env_prefix: "NA" })).envPrefix, "NA");
+  assert.equal(
+    toServiceCredentialView(sampleRow({ provider: "dockhand", env_prefix: null })).envPrefix,
+    "DOCKHAND",
+  );
   assert.equal(credentialTimestamp(new Date("2026-11-10T02:03:04.567Z")), "2026-11-10T02:03:04Z");
 });
 
@@ -460,6 +475,125 @@ test("跨实现：Rust 写库（mock GitLab 校验）→ Node 用同一 secret.k
       assert.equal(secrets.decrypt(String(row.secret_ciphertext)), token, "Node 必须能解密 Rust 写的密文");
     } finally {
       storage.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+// ─── schema 迁移（phase2 spec §1.3：只 ALTER TABLE ADD COLUMN，不重建表） ────
+
+const LEGACY_SERVICE_CREDENTIALS_SQL = `
+CREATE TABLE service_credentials (
+    id                 TEXT PRIMARY KEY,
+    name               TEXT NOT NULL,
+    provider           TEXT NOT NULL,
+    base_url           TEXT NOT NULL,
+    secret_ciphertext  TEXT NOT NULL,
+    secret_hint        TEXT NOT NULL,
+    kind               TEXT NOT NULL DEFAULT 'cli_token',
+    note               TEXT,
+    enabled            INTEGER NOT NULL DEFAULT 1,
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL,
+    last_verified_at   TEXT,
+    last_error         TEXT
+);
+`;
+
+test("迁移：旧库 service_credentials 幂等补 env_prefix 列，旧行保留 NULL 且数据不丢", () => {
+  const dir = tempDir("migrate-env-prefix");
+  const dbPath = path.join(dir, "flowlet.sqlite");
+  try {
+    // 模拟第一期数据库：表已存在但没有 env_prefix 列。
+    const legacy = new DatabaseSync(dbPath);
+    try {
+      legacy.exec(LEGACY_SERVICE_CREDENTIALS_SQL);
+      legacy
+        .prepare(
+          `INSERT INTO service_credentials (
+             id, name, provider, base_url, secret_ciphertext, secret_hint, kind, note,
+             enabled, created_at, updated_at, last_verified_at, last_error
+           ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)`,
+        )
+        .run(
+          "legacy-cred",
+          "旧凭据",
+          "gitlab",
+          "https://gitlab.example.com",
+          "v1:fake",
+          "••••a1b2",
+          "cli_token",
+          null,
+          1,
+          "2026-11-10T00:00:00Z",
+          "2026-11-10T00:00:00Z",
+          null,
+          null,
+        );
+      assert.equal(tableHasColumn(legacy, "service_credentials", "env_prefix"), false);
+    } finally {
+      legacy.close();
+    }
+
+    // 生产入口（SqliteStorage 构造）执行 migrate。
+    const storage = new SqliteStorage(dbPath);
+    try {
+      const rows = storage.listServiceCredentials();
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].name, "旧凭据");
+      assert.equal(rows[0].env_prefix, null, "旧行读取为 NULL，由业务层按 provider 默认解析");
+      // 新行写入解析后的前缀，upsert 可覆盖旧行。
+      storage.upsertServiceCredential({ ...rows[0], env_prefix: "GITLAB" });
+      assert.equal(storage.getServiceCredential("legacy-cred")!.env_prefix, "GITLAB");
+    } finally {
+      storage.close();
+    }
+
+    // 幂等：再次迁移不报错、不重建表、不丢数据。
+    const verify = new DatabaseSync(dbPath);
+    try {
+      assert.equal(tableHasColumn(verify, "service_credentials", "env_prefix"), true);
+      migrate(verify);
+      migrate(verify);
+      addColumnIfMissing(verify, "service_credentials", "env_prefix", "TEXT");
+      assert.equal(tableHasColumn(verify, "service_credentials", "env_prefix"), true);
+      const row = verify
+        .prepare("SELECT name, provider, env_prefix FROM service_credentials WHERE id = ?1")
+        .get("legacy-cred") as Record<string, unknown>;
+      assert.equal(row.name, "旧凭据");
+      assert.equal(row.provider, "gitlab");
+      assert.equal(row.env_prefix, "GITLAB");
+    } finally {
+      verify.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("新库：service_credentials 建表即含 env_prefix；无旧列残留", () => {
+  const dir = tempDir("fresh-env-prefix");
+  try {
+    const storage = new SqliteStorage(path.join(dir, "flowlet.sqlite"));
+    try {
+      assert.equal(storage.listServiceCredentials().length, 0);
+    } finally {
+      storage.close();
+    }
+    const db = new DatabaseSync(path.join(dir, "flowlet.sqlite"));
+    try {
+      assert.equal(tableHasColumn(db, "service_credentials", "env_prefix"), true);
+      const row = db
+        .prepare(
+          `SELECT name, type, "notnull" AS not_null, dflt_value
+             FROM pragma_table_info('service_credentials') WHERE name = 'env_prefix'`,
+        )
+        .get() as Record<string, unknown>;
+      assert.equal(row.type, "TEXT");
+      assert.equal(row.not_null, 0, "env_prefix 必须可空，旧行保持 NULL");
+      assert.equal(row.dflt_value, null);
+    } finally {
+      db.close();
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });

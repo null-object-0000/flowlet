@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { accountCommands, type ScrapeBalanceResult } from "../../domains/account/commands";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 
+import { errorMessage } from "../../shared/errors/AppError";
 type ScrapeState =
   | "idle"
   | "opening"
@@ -86,7 +87,7 @@ export function useScrapeConsole(runScrape?: (accountId: string) => Promise<Scra
       await accountCommands.closeScrapeConsole(accountId).catch(() => undefined);
       const message = err && typeof err === "object" && "message" in err
         ? String((err as { message: unknown }).message)
-        : err instanceof Error ? err.message : String(err);
+        : errorMessage(err);
       setError(message);
       setState("error");
       activeAccountId.current = null;

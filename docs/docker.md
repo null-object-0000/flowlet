@@ -16,12 +16,19 @@ Web Host 与桌面端执行同一组后台维护任务：每 15 分钟做一次�
 
 本机 Agent 自动发现/写入配置、原生会话采集、桌面 WebView 控制台抓取和本机 OAuth 授权仍使用桌面端。Web 版不会扫描服务器上的个人 Agent 配置。
 
-「服务凭据」页面集中管理 Agent 接入所需的三方服务 token（当前支持 GitLab API v4，按 CE 10.8.7 实现）：token 经 ChaCha20-Poly1305 加密后存 SQLite，密钥文件 `secret.key` 在 `/data` 下并随命名卷备份；管理接口只返回 `••••1234` 掩码，保存时会实际请求 `GET /api/v4/user` 校验，失败不落库。Agent 机器上执行
-`flowlet-cred pull --server=http://<服务器地址>:20134 --token=<管理凭据>` 把启用中的凭据同步到本地
-`~/.config/flowlet/credentials/credentials.env`，Agent 继续读本机 `.env` 或用 `flowlet-cred run` 注入；
-服务端不向 Agent 下发明文以外的任何凭据管理能力。
+「服务凭据」页面集中管理 Agent 接入所需的三方服务 token（provider：GitLab API v4，按 CE 10.8.7 实现；Dockhand 面板 API，Bearer Token）：token 经 ChaCha20-Poly1305 加密后存 SQLite，密钥文件 `secret.key` 在 `/data` 下并随命名卷备份；管理接口只返回 `••••1234` 掩码，保存时会实际请求上游校验（GitLab `GET /api/v4/user`、Dockhand `GET /api/environments`），失败不落库。同 provider 多实例用「环境别名（Env 前缀）」区分，`flowlet pull` 生成 `{PREFIX}_URL` / `{PREFIX}_TOKEN`（如三份 Dockhand 得到 `DOCKHAND_NA_URL` / `DOCKHAND_SZ_URL` / `DOCKHAND_SELF_URL`）。页面还提供「本机接入」下载引导：可直接下载 `install-flowlet.sh`、CLI 与 Skills 包（`/downloads/`），用一条 `curl ... | sh` 命令在 Agent 机器安装 `flowlet`。安装后在 Agent 机器上执行
+`flowlet login --server=http://<服务器地址>:20134`，在浏览器用公司 SSO 完成授权（loopback + PKCE），
+CLI 只保存一把 **仅能读服务凭据** 的本机授权（`~/.config/flowlet/credentials/auth.json`，30 天有效，
+可在管理台「服务凭据 → 本机接入 → 已授权的 CLI」撤销）；随后
+`flowlet pull --server=http://<服务器地址>:20134` 把启用中的凭据同步到本地
+`~/.config/flowlet/credentials/credentials.env`，Agent 继续读本机 `.env` 或用 `flowlet run` 注入；
+服务端不向 Agent 下发明文以外的任何凭据管理能力。OIDC-only 实例**不需要**开启
+`FLOWLET_ADMIN_ALLOW_TOKEN_LOGIN`，也不需要把管理凭据交给 Agent 机器；`--token` 只在 token 模式实例
+（或显式保留了 Bearer 兜底的实例）使用。
 
-「会话管理」在 Web 版只聚合经过本实例代理的请求观测：按请求携带的 Agent 类型与会话标识聚合客户端、请求数、成功/失败数、Token、预估费用和最近活动时间，并支持客户端筛选、会话 ID 搜索、子会话查看和跳转请求日志。它不读取服务器本机 Agent 原生会话文件，因此不展示原生用量、原生时间线，也不提供 OpenCode 实时权限确认；这些能力仍需在桌面端使用。文件夹级别的原生会话上报仍依赖桌面端设备同步，Web 版不参与。
+「会话管理」在 Web 版只聚合经过本实例代理的请求观测：按请求携带的 Agent 类型与会话标识聚合客户端、请求数、成功/失败数、Token、预估费用和最近活动时间，并支持客户端筛选、会话标题/项目目录搜索、子会话查看和跳转请求日志。它不读取服务器本机 Agent 原生会话文件，因此不展示原生用量、原生时间线，也不提供 OpenCode 实时权限确认；这些能力仍需在桌面端使用。文件夹级别的原生会话上报仍依赖桌面端设备同步，Web 版不参与。
+
+会话行的**标题与项目目录**由代理侧从已读入内存的请求体派生（标题取该会话第一条人类消息，项目取请求体里的工作目录，如 Claude Code 的 `Primary working directory`、Codex 的 `<environment_context><cwd>`），存入 SQLite `agent_session_metadata` 并合并进会话聚合，详见 [agent-session-metadata.md](agent-session-metadata.md)。派生值不依赖 `log_capture`（Body 未捕获也生效）、不要求客户端安装插件；代价是**近似值**：客户端里手工改的会话名不会同步，请求体里没有工作目录的 Agent（如 DSH）只显示标题。
 
 ## 启动
 
@@ -82,13 +89,25 @@ FLOWLET_OIDC_NONCE=required
 OIDC 模式不内置任何 client secret；GitLab 应用 Secret 只放在 `.env`/部署密钥中，不要提交仓库。
 会话保存在进程内存，容器重启后所有人需要重新登录；当前为单管理员/单实例设计。
 
+**CLI 凭据同步的授权方式**：OIDC 模式下管理台不接受静态管理 Bearer，`ALLOW_TOKEN_LOGIN`
+默认关闭且**不应为了让 Agent 机器同步凭据而打开**。CLI 走独立的浏览器授权：Agent 机器执行
+`flowlet login --server=http://<服务器地址>:20134` 打开授权页（复用当前管理台登录状态 + CSRF），
+签发一把作用域仅 `credentials:read`、TTL 30 天的 token，只能调
+`export_service_credentials`（其它命令 403）；之后 `flowlet pull --server=...` 自动使用它。
+授权页面本身先 `GET /api/session` 判断模式：token 模式会提示改用
+`flowlet pull --server=<origin> --token=<管理凭据>`，OIDC 模式才展示授权按钮。撤销在
+「服务凭据 → 本机接入 → 已授权的 CLI」逐条进行。
+
+> 注意：`--token` 仅适用于 token 模式（或显式 `FLOWLET_ADMIN_ALLOW_TOKEN_LOGIN=1` 的紧急兜底）。
+> 线上 OIDC-only 实例（20134）用它必然 401，而 `flowlet login` 不需要也不接受任何管理凭据。
+
 ## 配置与数据
 
 | 环境变量 | 默认值 / 用途 |
 | --- | --- |
 | `FLOWLET_ADMIN_AUTH_MODE` | `token`（默认）或 `oidc` |
 | `FLOWLET_ADMIN_TOKEN` | token 模式必填（至少 24 字符）；oidc 模式仅在 `ALLOW_TOKEN_LOGIN=1` 时需要 |
-| `FLOWLET_ADMIN_ALLOW_TOKEN_LOGIN` | OIDC 模式下是否允许 Bearer token 兜底，默认 `0` |
+| `FLOWLET_ADMIN_ALLOW_TOKEN_LOGIN` | OIDC 模式下是否允许 Bearer token 兜底，默认 `0`；**CLI 同步凭据不需要它**（`flowlet login` 走独立作用域 token） |
 | `FLOWLET_PUBLIC_WEB_URL` | OIDC 模式必填；浏览器访问管理台的绝对地址，如 `http://10.100.217.60:20134` |
 | `FLOWLET_OIDC_ISSUER` | OIDC issuer；目标 GitLab 为 `http://git.17usoft.com` |
 | `FLOWLET_OIDC_DISCOVERY_URL` | 可选；issuer 为 http 时必填且必须 https |

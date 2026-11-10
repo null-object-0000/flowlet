@@ -964,23 +964,64 @@ fn expect_matches(expect: JsonExpect, value: &serde_json::Value) -> bool {
 mod tests {
     use super::*;
 
+    /// 控制台示例描述符只做本地/私有仓库维护，仓库自带用例改为内联 manifest +
+    /// 临时目录，既覆盖 workspace 级 API 的匹配语义，又不在仓库里固化内部地址。
     #[test]
-    fn friday_example_matches_only_workspace_key_lists() {
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/custom-scrape/friday");
-        let descriptor = load_descriptor(&dir).expect("valid Friday example");
+    fn workspace_key_list_descriptor_matches_only_api_calls() {
+        let manifest = r#"{
+          "schemaVersion": 1,
+          "channelId": "custom",
+          "accountName": "Example",
+          "resourceModes": [{ "resourceMode": "pay_as_you_go", "modeKey": "paygo" }],
+          "login": { "kind": "generic" },
+          "modes": {
+            "paygo": {
+              "consoleUrl": "https://console.example.com/system/api-keys",
+              "aggregate": true,
+              "requiredSlots": ["usage"],
+              "slots": {
+                "usage": {
+                  "match": {
+                    "kind": "url_regex",
+                    "pattern": "^https://console\\.example\\.com/api/authing/v2/workspaces/[^/?#]+/api-keys/?(?:[?#].*)?$"
+                  },
+                  "satisfies": { "kind": "json_path", "path": "$.items", "expect": "array" }
+                }
+              }
+            }
+          },
+          "summary": { "plan": "Pay as you go" }
+        }"#;
+        let dir = std::env::temp_dir().join(format!(
+            "flowlet-custom-scrape-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|elapsed| elapsed.as_nanos())
+                .unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&dir).expect("create temp descriptor dir");
+        std::fs::write(dir.join("manifest.json"), manifest).expect("write manifest");
+        std::fs::write(
+            dir.join("extractor.js"),
+            "function extract(bundle, credential) { return null; }",
+        )
+        .expect("write extractor");
+        let descriptor = load_descriptor(&dir).expect("valid descriptor");
+        let _ = std::fs::remove_dir_all(&dir);
         let mode = &descriptor.modes["paygo"];
         let rule = &mode.slots[0];
         let matcher = rule.match_rule.as_ref().expect("explicit API matcher");
         for url in [
-            "https://friday.17usoft.com/api/authing/v2/workspaces/a/api-keys",
-            "https://friday.17usoft.com/api/authing/v2/workspaces/a/api-keys?limit=20",
+            "https://console.example.com/api/authing/v2/workspaces/a/api-keys",
+            "https://console.example.com/api/authing/v2/workspaces/a/api-keys?limit=20",
         ] {
             assert!(url_matches(matcher, url), "{url}");
         }
         for url in [
             mode.console_url.as_str(),
-            "https://friday.17usoft.com/_next/static/chunks/app/system/api-keys/page.js",
-            "https://friday.17usoft.com/api/authing/v2/workspaces/a/api-keys/key1",
+            "https://console.example.com/_next/static/chunks/app/system/api-keys/page.js",
+            "https://console.example.com/api/authing/v2/workspaces/a/api-keys/key1",
             "https://other.example/api/authing/v2/workspaces/a/api-keys",
         ] {
             assert!(!url_matches(matcher, url), "{url}");

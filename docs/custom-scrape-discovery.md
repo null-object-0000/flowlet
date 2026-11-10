@@ -376,7 +376,9 @@ custom-scrape/
 
 ## Friday 示例与登录导航
 
-仓库 `examples/custom-scrape/friday/` 提供完整描述符与拦截/提取脚本。
+Friday 的完整描述符与拦截/提取脚本属于公司内部实现，放在本机发现目录
+（`~/.flowlet/custom-scrape/friday/`）或公司私有仓库维护，**不随本仓库发布**；
+上面的 manifest 用 `friday.example.com` 占位，演示同类控制台的写法。
 Friday 列表接口为 `/api/authing/v2/workspaces/<workspace>/api-keys`，允许查询参数；
 不得用 `/api-keys` 子串匹配，否则会捕获控制台 HTML、Next.js 静态脚本及单条 Key 接口。
 拦截器保留原生 XMLHttpRequest 构造器与静态常量，捕获失败不改变页面 fetch 结果。
@@ -388,4 +390,4 @@ Friday 列表接口为 `/api/authing/v2/workspaces/<workspace>/api-keys`，允�
 本机已有描述符需更新 `manifest.json` 与 `interceptor.js`（先备份到发现目录外），
 再调用 `reload_custom_scrape_registry`。已存在窗口仍持有旧注入脚本，须关闭后重建；
 Rust 导航修复需使用重新构建的 Flowlet 并重启。数据结构与设备同步摘要不变。
-示例脚本回归检查：`node --test examples/custom-scrape/friday/interceptor.test.mjs`。
+示例脚本回归检查：在本地示例目录运行 `node --test <示例目录>/interceptor.test.mjs`（示例不随仓库发布）。

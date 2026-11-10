@@ -157,6 +157,10 @@ vite.config.ts.timestamp-*
 # DSH 会话临时目录（部署/冒烟脚本与凭据痕迹，禁止入库）
 .dsh-scratch/
 
+# 公司内部控制台抓取示例与临时抓包产物（含内部地址，禁止入库）
+examples/custom-scrape/friday/
+.tmp-zai/
+
 # IDE metadata (including generated Android projects)
 **/.idea/
 *.iml

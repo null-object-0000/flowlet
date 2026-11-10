@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppPreferencesProvider } from "../../app/preferences/AppPreferences";
-import { CredentialsPage } from "./CredentialsPage";
+import { CredentialsPage, asCredentialProviderId, checkEndpoint } from "./CredentialsPage";
 
 const commands = vi.hoisted(() => ({
   listProviders: vi.fn(),
@@ -721,5 +721,42 @@ describe("CredentialsPage uptime-kuma provider", () => {
         }),
       ),
     );
+  });
+});
+
+describe("asCredentialProviderId", () => {
+  it("保留每一个受支持的 provider（含 http-bearer），不会回落成 gitlab", () => {
+    // 编辑抽屉靠它回填「服务类型」。漏登记的 provider 会被静默改写成 gitlab，
+    // 保存后凭据类型就被毁了 —— 这里逐个锁住。
+    for (const id of [
+      "gitlab",
+      "dockhand",
+      "jenkins",
+      "uptime-kuma",
+      "beszel",
+      "registry",
+      "http-bearer",
+    ] as const) {
+      expect(asCredentialProviderId(id)).toBe(id);
+    }
+  });
+
+  it("未知类型回落 gitlab", () => {
+    expect(asCredentialProviderId("github")).toBe("gitlab");
+    expect(asCredentialProviderId("")).toBe("gitlab");
+  });
+});
+
+describe("checkEndpoint", () => {
+  it("每种 provider 都给出自己的校验端点，不会一律显示成 GitLab", () => {
+    expect(checkEndpoint("gitlab")).toContain("GitLab");
+    expect(checkEndpoint("jenkins")).toContain("Jenkins");
+    expect(checkEndpoint("uptime-kuma")).toContain("Uptime Kuma");
+    expect(checkEndpoint("beszel")).toContain("Beszel");
+    expect(checkEndpoint("dockhand")).toContain("Dockhand");
+    expect(checkEndpoint("registry")).toContain("/v2/");
+    // 回归点：http-bearer 曾经掉进 default，界面显示「请求 GitLab /api/v4/user」。
+    expect(checkEndpoint("http-bearer")).not.toContain("GitLab");
+    expect(checkEndpoint("http-bearer")).toContain("所填地址");
   });
 });

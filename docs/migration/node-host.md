@@ -1,7 +1,10 @@
 # Flowlet Node Host（Docker 优先）实现契约
 
 > 目标：用 Node/TS 重写 **headless / Docker Host**，作为 Rust `headless` 二进制的**行为等价替代**。
-> 桌面端（Electron）**不在本阶段范围**；后续再基于同一 `flowlet-core` 加 Electron 壳。
+> 桌面端（Electron）已在 2026-11-10 起基于同一 `flowlet-core` 开工：桌面独有命令注册在
+> `packages/flowlet-core/src/desktop/`（见该目录 README），Electron 宿主在
+> `packages/flowlet-desktop/`，施工状态见 `docs/electron-migration-plan.md` 与
+> `docs/desktop-electron.md`。
 > 工作分支：`migrate/electron`；工作树：`.worktrees/electron`。
 
 ## 1. 运行形态（必须与 Rust headless 完全一致）

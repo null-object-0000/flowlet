@@ -1,0 +1,13 @@
+# DeepSeek Harness user settings (upstream settings.yaml shape).
+ui:
+  theme: dark
+llm-pi-ai:
+  providers:
+    local:
+      api: openai-completions
+      baseURL: http://127.0.0.1:9999/v1
+      models:
+        - id: local-model
+agent-default-model:
+  provider: local
+  model: local-model

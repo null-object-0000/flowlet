@@ -71,6 +71,7 @@ const english: Record<string, string> = {
   "复制 Token": "Copy Token",
   "已运行 {time}": "Running for {time}",
   "本地代理": "Local proxy",
+  "远程代理": "Remote proxy",
   "{protocol} 接口连接正常": "{protocol} connection OK",
   "工作台": "Workspace",
   "运行记录": "Activity",

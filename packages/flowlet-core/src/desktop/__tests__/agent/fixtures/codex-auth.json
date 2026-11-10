@@ -1,0 +1,8 @@
+{
+  "OPENAI_API_KEY": "sk-user-key",
+  "tokens": {
+    "access_token": "user-access-token",
+    "refresh_token": "user-refresh-token",
+    "account_id": "user-account"
+  }
+}

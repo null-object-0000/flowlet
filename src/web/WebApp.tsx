@@ -8,6 +8,7 @@ import {
   Select,
   SideSheet,
   Space,
+  Tag,
   Toast,
   Typography,
 } from "@douyinfe/semi-ui-19";
@@ -24,15 +25,23 @@ import {
   OverviewPageView,
 } from "@flowlet/product-ui";
 import { Sidebar } from "../app/shell/Sidebar";
+import { pickConnectionBaseUrl } from "./connectionBaseUrl";
 import { UpstreamProxySettings } from "../pages/settings/UpstreamProxySettings";
 import { CaptureSettings } from "../pages/settings/CaptureSettings";
 import { UsageCostDisplaySettings } from "../pages/settings/UsageCostDisplaySettings";
+import { SettingRow, SettingSection } from "../pages/settings/SettingRow";
+import settingsStyles from "../pages/settings/SettingsPage.module.css";
+import navStyles from "../pages/settings/SettingsNav.module.css";
+import { IconCamera, IconCloud, IconLock, IconSetting } from "@douyinfe/semi-icons";
+import { AuthTab } from "../pages/settings/tabs/AuthTab";
 import { OverviewServiceStrip } from "../pages/overview/OverviewServiceStrip";
 import { OverviewExposedModelsCard } from "../features/exposed-models/OverviewExposedModelsCard";
 import { OverviewModuleCard } from "../shared/ui/OverviewModuleCard";
 import { modelCommands } from "../domains/model/commands";
 import { useAppPreferences } from "../app/preferences/AppPreferences";
 import { AppProviders } from "../app/providers";
+import { WindowControls } from "../app/shell/WindowControls";
+import { isDesktopClient } from "../platform/desktop/mode";
 import {
   adminToken,
   fetchAuthConfig,
@@ -184,9 +193,6 @@ function WebSession() {
       setBusy(false);
     }
   };
-  const loginWithSso = () => {
-    if (authConfig) window.location.assign(authConfig.login_path);
-  };
   if (busy && !authConfig)
     return (
       <main className={styles.login}>
@@ -198,15 +204,35 @@ function WebSession() {
   if (!authenticated) {
     const oidc = authConfig?.mode === "oidc";
     const providerName = authConfig?.provider.display_name ?? "GitLab";
+    // 配了多个提供方（内网 OIDC + 公网 GitHub）就逐个给按钮，不再猜。
+    const providers = authConfig?.providers ?? [];
+    const loginWith = (id?: string) => {
+      if (!authConfig) return;
+      const target =
+        id === undefined
+          ? authConfig.login_path
+          : `${authConfig.login_path}?provider=${encodeURIComponent(id)}`;
+      window.location.assign(target);
+    };
     return (
       <main className={styles.login}>
         <Card title="登录 Flowlet">
           <Space vertical align="start" style={{ width: "100%" }}>
             {error && <Banner type="danger" description={error} />}
-            {oidc && (
+            {oidc && providers.length > 1 && (
+              <>
+                <Typography.Text>选择登录方式：</Typography.Text>
+                {providers.map((item) => (
+                  <Button key={item.id} theme="solid" onClick={() => loginWith(item.id)}>
+                    使用 {item.display_name} 登录
+                  </Button>
+                ))}
+              </>
+            )}
+            {oidc && providers.length <= 1 && (
               <>
                 <Typography.Text>使用 {providerName} 账号登录 Flowlet 管理台。</Typography.Text>
-                <Button theme="solid" onClick={loginWithSso}>
+                <Button theme="solid" onClick={() => loginWith()}>
                   使用 {providerName} 登录
                 </Button>
               </>
@@ -241,6 +267,8 @@ function WebSession() {
     );
   }
   return (
+    <>
+    {isDesktopClient ? <WindowControls /> : null}
     <DesktopAppFrameView
       sidebar={
         <Sidebar
@@ -300,8 +328,11 @@ function WebSession() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </DesktopAppFrameView>
+    </>
   );
 }
+
+type WebSettingsTab = "general" | "capture" | "cost" | "network" | "auth";
 
 function WebSettings({
   onLogout,
@@ -314,43 +345,140 @@ function WebSettings({
 }) {
   const { language, setLanguage, theme, setTheme, t } = useAppPreferences();
   const label = identityLabel(identity);
-  return (
+  const isViewer = identity?.role === "viewer";
+  const [tab, setTab] = useState<WebSettingsTab>("general");
+
+  // 二级菜单：与桌面壳「应用设置」同一套结构（左侧分组 + 右侧面板），只保留 Web 端有意义的项。
+  const items: Array<{ key: WebSettingsTab; label: string; icon: React.ReactNode }> = [
+    { key: "general", label: t("通用"), icon: <IconSetting /> },
+    ...(isViewer
+      ? []
+      : [
+          { key: "capture" as const, label: t("数据捕获"), icon: <IconCamera /> },
+          { key: "cost" as const, label: t("费用展示"), icon: <IconCloud /> },
+          { key: "network" as const, label: t("网络"), icon: <IconCloud /> },
+          { key: "auth" as const, label: t("登录与访问"), icon: <IconLock /> },
+        ]),
+  ];
+
+  const meta: Record<WebSettingsTab, { title: string; desc: string }> = {
+    general: { title: t("通用"), desc: t("界面语言、主题与当前登录") },
+    capture: { title: t("数据捕获"), desc: t("请求 / 响应内容的捕获与保留策略") },
+    cost: { title: t("费用展示"), desc: t("用量页的统一货币折算") },
+    network: { title: t("网络"), desc: t("全局请求的代理出口") },
+    auth: { title: t("登录与访问"), desc: t("管理台登录方式、准入名单与角色") },
+  };
+
+  const generalPanel = (
     <>
-    <Card title={t("应用设置")}>
-      <Space vertical align="start" style={{ width: "100%" }}>
-      <Space wrap>
-        <Select
-          aria-label="界面语言"
-          value={language}
-          onChange={(value) => setLanguage(value as typeof language)}
-          optionList={[
-            { value: "zh-CN", label: "简体中文" },
-            { value: "en-US", label: "English" },
-          ]}
+      <SettingSection title={t("外观")} note={t("只影响本机浏览器里的显示。")} keywords="语言 主题 外观">
+        <SettingRow
+          name={t("界面语言")}
+          control={
+            <Select
+              aria-label={t("界面语言")}
+              value={language}
+              onChange={(value) => setLanguage(value as typeof language)}
+              optionList={[
+                { value: "zh-CN", label: "简体中文" },
+                { value: "en-US", label: "English" },
+              ]}
+              style={{ width: 200 }}
+            />
+          }
         />
-        <Select
-          aria-label="界面主题"
-          value={theme}
-          onChange={(value) => setTheme(value as typeof theme)}
-          optionList={[
-            { value: "system", label: "跟随系统" },
-            { value: "light", label: "浅色" },
-            { value: "dark", label: "深色" },
-          ]}
+        <SettingRow
+          name={t("界面主题")}
+          control={
+            <Select
+              aria-label={t("界面主题")}
+              value={theme}
+              onChange={(value) => setTheme(value as typeof theme)}
+              optionList={[
+                { value: "system", label: "跟随系统" },
+                { value: "light", label: "浅色" },
+                { value: "dark", label: "深色" },
+              ]}
+              style={{ width: 200 }}
+            />
+          }
         />
-        <Button onClick={onLogout}>退出登录</Button>
-      </Space>
-      {mode === "oidc" && label ? (
-        <Typography.Text type="tertiary">
-          当前登录：{label}（{identity?.provider ?? "企业 SSO"}）
-        </Typography.Text>
-      ) : null}
-      </Space>
-    </Card>
-    <CaptureSettings />
-    <UsageCostDisplaySettings />
-    <UpstreamProxySettings />
+      </SettingSection>
+      <SettingSection title={t("账号")} keywords="登录 账号 退出">
+        <SettingRow
+          name={t("当前登录")}
+          control={
+            <Typography.Text type="tertiary">
+              {mode === "oidc" && label
+                ? `${label}（${identity?.provider ?? "企业 SSO"}${isViewer ? " · 只读" : ""}）`
+                : t("管理凭据登录")}
+            </Typography.Text>
+          }
+        />
+        {isViewer ? (
+          <SettingRow
+            name={t("权限")}
+            help={t("只读账号可以查看运行情况与用量，不能修改配置、也不能读取服务凭据。需要更高权限请联系管理员把它加进管理员名单。")}
+            control={<Tag color="grey">{t("只读")}</Tag>}
+          />
+        ) : null}
+        <SettingRow
+          name={t("退出登录")}
+          help={t("退出后需要重新通过登录提供方授权。")}
+          control={<Button onClick={onLogout}>{t("退出登录")}</Button>}
+        />
+        {isDesktopClient ? (
+          <SettingRow
+            name={t("运行模式")}
+            help={t("客户端模式只做远程观测与管理；本机 Agent 接入、抓取与跨设备同步不可用。")}
+            control={
+              <Button onClick={() => void window.flowletDesktop?.openModeSettings?.()}>
+                {t("切换运行模式…")}
+              </Button>
+            }
+          />
+        ) : null}
+      </SettingSection>
     </>
+  );
+
+  return (
+    <main className={settingsStyles.page} style={{ gridTemplateRows: "minmax(0, 1fr)" }}>
+      <section className={settingsStyles.shell}>
+        <nav className={navStyles.nav}>
+          {items.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              className={`${navStyles.button} ${tab === item.key ? navStyles.active : ""}`}
+              data-tab={item.key}
+              aria-current={tab === item.key ? "true" : undefined}
+              onClick={() => setTab(item.key)}
+            >
+              <span className={navStyles.icon} aria-hidden="true">
+                {item.icon}
+              </span>
+              {item.label}
+            </button>
+          ))}
+        </nav>
+        <article className={settingsStyles.contentPanel}>
+          <div className={settingsStyles.panelHead}>
+            <div>
+              <h2 className={settingsStyles.panelTitle}>{meta[tab].title}</h2>
+              <p className={settingsStyles.panelDesc}>{meta[tab].desc}</p>
+            </div>
+          </div>
+          <div className={settingsStyles.panelBody}>
+            {tab === "general" ? generalPanel : null}
+            {tab === "capture" ? <CaptureSettings /> : null}
+            {tab === "cost" ? <UsageCostDisplaySettings /> : null}
+            {tab === "network" ? <UpstreamProxySettings /> : null}
+            {tab === "auth" ? <AuthTab /> : null}
+          </div>
+        </article>
+      </section>
+    </main>
   );
 }
 
@@ -383,13 +511,33 @@ function WebAccounts() {
   const connection = useQuery({
     queryKey: ["web", "connection"],
     queryFn: () =>
-      invokeWebCommand<{ base_url: string; client_token: string }>(
-        "web_connection_info",
-      ),
+      invokeWebCommand<{
+        base_url: string;
+        base_urls?: string[];
+        client_token: string;
+      }>("web_connection_info"),
   });
-  const baseUrl =
-    connection.data?.base_url ||
-    `${window.location.protocol}//${window.location.hostname.includes(":") ? `[${window.location.hostname}]` : window.location.hostname}:18640`;
+  // 桌面客户端模式：界面由本机网关提供，`window.location.origin` 是本机网关而不是
+  // 用户要接入的模型端点，必须回退到“远程主机 + 默认代理端口”而不是本机地址。
+  const remoteProxyOrigin = (() => {
+    if (!isDesktopClient) return window.location.origin;
+    const remote = window.flowletDesktop?.clientBaseUrl ?? "";
+    try {
+      const url = new URL(remote);
+      const host = url.hostname.includes(":") ? `[${url.hostname}]` : url.hostname;
+      return `${url.protocol}//${host}:18640`;
+    } catch {
+      return window.location.origin;
+    }
+  })();
+  const pickedBaseUrl = pickConnectionBaseUrl(
+    connection.data?.base_urls,
+    connection.data?.base_url,
+    remoteProxyOrigin,
+  );
+  // 远程未配置对外入口（FLOWLET_PUBLIC_PROXY_URL 为空）时，回退到“远程主机 + 默认代理端口”，
+  // 不要回退成本机网关地址（那是客户端自己的 origin，用户复制出去连不上）。
+  const baseUrl = pickedBaseUrl !== "" ? pickedBaseUrl : remoteProxyOrigin;
   const failure =
     accountsQuery.error ||
     presetsQuery.error ||
@@ -441,6 +589,7 @@ function WebAccounts() {
             onOpenUsage={() => navigate("/usage")}
             onOpenDetails={() => setDetailsOpen(true)}
             showConnectionTest={false}
+            proxyScope={isDesktopClient ? "remote" : "local"}
           />
         </>
       }

@@ -29,6 +29,24 @@ GitHub Actions 会为 Windows、Linux 和 macOS 生成产物，但“自动构�
 
 各平台任务彼此独立；单个平台失败不会取消其他平台正在执行的构建。
 
+## Electron 桌面端（迁移验证包）
+
+桌面端迁移到 Electron 期间，`.github/workflows/desktop-electron.yml` 会构建
+**迁移验证包**（Windows NSIS/zip、Linux AppImage/deb、macOS dmg），与上面的 Tauri
+正式产物并行，**不覆盖** Release 资产：
+
+- 触发：Actions → **Desktop (Electron) build & smoke** → Run workflow；
+  推送 `v*-beta*` 标签时也会触发；
+- Linux job 会额外跑 `node --test packages/flowlet-core/src`、
+  `node scripts/desktop-command-parity.mjs --check`（Rust 154 条命令覆盖门禁）、
+  `npm run desktop:smoke`（首屏 + `/health`）与 `npm run desktop:smoke:pages`
+  （逐路由渲染 + 截图 + console/命令错误），产物里带 `.flowlet-dev-data/desktop-pages/`
+  的截图与 `report.json`；
+- Windows / macOS job 目前只构建与跑 Node 测试，**真机回归仍需人工完成**（见
+  `docs/desktop-electron.md` §8）。
+
+本地对应命令：`npm run desktop:smoke:pages`（可传 `--db=<sqlite>` 用老用户数据库副本）。
+
 ## Android 签名
 
 Android Release job 需要配置以下 GitHub Actions Secrets：

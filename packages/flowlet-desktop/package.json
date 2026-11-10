@@ -1,0 +1,74 @@
+{
+  "name": "flowlet-desktop",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Flowlet desktop Electron host: window shell, tray, host channels and in-process Node Host",
+  "main": "dist-host/main.mjs",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "build:host": "node ../../scripts/build-desktop-host.mjs",
+    "dev": "node ../../scripts/build-desktop.mjs --dev"
+  },
+  "devDependencies": {
+    "electron": "44.7.0",
+    "electron-builder": "^26.0.12",
+    "esbuild": "^0.28.2"
+  },
+  "build": {
+    "appId": "site.snewbie.flowlet",
+    "productName": "Flowlet",
+    "asar": true,
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist-host/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "dist-host/runtime",
+        "to": "runtime"
+      },
+      {
+        "from": "../../dist-desktop",
+        "to": "desktop-static"
+      }
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Utility",
+      "icon": "build/icons",
+      "maintainer": "Flowlet <flowlet@localhost>"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.icns"
+    }
+  },
+  "author": {
+    "name": "Flowlet",
+    "email": "flowlet@localhost"
+  },
+  "homepage": "https://github.com/null-object-0000/flowlet"
+}

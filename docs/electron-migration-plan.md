@@ -1,12 +1,55 @@
 # Flowlet 技术架构迁移方案：Rust / Tauri → Electron + Node/TS
 
-> 状态：**方案评审中**（尚未开始迁移）。本文是决策文档，不是施工记录。
+> 状态：**执行中**——Docker/Web Host 已完成切换（Node Host 生产运行），桌面 Electron 阶段
+> 自 2026-11-10 起开工。本文是决策文档与阶段状态记录；施工细节见
+> [`commands-and-schema.md`](./migration/commands-and-schema.md)、
+> [`platform-gap-matrix.md`](./migration/platform-gap-matrix.md) 与 `docs/desktop-electron.md`。
 > 依据：本目录下的勘察结论 [`commands-and-schema.md`](./migration/commands-and-schema.md)、
 > [`platform-gap-matrix.md`](./migration/platform-gap-matrix.md)、`proxy-core.md`，
 > 以及可运行骨架 PoC `poc/electron-host/`。
 > 基线：仓库工作区 @ `26fed4c`（2026-11-09）。
 
 ---
+
+## 0.0.1 桌面阶段执行状态（2026-11-10 起）
+
+**用户决策：Docker 版本已切 Node Host（生产稳定），现在开始桌面端全面重构。**
+
+桌面阶段的实现边界（相对本文原计划）：
+
+- Electron 宿主 + 桌面独有命令都放在 `packages/flowlet-desktop/` 与 `packages/flowlet-core/src/desktop/`；
+- 前端 React 页面零重写：新增 `desktop` 构建模式，命令通道改走本机 HTTP（同一份 `POST /api/commands/{command}`）；
+- **Tauri/Rust 版本保留为回滚路径**，本轮不删除 `src-tauri/**`、不删除 Android 工程；
+- 桌面命令面覆盖度用 `node scripts/desktop-command-parity.mjs` 追踪（Rust `generate_handler!`
+  对 `web/commands.ts` + `desktop/*.ts`），任何阶段都必须能报出「还差哪几条」。
+
+阶段状态：
+
+| 阶段 | 内容 | 状态 |
+| --- | --- | --- |
+| P6-a | core 桌面命令 seam（`DesktopContext`/注册表/host 注入/`withDatabase`） | ✅ 已完成（Lead） |
+| P6-b | `packages/flowlet-desktop` Electron 宿主（窗口/托盘/单实例/自启/凭据/host 生命周期） | ✅ 已完成：xvfb 下真实启动 + 截图 + `/health` 200 + 单实例/旧库直开/打包 AppImage 131MB 验证 |
+| P6-c | 前端 desktop 模式（vite mode、命令通道、窗口桥） | ✅ 已完成：`build:desktop` 通过、`src/**` 测试全绿 |
+| P6-d | 桌面命令：Agent 接入 17 条 | ✅ 已完成（含配置生命周期 fixture 测试） |
+| P6-e | 桌面命令：设置/维护/账号工作区 27 条 | ✅ 已完成（S3+ChaCha20 与 Rust 参数一致，本地假 S3 验证） |
+| P6-f | 桌面命令：观测/会话/后台任务 19 条（含会话列表原生化、DSH v0–v4） | ✅ 已完成 |
+| P6-g | 桌面命令：跨设备同步 23 条 | ✅ 已完成（S3 SigV4 + LAN HMAC/ChaCha20 信封；快照部分字段依赖其它域，已记录） |
+| P6-h | 桌面命令：控制台抓取 CDP 10 条 | ✅ 已完成（ScrapePlan + slot engine + extractor，68 测试；登录态需用户重新登录，已明确报错不伪造成功） |
+| P7 | 打包/发布/用户数据迁移/灰度 | 🟡 部分完成：electron-builder 三平台配置 + Linux AppImage/deb 实机出包/启动验证通过；新增 `.github/workflows/desktop-electron.yml`（三平台构建 + Linux xvfb 单窗口/逐路由冒烟）；签名、自动更新、灰度发布与 Windows/macOS 真机回归未开始 |
+
+> 覆盖度（2026-11-10 收口）：Rust 桌面命令 154 条（勘察文档记 142，之后新增了服务凭据等命令），
+> Web Host 覆盖 60 条 + desktop 注册表 94 条 = **154 条（100%）**。
+> 门禁：`npm run node:typecheck` / `npm run desktop:typecheck` / `npm run check` 均 0 错误；
+> `node --test packages/flowlet-core/src` 578 tests（577 pass / 1 skip 既有）；
+> `node scripts/desktop-command-parity.mjs --check` missing=0；
+> `npm run desktop:smoke` 通过（截图 + `/health` 200 + preload bridge）；
+> `npm run desktop:smoke:pages` 空库与真实库副本各 8/8 路由通过（0 console error、0 命令失败）；
+> `npm run desktop:dist` 产出 AppImage/deb，`release/linux-unpacked` 直接启动并截图通过。
+>
+> 已知缺口（转入后续阶段）：Windows Job Object 子进程树强杀回收、Windows toast/AUMID、
+> Linux 八向缩放原生吸附、Android 端、macOS/Windows 真机验证、Electron devDependencies 的
+> 仓库级 `npm install`（package-lock 需重生成）、SyncTab 的 `@tauri-apps/plugin-dialog`
+> 兼容 shim（已用窄白名单 shim 覆盖 dialog open/save）。
 
 ## 0.0 执行状态（2026-11-09 更新）
 

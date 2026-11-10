@@ -164,7 +164,9 @@ function parseAddr(addr: string): { host: string; port: number } {
   return { host: addr.slice(0, idx), port: Number(addr.slice(idx + 1)) };
 }
 
-export async function startHost(options: HostOptions): Promise<{ close(): Promise<void> }> {
+export async function startHost(
+  options: HostOptions,
+): Promise<{ close(): Promise<void>; webAddr: string }> {
   const dataDir = dirname(options.dbPath);
   // 管理端 OIDC 会话持久化：容器重启/升级不再让所有管理台登录失效（token 模式不产生会话）。
   const sessionStore = openAdminSessionStore(join(dataDir, "admin-sessions.json"));
@@ -241,8 +243,13 @@ export async function startHost(options: HostOptions): Promise<{ close(): Promis
     staticDir: options.staticDir,
     publicProxyUrl: options.publicProxyUrl,
     deviceIdentity,
+    // 桌面（Electron）宿主：命令面升级为桌面超集。Web Host / Docker 为 undefined。
+    desktop: options.desktop,
   });
   await web.listen(options.webAddr);
+  // 桌面宿主用 127.0.0.1:0 让系统分配端口，必须回传真实监听地址（Web/Docker 也返回同一格式）。
+  const bound = web.address();
+  const webAddr = bound === null ? options.webAddr : `${bound.host}:${bound.port}`;
 
   // 与 Rust headless 一致的后台维护：余额(5m) / 存储清理(15m) / 目录同步(1h)。
   // 冒烟/对拍/单测可设 FLOWLET_DISABLE_BACKGROUND_TASKS=1 关闭，避免用真实凭据
@@ -305,7 +312,7 @@ export async function startHost(options: HostOptions): Promise<{ close(): Promis
   process.on("SIGTERM", onSignal);
   process.on("SIGINT", onSignal);
 
-  return { close };
+  return { close, webAddr };
 }
 
 if (import.meta.main ?? process.argv[1]?.endsWith("/index.ts")) {

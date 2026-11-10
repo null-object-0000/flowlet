@@ -1,0 +1,17 @@
+# Codex user config. Keep this comment after Flowlet writes.
+model = "gpt-5" # user-selected model
+model_provider = "openai"
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"
+disable_response_storage = false
+
+[model_providers.openai]
+name = "OpenAI"
+base_url = "https://api.openai.com/v1"
+wire_api = "responses"
+requires_openai_auth = true
+
+# Unrelated profile must survive untouched.
+[profiles.fast]
+model = "gpt-5-mini"
+approval_policy = "never"

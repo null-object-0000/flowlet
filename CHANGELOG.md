@@ -15,13 +15,36 @@
   命令——Agent 接入 17 条（环境探测/全局配置 inspect→apply→restore/Codex/Antigravity/托管运行时）、
   设置与维护 22 条 + 账号工作区 5 条、观测与会话 19 条（原生会话目录合并、DSH v0–v4 时间线、
   后台任务、成本探测、目录预设同步）、跨设备同步 23 条（S3 SigV4 + LAN HMAC/ChaCha20 信封）；
-  覆盖度用 `node scripts/desktop-command-parity.mjs` 追踪（当前 144/154，剩余为控制台抓取批次）。
+  覆盖度用 `node scripts/desktop-command-parity.mjs` 追踪：**154/154（100%）**。
+- 桌面控制台抓取（CDP）：`open/close_scrape_console`、`probe_scrape_login`、`scrape_balance`、
+  `sync_scrape_balances`、拦截回调、外部链接与自定义抓取注册表共 10 条命令，按 `config.json`
+  抓取描述符驱动（零渠道硬编码），槽位引擎/extractor 与 Rust 行为对齐；Electron 统一用
+  `webContents.debugger`（CDP）替代 WebView2/WebKitGTK 三套实现。**升级后控制台渠道需重新登录
+  一次**（旧 WebView 登录态无法迁移，命令层会明确返回 `login_required` 而不是伪造成功）。
 - `packages/flowlet-desktop`：单实例、无边框窗口壳（CSS app-region 拖动 + IPC 伪缩放）、托盘
   （关闭隐藏、仅托盘退出停代理）、窗口记忆、开机自启、`safeStorage` 凭据存储并兼容迁移 Rust
   keyring 旧条目、`platform/keyring/agentRuntime/scrape/power` host channel、
   electron-builder 打包（AppImage/deb/nsis/zip/dmg），以及 `desktop:dev/build/dist/smoke` 脚本。
 - 前端新增 `desktop` 运行模式（`src/platform/desktop/**`）：命令改走本机 HTTP、窗口能力经 preload
   桥接、`isWebHost`/移动端/demo 语义不变。
+- 桌面迁移门禁与验证：新增 `npm run desktop:smoke:pages`（逐路由渲染 + 截图 + console/命令
+  错误报告，支持 `--db=<sqlite>` 跑老用户数据库）、`node scripts/desktop-command-parity.mjs
+  --check`（154 条命令覆盖门禁）与 `.github/workflows/desktop-electron.yml`（三平台构建 +
+  Linux xvfb 冒烟，产物为迁移验证包，不覆盖 Tauri 正式 Release）。
+- Windows 通知：`platform.notify` 支持点击回到主窗口；启动时幂等写
+  `HKCU\Software\Classes\AppUserModelId\site.snewbie.flowlet`（DisplayName/IconUri），
+  与 Rust `notification_registry.rs` 对齐，缓解便携版 toast 被系统丢弃（仍未真机验证）。
+
+- **桌面端新增「主机 / 客户端」双运行模式**：主机模式不变（本机 Node Host + 154 条桌面命令）；
+  客户端模式不启动本机 Host，只跑 Client Gateway（同源静态界面 + `/api` 反向代理）连接
+  Docker/Web Host，复用 Web 管理台做远程观测与管理（账号/模型/日志/会话/用量/服务凭据），
+  本机 Agent 接入、控制台抓取、跨设备同步与开机自启在客户端模式不可用；
+  token 经 `safeStorage` 加密保存在 `desktop-config.json`，OIDC 会话 Cookie 存放在独立持久化
+  分区并由网关注入（渲染进程拿不到凭据）；托盘「运行模式…」可切换并自动重启；
+  新增 `npm run desktop:smoke:client`（真实 Node Host + 客户端模式逐路由冒烟）；
+  客户端模式概览显示「远程代理」并按远程公开入口展示模型地址，网关强制
+  `accept-encoding: identity` 避免压缩响应转发失真；OIDC 会话解析/Cookie 注入与网关契约
+  共 12 条单测。
 
 ### 变更
 

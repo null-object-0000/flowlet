@@ -33,6 +33,8 @@
     "website:build": "npm run build --workspace flowlet-website",
     "build:web": "tsc && vite build --mode web --outDir dist-web && node scripts/build-local-access.mjs",
     "dev:web": "vite --mode web",
+    "build:desktop": "tsc && vite build --mode desktop --outDir dist-desktop",
+    "dev:desktop": "vite --mode desktop",
     "node:host": "node packages/flowlet-core/src/index.ts",
     "node:typecheck": "tsc -p packages/flowlet-core/tsconfig.json",
     "node:parity": "node scripts/web-parity.mjs",
@@ -41,7 +43,14 @@
     "cred": "node packages/flowlet-cred/src/cli.ts",
     "cred:test": "node --test packages/flowlet-cred/src/__tests__/",
     "cred:compat": "node packages/flowlet-cred/scripts/compat.mjs",
-    "cred:typecheck": "tsc -p packages/flowlet-cred/tsconfig.json"
+    "cred:typecheck": "tsc -p packages/flowlet-cred/tsconfig.json",
+    "desktop:dev": "node scripts/build-desktop.mjs --dev",
+    "desktop:build": "node scripts/build-desktop.mjs",
+    "desktop:dist": "node scripts/build-desktop.mjs --dist",
+    "desktop:typecheck": "tsc -p packages/flowlet-desktop/tsconfig.json",
+    "desktop:smoke": "node scripts/smoke-desktop.mjs",
+    "desktop:smoke:pages": "node scripts/smoke-desktop-pages.mjs",
+    "desktop:smoke:client": "node scripts/smoke-desktop-client.mjs"
   },
   "dependencies": {
     "@douyinfe/semi-icons": "^2.101.0",

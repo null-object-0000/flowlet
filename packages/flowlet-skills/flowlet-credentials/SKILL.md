@@ -297,6 +297,37 @@ flowlet registry env --profile=na   # REGISTRY_NA_HOST / REGISTRY_NA_USER / REGI
 - `pull` 会写三把键（默认 `REGISTRY_HOST` / `REGISTRY_USER` / `REGISTRY_TOKEN`，多实例见上）。
 - **不要把 `registry env` 的输出贴进对话**，它包含明文 token。
 
+## 通用 API（Bearer）
+
+给「一个地址 + 一把 `Authorization: Bearer <token>`」的三方服务用（provider id `http-bearer`）。
+典型例子是自建面板：FileBrowser Quantum、各种 admin UI、小众 SaaS 的 API Key。它们的认证
+模型和 GitLab / Dockhand 一样，但**没有统一的元数据接口**，所以这个 provider 只保证
+「存得住、同步得到、注入得进去」，校验是尽力而为。
+
+```bash
+printf '%s' "$TOKEN" | flowlet http-bearer set --url=https://files.example.com/files --profile=FB
+flowlet http-bearer status --profile=FB     # 地址 / 状态码 / 认证是否生效
+flowlet http-bearer env --profile=FB        # HTTP_BEARER_FB_URL / HTTP_BEARER_FB_TOKEN（含明文）
+flowlet http-bearer clear --profile=FB
+```
+
+要点：
+
+- 不传 `--profile` 时默认前缀是 `HTTP_BEARER`（`HTTP_BEARER_URL` / `HTTP_BEARER_TOKEN`）；
+  实际使用时几乎总该显式给一个有意义的前缀，例如 `--profile=FB`，或直接在服务端页面把
+  环境前缀填成 `FILEBROWSER`。
+- 校验打**两次**：带 token 一次、不带一次。
+  - 401/403 → 确定失败，不保存；
+  - 带 token 2xx 且匿名 401/403 → 「认证生效」；
+  - 带 token 2xx 且匿名也 2xx → 只能说「地址可达」，**不会谎报 token 有效**。
+    首页公开、只有 `/api/*` 才鉴权的服务（例如 FileBrowser Quantum 的 `/files`）属于这一类；
+  - 404/405 → 「该路径没有端点，无法据此判断 token」，**仍然允许保存**：通用 provider
+    猜不到服务的端点布局（`https://api.cloudflare.com/client/v4` 的裸根就是 404）。
+- 子路径部署请带上子路径（`https://host/files`）。裸路径返回 301 到「带斜杠」时，
+  探针会在同一地址上补 `/` 重试一次——**不跟随 Location**，token 不会被带到别的地址。
+- 不跟随重定向、10s 超时、`--insecure` 跳过 TLS 校验，与其它 provider 一致。
+- `pull` 写两把键：`{PREFIX}_URL` / `{PREFIX}_TOKEN`。
+
 ## 与 Agent 配置的关系
 
 - MCP 服务器配置里的 `env` / `headers`、CLI 的 `*_TOKEN` 环境变量都从这份库取；

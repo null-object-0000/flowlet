@@ -7,7 +7,9 @@ import type {
 } from "../types.ts";
 import type { SqliteStorage } from "../storage/index.ts";
 import type { CliAuth } from "./cli-auth.ts";
+import type { AdminAuth } from "./auth.ts";
 import type { LogCaptureConfig, UpstreamProxyConfig } from "./config-state.ts";
+import type { DesktopRuntime } from "../desktop/types.ts";
 
 /** 与 node-storage `SecretBox` 结构兼容的静态加密接口（密文格式 v1:...）。 */
 export interface SecretBoxLike {
@@ -38,6 +40,14 @@ export interface WebContext {
   customScrapeChannels?: JsonRow[] | null;
   /** 三方服务凭据的静态加密（index.ts 传入 SecretBox，数据卷 secret.key）。 */
   secrets: SecretBoxLike;
+  /** 管理端鉴权实例：命令里改登录提供方配置后要能立刻热替换。 */
+  auth?: AdminAuth;
   /** CLI 浏览器授权（`flowlet login`）：授权码、token 签发与作用域校验。 */
   cliAuth: CliAuth;
+  /**
+   * 桌面（Electron）宿主注入的运行时能力。存在时命令 dispatch 先查桌面注册表
+   * （`desktop/commands.ts`），未命中再回落到 Web Host 命令实现。
+   * Web Host / Docker Host 上为 undefined。
+   */
+  desktop?: DesktopRuntime;
 }

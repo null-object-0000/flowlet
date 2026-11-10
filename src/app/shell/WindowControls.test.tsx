@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const windowApi = vi.hoisted(() => ({
@@ -32,12 +32,12 @@ describe("WindowControls", () => {
     windowApi.close.mockResolvedValue();
   });
 
-  it("starts window dragging on a single left-button mousedown", () => {
+  it("starts window dragging on a single left-button mousedown", async () => {
     render(<WindowControls />);
 
     fireEvent.mouseDown(screen.getByTestId("titlebar-drag-region"), { buttons: 1, detail: 1 });
 
-    expect(windowApi.startDragging).toHaveBeenCalledOnce();
+    await waitFor(() => expect(windowApi.startDragging).toHaveBeenCalledOnce());
     expect(windowApi.toggleMaximize).not.toHaveBeenCalled();
   });
 
@@ -55,7 +55,7 @@ describe("WindowControls", () => {
     expect(region.className).not.toContain("dragRegionStandalone");
   });
 
-  it("toggles maximize on a double mousedown without starting a drag or selecting text", () => {
+  it("toggles maximize on a double mousedown without starting a drag or selecting text", async () => {
     render(<WindowControls />);
 
     const node = screen.getByTestId("titlebar-drag-region");
@@ -63,7 +63,7 @@ describe("WindowControls", () => {
     const preventDefault = vi.spyOn(event, "preventDefault");
     node.dispatchEvent(event);
 
-    expect(windowApi.toggleMaximize).toHaveBeenCalledOnce();
+    await waitFor(() => expect(windowApi.toggleMaximize).toHaveBeenCalledOnce());
     expect(windowApi.startDragging).not.toHaveBeenCalled();
     // 双击最大化的同时，必须阻止默认的文本选中行为。
     expect(preventDefault).toHaveBeenCalledOnce();
@@ -78,27 +78,27 @@ describe("WindowControls", () => {
     expect(windowApi.toggleMaximize).not.toHaveBeenCalled();
   });
 
-  it("minimizes the window", () => {
+  it("minimizes the window", async () => {
     render(<WindowControls />);
 
     fireEvent.click(screen.getByRole("button", { name: "最小化" }));
 
-    expect(windowApi.minimize).toHaveBeenCalledOnce();
+    await waitFor(() => expect(windowApi.minimize).toHaveBeenCalledOnce());
   });
 
-  it("toggles maximize from the control button", () => {
+  it("toggles maximize from the control button", async () => {
     render(<WindowControls />);
 
     fireEvent.click(screen.getByRole("button", { name: "最大化" }));
 
-    expect(windowApi.toggleMaximize).toHaveBeenCalledOnce();
+    await waitFor(() => expect(windowApi.toggleMaximize).toHaveBeenCalledOnce());
   });
 
-  it("closes the window", () => {
+  it("closes the window", async () => {
     render(<WindowControls />);
 
     fireEvent.click(screen.getByRole("button", { name: "关闭" }));
 
-    expect(windowApi.close).toHaveBeenCalledOnce();
+    await waitFor(() => expect(windowApi.close).toHaveBeenCalledOnce());
   });
 });

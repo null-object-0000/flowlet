@@ -12,6 +12,7 @@ const FALLBACK_DEFAULT_ENV_PREFIX: Record<string, string> = {
   "uptime-kuma": "UPTIME_KUMA",
   beszel: "BESZEL",
   registry: "REGISTRY",
+  "http-bearer": "HTTP_BEARER",
 };
 
 /** 环境变量名前缀最大长度（与 Host 校验一致）。 */
@@ -109,9 +110,13 @@ export function envPrefixSegment(text: string, providerDefault: string): string 
 /** 单个文本里的可用片段（已去掉默认前缀词与文本内重复）。 */
 function envPrefixTokens(text: string, base: string): string[] {
   const tokens = (text ?? "").toUpperCase().match(/[A-Z0-9]+/g) ?? [];
+  // base 可能是多词默认前缀（`UPTIME_KUMA` / `HTTP_BEARER`）。切出来的 token 是
+  // 单词（`UPTIME`、`KUMA`），只和整串比较永远不相等，会把默认前缀拼成
+  // `UPTIME_KUMA_UPTIME_KUMA`。所以按词比较。
+  const baseWords = new Set([base, ...base.split("_")].filter((word) => word !== ""));
   const kept: string[] = [];
   for (const token of tokens) {
-    if (token === base) continue;
+    if (baseWords.has(token)) continue;
     if (kept.includes(token)) continue;
     kept.push(token);
   }

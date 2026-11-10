@@ -52,6 +52,12 @@ import {
   type KumaMetrics,
 } from "./uptime-kuma.ts";
 import {
+  HttpBearerClient,
+  HttpBearerError,
+  normalizeBaseUrl as normalizeHttpBearerBaseUrl,
+  type HttpBearerProbe,
+} from "./http-bearer.ts";
+import {
   RegistryClient,
   RegistryError,
   normalizeUsername as normalizeRegistryUsername,
@@ -65,6 +71,7 @@ const JENKINS_DEFAULT_PREFIX = "JENKINS";
 const BESZEL_DEFAULT_PREFIX = "BESZEL";
 const UPTIME_KUMA_DEFAULT_PREFIX = "UPTIME_KUMA";
 const REGISTRY_DEFAULT_PREFIX = "REGISTRY";
+const HTTP_BEARER_DEFAULT_PREFIX = "HTTP_BEARER";
 
 const USAGE = `flowlet — Flowlet 全局凭据库
 
@@ -129,6 +136,14 @@ OCI 镜像仓库（Docker Registry HTTP API V2 / OCI Distribution，用户名 + 
   flowlet registry clear [--profile=NA]                                 移除对应前缀的 OCI 镜像仓库凭据
   （只按标准 GET /v2/ + WWW-Authenticate Bearer 认证；不做 Harbor 专属探测，
     robot account 当普通用户名 + token，--url 只填仓库地址、不要带路径）
+
+通用 API（Bearer：任意「地址 + Authorization: Bearer token」的三方服务，如 FileBrowser Quantum）：
+  flowlet http-bearer set --url=https://files.example.com/files [--profile=FB]  token 从 stdin 读取并校验
+  flowlet http-bearer status [--insecure] [--profile=FB]                       地址可达性 + 认证是否生效
+  flowlet http-bearer env [--profile=FB]                                       输出 {PREFIX}_URL / {PREFIX}_TOKEN
+  flowlet http-bearer clear [--profile=FB]                                     移除对应前缀的通用 Bearer 凭据
+  （校验打两次：带 token 一次、不带一次；匿名也能 2xx 时只能说「地址可达」，
+    不会谎报 token 有效）
 
 远程同步（Docker / 服务端管理的凭据 → 本机 .env）：
   flowlet login --server=http://10.100.217.60:20134 [--name=机器名] [--no-browser] [--insecure] [--timeout=180]
@@ -391,6 +406,8 @@ async function run(argv: string[]): Promise<number> {
       return uptimeKumaCommand(rest);
     case "registry":
       return registryCommand(rest);
+    case "http-bearer":
+      return httpBearerCommand(rest);
     default:
       throw new Error(`未知命令：${command}\n\n${USAGE}`);
   }
@@ -618,6 +635,7 @@ const PROVIDER_DEFAULT_PREFIX: Record<string, string> = {
   beszel: "BESZEL",
   "uptime-kuma": "UPTIME_KUMA",
   registry: "REGISTRY",
+  "http-bearer": "HTTP_BEARER",
 };
 
 function envKeys(entry: ServiceCredentialExport): Array<[string, string, string]> {
@@ -1716,6 +1734,140 @@ function storedUptimeKumaClient(
     );
   }
   return new UptimeKumaClient(url, token, { insecure });
+}
+
+// ─── 通用 API（Bearer）子命令 ──────────────────────────────────────────────
+
+function bearerKeys(prefix: string): { urlKey: string; tokenKey: string } {
+  return { urlKey: `${prefix}_URL`, tokenKey: `${prefix}_TOKEN` };
+}
+
+async function httpBearerCommand(args: string[]): Promise<number> {
+  const sub = positional(args, 0);
+  const insecure = flagPresent(args, "--insecure");
+  const profile = resolveProfile(args, HTTP_BEARER_DEFAULT_PREFIX);
+  switch (sub) {
+    case "set":
+      return httpBearerSet(args, insecure, profile);
+    case "status":
+      return httpBearerStatus(args, insecure, profile);
+    case "env": {
+      const keys = bearerKeys(profile.prefix);
+      const store = openStore();
+      const url = storedValue(store, keys.urlKey);
+      if (url === null) {
+        throw new Error(
+          `尚未配置地址，先运行 flowlet http-bearer set --url=https://host/files${profileHint(profile)}`,
+        );
+      }
+      const token = storedValue(store, keys.tokenKey);
+      if (token === null) {
+        throw new Error(
+          `尚未保存 token，先运行 flowlet http-bearer set --url=https://host/files${profileHint(profile)}`,
+        );
+      }
+      errLine("注意：下面输出包含明文 token，只应在可信 shell 中使用。");
+      outLine(`${keys.urlKey}=${url}`);
+      outLine(`${keys.tokenKey}=${token}`);
+      return 0;
+    }
+    case "clear": {
+      const keys = bearerKeys(profile.prefix);
+      const store = openStore();
+      const urlRemoved = store.unset(keys.urlKey);
+      const tokenRemoved = store.unset(keys.tokenKey);
+      const suffix = profileDescription(profile);
+      outLine(
+        urlRemoved || tokenRemoved
+          ? `已移除通用 Bearer 凭据${suffix}`
+          : `没有可移除的通用 Bearer 凭据${suffix}`,
+      );
+      return 0;
+    }
+    default:
+      throw new Error(`未知的 http-bearer 子命令：${sub}（set|status|env|clear）`);
+  }
+}
+
+async function httpBearerSet(
+  args: string[],
+  insecure: boolean,
+  profile: ProfileContext,
+): Promise<number> {
+  const store = openStore();
+  const keys = bearerKeys(profile.prefix);
+  const url = optionValue(args, "--url");
+  if (url === null) {
+    throw new Error(
+      `缺少 --url，例如：flowlet http-bearer set --url=https://host/files${profileHint(profile)}`,
+    );
+  }
+  const token = readStdinValue();
+  if (token === "") {
+    throw new Error(
+      "token 不能为空：用 `printf '%s' \"$TOKEN\" | flowlet http-bearer set ...`",
+    );
+  }
+  const client = new HttpBearerClient(url, token, { insecure });
+  let probe: HttpBearerProbe;
+  try {
+    // 与其它 provider 一致：先验证再落库。匿名也能访问时只算「地址可达」。
+    probe = await client.probe();
+  } catch (error) {
+    const detail = error instanceof HttpBearerError ? error.toString() : errorMessage(error);
+    throw new Error(`${detail}\n未保存。请检查地址与 token 是否有效。`);
+  }
+  const base = normalizeHttpBearerBaseUrl(url);
+  store.set(keys.urlKey, base, "service", "通用 API 地址");
+  store.set(keys.tokenKey, token, "cli_token", "通用 API bearer token");
+  outLine(`已保存通用 Bearer 凭据${profileDescription(profile)}：${base}`);
+  outLine(`校验：${describeProbe(probe)}`);
+  return 0;
+}
+
+async function httpBearerStatus(
+  args: string[],
+  insecure: boolean,
+  profile: ProfileContext,
+): Promise<number> {
+  const client = storedHttpBearerClient(args, insecure, profile);
+  const probe = await client.probe();
+  outLine(`地址：${client.base()}`);
+  outLine(`状态：HTTP ${probe.status}`);
+  outLine(`认证：${describeProbe(probe)}`);
+  return 0;
+}
+
+function describeProbe(probe: HttpBearerProbe): string {
+  if (probe.endpointMissing) {
+    return `地址可达，但该路径没有端点（HTTP ${probe.status}），无法据此判断 token 是否有效`;
+  }
+  return probe.anonymousAccessible
+    ? "地址可达，但匿名也能访问，无法从响应证明 token 有效"
+    : "认证生效（带 token 可访问，匿名被拒绝）";
+}
+
+function storedHttpBearerClient(
+  args: string[],
+  insecure: boolean,
+  profile: ProfileContext,
+): HttpBearerClient {
+  const store = openStore();
+  const keys = bearerKeys(profile.prefix);
+  const hint = profileHint(profile);
+  const url = storedValue(store, keys.urlKey);
+  if (url === null) {
+    throw new Error(
+      `尚未配置地址，先运行 flowlet http-bearer set --url=https://host/files${hint}`,
+    );
+  }
+  const token = storedValue(store, keys.tokenKey);
+  if (token === null) {
+    throw new Error(
+      `尚未保存 token，先运行 flowlet http-bearer set --url=https://host/files${hint}`,
+    );
+  }
+  return new HttpBearerClient(url, token, { insecure });
 }
 
 // ─── OCI 镜像仓库子命令（Registry V2 / OCI Distribution） ───────────────────

@@ -6,6 +6,7 @@ import { GeneralTab } from "./tabs/GeneralTab";
 import { MaintenanceTab } from "./tabs/MaintenanceTab";
 import { StorageTab } from "./tabs/StorageTab";
 import { SyncTab } from "./tabs/SyncTab";
+import { AuthTab } from "./tabs/AuthTab";
 import styles from "./SettingsPage.module.css";
 import { SettingsNav, useSettingsTabMeta, type SettingsTab } from "./SettingsNav";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
@@ -15,6 +16,7 @@ const TAB_COMPONENTS: Record<SettingsTab, React.ComponentType> = {
   general: GeneralTab,
   capture: CaptureTab,
   sync: SyncTab,
+  auth: AuthTab,
   storage: StorageTab,
   maintenance: MaintenanceTab,
   about: AboutTab,

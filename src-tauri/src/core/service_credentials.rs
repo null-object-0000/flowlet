@@ -7,6 +7,7 @@
 use super::beszel::{parse_info_version as beszel_info_version, BeszelClient};
 use super::dockhand::DockhandClient;
 use super::gitlab::GitlabClient;
+use super::http_bearer::HttpBearerClient;
 use super::jenkins::JenkinsClient;
 use super::registry::RegistryClient;
 use super::services::FlowletServices;
@@ -20,6 +21,7 @@ pub const PROVIDER_JENKINS: &str = "jenkins";
 pub const PROVIDER_UPTIME_KUMA: &str = "uptime-kuma";
 pub const PROVIDER_BESZEL: &str = "beszel";
 pub const PROVIDER_REGISTRY: &str = "registry";
+pub const PROVIDER_HTTP_BEARER: &str = "http-bearer";
 
 /// 环境变量名前缀默认值：`GITLAB_URL` / `DOCKHAND_URL` / `JENKINS_URL` /
 /// `UPTIME_KUMA_URL` / `BESZEL_URL` / `REGISTRY_HOST`（与第一期行为一致；registry 的
@@ -30,6 +32,9 @@ pub const DEFAULT_ENV_PREFIX_JENKINS: &str = "JENKINS";
 pub const DEFAULT_ENV_PREFIX_UPTIME_KUMA: &str = "UPTIME_KUMA";
 pub const DEFAULT_ENV_PREFIX_BESZEL: &str = "BESZEL";
 pub const DEFAULT_ENV_PREFIX_REGISTRY: &str = "REGISTRY";
+/// 通用 Bearer provider 的默认前缀：服务本身没有名字，只能给一个中性的
+/// `HTTP_BEARER`；实际使用时几乎总会显式填环境前缀（如 `FILEBROWSER`）。
+pub const DEFAULT_ENV_PREFIX_HTTP_BEARER: &str = "HTTP_BEARER";
 
 /// 列表 / 详情视图：**不含明文密钥**。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -189,6 +194,16 @@ pub fn providers() -> Vec<CredentialProvider> {
             default_env_prefix: DEFAULT_ENV_PREFIX_REGISTRY.to_string(),
             available: true,
         },
+        CredentialProvider {
+            id: PROVIDER_HTTP_BEARER.to_string(),
+            label: "通用 API（Bearer）".to_string(),
+            base_url_hint: "https://files.example.com/files（子路径部署要带上）".to_string(),
+            token_label: "Bearer Token（APIToken / API Key，请求头 Authorization: Bearer）"
+                .to_string(),
+            username_label: None,
+            default_env_prefix: DEFAULT_ENV_PREFIX_HTTP_BEARER.to_string(),
+            available: true,
+        },
     ]
 }
 
@@ -201,6 +216,7 @@ pub fn is_supported_provider(provider: &str) -> bool {
             | PROVIDER_UPTIME_KUMA
             | PROVIDER_BESZEL
             | PROVIDER_REGISTRY
+            | PROVIDER_HTTP_BEARER
     )
 }
 
@@ -217,6 +233,7 @@ pub fn default_env_prefix(provider: &str) -> String {
         PROVIDER_UPTIME_KUMA => DEFAULT_ENV_PREFIX_UPTIME_KUMA.to_string(),
         PROVIDER_BESZEL => DEFAULT_ENV_PREFIX_BESZEL.to_string(),
         PROVIDER_REGISTRY => DEFAULT_ENV_PREFIX_REGISTRY.to_string(),
+        PROVIDER_HTTP_BEARER => DEFAULT_ENV_PREFIX_HTTP_BEARER.to_string(),
         other => other.trim().to_uppercase(),
     }
 }
@@ -721,6 +738,67 @@ pub async fn check_registry(
     }
 }
 
+/// 校验一个通用 Bearer 凭据。
+///
+/// 打两次：带 token 一次、不带一次。401/403 是确定失败（token 被拒）；带 token
+/// 2xx 而匿名也 2xx 时，说明该地址本身不需要认证，**无法从响应证明 token 有效**——
+/// 这种情况仍放行保存，但 `detail` 里直说，避免界面显示「校验通过」给人错误的安全感。
+pub async fn check_http_bearer(base_url: &str, token: &str, insecure: bool) -> CredentialCheck {
+    let client = match HttpBearerClient::new(base_url, token) {
+        Ok(client) => client.with_insecure(insecure),
+        Err(error) => {
+            return CredentialCheck {
+                ok: false,
+                username: None,
+                version: None,
+                detail: None,
+                error: Some(error),
+            }
+        }
+    };
+    match client.probe().await {
+        Ok(probe) if probe.authenticated() => CredentialCheck {
+            ok: true,
+            username: None,
+            version: None,
+            detail: Some(format!(
+                "认证生效（HTTP {}；匿名访问被拒绝）",
+                probe.status
+            )),
+            error: None,
+        },
+        // 该路径没有端点（裸根 404）：地址可达，但无法据此判断 token。
+        // 通用 provider 不知道服务的端点布局，不能因此拒存。
+        Ok(probe) if probe.endpoint_missing => CredentialCheck {
+            ok: true,
+            username: None,
+            version: None,
+            detail: Some(format!(
+                "地址可达，但该路径没有端点（HTTP {}），无法据此判断 token 是否有效",
+                probe.status
+            )),
+            error: None,
+        },
+        Ok(probe) => CredentialCheck {
+            ok: true,
+            username: None,
+            version: None,
+            detail: Some(format!(
+                "地址可达（HTTP {}），但匿名也能访问，无法证明 token 有效",
+                probe.status
+            )),
+            error: None,
+        },
+        Err(error) => CredentialCheck {
+            ok: false,
+            username: None,
+            version: None,
+            detail: None,
+            error: Some(error.to_string()),
+        },
+    }
+}
+
 pub async fn save(
     services: &FlowletServices,
     input: ServiceCredentialInput,
@@ -735,7 +813,7 @@ pub async fn save(
     }
     if !is_supported_provider(&input.provider) {
         return Err(format!(
-            "暂不支持的服务类型：{}（当前支持 gitlab、dockhand、jenkins、uptime-kuma、beszel、registry）",
+            "暂不支持的服务类型：{}（当前支持 gitlab、dockhand、jenkins、uptime-kuma、beszel、registry、http-bearer）",
             input.provider
         ));
     }
@@ -745,6 +823,7 @@ pub async fn save(
         PROVIDER_UPTIME_KUMA => super::uptime_kuma::normalize_base_url(&input.base_url)?,
         PROVIDER_BESZEL => super::beszel::normalize_base_url(&input.base_url)?,
         PROVIDER_REGISTRY => super::registry::normalize_base_url(&input.base_url)?,
+        PROVIDER_HTTP_BEARER => super::http_bearer::normalize_base_url(&input.base_url)?,
         _ => super::dockhand::normalize_base_url(&input.base_url)?,
     };
     let env_prefix = normalize_env_prefix(
@@ -837,6 +916,7 @@ pub async fn save(
             )
             .await
         }
+        PROVIDER_HTTP_BEARER => check_http_bearer(&base_url, &token, insecure).await,
         _ => check_dockhand(&base_url, &token, insecure).await,
     };
     if !check.ok {
@@ -1072,7 +1152,8 @@ mod tests {
                 PROVIDER_JENKINS,
                 PROVIDER_UPTIME_KUMA,
                 PROVIDER_BESZEL,
-                PROVIDER_REGISTRY
+                PROVIDER_REGISTRY,
+                PROVIDER_HTTP_BEARER
             ]
         );
         assert_eq!(listed[0].label, "GitLab");

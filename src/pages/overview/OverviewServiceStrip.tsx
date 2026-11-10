@@ -18,9 +18,11 @@ type Props = {
   onOpenUsage: () => void;
   onOpenDetails: () => void;
   showConnectionTest?: boolean;
+  /** 主机模式展示「本地代理」，桌面客户端模式展示「远程代理」。 */
+  proxyScope?: "local" | "remote";
 };
 
-export function OverviewServiceStrip({ status, phase, bindConfig, baseUrl, todayUsage, onOpenUsage, onOpenDetails, showConnectionTest = true }: Props) {
+export function OverviewServiceStrip({ status, phase, bindConfig, baseUrl, todayUsage, onOpenUsage, onOpenDetails, showConnectionTest = true, proxyScope = "local" }: Props) {
   const { language, t } = useAppPreferences();
   const running = status?.running === true;
   const [, forceTick] = useState(0);
@@ -58,7 +60,7 @@ export function OverviewServiceStrip({ status, phase, bindConfig, baseUrl, today
       model={{
         running,
         statusTitle: getProxyPhaseLabel(phase),
-        statusSubtitle: `${t("本地代理")} · ${uptimeText ? t("已运行 {time}", { time: uptimeText }) : t("已停止")}`,
+        statusSubtitle: `${t(proxyScope === "remote" ? "远程代理" : "本地代理")} · ${uptimeText ? t("已运行 {time}", { time: uptimeText }) : t("已停止")}`,
         statusTooltip: startedAtTitle,
         usageLabel: t("今日消耗"),
         usageValue: todayUsage ? formatCompactNumber(todayUsage.total_tokens, language) : "—",

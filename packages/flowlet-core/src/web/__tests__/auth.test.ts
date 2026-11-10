@@ -28,6 +28,9 @@ const AUTH_ENV_KEYS = [
   "FLOWLET_ADMIN_TOKEN",
   "FLOWLET_ADMIN_ALLOW_TOKEN_LOGIN",
   "FLOWLET_PUBLIC_WEB_URL",
+  "FLOWLET_PUBLIC_WEB_URLS",
+  "FLOWLET_OIDC_REDIRECT_URL",
+  "FLOWLET_OIDC_REDIRECT_URLS",
   "FLOWLET_OIDC_ISSUER",
   "FLOWLET_OIDC_DISCOVERY_URL",
   "FLOWLET_OIDC_ALLOW_HTTP_ISSUER",
@@ -48,6 +51,17 @@ const AUTH_ENV_KEYS = [
   "FLOWLET_ADMIN_SESSION_IDLE_MINUTES",
   "FLOWLET_ADMIN_SESSION_TTL_HOURS",
   "FLOWLET_ADMIN_COOKIE_SECURE",
+  "FLOWLET_GITHUB_CLIENT_ID",
+  "FLOWLET_GITHUB_CLIENT_SECRET",
+  "FLOWLET_GITHUB_SCOPES",
+  "FLOWLET_GITHUB_DISPLAY_NAME",
+  "FLOWLET_GITHUB_ALLOWED_LOGINS",
+  "FLOWLET_GITHUB_ALLOWED_EMAILS",
+  "FLOWLET_GITHUB_ALLOWED_ORGS",
+  "FLOWLET_GITHUB_ALLOW_ANY",
+  "FLOWLET_GITHUB_AUTHORIZE_URL",
+  "FLOWLET_GITHUB_TOKEN_URL",
+  "FLOWLET_GITHUB_API_BASE",
 ];
 
 function clearAuthEnv(): void {
@@ -485,6 +499,7 @@ describe("token 模式", () => {
     assert.deepEqual(response.json, {
       mode: "token",
       provider: { display_name: null },
+      providers: [],
       login_path: "/api/auth/login",
       token_login: true,
     });
@@ -547,6 +562,7 @@ describe("OIDC 模式", () => {
     assert.deepEqual(response.json, {
       mode: "oidc",
       provider: { display_name: "GitLab" },
+      providers: [{ id: "oidc", display_name: "GitLab" }],
       login_path: "/api/auth/login",
       token_login: false,
     });
@@ -823,6 +839,66 @@ describe("OIDC 模式", () => {
 
 // ─── 启动期 env 校验（fail-closed） ────────────────────────────────────────
 
+describe("多入口（内网 IP + 公网域名）", () => {
+  const ENV = {
+    FLOWLET_PUBLIC_WEB_URLS: "https://flowlet.example.com,http://10.0.0.5:20134",
+  };
+
+  it("按请求来源选回调地址；白名单外的 Host 回落默认", async () => {
+    const provider = new MockOidcProvider();
+    await provider.start();
+    const host = await startOidcHost(provider, ENV);
+
+    const viaDomain = await request(host.baseUrl, "/api/auth/login", {
+      headers: { "x-forwarded-proto": "https", "x-forwarded-host": "flowlet.example.com" },
+    });
+    assert.equal(viaDomain.status, 302);
+    assert.equal(
+      new URL(viaDomain.headers.get("location") ?? "").searchParams.get("redirect_uri"),
+      "https://flowlet.example.com/api/auth/callback",
+    );
+
+    const viaLan = await request(host.baseUrl, "/api/auth/login", {
+      headers: { "x-forwarded-proto": "http", "x-forwarded-host": "10.0.0.5:20134" },
+    });
+    assert.equal(viaLan.status, 302);
+    assert.equal(
+      new URL(viaLan.headers.get("location") ?? "").searchParams.get("redirect_uri"),
+      "http://10.0.0.5:20134/api/auth/callback",
+    );
+
+    // Host 头伪造：不在白名单里，必须回落默认值，不能跟着 Host 走。
+    const forged = await request(host.baseUrl, "/api/auth/login", {
+      headers: { "x-forwarded-proto": "https", "x-forwarded-host": "evil.example.com" },
+    });
+    assert.equal(forged.status, 302);
+    assert.equal(
+      new URL(forged.headers.get("location") ?? "").searchParams.get("redirect_uri"),
+      "https://flowlet.example.com/api/auth/callback",
+    );
+  });
+
+  it("cookie 的 Secure 跟随请求协议，http 入口不会被浏览器丢弃", async () => {
+    const provider = new MockOidcProvider();
+    await provider.start();
+    const host = await startOidcHost(provider, ENV);
+
+    const https = await request(host.baseUrl, "/api/auth/login", {
+      headers: { "x-forwarded-proto": "https", "x-forwarded-host": "flowlet.example.com" },
+    });
+    const httpsCookie = setCookies(https).find((c) => c.includes("__Host-flowlet-oidc-browser"));
+    assert.ok(httpsCookie, "https 入口应下发 __Host- 前缀 cookie");
+    assert.ok(httpsCookie.includes("Secure"));
+
+    const http = await request(host.baseUrl, "/api/auth/login", {
+      headers: { "x-forwarded-proto": "http", "x-forwarded-host": "10.0.0.5:20134" },
+    });
+    const httpCookie = setCookies(http).find((c) => c.startsWith("flowlet-oidc-browser="));
+    assert.ok(httpCookie, "http 入口应下发不带 __Host- 的 cookie");
+    assert.ok(!httpCookie.includes("Secure"), "http 上不能带 Secure，否则浏览器直接丢弃");
+  });
+});
+
 describe("AdminAuthConfig 启动校验", () => {
   const base = (overrides: Record<string, string>): Record<string, string> => ({
     FLOWLET_ADMIN_AUTH_MODE: "oidc",
@@ -925,5 +1001,163 @@ describe("AdminAuthConfig 启动校验", () => {
     );
     assert.equal(invalid.sessionIdleMs, 30 * 60 * 1000);
     assert.equal(invalid.sessionTtlMs, 8 * 3600 * 1000);
+  });
+});
+
+
+// ─── GitHub 登录（第二提供方） ───────────────────────────────────────────────
+
+async function startMockGithub(login: string): Promise<{ base: string; requests: string[] }> {
+  const requests: string[] = [];
+  const server = createHttpServer((req, res) => {
+    requests.push(`${req.method} ${req.url ?? ""}`);
+    const url = req.url ?? "";
+    if (req.method === "POST" && url.startsWith("/login/oauth/access_token")) {
+      req.resume();
+      req.on("end", () => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(
+          JSON.stringify({ access_token: "gh-token", token_type: "bearer", scope: "read:user,user:email" }),
+        );
+      });
+      return;
+    }
+    if (req.method === "GET" && url === "/user") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ id: 4242, login, name: "倪常恩", email: null }));
+      return;
+    }
+    if (req.method === "GET" && url === "/user/emails") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify([
+          { email: "other@example.com", primary: false, verified: true },
+          { email: "nick@example.com", primary: true, verified: true },
+        ]),
+      );
+      return;
+    }
+    if (req.method === "GET" && url === "/user/orgs") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify([{ login: "acme" }]));
+      return;
+    }
+    res.writeHead(404).end();
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  const port = typeof address === "object" && address ? address.port : 0;
+  cleanupCallbacks.push(
+    async () => {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    },
+  );
+  return { base: `http://127.0.0.1:${port}`, requests };
+}
+
+function githubEnv(base: string, extra: Record<string, string> = {}): Record<string, string> {
+  return {
+    FLOWLET_ADMIN_AUTH_MODE: "oidc",
+    FLOWLET_GITHUB_CLIENT_ID: "gh-client",
+    FLOWLET_GITHUB_CLIENT_SECRET: "gh-secret",
+    FLOWLET_GITHUB_ALLOWED_LOGINS: "changen",
+    FLOWLET_GITHUB_AUTHORIZE_URL: `${base}/login/oauth/authorize`,
+    FLOWLET_GITHUB_TOKEN_URL: `${base}/login/oauth/access_token`,
+    FLOWLET_GITHUB_API_BASE: base,
+    ...extra,
+  };
+}
+
+describe("GitHub 登录", () => {
+  it("授权跳转 → 回调换身份 → 建会话", async () => {
+    const github = await startMockGithub("changen");
+    const host = await startHost(githubEnv(github.base));
+
+    const login = await request(host.baseUrl, "/api/auth/login?provider=github");
+    assert.equal(login.status, 302);
+    const authorize = new URL(login.headers.get("location") ?? "");
+    assert.equal(`${authorize.origin}${authorize.pathname}`, `${github.base}/login/oauth/authorize`);
+    assert.equal(authorize.searchParams.get("client_id"), "gh-client");
+    assert.equal(authorize.searchParams.get("scope"), "read:user user:email");
+    assert.equal(
+      authorize.searchParams.get("redirect_uri"),
+      `${host.baseUrl}/api/auth/callback/github`,
+    );
+    const browser = findCookie(setCookies(login), "flowlet-oidc-browser");
+    assert.ok(browser, "登录应下发浏览器绑定 cookie");
+
+    const state = authorize.searchParams.get("state") ?? "";
+    assert.ok(state !== "");
+    const callback = await request(
+      host.baseUrl,
+      `/api/auth/callback/github?code=abc123&state=${encodeURIComponent(state)}`,
+      { headers: { cookie: browser! } },
+    );
+    assert.equal(callback.status, 303);
+    assert.equal(callback.headers.get("location"), "/");
+    const sessionCookie = findCookie(setCookies(callback), "flowlet-admin");
+    assert.ok(sessionCookie, "回调成功应下发会话 cookie");
+
+    const session = await request(host.baseUrl, "/api/session", {
+      headers: { cookie: sessionCookie! },
+    });
+    assert.equal(session.status, 200);
+    assert.equal(session.json?.authenticated, true);
+    assert.ok(github.requests.includes("POST /login/oauth/access_token"));
+    assert.ok(github.requests.includes("GET /user"));
+  });
+
+  it("准入名单外的人登录失败", async () => {
+    const github = await startMockGithub("stranger");
+    const host = await startHost(githubEnv(github.base));
+    const login = await request(host.baseUrl, "/api/auth/login?provider=github");
+    const authorize = new URL(login.headers.get("location") ?? "");
+    const browser = findCookie(setCookies(login), "flowlet-oidc-browser");
+    const state = authorize.searchParams.get("state") ?? "";
+    const callback = await request(
+      host.baseUrl,
+      `/api/auth/callback/github?code=abc123&state=${encodeURIComponent(state)}`,
+      { headers: { cookie: browser! } },
+    );
+    assert.equal(callback.status, 303);
+    assert.equal(callback.headers.get("location"), "/?auth_error=allowlist_denied");
+    assert.equal(findCookie(setCookies(callback), "flowlet-admin"), null);
+  });
+
+  it("组织准入：成员放行", async () => {
+    const github = await startMockGithub("someone");
+    const host = await startHost(
+      githubEnv(github.base, { FLOWLET_GITHUB_ALLOWED_LOGINS: "", FLOWLET_GITHUB_ALLOWED_ORGS: "acme" }),
+    );
+    const login = await request(host.baseUrl, "/api/auth/login?provider=github");
+    const authorize = new URL(login.headers.get("location") ?? "");
+    const browser = findCookie(setCookies(login), "flowlet-oidc-browser");
+    const state = authorize.searchParams.get("state") ?? "";
+    assert.equal(
+      authorize.searchParams.get("scope"),
+      "read:user user:email read:org",
+      "配了组织准入就必须申请 read:org",
+    );
+    const callback = await request(
+      host.baseUrl,
+      `/api/auth/callback/github?code=abc123&state=${encodeURIComponent(state)}`,
+      { headers: { cookie: browser! } },
+    );
+    assert.equal(callback.headers.get("location"), "/");
+    assert.ok(findCookie(setCookies(callback), "flowlet-admin"));
+  });
+
+  it("没配准入名单直接拒绝启动（fail-closed）", () => {
+    clearAuthEnv();
+    Object.assign(process.env, githubEnv("http://127.0.0.1:1", { FLOWLET_GITHUB_ALLOWED_LOGINS: "" }));
+    process.env.FLOWLET_PUBLIC_WEB_URL = "http://127.0.0.1:8080";
+    assert.throws(() => adminAuthConfigFromEnv(process.env), /GitHub 登录必须配置准入名单/);
+  });
+
+  it("只有 GitHub 也能起来（没有 OIDC）", async () => {
+    const github = await startMockGithub("changen");
+    const host = await startHost(githubEnv(github.base));
+    const config = await request(host.baseUrl, "/api/auth/config");
+    assert.deepEqual(config.json?.providers, [{ id: "github", display_name: "GitHub" }]);
   });
 });

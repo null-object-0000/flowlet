@@ -87,6 +87,11 @@ Flowlet 采用前端优先的桌面应用架构。
 - **Web/Docker Host**（`packages/flowlet-core`）：生产管理台，命令面 = Web 白名单 66 条；
   桌面命令在 `packages/flowlet-core/src/desktop/` 注册，仅在 `ctx.desktop` 存在时生效，
   Web Host 行为不变。
+- **桌面运行模式**：桌面端支持 `host`（本机 Node Host + 桌面命令超集，默认）与 `client`
+  （不启动本机 Host，只跑 Client Gateway 反代远程 Web Host，做远程观测与管理）。客户端模式
+  不得暴露本机 Agent 配置写入、控制台抓取、跨设备同步、开机自启等桌面能力（远程 Web 白名单
+  之外一律不可用）；远程凭据只允许留在 Electron 主进程（token 用 safeStorage 加密存储，
+  OIDC 会话 Cookie 放在独立分区），渲染进程与页面不得直接持有远程凭据。
 
 桌面命令面覆盖度用 `node scripts/desktop-command-parity.mjs` 追踪（Rust
 `generate_handler!` ↔ Web Host + desktop 注册表），新增桌面命令必须同步该脚本报出的缺口，

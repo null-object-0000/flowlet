@@ -731,6 +731,15 @@ describe("GitLab 客户端基础", () => {
         defaultEnvPrefix: "REGISTRY",
         available: true,
       },
+      {
+        id: "http-bearer",
+        label: "通用 API（Bearer）",
+        baseUrlHint: "https://files.example.com/files（子路径部署要带上）",
+        tokenLabel: "Bearer Token（APIToken / API Key，请求头 Authorization: Bearer）",
+        usernameLabel: null,
+        defaultEnvPrefix: "HTTP_BEARER",
+        available: true,
+      },
     ]);
   });
 
@@ -833,7 +842,7 @@ describe("服务凭据编排", () => {
     );
     await assert.rejects(
       () => save(ctx, inputFor(mock, { provider: "github" }) as never, false),
-      /暂不支持的服务类型：github（当前支持 gitlab、dockhand、jenkins、uptime-kuma、beszel、registry）/,
+      /暂不支持的服务类型：github（当前支持 gitlab、dockhand、jenkins、uptime-kuma、beszel、registry、http-bearer）/,
     );
     await assert.rejects(
       () => save(ctx, inputFor(mock, { baseUrl: "ftp://example.com" }) as never, false),
@@ -1227,7 +1236,7 @@ describe("Dockhand 凭据", () => {
     );
     await assert.rejects(
       () => save(ctx, { name: "x", provider: "github", baseUrl: "http://host", token: "t" } as never, false),
-      /暂不支持的服务类型：github（当前支持 gitlab、dockhand、jenkins、uptime-kuma、beszel、registry）/,
+      /暂不支持的服务类型：github（当前支持 gitlab、dockhand、jenkins、uptime-kuma、beszel、registry、http-bearer）/,
     );
   });
 });
@@ -1728,7 +1737,7 @@ describe("Registry 凭据", () => {
   it("元数据：provider 追加在 beszel 之后、supported、默认前缀 REGISTRY", () => {
     assert.deepEqual(
       providers().map((item) => item.id),
-      ["gitlab", "dockhand", "jenkins", "uptime-kuma", "beszel", "registry"],
+      ["gitlab", "dockhand", "jenkins", "uptime-kuma", "beszel", "registry", "http-bearer"],
     );
     assert.equal(isSupportedProvider("registry"), true);
     assert.equal(isSupportedProvider("github"), false);

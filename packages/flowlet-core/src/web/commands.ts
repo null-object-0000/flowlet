@@ -38,6 +38,15 @@ import {
 } from "./catalog-files.ts";
 import { queryBalance } from "./balance.ts";
 import {
+  checkGithubProvider,
+  deleteGithubProvider,
+  readGithubProvider,
+  readGithubProviderSummary,
+  saveGithubProvider,
+  type GithubProviderInput,
+} from "./auth-providers.ts";
+import type { GithubConfig } from "./auth.ts";
+import {
   logout as qwenPlatformLogout,
   pollLogin as qwenPlatformPollLogin,
   startLogin as qwenPlatformStartLogin,
@@ -96,6 +105,57 @@ interface StorageFacade {
   markAccountCredentialHealthy(accountId: string): void;
   markAccountCredentialInvalid(accountId: string): void;
   updateAccountLastError(accountId: string, error: string | null): void;
+}
+
+/**
+ * 模型入口候选地址：`FLOWLET_PUBLIC_PROXY_URLS`（逗号分隔）优先，否则退回单个
+ * `FLOWLET_PUBLIC_PROXY_URL`（即 `ctx.publicProxyUrl`）。首条为默认，去空白/尾斜杠/重复。
+ *
+ * 多个入口存在的理由：同一套服务可能同时挂内网 IP 和公网域名，管理台里展示的
+ * `base_url` 必须跟访问者当前所在的 origin 一致，否则复制出来连不上。
+ */
+function publicProxyUrlsFromEnv(fallback: string): string[] {
+  const raw = (process.env.FLOWLET_PUBLIC_PROXY_URLS ?? "").trim();
+  const items = raw !== "" ? raw.split(",") : [fallback];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of items) {
+    const value = item.trim().replace(/\/+$/, "");
+    if (value === "" || seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
+  }
+  return out;
+}
+
+/** 登录提供方表单参数：接受 snake_case（管理台）与 camelCase（旧调用）两种写法。 */
+function parseGithubProviderArg(args: JsonRow): GithubProviderInput {
+  const str = (key: string): string | null => {
+    const value = args[key];
+    return typeof value === "string" ? value : null;
+  };
+  const orCamel = (snake: string, camel: string): string | null => str(snake) ?? str(camel);
+  const list = (key: string): string[] | null => {
+    const value = args[key];
+    return Array.isArray(value) ? value.map((item) => String(item)) : null;
+  };
+  const bool = (key: string): boolean | null =>
+    typeof args[key] === "boolean" ? (args[key] as boolean) : null;
+  return {
+    client_id: orCamel("client_id", "clientId") ?? "",
+    client_secret: orCamel("client_secret", "clientSecret"),
+    scopes: str("scopes"),
+    display_name: orCamel("display_name", "displayName"),
+    allowed_logins: list("allowed_logins") ?? list("allowedLogins"),
+    allowed_emails: list("allowed_emails") ?? list("allowedEmails"),
+    allowed_orgs: list("allowed_orgs") ?? list("allowedOrgs"),
+    admin_logins: list("admin_logins") ?? list("adminLogins"),
+    admin_emails: list("admin_emails") ?? list("adminEmails"),
+    allow_any: bool("allow_any") ?? bool("allowAny"),
+    authorize_url: orCamel("authorize_url", "authorizeUrl"),
+    token_url: orCamel("token_url", "tokenUrl"),
+    api_base: orCamel("api_base", "apiBase"),
+  };
 }
 
 function storageOf(ctx: WebContext): StorageFacade {
@@ -420,11 +480,16 @@ export async function dispatch(ctx: WebContext, command: string, rawArgs: unknow
       return null;
     case "get_proxy_bind_config":
       return ctx.proxy.bindConfig();
-    case "web_connection_info":
+    case "web_connection_info": {
+      // 同一套服务可能有多个入口（内网 IP + 公网域名）：界面按当前 origin 挑一条。
+      // 这里直接读环境变量，避免把展示用的候选列表塞进 WebHostOptions（改动面最小）。
+      const baseUrls = publicProxyUrlsFromEnv(ctx.publicProxyUrl);
       return {
-        base_url: ctx.publicProxyUrl,
+        base_url: baseUrls[0] ?? ctx.publicProxyUrl,
+        base_urls: baseUrls,
         client_token: ctx.proxy.bindConfig().default_client_token,
       };
+    }
     case "set_proxy_bind_config": {
       const config = parseBindConfigArg(args);
       const normalized = normalizeBindConfig(config);
@@ -614,6 +679,44 @@ export async function dispatch(ctx: WebContext, command: string, rawArgs: unknow
       ctx.storage.setAppMeta(UPSTREAM_PROXY_META_KEY, JSON.stringify(config));
       ctx.upstreamProxy = config;
       return null;
+    }
+
+    // ── 管理台登录提供方（GitHub）：改完立即热替换，不用重启进程 ──────────
+    case "get_github_auth_provider":
+      return readGithubProviderSummary(ctx.storage, ctx.auth?.config.github ?? null);
+    case "set_github_auth_provider": {
+      const input = parseGithubProviderArg(args);
+      let config: GithubConfig;
+      try {
+        config = saveGithubProvider(ctx.storage, ctx.secrets, input);
+      } catch (error) {
+        throw CommandError.badRequest(error instanceof Error ? error.message : String(error));
+      }
+      ctx.auth?.applyGithubConfig(config);
+      return null;
+    }
+    case "delete_github_auth_provider": {
+      deleteGithubProvider(ctx.storage);
+      ctx.auth?.applyGithubConfig(null);
+      return null;
+    }
+    case "check_github_auth_provider": {
+      const input = parseGithubProviderArg(args);
+      const stored = readGithubProvider(ctx.storage, ctx.secrets) ?? ctx.auth?.config.github ?? null;
+      const clientId = (input.client_id ?? "").trim();
+      // 表单不回显 secret：留空就用已存的，避免为了点一次「校验」逼用户重填。
+      const clientSecret = (input.client_secret ?? "").trim() || stored?.clientSecret || "";
+      if (clientId === "" || clientSecret === "") {
+        throw CommandError.badRequest("校验需要 client_id 与 client_secret");
+      }
+      return await checkGithubProvider({
+        clientId,
+        clientSecret,
+        tokenUrl:
+          (input.token_url ?? "").trim() ||
+          stored?.tokenUrl ||
+          "https://github.com/login/oauth/access_token",
+      });
     }
 
     case "test_connection": {

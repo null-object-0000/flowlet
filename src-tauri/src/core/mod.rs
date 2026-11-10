@@ -30,6 +30,7 @@ pub mod device_sync;
 pub mod device_usage;
 pub mod dockhand;
 pub mod gitlab;
+pub mod http_bearer;
 pub mod host_scheduler;
 pub mod jenkins;
 pub mod job_runtime;

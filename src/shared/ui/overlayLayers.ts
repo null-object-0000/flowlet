@@ -33,21 +33,48 @@ const SIDE_SHEET_DRAG_EXCLUDE_SELECTOR = [
   ".semi-tabs-tab",
 ].join(",");
 
+const DESKTOP_DRAG_STYLE_ID = "flowlet-desktop-window-drag-styles";
+
+/**
+ * Electron desktop 壳没有 Tauri `startDragging()` 的等价 API（HG-2），抽屉头部
+ * 改用 CSS `-webkit-app-region: drag` 交给 Chromium 原生处理拖动（双击最大化同样
+ * 由平台处理）。这里集中注入全局规则，避免页面/feature 各自覆盖 `.semi-sidesheet-*`。
+ */
+function installDesktopSideSheetDragRegions(): () => void {
+  if (typeof document === "undefined") return () => undefined;
+  if (document.getElementById(DESKTOP_DRAG_STYLE_ID)) return () => undefined;
+
+  const style = document.createElement("style");
+  style.id = DESKTOP_DRAG_STYLE_ID;
+  style.textContent = [
+    ".semi-sidesheet-header { -webkit-app-region: drag; }",
+    `.semi-sidesheet-header :is(${SIDE_SHEET_DRAG_EXCLUDE_SELECTOR}) { -webkit-app-region: no-drag; }`,
+  ].join("\n");
+  document.head.appendChild(style);
+  return () => style.remove();
+}
+
 /**
  * 让所有抽屉（Semi SideSheet）的公共标题栏空白区域支持窗口拖拽与双击最大化/还原。
  *
- * 与主窗口标题栏（WindowControls）同一套成熟方案：在 `mousedown` 上读取
- * `event.detail` —— 双击时第二次 mousedown 的 detail 为 2，直接切换最大化/还原；
- * 否则立即进入系统拖动。注意不能依赖 `dblclick`（Windows 拖动模态会吞掉它），
+ * Tauri 桌面壳：与主窗口标题栏（WindowControls）同一套成熟方案——在 `mousedown`
+ * 上读取 `event.detail`（双击时第二次 mousedown 的 detail 为 2），直接切换最大化/
+ * 还原；否则立即进入系统拖动。注意不能依赖 `dblclick`（Windows 拖动模态会吞掉它），
  * 也绝不能先于本次判断去调用 `startDragging`（同样会吞掉第二次 mousedown）。
+ * 双击操作作用于抽屉所在当前窗口（`toggleMaximize` 由 `getCurrentWindow()` 提供）。
  *
- * 双击操作作用于抽屉所在当前窗口（`toggleMaximize` 由 `getCurrentWindow()` 提供），
- * 因此主窗口抽屉最大化主窗口、独立窗口抽屉则最大化该独立窗口。
+ * Electron desktop 壳（`options.desktop`）：走 CSS `-webkit-app-region: drag`，
+ * 不再注册 mousedown 逻辑（也没有可调用的程序化拖动 API）。
  */
 export function configureSideSheetWindowDragging(
   startDragging: () => Promise<void>,
   toggleMaximize?: () => Promise<void>,
+  options: { desktop?: boolean } = {},
 ) {
+  if (options.desktop) {
+    return installDesktopSideSheetDragRegions();
+  }
+
   const handleMouseDown = (event: MouseEvent) => {
     if (event.buttons !== 1) return;
     const target = event.target;

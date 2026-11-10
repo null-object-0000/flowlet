@@ -37,6 +37,7 @@ import {
   normalizeBaseUrl as normalizeUptimeKumaBaseUrl,
   summarizeMetrics,
 } from "./uptime-kuma.ts";
+import { HttpBearerClient, HttpBearerError, normalizeBaseUrl as normalizeHttpBearerBaseUrl } from "./http-bearer.ts";
 
 export const PROVIDER_GITLAB = "gitlab";
 export const PROVIDER_DOCKHAND = "dockhand";
@@ -44,6 +45,7 @@ export const PROVIDER_JENKINS = "jenkins";
 export const PROVIDER_BESZEL = "beszel";
 export const PROVIDER_UPTIME_KUMA = "uptime-kuma";
 export const PROVIDER_REGISTRY = "registry";
+export const PROVIDER_HTTP_BEARER = "http-bearer";
 
 export interface ServiceCredentialView {
   id: string;
@@ -184,6 +186,15 @@ export function providers(): CredentialProvider[] {
       defaultEnvPrefix: "REGISTRY",
       available: true,
     },
+    {
+      id: PROVIDER_HTTP_BEARER,
+      label: "通用 API（Bearer）",
+      baseUrlHint: "https://files.example.com/files（子路径部署要带上）",
+      tokenLabel: "Bearer Token（APIToken / API Key，请求头 Authorization: Bearer）",
+      usernameLabel: null,
+      defaultEnvPrefix: "HTTP_BEARER",
+      available: true,
+    },
   ];
 }
 
@@ -194,7 +205,8 @@ export function isSupportedProvider(provider: string): boolean {
     provider === PROVIDER_JENKINS ||
     provider === PROVIDER_UPTIME_KUMA ||
     provider === PROVIDER_BESZEL ||
-    provider === PROVIDER_REGISTRY
+    provider === PROVIDER_REGISTRY ||
+    provider === PROVIDER_HTTP_BEARER
   );
 }
 
@@ -205,6 +217,7 @@ function normalizeProviderBaseUrl(provider: string, raw: string): string {
   if (provider === PROVIDER_UPTIME_KUMA) return normalizeUptimeKumaBaseUrl(raw);
   if (provider === PROVIDER_BESZEL) return normalizeBeszelBaseUrl(raw);
   if (provider === PROVIDER_REGISTRY) return normalizeRegistryUrl(raw);
+  if (provider === PROVIDER_HTTP_BEARER) return normalizeHttpBearerBaseUrl(raw);
   return normalizeBaseUrl(raw);
 }
 
@@ -217,6 +230,7 @@ export function defaultEnvPrefix(provider: string): string {
   if (provider === PROVIDER_UPTIME_KUMA) return "UPTIME_KUMA";
   if (provider === PROVIDER_BESZEL) return "BESZEL";
   if (provider === PROVIDER_REGISTRY) return "REGISTRY";
+  if (provider === PROVIDER_HTTP_BEARER) return "HTTP_BEARER";
   // save/test 会先做 provider 校验；这里只兜底旧库中可能存在的未知 provider 行。
   return provider.trim().toUpperCase();
 }
@@ -494,6 +508,48 @@ export async function checkUptimeKuma(
   }
 }
 
+/**
+ * 校验一个通用 Bearer 凭据。
+ *
+ * 打两次：带 token 一次、不带一次。401/403 是确定失败（token 被拒）；带 token
+ * 2xx 而匿名也 2xx 时说明地址本身不需要认证，**无法从响应证明 token 有效**——
+ * 仍放行保存，但 detail 直说，避免界面显示「校验通过」给人错误的安全感。
+ */
+export async function checkHttpBearer(
+  baseUrl: string,
+  token: string,
+  insecure: boolean,
+): Promise<CredentialCheck> {
+  let client: HttpBearerClient;
+  try {
+    client = new HttpBearerClient(baseUrl, token, { insecure });
+  } catch (error) {
+    return { ok: false, username: null, version: null, detail: null, error: message(error) };
+  }
+  try {
+    const probe = await client.probe();
+    return {
+      ok: true,
+      username: null,
+      version: null,
+      detail: probe.endpointMissing
+        ? `地址可达，但该路径没有端点（HTTP ${probe.status}），无法据此判断 token 是否有效`
+        : probe.anonymousAccessible
+          ? `地址可达（HTTP ${probe.status}），但匿名也能访问，无法证明 token 有效`
+          : `认证生效（HTTP ${probe.status}；匿名访问被拒绝）`,
+      error: null,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      username: null,
+      version: null,
+      detail: null,
+      error: error instanceof HttpBearerError ? error.toString() : message(error),
+    };
+  }
+}
+
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -572,7 +628,7 @@ export async function save(
   if ([...name].length > 64) fail("凭据名称不能超过 64 个字符");
   if (!isSupportedProvider(input.provider)) {
     fail(
-      `暂不支持的服务类型：${input.provider}（当前支持 gitlab、dockhand、jenkins、uptime-kuma、beszel、registry）`,
+      `暂不支持的服务类型：${input.provider}（当前支持 gitlab、dockhand、jenkins、uptime-kuma、beszel、registry、http-bearer）`,
     );
   }
   let baseUrl: string;
@@ -639,7 +695,9 @@ export async function save(
             ? await checkBeszel(baseUrl, username ?? "", token, insecure)
             : input.provider === PROVIDER_REGISTRY
               ? await checkRegistry(baseUrl, username ?? "", token, insecure)
-              : await checkGitlab(baseUrl, token, insecure);
+              : input.provider === PROVIDER_HTTP_BEARER
+                ? await checkHttpBearer(baseUrl, token, insecure)
+                : await checkGitlab(baseUrl, token, insecure);
   if (!check.ok) {
     return fail(`校验失败，未保存：${check.error ?? "未知错误"}`);
   }

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const windowApi = vi.hoisted(() => ({
@@ -17,14 +17,14 @@ describe("WindowResizeHandles", () => {
     windowApi.startResizeDragging.mockResolvedValue();
   });
 
-  it("starts resizing with the matching direction on left-button mousedown", () => {
+  it("starts resizing with the matching direction on left-button mousedown", async () => {
     render(<WindowResizeHandles />);
 
     fireEvent.mouseDown(screen.getByTestId("resize-handle-SouthEast"), {
       buttons: 1,
     });
 
-    expect(windowApi.startResizeDragging).toHaveBeenCalledWith("SouthEast");
+    await waitFor(() => expect(windowApi.startResizeDragging).toHaveBeenCalledWith("SouthEast"));
   });
 
   it("maps all eight directions to resize handles", () => {

@@ -186,3 +186,15 @@ apps/desktop-electron/evidence/
 # 冒烟测试的数据库副本（含真实凭据，禁止入库）
 **/__smoke__/data/
 .flowlet-dev-data/
+
+# Electron desktop shell build outputs (dist-desktop 由 npm run build:desktop 生成)
+dist-desktop/
+packages/flowlet-desktop/dist-host/
+packages/flowlet-desktop/release/
+packages/flowlet-desktop/build/
+packages/flowlet-desktop/node_modules/
+.flowlet-dev-data/desktop-smoke/
+
+# Local scratch dirs used for npm/electron-builder caches in sandboxed envs
+.tmp-cache/
+.tmp-npm/

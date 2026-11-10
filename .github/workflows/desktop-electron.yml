@@ -1,0 +1,131 @@
+# Electron 桌面端（迁移验证）构建与冒烟。
+#
+# 与 build-installers.yml（Tauri 正式产物）并行存在，本 workflow 只产出
+# “Electron 迁移验证包”，不覆盖正式 Release 资产；确认桌面端切换后可在
+# build-installers.yml 中改为主产物。
+#
+# 触发：
+#   - 手动 Run workflow（默认构建三平台，可选只跑 Linux 冒烟）
+#   - 预发布标签（v*-beta*）推送
+name: Desktop (Electron) build & smoke
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*-beta*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-electron-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  linux:
+    name: Linux x64 (build + xvfb smoke)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck (core + desktop host + frontend)
+        run: |
+          npm run node:typecheck
+          npm run check
+          npm run desktop:typecheck
+      - name: Node tests (core + desktop commands)
+        run: node --test packages/flowlet-core/src
+      - name: Desktop command parity (Rust ↔ Node)
+        run: node scripts/desktop-command-parity.mjs --check
+      - name: Build desktop frontend + host bundle
+        run: |
+          npm run build:desktop
+          npm run desktop:build
+      - name: Install xvfb
+        run: sudo apt-get update && sudo apt-get install -y xvfb
+      - name: Smoke (single window + health)
+        run: npm run desktop:smoke
+      - name: Smoke (all routes + screenshots)
+        run: npm run desktop:smoke:pages
+      - name: Package (AppImage + deb)
+        run: npm run desktop:dist
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: flowlet-desktop-linux-x64
+          path: |
+            packages/flowlet-desktop/release/*.AppImage
+            packages/flowlet-desktop/release/*.deb
+            .flowlet-dev-data/desktop-smoke/*.png
+            .flowlet-dev-data/desktop-pages/*.png
+            .flowlet-dev-data/desktop-pages/report.json
+          if-no-files-found: error
+
+  windows:
+    name: Windows x64 (build only)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck + tests
+        run: |
+          npm run node:typecheck
+          npm run desktop:typecheck
+          node --test packages/flowlet-core/src
+      - name: Build desktop frontend + host bundle
+        run: |
+          npm run build:desktop
+          npm run desktop:build
+      - name: Package (nsis + portable zip)
+        run: npm run desktop:dist
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: flowlet-desktop-windows-x64
+          path: |
+            packages/flowlet-desktop/release/*.exe
+            packages/flowlet-desktop/release/*.zip
+            packages/flowlet-desktop/release/*.msi
+          if-no-files-found: error
+
+  macos:
+    name: macOS (build only)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Typecheck + tests
+        run: |
+          npm run node:typecheck
+          npm run desktop:typecheck
+          node --test packages/flowlet-core/src
+      - name: Build desktop frontend + host bundle
+        run: |
+          npm run build:desktop
+          npm run desktop:build
+      - name: Package (dmg, ad-hoc)
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npm run desktop:dist
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: flowlet-desktop-macos
+          path: packages/flowlet-desktop/release/*.dmg
+          if-no-files-found: error

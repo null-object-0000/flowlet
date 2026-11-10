@@ -1,5 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
 import type { AppError } from "../../shared/errors/AppError";
+import { isDesktopHost } from "../desktop/mode";
 import { isWebHost } from "../web/mode";
 
 /**
@@ -41,11 +41,17 @@ function normalizeInvokeFailure(command: string, err: unknown): InvokeError {
 }
 
 /**
- * Typed Tauri invoke with explicit timeout. NEVER swallows rejections:
+ * Typed command invoke with explicit timeout. NEVER swallows rejections:
  * every failure (including timeout) rejects the returned promise so the
  * caller / TanStack Query can model it as a genuine error instead of an
  * empty default. Domains should wrap this and map `InvokeError` into typed
  * `AppError` values; pages/components must not call `invoke` directly.
+ *
+ * Transport selection:
+ * - Tauri desktop shell → native IPC `invoke`;
+ * - Web Host (`--mode web`) 与 Electron desktop 壳 (`--mode desktop`) →
+ *   `POST /api/commands/{command}`（Bearer 管理 token）。
+ *   `isWebHost` 语义保持不变，desktop 是独立的附加分支。
  */
 export function invokeCommand<TResult>(
   command: string,
@@ -54,9 +60,12 @@ export function invokeCommand<TResult>(
 ): Promise<TResult> {
   let timer: ReturnType<typeof setTimeout> | undefined;
 
-  const call = (isWebHost
+  const usesHttpCommandHost = isWebHost || isDesktopHost;
+  // `@tauri-apps/api/core` 只在 Tauri 分支动态加载：desktop / web 产物不能触碰
+  // 依赖 `window.__TAURI_INTERNALS__` 的 Tauri API。
+  const call = (usesHttpCommandHost
     ? import("../web/client").then(({ invokeWebCommand }) => invokeWebCommand<TResult>(command, args))
-    : invoke<TResult>(command, args)).then(
+    : import("@tauri-apps/api/core").then(({ invoke }) => invoke<TResult>(command, args))).then(
     (value) => value,
     (err: unknown) => {
       throw normalizeInvokeFailure(command, err);

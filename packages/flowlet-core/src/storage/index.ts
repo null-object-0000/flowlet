@@ -548,4 +548,15 @@ export class SqliteStorage {
 
   /** `get_upstream_proxy_config` / `set_upstream_proxy_config` 使用的 app_meta 键。 */
   static readonly UPSTREAM_PROXY_META_KEY = UPSTREAM_PROXY_META_KEY;
+
+  /**
+   * 领域模块（`storage/*.ts` 的纯函数）访问底层连接的唯一入口。
+   *
+   * 桌面命令层的新查询不要继续往本类堆方法（多领域并行开发会互相冲突），
+   * 而是在自己的领域模块里导出 `(db: DatabaseSync, ...) => ...` 的纯函数，
+   * 通过这里执行。连接仍是单连接串行语义，与 Rust 版一致。
+   */
+  withDatabase<T>(fn: (db: DatabaseSync) => T): T {
+    return fn(this.#db);
+  }
 }

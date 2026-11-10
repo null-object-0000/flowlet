@@ -30,6 +30,8 @@ export interface PersistedIdentity {
   name: string | null;
   groups: string[];
   provider: string;
+  /** 角色；旧文件没有该字段时按 admin 读回（升级不踢人）。 */
+  role?: string;
 }
 
 /** 落盘的一条会话：key 是 cookie 的 sha256（不保存原始 cookie）。 */
@@ -76,6 +78,7 @@ function parseIdentity(raw: unknown): PersistedIdentity | null {
     name: optional(value.name),
     groups: [...value.groups],
     provider: value.provider,
+    role: value.role === "viewer" ? "viewer" : value.role === "admin" ? "admin" : undefined,
   };
 }
 

@@ -30,6 +30,11 @@ export interface HostOptions {
   webAddr: string;
   /** 对外展示的模型入口 URL（可为空） */
   publicProxyUrl: string;
+  /**
+   * 桌面（Electron）宿主能力。仅桌面应用传入；Web Host / Docker 不传。
+   * 传入后 `/api/commands/*` 的命令面升级为桌面超集（见 src/desktop/README.md）。
+   */
+  desktop?: import("./desktop/types.ts").DesktopRuntime;
 }
 
 export interface ProxyBindConfig {

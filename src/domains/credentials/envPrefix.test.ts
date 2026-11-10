@@ -147,6 +147,20 @@ describe("suggestEnvPrefix", () => {
     expect(suggestEnvPrefix({ providerDefault: "GITLAB", name: "", note: "" })).toBe("GITLAB");
   });
 
+  it("does not duplicate a multi-word default prefix", () => {
+    // `UPTIME_KUMA` 拆出来的 token 是 UPTIME / KUMA，按词比较才不会拼成
+    // UPTIME_KUMA_UPTIME_KUMA（曾经的真实 bug）。
+    expect(suggestEnvPrefix({ providerDefault: "UPTIME_KUMA", name: "公司苏州 Uptime Kuma" })).toBe(
+      "UPTIME_KUMA",
+    );
+    expect(suggestEnvPrefix({ providerDefault: "UPTIME_KUMA", name: "Uptime Kuma NA" })).toBe(
+      "UPTIME_KUMA_NA",
+    );
+    expect(suggestEnvPrefix({ providerDefault: "HTTP_BEARER", name: "Http Bearer" })).toBe(
+      "HTTP_BEARER",
+    );
+  });
+
   it("uses the note when the name has no usable fragment, and dedupes the default word", () => {
     expect(suggestEnvPrefix({ providerDefault: "DOCKHAND", name: "北美", note: "dockhand self" })).toBe(
       "DOCKHAND_SELF",

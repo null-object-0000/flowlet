@@ -1,0 +1,7 @@
+# Hermes Agent user config.
+theme: dark
+streaming: true
+model: ""
+tools:
+  enabled:
+    - terminal

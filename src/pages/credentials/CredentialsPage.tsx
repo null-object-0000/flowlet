@@ -78,14 +78,20 @@ const EMPTY_DRAFT: Draft = {
   envPrefix: "",
 };
 
-const PROVIDER_LABEL: Record<string, string> = {
+const PROVIDER_LABEL = {
   gitlab: "GitLab",
   dockhand: "Dockhand",
   jenkins: "Jenkins",
   "uptime-kuma": "Uptime Kuma",
   beszel: "Beszel",
   registry: "OCI 镜像仓库",
-};
+  "http-bearer": "通用 API（Bearer）",
+} as const satisfies Record<CredentialProviderId, string>;
+
+/** 表格/表单展示用的 provider 名称；未知 id 原样返回。 */
+function providerLabel(id: string): string {
+  return (PROVIDER_LABEL as Record<string, string>)[id] ?? id;
+}
 
 /** 服务端 provider 元数据加载前/旧 Host 的兜底，保证表单文案马上可用。 */
 const FALLBACK_PROVIDERS: CredentialProvider[] = [
@@ -143,6 +149,15 @@ const FALLBACK_PROVIDERS: CredentialProvider[] = [
     available: true,
     defaultEnvPrefix: "REGISTRY",
   },
+  {
+    id: "http-bearer",
+    label: "通用 API（Bearer）",
+    baseUrlHint: "https://files.example.com/files（子路径部署要带上）",
+    tokenLabel: "Bearer Token（APIToken / API Key，请求头 Authorization: Bearer）",
+    usernameLabel: null,
+    available: true,
+    defaultEnvPrefix: "HTTP_BEARER",
+  },
 ];
 
 /** 毫秒 → 秒（保留 1 位小数），用于 AI 生成进度展示。 */
@@ -150,38 +165,54 @@ function formatSeconds(ms: number): string {
   return `${(Math.max(0, ms) / 1000).toFixed(1)}s`;
 }
 
-/** 保存时实际校验的端点（与两套 Host 的 check 实现一致）。 */
-function checkEndpoint(provider: CredentialProviderId): string {
-  switch (provider) {
-    case "jenkins":
-      return "Jenkins /me/api/json";
-    case "uptime-kuma":
-      // 只读：API Key 走 Basic（空用户名）+ Prometheus /metrics。
-      return "Uptime Kuma /metrics";
-    case "beszel":
-      return "Beszel /api/collections/users/auth-with-password";
-    case "dockhand":
-      return "Dockhand /api/environments";
-    case "registry":
-      // 标准 Registry V2 认证流程（Basic → WWW-Authenticate Bearer 质询 → token → 重试）。
-      return "镜像仓库 GET /v2/";
-    default:
-      return "GitLab /api/v4/user";
-  }
+/** 保存时实际校验的端点（与两套 Host 的 check 实现一致）。
+ *
+ * 用 `Record<CredentialProviderId, string>` 而不是带 `default` 的 switch：新增 provider
+ * 忘记登记时编译直接失败。之前 http-bearer 掉进 default，界面上显示成
+ * 「保存时会实际请求 GitLab /api/v4/user」——与实际行为不符。
+ */
+const CHECK_ENDPOINTS: Record<CredentialProviderId, string> = {
+  gitlab: "GitLab /api/v4/user",
+  dockhand: "Dockhand /api/environments",
+  jenkins: "Jenkins /me/api/json",
+  // 只读：API Key 走 Basic（空用户名）+ Prometheus /metrics。
+  "uptime-kuma": "Uptime Kuma /metrics",
+  beszel: "Beszel /api/collections/users/auth-with-password",
+  // 标准 Registry V2 认证流程（Basic → WWW-Authenticate Bearer 质询 → token → 重试）。
+  registry: "镜像仓库 GET /v2/",
+  // 通用 Bearer：带 token 打一次、不带 token 再打一次做对照。
+  "http-bearer": "所填地址（带 token 与不带 token 各一次）",
+};
+
+export function checkEndpoint(provider: CredentialProviderId): string {
+  return CHECK_ENDPOINTS[provider] ?? CHECK_ENDPOINTS.gitlab;
 }
 
+/**
+ * 前端认识的全部 provider id。新增 provider 时**必须**同步这里：
+ * 漏一个的后果是编辑该类型的凭据时下拉回落成 GitLab，保存后 provider 被静默改写成
+ * `gitlab`（曾经的真实事故）。下面的类型断言会在漏项时直接编译失败。
+ */
+const KNOWN_PROVIDER_IDS = [
+  "gitlab",
+  "dockhand",
+  "jenkins",
+  "uptime-kuma",
+  "beszel",
+  "registry",
+  "http-bearer",
+] as const satisfies readonly CredentialProviderId[];
+
+type MissingProviderId = Exclude<CredentialProviderId, (typeof KNOWN_PROVIDER_IDS)[number]>;
+// 若 `MissingProviderId` 不是 never，这行的赋值就会类型报错，从而拦住漏项。
+const _allProvidersListed: MissingProviderId extends never ? true : never = true;
+void _allProvidersListed;
+
 /** 把 Host 返回的 provider 字符串收窄为下拉可选的 id（未知类型回落 gitlab，避免下拉缺项）。 */
-function asCredentialProviderId(value: string): CredentialProviderId {
-  switch (value) {
-    case "dockhand":
-    case "jenkins":
-    case "uptime-kuma":
-    case "beszel":
-    case "registry":
-      return value;
-    default:
-      return "gitlab";
-  }
+export function asCredentialProviderId(value: string): CredentialProviderId {
+  return (KNOWN_PROVIDER_IDS as readonly string[]).includes(value)
+    ? (value as CredentialProviderId)
+    : "gitlab";
 }
 
 /** provider 需要额外身份字段（Jenkins / OCI 镜像仓库用户名、Beszel 邮箱）；旧 Host 元数据缺失时按 id 兜底。 */
@@ -233,6 +264,8 @@ function tokenPlaceholderFor(provider: CredentialProviderId, editing: boolean): 
       return "粘贴 Beszel 登录密码";
     case "registry":
       return "粘贴密码或 Token（与用户名一起用于 docker login）";
+    case "http-bearer":
+      return "粘贴 Bearer Token（API Key / Personal Access Token 均可）";
     default:
       return "粘贴 Personal Access Token";
   }
@@ -490,7 +523,7 @@ export function CredentialsPage() {
   // 服务端按 gitlab → dockhand → jenkins → uptime-kuma → beszel → registry 的顺序返回；加载失败/旧 Host 时退回本地兜底定义。
   const providerOptions = providers.data && providers.data.length > 0 ? providers.data : FALLBACK_PROVIDERS;
   const selectedProvider = providerOptions.find((option) => option.id === draft?.provider) ?? FALLBACK_PROVIDERS[0]!;
-  const selectedProviderLabel = PROVIDER_LABEL[selectedProvider.id] ?? selectedProvider.label;
+  const selectedProviderLabel = providerLabel(selectedProvider.id) || selectedProvider.label;
   const selectedProviderDefaultEnvPrefix = providerDefaultEnvPrefix(selectedProvider);
   /** 身份字段的标题；null 表示该 provider 不需要额外身份字段。 */
   const selectedUsernameLabel = usernameLabelFor(selectedProvider);
@@ -589,7 +622,7 @@ export function CredentialsPage() {
                 width: 110,
                 render: (value: string) => (
                   <Tag color="blue" type="light">
-                    {PROVIDER_LABEL[value] ?? value}
+                    {providerLabel(value)}
                   </Tag>
                 ),
               },

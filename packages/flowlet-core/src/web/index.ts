@@ -21,7 +21,8 @@ import type {
 } from "../types.ts";
 import { CommandError } from "../types.ts";
 import type { SqliteStorage } from "../storage/index.ts";
-import { AdminAuth, type AuthResponse } from "./auth.ts";
+import { AdminAuth, viewerCanRunCommand, type AuthResponse } from "./auth.ts";
+import { hasStoredGithubProvider, readGithubProvider } from "./auth-providers.ts";
 import { CLI_ALLOWED_COMMANDS, createCliAuth, type CliAuthStorage } from "./cli-auth.ts";
 import {
   prepareEnvPrefixTarget,
@@ -29,6 +30,8 @@ import {
   type EnvPrefixStreamEvent,
 } from "./env-prefix.ts";
 import { dispatch } from "./commands.ts";
+import { dispatchDesktop, hasDesktopCommand } from "../desktop/commands.ts";
+import type { DesktopRuntime } from "../desktop/types.ts";
 import type { SecretBoxLike, WebContext } from "./context.ts";
 import {
   readChannelsConfig,
@@ -62,10 +65,17 @@ export interface WebHostOptions {
   staticDir: string;
   publicProxyUrl: string;
   deviceIdentity: DeviceIdentity;
+  /**
+   * 桌面（Electron）宿主能力。提供时命令面升级为「桌面超集」：
+   * 桌面注册表命中优先，其余回落到 Web 命令。Web Host / Docker 不传。
+   */
+  desktop?: DesktopRuntime;
 }
 
 export interface WebHost {
   listen(addr: string): Promise<void>;
+  /** 实际监听地址；端口传 0 时由系统分配，桌面宿主靠它拿真实端口。未监听时为 null。 */
+  address(): { host: string; port: number } | null;
   close(): Promise<void>;
   /** Host 维护任务（余额/目录/清理）共享的上下文。 */
   context: WebContext;
@@ -234,7 +244,14 @@ export function createWebHost(options: WebHostOptions): WebHost {
     customScrapeChannels: null,
     secrets: options.secrets,
     cliAuth,
+    desktop: options.desktop,
   };
+
+  // 库里有记录（含「已关闭」的墓碑）就以库为准，没有记录才用环境变量当种子。
+  if (hasStoredGithubProvider(options.storage)) {
+    auth.applyGithubConfig(readGithubProvider(options.storage, options.secrets));
+  }
+  ctx.auth = auth;
 
   let server: Server | null = null;
 
@@ -250,7 +267,9 @@ export function createWebHost(options: WebHostOptions): WebHost {
     if (
       pathname === "/api/auth/config" ||
       pathname === "/api/auth/login" ||
-      pathname === "/api/auth/callback"
+      pathname === "/api/auth/callback" ||
+      // 多提供方：/api/auth/callback/<provider>（GitHub 的回调必须逐个登记）。
+      pathname.startsWith("/api/auth/callback/")
     ) {
       if (method !== "GET" && method !== "HEAD") {
         return sendEmpty(response, 405, { allow: "GET,HEAD" });
@@ -449,13 +468,32 @@ export function createWebHost(options: WebHostOptions): WebHost {
         );
       }
 
+      // 角色闸门：只读账号只能跑读类命令，写配置 / 读凭据一律 403。
+      if (
+        context !== null &&
+        context.identity !== null &&
+        (context.identity.role ?? "admin") === "viewer" &&
+        !viewerCanRunCommand(command)
+      ) {
+        request.resume();
+        return sendJson(
+          response,
+          403,
+          { code: "forbidden", message: "当前账号只有只读权限，不能执行该操作" },
+          { noStore: true, head: false },
+        );
+      }
+
       // 命令路由：鉴权通过后才读取 body（与 axum extractor 顺序一致）。
       const body = await readJsonBody(request);
       if (!body.ok) {
         return sendText(response, body.status, body.text, { noStore: true, head: false });
       }
       try {
-        const result = await dispatch(ctx, command, body.value);
+        const result =
+          ctx.desktop !== undefined && hasDesktopCommand(command)
+            ? await dispatchDesktop(ctx, command, body.value as JsonRow)
+            : await dispatch(ctx, command, body.value);
         return sendJson(response, 200, result, { noStore: true, head: false });
       } catch (error) {
         if (error instanceof CommandError) {
@@ -528,6 +566,11 @@ export function createWebHost(options: WebHostOptions): WebHost {
           resolve();
         });
       });
+    },
+    address(): { host: string; port: number } | null {
+      const bound = server?.address();
+      if (bound === null || bound === undefined || typeof bound === "string") return null;
+      return { host: bound.address, port: bound.port };
     },
     close(): Promise<void> {
       const active = server;

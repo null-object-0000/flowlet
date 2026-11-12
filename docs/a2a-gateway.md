@@ -125,3 +125,5 @@ node scripts/desktop-command-parity.mjs
 - 线上 SQLite 在线备份及关键配置位于数据卷 `/data/backups/a2a-20261112-bf06412/`；
   原镜像 `flowlet:node-20261110-settingsnav2` 保留，可按部署技能回滚。
 - 此次发布网关本身，未在服务器安装或常驻百晓生封装；注册时仍需提供网关可访问的外部 Agent 地址。
+- 同日更新左侧导航入口：提交 `a937589`，前端镜像 `flowlet:node-20261112-a2a-sidebar-a937589`；
+  在「工作台」中位于「模型服务」下方，Web 路由白名单和中英文导航同步。

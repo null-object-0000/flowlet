@@ -4,7 +4,7 @@
 > **Node Host**（`packages/flowlet-core`，Node 26 直接执行 TypeScript）。迁移目标是行为等价替换：
 > 镜像不再包含 Rust 工具链与编译产物，环境变量、端口、`/data` 数据卷、SQLite schema、管理端
 > 鉴权（token / GitLab OIDC）全部保持相同契约。当前线上实例（10.100.217.60）于 **2026-11-12 更新通用 A2A 网关**，
-> 镜像 `flowlet:node-20261112-a2a-bf06412`（回滚点 `flowlet:node-20261110-settingsnav2`）。Node Host 于 2026-11-10 首次上线。实现契约见 [migration/node-host.md](migration/node-host.md)，
+> 镜像 `flowlet:node-20261112-a2a-sidebar-a937589`（回滚点 `flowlet:node-20261112-a2a-bf06412`）。Node Host 于 2026-11-10 首次上线。实现契约见 [migration/node-host.md](migration/node-host.md)，
 > 镜像与冒烟记录见 [migration/docker-node.md](migration/docker-node.md)。
 
 Docker 版由独立服务和 React 管理界面组成，不需要 Tauri、GTK、显示服务或桌面登录会话。

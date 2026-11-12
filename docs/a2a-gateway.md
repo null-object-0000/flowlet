@@ -138,7 +138,8 @@ node scripts/desktop-command-parity.mjs
 验证发现该 facade 的自动生成首轮 context 与内部会话绑定存在问题；使用客户端生成的 contextId
 可正常续聊，Flowlet 不对该问题做上游专属补丁。
 
-协议依据：[A2A v1 specification](https://a2a-protocol.org/latest/specification/)。
+协议依据：[A2A 1.0 specification](https://a2a-protocol.org/v1.0.0/specification/)、
+[1.0.0 a2a.proto](https://github.com/a2aproject/A2A/blob/v1.0.0/specification/a2a.proto)。
 
 ## 线上部署记录（2026-11-12）
 
@@ -158,3 +159,20 @@ node scripts/desktop-command-parity.mjs
   `references/server-deployment.md`，百晓生上游票据仍有七天有效期。
 - 同日更新左侧导航入口：提交 `a937589`，前端镜像 `flowlet:node-20261112-a2a-sidebar-a937589`；
   在「工作台」中位于「模型服务」下方，Web 路由白名单和中英文导航同步。
+
+## 标准操作补齐与发布（2026-11-12）
+
+- 源码提交 `016ba24`，生产镜像 `flowlet:node-20261112-a2a-standard-016ba24`；
+  只覆盖 `a2a/gateway.ts`、`a2a/network.ts`、`a2a/protocol.ts`，三个文件镜像 SHA-256 校验通过。
+- 本地及 canary 镜像内各通过 23 项协议测试，覆盖全部标准操作转发、可选能力拒绝、
+  扩展 Card 改写、标准错误保留、版本/扩展协商、文件/结构化内容透传、正常暂停与断流观测。
+  前后端类型检查、A2A 前端 2 项测试、Web 构建通过；未修改 Rust、前端、数据库结构或配置字段。
+- 发布前在线备份 `/data/backups/a2a-standard-20261112-016ba24/`，以独立数据卷还原并验证 canary；
+  14 个渠道账号、11 条服务凭据保留。生产 `/health` healthy、OIDC-only、模型列表及流式回归 3/3。
+- 主实例切换最长健康探测间隔 3.16 秒；`flowlet-egress` 和 `aiops-a2a` 容器及启动时间未变。
+- 使用 CLI 凭据经生产 `/a2a/aiops` 验证标准 Card、六种不支持响应、缺版本错误、无凭据 401，
+  两轮真实问答保持同一 context 与百晓生 conversation；CLI 凭据导出仍正常。
+- **兼容变化**：外部 RPC 必须显式发送 `A2A-Version: 1.0`，不再把缺失版本的客户端静默当作 1.0。
+  百晓生业务端点资料另存独立封装；本次未增加其上传、停止、删除或追问建议实现。
+- 可回滚至 `flowlet:node-20261112-a2a-sidebar-a937589`；已有 Agent 配置无需迁移，
+  保存配置与撤销密钥仍热生效，代码升级通过 Host 重启生效。

@@ -111,3 +111,17 @@ node scripts/desktop-command-parity.mjs
 可正常续聊，Flowlet 不对该问题做上游专属补丁。
 
 协议依据：[A2A v1 specification](https://a2a-protocol.org/latest/specification/)。
+
+## 线上部署记录（2026-11-12）
+
+- 代码提交：`bf06412`；镜像：`flowlet:node-20261112-a2a-bf06412`。
+- 入口：`http://10.100.217.60:20134/#/a2a`，仍由原 OIDC 管理登录保护。
+- 发布前以线上一致性备份在独立 canary 验证升级：14 个渠道账号、10 条服务凭据保留；
+  通用 A2A 注册、上游 Bearer 注入、调用密钥授权、Card 改写、消息、任务查询/列表/取消、
+  SSE、日志与撤销通过；模型列表及一次真实模型流式调用通过。
+- 镜像内 673 个交付文件 SHA-256 校验通过；运行用户、入口、端口、健康检查与卷契约保持一致。
+- 主容器切换观测不可用窗口约 3.14 秒；发布后 healthy，OIDC 配置保留，模型流式回归 3/3。
+  主实例账号/凭据数量保持 14/10，`flowlet-egress` 的容器 ID 与启动时间未变。
+- 线上 SQLite 在线备份及关键配置位于数据卷 `/data/backups/a2a-20261112-bf06412/`；
+  原镜像 `flowlet:node-20261110-settingsnav2` 保留，可按部署技能回滚。
+- 此次发布网关本身，未在服务器安装或常驻百晓生封装；注册时仍需提供网关可访问的外部 Agent 地址。

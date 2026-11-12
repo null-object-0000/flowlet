@@ -35,11 +35,16 @@ function child(
   for (const key of ["FLOWLET_A2A_TEST_URL", "FLOWLET_A2A_TEST_TOKEN"])
     delete env[key];
   Object.assign(env, extraEnv);
-  const selection = args.some(
-    (arg) => arg === "--prefix" || arg.startsWith("--prefix="),
-  )
-    ? []
-    : ["--profile=TEST"];
+  const selection =
+    args.some(
+      (arg) =>
+        arg === "--prefix" ||
+        arg.startsWith("--prefix=") ||
+        arg === "--profile" ||
+        arg.startsWith("--profile="),
+    ) || args[0] === "list"
+      ? []
+      : ["--profile=TEST"];
   const processHandle = spawn(
     process.execPath,
     [CLI, "a2a", ...args, ...selection],
@@ -106,6 +111,14 @@ before(async () => {
       );
     };
     if (req.method === "GET") {
+      if (req.url?.startsWith("/unreachable")) {
+        res.writeHead(503);
+        res.end("{}");
+        return;
+      }
+      if (req.url?.startsWith("/hanging")) {
+        return;
+      }
       if (mode === "redirect") {
         res.writeHead(302, { location: base + "/file.txt" });
         res.end();
@@ -127,7 +140,17 @@ before(async () => {
             },
           ],
           capabilities: { streaming: true, extendedAgentCard: true },
-          skills: [],
+          skills: [
+            {
+              id: "research",
+              name: "Research",
+              description:
+                mode === "list-secrets"
+                  ? "Research " + TOKEN
+                  : "Independent research",
+              tags: ["analysis"],
+            },
+          ],
         }),
       );
       return;
@@ -295,6 +318,122 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 describe("generic A2A CLI through actual subprocess and HTTP boundaries", () => {
+  it("lists agents and declared skills without a preselected profile and returns usable selectors", async () => {
+    const store = new CredentialStore(dir);
+    store.set("FLOWLET_A2A_URL", base + "/rpc", "service", null);
+    store.set("FLOWLET_A2A_TOKEN", TOKEN, "api_key", null);
+    store.set("DOCKHAND_URL", base + "/unrelated", "service", null);
+    store.set("DOCKHAND_TOKEN", TOKEN, "api_key", null);
+    mode = "list-secrets";
+    const result = await run(["list"]);
+    assert.equal(result.code, 0, result.stderr);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.total, 2);
+    assert.equal(report.available, 2);
+    const research = report.agents.find((a: any) => a.profile === "TEST");
+    assert.ok(research);
+    assert.equal(research.prefix, "FLOWLET_A2A_TEST");
+    assert.equal(research.name, "Independent research agent");
+    assert.equal(research.skills[0].name, "Research");
+    assert.deepEqual(research.skills[0].tags, ["analysis"]);
+    assert.deepEqual(research.invoke, {
+      command: "flowlet",
+      args: ["a2a", "send", "<message>", "--profile=TEST"],
+    });
+    assert.ok(!result.stdout.includes(TOKEN));
+    assert.ok(!result.stdout.includes("DOCKHAND"));
+    const defaultAgent = report.agents.find(
+      (a: any) => a.prefix === "FLOWLET_A2A",
+    );
+    assert.equal(defaultAgent.profile, null);
+    assert.deepEqual(defaultAgent.invoke.args, ["a2a", "send", "<message>"]);
+    const invoked = await run([
+      ...research.invoke.args
+        .slice(1)
+        .map((arg: string) => (arg === "<message>" ? "discovered agent" : arg)),
+      "--async",
+    ]);
+    assert.equal(invoked.code, 0, invoked.stderr);
+  });
+  it("isolates unavailable, incomplete and timed-out agents while keeping healthy results", async () => {
+    const store = new CredentialStore(dir);
+    store.set("FLOWLET_A2A_BAD_URL", base + "/unreachable", "service", null);
+    store.set("FLOWLET_A2A_BAD_TOKEN", TOKEN, "api_key", null);
+    store.set("FLOWLET_A2A_SLOW_URL", base + "/hanging", "service", null);
+    store.set("FLOWLET_A2A_SLOW_TOKEN", TOKEN, "api_key", null);
+    store.set("FLOWLET_A2A_MISSING_URL", base + "/rpc", "service", null);
+    const result = await run(["list", "--timeout=1"]);
+    assert.equal(result.code, 0, result.stderr);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.total, 4);
+    assert.equal(report.available, 1);
+    assert.equal(report.unavailable, 3);
+    assert.equal(
+      report.agents.find((a: any) => a.profile === "TEST").available,
+      true,
+    );
+    assert.match(
+      report.agents.find((a: any) => a.profile === "BAD").error,
+      /503/,
+    );
+    assert.match(
+      report.agents.find((a: any) => a.profile === "SLOW").error,
+      /超时/,
+    );
+    assert.match(
+      report.agents.find((a: any) => a.profile === "MISSING").error,
+      /缺少/,
+    );
+    assert.ok(!result.stdout.includes(TOKEN));
+  });
+  it("supports explicit custom prefixes and environment-only discovery without probing unrelated credentials", async () => {
+    const store = new CredentialStore(dir);
+    store.set("CUSTOM_AGENT_URL", base + "/rpc", "service", null);
+    store.set("CUSTOM_AGENT_TOKEN", TOKEN, "api_key", null);
+    let result = await run(["list", "--prefix=CUSTOM_AGENT"]);
+    assert.equal(result.code, 0, result.stderr);
+    const row = JSON.parse(result.stdout).agents[0];
+    assert.equal(row.prefix, "CUSTOM_AGENT");
+    assert.equal(row.profile, null);
+    assert.deepEqual(row.invoke.args, [
+      "a2a",
+      "send",
+      "<message>",
+      "--prefix=CUSTOM_AGENT",
+    ]);
+    result = await child(["list"], undefined, {
+      FLOWLET_A2A_ENV_URL: base + "/rpc",
+      FLOWLET_A2A_ENV_TOKEN: TOKEN,
+    }).result;
+    assert.equal(
+      JSON.parse(result.stdout).agents.find((a: any) => a.profile === "ENV")
+        .available,
+      true,
+    );
+    result = await child(["list"], undefined, {
+      FLOWLET_A2A_ENV_URL: base + "/rpc",
+    }).result;
+    assert.match(
+      JSON.parse(result.stdout).agents.find((a: any) => a.profile === "ENV")
+        .error,
+      /成对提供/,
+    );
+    result = await run(["list", "--profile=TEST"]);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).total, 1);
+  });
+  it("lists an empty vault without requiring a default profile or creating state", async () => {
+    const store = new CredentialStore(dir);
+    store.unset("FLOWLET_A2A_TEST_URL");
+    store.unset("FLOWLET_A2A_TEST_TOKEN");
+    const result = await run(["list"]);
+    assert.equal(result.code, 0, result.stderr);
+    const report = JSON.parse(result.stdout);
+    assert.deepEqual(report.agents, []);
+    assert.equal(report.total, 0);
+    assert.match(report.hint, /flowlet pull/);
+    assert.equal(existsSync(path.join(dir, "a2a-sessions")), false);
+  });
   it("discovers a standard interface and waits for tasks without resending messages", async () => {
     let r = await run(["discover"]);
     assert.equal(r.code, 0, r.stderr);

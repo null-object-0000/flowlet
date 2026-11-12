@@ -48,7 +48,7 @@ Agent Card 在验证保存时刷新；上游能力变化后应重新验证保存
 
 ## 本地 Agent 调用
 
-Node CLI 原生提供 `flowlet a2a discover/send/tasks/session/rpc`，直接读取已同步的通用 URL/Bearer 凭据。
+Node CLI 原生提供 `flowlet a2a list/discover/send/tasks/session/rpc`，直接读取已同步的通用 URL/Bearer 凭据。
 使用说明见 [a2a-cli.md](a2a-cli.md)。CLI 仅实现标准 A2A 1.0 JSON-RPC/SSE，不包含任何特定 Agent 的上传、
 换票、内部会话或业务 API；各 Agent 的输入格式、权限与任务语义仍由其独立服务负责。
 

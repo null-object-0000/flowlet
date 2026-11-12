@@ -9,8 +9,45 @@ Rust legacy CLI 不增加此功能；Node CLI 运行要求仍为 Node.js 22.6+�
 ```bash
 flowlet login --server=http://10.100.217.60:20134
 flowlet pull --server=http://10.100.217.60:20134
+
+# 无需预先知道任何 profile 名称
+flowlet a2a list
+
+# 根据列表返回的 profile 继续调用
 flowlet a2a discover --profile=AIOPS
 ```
+
+`list` 从本机凭据库和环境变量中枚举 `FLOWLET_A2A_URL/TOKEN` 与
+`FLOWLET_A2A_<PROFILE>_URL/TOKEN`，读取各目标的 Agent Card。输出 JSON 包含 `agents`、
+`total`、`available`、`unavailable`；每条含 name、description、version、skills、profile、prefix、url，
+以及可复用的 `invoke.command` / `invoke.args`。调用方替换 args 中的 `<message>` 即可发送请求。
+
+```json
+{
+  "agents": [{
+    "name": "运维百晓生",
+    "profile": "AIOPS",
+    "prefix": "FLOWLET_A2A_AIOPS",
+    "available": true,
+    "skills": [{"id":"aiops.ops-qa","name":"运维问答","tags":["ops","troubleshooting"]}],
+    "invoke": {"command":"flowlet","args":["a2a","send","<message>","--profile=AIOPS"]}
+  }],
+  "total": 1,
+  "available": 1,
+  "unavailable": 0
+}
+```
+
+技能取自 Agent Card 声明。`available` 表示配置完整且 Card 发现验证成功；经网关读取的 Card
+可能是缓存，实际业务执行状态由任务结果表达。列举只读取发现信息。
+
+单个配置缺失、认证失败、不可达或超时，保留为 `available: false` 与 `error`，其他条目继续发现。
+默认最多4个并发，每个 Agent 10秒超时，可用 `--timeout` 调整。输出按凭据前缀排序；空列表给出
+login/pull 提示。成功完成枚举退出0（包括部分或全部条目不可用），调用方按 available 字段选择。
+
+自动枚举限于 A2A 命名空间。自定义环境前缀可显式使用 `flowlet a2a list --prefix=MY_AGENT`；
+`--profile=NAME` 只列所选配置。默认前缀条目的 profile 为 null，调用参数无需 profile；
+自定义前缀条目使用返回的 --prefix 参数。列表不包含 token、安全配置或其他服务的凭据。
 
 `--profile=AIOPS` 读取 `FLOWLET_A2A_AIOPS_URL` / `_TOKEN`；不传时读取 `FLOWLET_A2A_URL` / `_TOKEN`。
 也可用 `--prefix=MY_AGENT` 指向任意已有前缀，两者互斥。可从凭据库读取，或用同前缀的成对环境变量

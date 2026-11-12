@@ -85,6 +85,9 @@ flowlet pull --server=<origin> [--dry-run]       # 自动使用 login 的本机�
 flowlet login --server=http://<Flowlet 地址>:20134
 flowlet pull --server=http://<Flowlet 地址>:20134
 
+# 先从本机同步配置发现 Agent、技能、profile 和调用参数
+flowlet a2a list
+
 # --profile=RESEARCH 对应 FLOWLET_A2A_RESEARCH_URL / FLOWLET_A2A_RESEARCH_TOKEN
 # 已有任意环境前缀则使用 --prefix=MY_AGENT（与 --profile 互斥）
 flowlet a2a discover --profile=RESEARCH
@@ -102,6 +105,7 @@ flowlet a2a tasks list --profile=RESEARCH --page-size=10
 flowlet a2a session show --profile=RESEARCH --session=demo
 ```
 
+- list 自动枚举 FLOWLET_A2A 命名空间；可用性表示 Card 发现成功，单个失败单独列 error。自定义前缀可用 list --prefix 指定。
 - 普通输出为 JSON，`send --stream` / `tasks subscribe` 输出 NDJSON 标准事件；所有请求发送 A2A-Version: 1.0。
 - send 默认等待任务结束；异步返回用 --async；查询/取消返回标准 Task，SendMessage 返回 `{task: ...}` 或 `{message: ...}`。
 - 每个 Agent 会话使用独立 --session 名称；也可显式 --state=FILE、--context=ID。续聊不回传旧 taskId；

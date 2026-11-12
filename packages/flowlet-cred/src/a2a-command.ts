@@ -12,9 +12,12 @@ import {
 } from "./a2a.ts";
 import { CredentialStore } from "./store.ts";
 import { SessionFile, type A2aSession } from "./a2a-session.ts";
+import { readA2aConfig } from "./a2a-config.ts";
+import { listA2aAgents } from "./a2a-list.ts";
 
 export const A2A_USAGE = `flowlet a2a — A2A 1.0 JSON-RPC + SSE 客户端
 
+  flowlet a2a list [--profile=NAME | --prefix=PREFIX]
   flowlet a2a discover [--extended]
   flowlet a2a send "消息" [--session=NAME | --state=FILE] [--new | --context=ID]
                    [--task=ID] [--file=PATH ...] [--file-url=URL ...] [--media-type=MIME]
@@ -28,7 +31,7 @@ export const A2A_USAGE = `flowlet a2a — A2A 1.0 JSON-RPC + SSE 客户端
 公共选项：
   --profile=NAME       读取 FLOWLET_A2A_<NAME>_URL / _TOKEN；默认 FLOWLET_A2A_URL / _TOKEN
   --prefix=PREFIX      使用已有凭据环境前缀，与 --profile 互斥
-  --timeout=SECONDS    整次命令超时，默认900秒（不自动重发消息）
+  --timeout=SECONDS    整次命令超时，默认900秒；list 为每个 Agent 10秒（不自动重发消息）
   --poll-ms=N          等待任务的轮询间隔，默认500毫秒
   --card-url=URL       覆盖 Card URL，必须与配置地址同源
   --extensions=URIS   显式声明接受的 A2A 扩展，逗号分隔
@@ -188,7 +191,7 @@ export async function a2aCommand(args: string[]): Promise<number> {
   const flag = (key: string) => v[key] === true;
   const verb = p[0],
     action = p[1];
-  if (!["discover", "send", "tasks", "session", "rpc"].includes(verb))
+  if (!["list", "discover", "send", "tasks", "session", "rpc"].includes(verb))
     throw new Error("未知 A2A 子命令：" + verb);
   if (
     verb === "tasks" &&
@@ -257,20 +260,51 @@ export async function a2aCommand(args: string[]): Promise<number> {
   if (!/^[A-Z][A-Z0-9_]{0,63}$/.test(prefix))
     throw new Error("A2A 凭据前缀无效");
   const store = CredentialStore.fromDefaultDir();
-  const urlKey = prefix + "_URL",
-    tokenKey = prefix + "_TOKEN";
-  const envUrl = process.env[urlKey],
-    envToken = process.env[tokenKey];
-  if ((envUrl !== undefined) !== (envToken !== undefined))
-    throw new Error(
-      `环境变量 ${urlKey}/${tokenKey} 必须成对提供，不能与凭据库混用`,
-    );
-  const url = (envUrl ?? store.get(urlKey))?.trim(),
-    token = (envToken ?? store.get(tokenKey))?.trim();
-  if (!url || !token)
-    throw new Error(
-      `缺少 ${urlKey}/${tokenKey}；请先 flowlet login / flowlet pull，或指定已有 --prefix`,
-    );
+  if (verb === "list") {
+    const allowed = new Set([
+      "profile",
+      "prefix",
+      "timeout",
+      "insecure",
+      "card-url",
+      "extensions",
+      "json",
+    ]);
+    for (const key of Object.keys(v))
+      if (!allowed.has(key)) throw new Error("--" + key + " 不适用于 a2a list");
+    const timeoutSeconds = integer(str("timeout"), 10, 1, 3600, "--timeout");
+    const controller = new AbortController();
+    const interrupt = () => controller.abort("SIGINT"),
+      terminate = () => controller.abort("SIGTERM");
+    process.once("SIGINT", interrupt);
+    process.once("SIGTERM", terminate);
+    try {
+      await output(
+        await listA2aAgents(store, {
+          prefix:
+            str("profile") !== undefined || str("prefix") !== undefined
+              ? prefix
+              : undefined,
+          timeoutSeconds,
+          signal: controller.signal,
+          insecure: flag("insecure"),
+          extensions: str("extensions"),
+          cardUrl: str("card-url"),
+        }),
+      );
+      return 0;
+    } catch (error) {
+      if (controller.signal.aborted) {
+        process.stderr.write("A2A 发现已中断\n");
+        return controller.signal.reason === "SIGTERM" ? 143 : 130;
+      }
+      throw error;
+    } finally {
+      process.off("SIGINT", interrupt);
+      process.off("SIGTERM", terminate);
+    }
+  }
+  const { url, token } = readA2aConfig(store, prefix);
   const configured = a2aUrl(url).href;
   const session =
     str("session") !== undefined || str("state") !== undefined

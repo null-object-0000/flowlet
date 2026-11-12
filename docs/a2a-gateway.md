@@ -124,6 +124,9 @@ node scripts/desktop-command-parity.mjs
   主实例账号/凭据数量保持 14/10，`flowlet-egress` 的容器 ID 与启动时间未变。
 - 线上 SQLite 在线备份及关键配置位于数据卷 `/data/backups/a2a-20261112-bf06412/`；
   原镜像 `flowlet:node-20261110-settingsnav2` 保留，可按部署技能回滚。
-- 此次发布网关本身，未在服务器安装或常驻百晓生封装；注册时仍需提供网关可访问的外部 Agent 地址。
+- 首次发布只部署网关；同日后续已在独立 Dockhand stack `aiops-a2a` 常驻百晓生封装，
+  并登记为 Agent `aiops`，入口 `/a2a/aiops`。外部封装负责认证与会话持久化，Flowlet 产品代码未增加专属逻辑。
+  经真实网关验证单轮、多轮、容器重启后续聊与 SSE；封装运维及票据续期见独立 `aiops-assistant` 技能的
+  `references/server-deployment.md`，百晓生上游票据仍有七天有效期。
 - 同日更新左侧导航入口：提交 `a937589`，前端镜像 `flowlet:node-20261112-a2a-sidebar-a937589`；
   在「工作台」中位于「模型服务」下方，Web 路由白名单和中英文导航同步。

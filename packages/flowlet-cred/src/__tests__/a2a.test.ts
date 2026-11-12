@@ -446,6 +446,13 @@ describe("generic A2A CLI through actual subprocess and HTTP boundaries", () => 
     assert.equal(JSON.parse(readFileSync(state, "utf8")).taskId, "task-1");
     assert.equal(existsSync(state + ".lock"), false);
   });
+  it("reports recoverable task IDs even without a local session file", async () => {
+    const result = await run(["send", "hold", "--timeout=1", "--poll-ms=100"]);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /taskId=task-1/);
+    assert.match(result.stderr, /contextId=context-1/);
+    assert.equal(requests.filter((r) => r.method === "SendMessage").length, 1);
+  });
   it("serializes sends to the same session while allowing another CLI to cancel", async () => {
     const state = path.join(dir, "busy.json");
     const active = child(["send", "hold", "--state=" + state, "--poll-ms=50"]);

@@ -321,11 +321,22 @@ export async function a2aCommand(args: string[]): Promise<number> {
     extensions: str("extensions"),
   });
   let unlock: (() => void) | undefined;
+  let knownTaskId: string | undefined, knownContextId: string | undefined;
   try {
     let state: A2aSession | null = null;
     if (verb === "send") unlock = session?.lock();
     if (!flag("new")) state = session?.read() ?? null;
     const observe = (value: A2aObject) => {
+      const item = object(
+        value.task ??
+          value.message ??
+          value.statusUpdate ??
+          value.artifactUpdate ??
+          value,
+      );
+      if (typeof item.id === "string" && item.status) knownTaskId = item.id;
+      if (typeof item.taskId === "string") knownTaskId = item.taskId;
+      if (typeof item.contextId === "string") knownContextId = item.contextId;
       if (session && verb === "send") state = session.save(state, value);
     };
     await client.discover(str("card-url"));
@@ -470,6 +481,7 @@ export async function a2aCommand(args: string[]): Promise<number> {
     const id = p[2] ?? state?.taskId;
     if (!id)
       throw new Error("请提供 TASK_ID，或指定已有任务的 --session / --state");
+    knownTaskId = id;
     if (action === "subscribe") return await stream("SubscribeToTask", { id });
     if (action === "cancel") {
       await output(await client.call("CancelTask", { id }));
@@ -483,17 +495,25 @@ export async function a2aCommand(args: string[]): Promise<number> {
     await output(task);
     return action === "wait" ? taskExit(task) : 0;
   } catch (error) {
+    const recovery = [
+      knownTaskId ? `taskId=${knownTaskId}` : "",
+      knownContextId ? `contextId=${knownContextId}` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    const hint = recovery ? "；" + recovery : "";
     if (controller.signal.aborted) {
       process.stderr.write(
-        "调用已中断；上游任务未自动取消，请使用 tasks get 查询\n",
+        "调用已中断；上游任务未自动取消，请使用 tasks get 查询" + hint + "\n",
       );
       return controller.signal.reason === "SIGTERM" ? 143 : 130;
     }
     if (signal.aborted)
       throw new Error(
-        "A2A 等待超时；任务可能继续执行，请使用 tasks get 查询，未自动重发消息",
+        "A2A 等待超时；任务可能继续执行，请使用 tasks get 查询，未自动重发消息" +
+          hint,
       );
-    throw new Error(client.clean(error));
+    throw new Error(client.clean(error) + hint);
   } finally {
     unlock?.();
     await client.close();

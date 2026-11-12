@@ -43,6 +43,7 @@ printf '%s' '从 stdin 读取的问题' | flowlet a2a send --stdin --profile=RES
 
 `--async` 只提交并返回，`--stream` 使用 SendStreamingMessage，输出逐行 JSON（NDJSON）标准事件。
 两者互斥。消息不会因网络错误、5xx、超时或断流而自动重新提交；`--timeout` 是整次命令的总时限。
+超时或中断后，错误信息包含已获知的 taskId/contextId，即使未指定本地会话文件也可继续查询。
 
 附件使用标准 raw/base64 Part，URL 附件只传 url Part，CLI 不下载。类型按扩展名推断，未知类型
 按 application/octet-stream 发送；恰好一个附件时可用 `--media-type=MIME` 指定类型。

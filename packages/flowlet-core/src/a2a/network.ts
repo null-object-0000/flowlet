@@ -68,6 +68,7 @@ export async function a2aRequest(
     allowPrivate: boolean;
     token?: string;
     body?: string;
+    extensions?: string;
     signal: AbortSignal;
   },
 ) {
@@ -100,6 +101,7 @@ export async function a2aRequest(
         accept: "application/json, text/event-stream",
         "accept-encoding": "identity",
         "a2a-version": "1.0",
+        ...(options.extensions ? { "a2a-extensions": options.extensions } : {}),
         ...(options.body === undefined
           ? {}
           : { "content-type": "application/json" }),

@@ -5,6 +5,15 @@ import type { WebContext } from "../web/context.ts";
 import { CommandError } from "../types.ts";
 import { A2aStore, type A2aAgent, type A2aCall } from "../storage/a2a.ts";
 import { a2aRequest, parseHttpUrl, readLimited } from "./network.ts";
+import {
+  METHODS,
+  PUSH_METHODS,
+  RpcError,
+  gatewayCard,
+  validateCapabilities,
+  validateAgentCard,
+  type ServiceParameters,
+} from "./protocol.ts";
 
 type ObjectValue = Record<string, unknown>;
 const object = (value: unknown): ObjectValue =>
@@ -13,25 +22,7 @@ const object = (value: unknown): ObjectValue =>
     : {};
 const hash = (token: string) =>
   createHash("sha256").update(token).digest("hex");
-const METHODS = new Set([
-  "SendMessage",
-  "SendStreamingMessage",
-  "GetTask",
-  "ListTasks",
-  "CancelTask",
-  "SubscribeToTask",
-]);
 const ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
-
-class RpcError extends Error {
-  code: number;
-  id: unknown;
-  constructor(code: number, message: string, id: unknown = null) {
-    super(message);
-    this.code = code;
-    this.id = id;
-  }
-}
 
 export interface A2aAgentInput {
   id: string;
@@ -117,6 +108,8 @@ export class A2aObserver {
           "TASK_STATE_FAILED",
           "TASK_STATE_CANCELED",
           "TASK_STATE_REJECTED",
+          "TASK_STATE_INPUT_REQUIRED",
+          "TASK_STATE_AUTH_REQUIRED",
         ].includes(this.state)
       )
         this.finished = true;
@@ -204,30 +197,7 @@ export class A2aGateway {
       const card = object(
         JSON.parse(await readLimited(upstream.body, 512 * 1024)),
       );
-      const strings = (value: unknown) =>
-        Array.isArray(value) && value.every((item) => typeof item === "string");
-      if (
-        typeof card.name !== "string" ||
-        !card.name ||
-        typeof card.description !== "string" ||
-        typeof card.version !== "string" ||
-        !card.capabilities ||
-        !strings(card.defaultInputModes) ||
-        !strings(card.defaultOutputModes) ||
-        !Array.isArray(card.skills) ||
-        card.skills.some((skill) => {
-          const value = object(skill);
-          return (
-            typeof value.id !== "string" ||
-            typeof value.name !== "string" ||
-            typeof value.description !== "string" ||
-            !strings(value.tags)
-          );
-        })
-      )
-        throw new Error(
-          "Agent Card 缺少有效的名称、版本、能力、输入输出模式或技能声明",
-        );
+      validateAgentCard(card);
       const iface = (
         Array.isArray(card.supportedInterfaces) ? card.supportedInterfaces : []
       )
@@ -305,7 +275,8 @@ export class A2aGateway {
     if (!METHODS.has(rpc.method))
       throw new RpcError(-32601, "该 A2A 方法尚不支持", rpc.id);
     if (
-      (rpc.params === undefined && rpc.method !== "ListTasks") ||
+      (rpc.params === undefined &&
+        !["ListTasks", "GetExtendedAgentCard"].includes(rpc.method)) ||
       (rpc.params !== undefined &&
         (rpc.params === null ||
           typeof rpc.params !== "object" ||
@@ -355,8 +326,15 @@ export class A2aGateway {
     agent: A2aAgent,
     body: string,
     keyId: string,
-    emit: (chunk: Buffer, status: number, contentType: string) => Promise<void>,
+    emit: (
+      chunk: Buffer,
+      status: number,
+      contentType: string,
+      extensions?: string,
+    ) => Promise<void>,
     signal?: AbortSignal,
+    service: ServiceParameters = { version: "1.0" },
+    publicUrl?: string,
   ) {
     const rpc = this.parseRpc(body);
     const observer = new A2aObserver();
@@ -384,12 +362,14 @@ export class A2aGateway {
     const jsonChunks: Buffer[] = [];
     let jsonSize = 0;
     try {
+      validateCapabilities(agent.card, rpc, service);
       upstream = await a2aRequest(agent.endpoint, {
         allowPrivate: agent.allowPrivateNetwork,
         token: agent.tokenCipher
           ? this.ctx.secrets.decrypt(agent.tokenCipher)
           : undefined,
         body,
+        extensions: service.extensions,
         signal: combined,
       });
       call.httpStatus = upstream.statusCode;
@@ -398,10 +378,26 @@ export class A2aGateway {
       );
       const streaming = contentType.includes("text/event-stream");
       const isJson = contentType.includes("json");
-      if (upstream.statusCode < 300 && !streaming && !isJson)
-        throw new Error("上游未返回 JSON 或 SSE 响应");
-      // Flush status even for an empty HTTP error body.
-      await emit(Buffer.alloc(0), upstream.statusCode, contentType);
+      const successful =
+        upstream.statusCode >= 200 && upstream.statusCode < 300;
+      const acceptedExtensions =
+        typeof upstream.headers["a2a-extensions"] === "string"
+          ? upstream.headers["a2a-extensions"]
+          : undefined;
+      if (successful && !streaming && !isJson)
+        throw new RpcError(
+          -32006,
+          "InvalidAgentResponseError: expected JSON or SSE",
+          rpc.id,
+        );
+      // Buffer JSON before sending headers, so protocol errors and extended cards can be handled safely.
+      if (streaming || !isJson)
+        await emit(
+          Buffer.alloc(0),
+          upstream.statusCode,
+          contentType,
+          acceptedExtensions,
+        );
       for await (const chunk of upstream.body) {
         const bytes = Buffer.from(chunk);
         if (streaming) observer.feed(bytes);
@@ -416,15 +412,72 @@ export class A2aGateway {
           collected.push(part);
           captured += part.length;
         }
-        await emit(bytes, upstream.statusCode, contentType);
+        if (streaming || !isJson)
+          await emit(bytes, upstream.statusCode, contentType);
       }
       if (!streaming && isJson && jsonSize) {
+        let value: ObjectValue = {};
+        const raw = Buffer.concat(jsonChunks);
         try {
-          observer.observe(JSON.parse(Buffer.concat(jsonChunks).toString()));
+          value = object(JSON.parse(raw.toString()));
+          if (
+            successful &&
+            (value.jsonrpc !== "2.0" ||
+              value.id !== rpc.id ||
+              (value.result === undefined) === (value.error === undefined))
+          )
+            throw new Error("Invalid JSON-RPC envelope");
         } catch {
-          throw new Error("上游返回了无效 JSON");
+          if (successful)
+            throw new RpcError(
+              -32006,
+              "InvalidAgentResponseError: invalid upstream JSON-RPC response",
+              rpc.id,
+            );
         }
+        let output = raw;
+        // A known A2A operation missing upstream is unsupported, not an unknown client method.
+        if (object(value.error).code === -32601) {
+          value.error = {
+            ...object(value.error),
+            code: PUSH_METHODS.has(String(rpc.method)) ? -32003 : -32004,
+            message: PUSH_METHODS.has(String(rpc.method))
+              ? "PushNotificationNotSupportedError"
+              : "UnsupportedOperationError",
+          };
+          output = Buffer.from(JSON.stringify(value));
+        } else if (
+          successful &&
+          rpc.method === "GetExtendedAgentCard" &&
+          !value.error &&
+          publicUrl
+        ) {
+          try {
+            validateAgentCard(object(value.result));
+          } catch {
+            throw new RpcError(
+              -32006,
+              "InvalidAgentResponseError: invalid extended Agent Card",
+              rpc.id,
+            );
+          }
+          value.result = gatewayCard(
+            object(value.result),
+            publicUrl,
+            this.iface(agent),
+          );
+          output = Buffer.from(JSON.stringify(value));
+        }
+        observer.observe(value);
+        await emit(
+          output,
+          upstream.statusCode,
+          contentType,
+          acceptedExtensions,
+        );
       }
+      if (!streaming && isJson && !jsonSize)
+        await emit(Buffer.alloc(0), upstream.statusCode, contentType);
       if (upstream.statusCode >= 300)
         observer.error ??= `上游 HTTP ${upstream.statusCode}`;
       // A dropped or unfinished stream is not a successfully completed task.
@@ -464,6 +517,19 @@ export class A2aGateway {
       }
     }
   }
+  private iface(agent: A2aAgent): ObjectValue {
+    return (agent.card.supportedInterfaces as ObjectValue[]).find(
+      (i) => i.protocolBinding === "JSONRPC" && i.protocolVersion === "1.0",
+    )!;
+  }
+  private publicUrl(agent: A2aAgent, host?: string): string {
+    const origin =
+      process.env.FLOWLET_PUBLIC_A2A_URL ||
+      (host ? `http://${host}` : undefined);
+    return origin
+      ? new URL(`/a2a/${agent.id}`, parseHttpUrl(origin)).href
+      : `/a2a/${agent.id}`;
+  }
   async invoke(id: string, rpc: unknown) {
     const value = object(rpc);
     if (
@@ -481,6 +547,9 @@ export class A2aGateway {
         chunks.push(bytes);
         status = code;
       },
+      undefined,
+      { version: "1.0" },
+      this.publicUrl(this.agent(id)),
     );
     return { status, body: JSON.parse(Buffer.concat(chunks).toString()) };
   }
@@ -498,6 +567,7 @@ export class A2aGateway {
       response.writeHead(status, {
         "content-type": "application/json",
         "cache-control": "no-store",
+        "a2a-version": "1.0",
       });
       response.end(JSON.stringify(value));
     };
@@ -536,31 +606,7 @@ export class A2aGateway {
         if (root.pathname !== "/")
           throw new Error("FLOWLET_PUBLIC_A2A_URL 必须是根地址");
         const gatewayUrl = new URL(`/a2a/${agent.id}`, root).href;
-        const iface = (agent.card.supportedInterfaces as ObjectValue[]).find(
-          (i) => i.protocolBinding === "JSONRPC" && i.protocolVersion === "1.0",
-        )!;
-        const {
-          signatures: _signatures,
-          securitySchemes: _schemes,
-          security: _security,
-          supportedInterfaces: _interfaces,
-          url: _url,
-          ...card
-        } = agent.card;
-        send(200, {
-          ...card,
-          url: gatewayUrl,
-          supportedInterfaces: [{ ...iface, url: gatewayUrl }],
-          capabilities: {
-            ...object(card.capabilities),
-            pushNotifications: false,
-            extendedAgentCard: false,
-          },
-          securitySchemes: {
-            flowlet: { httpAuthSecurityScheme: { scheme: "bearer" } },
-          },
-          security: [{ flowlet: [] }],
-        });
+        send(200, gatewayCard(agent.card, gatewayUrl, this.iface(agent)));
         return;
       }
       let size = 0;
@@ -585,17 +631,30 @@ export class A2aGateway {
           agent,
           Buffer.concat(chunks).toString(),
           keyId,
-          async (bytes, status, contentType) => {
+          async (bytes, status, contentType, extensions) => {
             if (!response.headersSent)
               response.writeHead(status, {
                 "content-type": contentType,
                 "cache-control": "no-store",
                 "x-accel-buffering": "no",
+                "a2a-version": "1.0",
+                ...(extensions ? { "a2a-extensions": extensions } : {}),
               });
             if (!response.write(bytes))
               await once(response, "drain", { signal: aborted.signal });
           },
           aborted.signal,
+          {
+            version: String(
+              request.headers["a2a-version"] ??
+                new URL(request.url ?? "/", "http://local").searchParams.get(
+                  "A2A-Version",
+                ) ??
+                "",
+            ),
+            extensions: String(request.headers["a2a-extensions"] ?? ""),
+          },
+          this.publicUrl(agent, request.headers.host),
         );
         response.end();
       } finally {

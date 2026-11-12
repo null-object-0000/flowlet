@@ -25,6 +25,12 @@ let received: { body: string; authorization?: string }[] = [];
 let behavior = "normal";
 let endpointOrigin: string | null = null;
 let streamBytes = "";
+let capabilities: Record<string, unknown> = {
+  streaming: true,
+  pushNotifications: true,
+  extendedAgentCard: true,
+};
+let extensionHeader: string | undefined;
 
 function input(id = "research") {
   return {
@@ -67,6 +73,7 @@ async function call(
     headers: {
       authorization: `Bearer ${token}`,
       "content-type": "application/json",
+      "a2a-version": "1.0",
     },
     body: JSON.stringify({ jsonrpc: "2.0", id: "rpc-1", method, params }),
   });
@@ -95,7 +102,7 @@ before(async () => {
               protocolVersion: "1.0",
             },
           ],
-          capabilities: { streaming: true, pushNotifications: true },
+          capabilities,
           skills: [
             {
               id: "research",
@@ -115,6 +122,69 @@ before(async () => {
     received.push({ body, authorization: req.headers.authorization });
     assert.equal(req.headers.authorization, `Bearer ${UPSTREAM}`);
     const rpc = JSON.parse(body);
+    extensionHeader = req.headers["a2a-extensions"] as string | undefined;
+    if (behavior === "missing-method") {
+      res.setHeader("content-type", "application/json");
+      res.end(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: rpc.id,
+          error: { code: -32601, message: "not implemented" },
+        }),
+      );
+      return;
+    }
+    if (behavior === "specific-error") {
+      res.setHeader("content-type", "application/json");
+      res.end(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: rpc.id,
+          error: {
+            code: -32007,
+            message: "ExtendedAgentCardNotConfiguredError",
+            data: [{ "@type": "example", detail: "not configured" }],
+          },
+        }),
+      );
+      return;
+    }
+    if (rpc.method === "GetExtendedAgentCard") {
+      res.setHeader("content-type", "application/json");
+      res.end(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: rpc.id,
+          result: {
+            name: "Extended Research",
+            description: "Extended private skills",
+            version: "1.0",
+            defaultInputModes: ["text/plain"],
+            defaultOutputModes: ["text/plain"],
+            capabilities,
+            supportedInterfaces: [
+              {
+                url: upstream + "/rpc",
+                protocolBinding: "JSONRPC",
+                protocolVersion: "1.0",
+              },
+            ],
+            signatures: [{ signature: "upstream" }],
+            securitySchemes: { private: {} },
+            security: [{ private: [] }],
+            skills: [
+              {
+                id: "private-skill",
+                name: "Private skill",
+                description: "Private skill",
+                tags: [],
+              },
+            ],
+          },
+        }),
+      );
+      return;
+    }
     if (behavior === "empty-error") {
       res.writeHead(429);
       res.end();
@@ -140,6 +210,23 @@ before(async () => {
       if (behavior === "partial") res.end();
       return;
     }
+    if (behavior === "invalid-json") {
+      res.setHeader("content-type", "application/json");
+      res.end("{broken");
+      return;
+    }
+    if (behavior === "echo") {
+      res.setHeader("content-type", "application/json");
+      res.setHeader("a2a-extensions", "https://example.com/ext");
+      res.end(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: rpc.id,
+          result: { message: { ...rpc.params.message, role: "ROLE_AGENT" } },
+        }),
+      );
+      return;
+    }
     if (behavior === "error") {
       res.setHeader("content-type", "application/json");
       res.end(
@@ -151,7 +238,10 @@ before(async () => {
       );
       return;
     }
-    if (rpc.method === "SendStreamingMessage") {
+    if (
+      rpc.method === "SendStreamingMessage" ||
+      rpc.method === "SubscribeToTask"
+    ) {
       res.writeHead(200, { "content-type": "text/event-stream" });
       streamBytes =
         ": keepalive\n\ndata: " +
@@ -385,7 +475,14 @@ describe("generic A2A gateway through real Host command and HTTP boundaries", ()
     const card: any = await r.json();
     assert.equal(card.supportedInterfaces[0].url, `${base}/a2a/research`);
     assert.equal(card.signatures, undefined);
-    assert.equal(card.capabilities.pushNotifications, false);
+    assert.deepEqual(card.securityRequirements, [
+      { schemes: { flowlet: { list: [] } } },
+    ]);
+    assert.deepEqual(
+      card.skills[0].securityRequirements,
+      card.securityRequirements,
+    );
+    assert.equal(card.capabilities.pushNotifications, true);
     assert.equal(
       card.securitySchemes.flowlet.httpAuthSecurityScheme.scheme,
       "bearer",
@@ -420,6 +517,196 @@ describe("generic A2A gateway through real Host command and HTTP boundaries", ()
       await res.arrayBuffer();
       assert.equal(JSON.parse(received.at(-1)!.body).method, method);
     }
+  });
+  it("subscribes without issuing a new message and preserves SSE bytes", async () => {
+    const response = await call("SubscribeToTask", key, "research", {
+      id: "t-stream",
+    });
+    assert.equal(await response.text(), streamBytes);
+    assert.equal(JSON.parse(received.at(-1)!.body).method, "SubscribeToTask");
+  });
+  it("passes raw files, URLs, structured data and asynchronous configuration unchanged", async () => {
+    behavior = "echo";
+    const params = {
+      message: {
+        messageId: "multipart",
+        role: "ROLE_USER",
+        contextId: "context-1",
+        referenceTaskIds: ["old-task"],
+        parts: [
+          { raw: "aGVsbG8=", mediaType: "image/png", filename: "tiny.png" },
+          {
+            url: "https://files.example/document.pdf",
+            mediaType: "application/pdf",
+          },
+          { data: { severity: "low", rows: [1, 2] } },
+        ],
+      },
+      configuration: {
+        returnImmediately: true,
+        historyLength: 0,
+        acceptedOutputModes: ["application/json"],
+      },
+      metadata: { trace: "opaque" },
+    };
+    const response = await call("SendMessage", key, "research", params);
+    assert.equal(
+      response.headers.get("a2a-extensions"),
+      "https://example.com/ext",
+    );
+    const value = (await response.json()) as any;
+    assert.deepEqual(value.result.message.parts, params.message.parts);
+    assert.deepEqual(JSON.parse(received.at(-1)!.body).params, params);
+    behavior = "normal";
+  });
+  it("distinguishes invalid upstream responses from specific protocol errors", async () => {
+    behavior = "invalid-json";
+    assert.equal(
+      ((await (await call("GetTask")).json()) as any).error.code,
+      -32006,
+    );
+    behavior = "specific-error";
+    const response = await call("GetExtendedAgentCard");
+    const value = (await response.json()) as any;
+    assert.equal(value.error.code, -32007);
+    assert.equal(value.error.data[0].detail, "not configured");
+    behavior = "normal";
+    for (const state of [
+      "TASK_STATE_INPUT_REQUIRED",
+      "TASK_STATE_AUTH_REQUIRED",
+    ]) {
+      const observer = new A2aObserver();
+      observer.observe({
+        result: { statusUpdate: { taskId: "awaiting", status: { state } } },
+      });
+      assert.equal(observer.finished, true);
+      assert.equal(observer.state, state);
+    }
+  });
+  it("forwards every push configuration operation with its original payload", async () => {
+    for (const method of [
+      "CreateTaskPushNotificationConfig",
+      "GetTaskPushNotificationConfig",
+      "ListTaskPushNotificationConfigs",
+      "DeleteTaskPushNotificationConfig",
+    ]) {
+      const params = {
+        taskId: "task-1",
+        id: "notify-1",
+        url: "https://callback.example/notify",
+        token: "callback-credential",
+        authentication: { scheme: "Bearer", credentials: "callback-secret" },
+      };
+      const response = await call(method, key, "research", params);
+      assert.equal(response.status, 200);
+      await response.text();
+      assert.deepEqual(JSON.parse(received.at(-1)!.body).params, params);
+    }
+  });
+  it("rewrites authenticated extended cards while preserving private skills", async () => {
+    const response = await call(
+      "GetExtendedAgentCard",
+      key,
+      "research",
+      undefined,
+    );
+    const card = ((await response.json()) as any).result;
+    assert.equal(card.name, "Extended Research");
+    assert.equal(card.skills[0].id, "private-skill");
+    assert.equal(card.supportedInterfaces[0].url, base + "/a2a/research");
+    assert.equal(card.signatures, undefined);
+    assert.deepEqual(card.security, [{ flowlet: [] }]);
+    const noParams = await fetch(base + "/a2a/research", {
+      method: "POST",
+      headers: { authorization: `Bearer ${key}`, "a2a-version": "1.0" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 88,
+        method: "GetExtendedAgentCard",
+      }),
+    });
+    assert.equal(
+      ((await noParams.json()) as any).result.name,
+      "Extended Research",
+    );
+  });
+  it("returns canonical errors for optional capabilities and records local rejections", async () => {
+    const previous = capabilities;
+    capabilities = {};
+    await command("save_a2a_agent", { input: input("limited") });
+    const limitedKey = await command("create_a2a_key", {
+      name: "limited",
+      agentIds: ["limited"],
+    });
+    capabilities = previous;
+    const count = received.length;
+    for (const [method, code] of [
+      ["SendStreamingMessage", -32004],
+      ["SubscribeToTask", -32004],
+      ["GetExtendedAgentCard", -32004],
+      ["CreateTaskPushNotificationConfig", -32003],
+      ["GetTaskPushNotificationConfig", -32003],
+      ["ListTaskPushNotificationConfigs", -32003],
+      ["DeleteTaskPushNotificationConfig", -32003],
+    ] as const) {
+      const response = await call(method, limitedKey.token, "limited");
+      const value = (await response.json()) as any;
+      assert.equal(value.error.code, code);
+      assert.equal(value.id, "rpc-1");
+    }
+    const nested = await call("SendMessage", limitedKey.token, "limited", {
+      message: { parts: [{ text: "hi" }] },
+      configuration: {
+        taskPushNotificationConfig: { url: "https://callback.example" },
+      },
+    });
+    assert.equal(((await nested.json()) as any).error.code, -32003);
+    assert.equal(received.length, count);
+    const logs = await command("list_a2a_calls", { agentId: "limited" });
+    assert.match(logs[0].error, /NotSupported|Unsupported/);
+    behavior = "missing-method";
+    const unsupported = await call("CancelTask");
+    assert.equal(((await unsupported.json()) as any).error.code, -32004);
+    behavior = "normal";
+  });
+  it("negotiates versions and required extensions without leaking arbitrary headers", async () => {
+    const previous = capabilities;
+    capabilities = {
+      ...previous,
+      extensions: [{ uri: "https://example.com/ext", required: true }],
+    };
+    await command("save_a2a_agent", { input: input("extended") });
+    capabilities = previous;
+    const extKey = await command("create_a2a_key", {
+      name: "extensions",
+      agentIds: ["extended"],
+    });
+    const count = received.length;
+    for (const version of ["", "0.3", "2.0"]) {
+      const response = await fetch(base + "/a2a/extended", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${extKey.token}`,
+          "a2a-version": version,
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 9, method: "ListTasks" }),
+      });
+      assert.equal(((await response.json()) as any).error.code, -32009);
+    }
+    const missing = await call("ListTasks", extKey.token, "extended", {});
+    assert.equal(((await missing.json()) as any).error.code, -32008);
+    assert.equal(received.length, count);
+    const response = await fetch(base + "/a2a/extended", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${extKey.token}`,
+        "a2a-version": "1.0",
+        "a2a-extensions": "https://example.com/ext",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 9, method: "ListTasks" }),
+    });
+    assert.equal(((await response.json()) as any).result.tasks.length, 0);
+    assert.equal(extensionHeader, "https://example.com/ext");
   });
   it("records JSON-RPC errors even when upstream HTTP status is 200; does not retry", async () => {
     behavior = "error";
@@ -489,7 +776,7 @@ describe("generic A2A gateway through real Host command and HTTP boundaries", ()
     const controller = new AbortController();
     const res = await fetch(`${base}/a2a/research`, {
       method: "POST",
-      headers: { authorization: `Bearer ${key}` },
+      headers: { authorization: `Bearer ${key}`, "a2a-version": "1.0" },
       body: JSON.stringify({
         jsonrpc: "2.0",
         id: "abort",

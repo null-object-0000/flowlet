@@ -15,11 +15,36 @@ A2A 客户端 → Flowlet Host /a2a/<agent-id> → 已登记的外部 A2A Agent
 外部 Agent 不属于 `plugin-registry.json` 的内置客户端适配器，也不是模型或渠道；
 不写模型白名单，不参与模型路由、Token 计量或模型成本估算。
 
-首版协议为 **A2A v1.0 JSON-RPC + SSE**，不做 0.3 转换，不支持 REST/gRPC 或 push 通知。
+协议为 **A2A v1.0 JSON-RPC + SSE**，覆盖该绑定全部标准操作；不做 0.3 转换，不声明 REST/gRPC 绑定。
 Card 必须声明 `supportedInterfaces` 中 `protocolBinding: "JSONRPC"`、`protocolVersion: "1.0"`。
-支持 `SendMessage`、`SendStreamingMessage`、`GetTask`、`ListTasks`、`CancelTask`、`SubscribeToTask`；
-具体操作是否可用取决于上游。消息、上下文、任务 ID 和响应体原样转发，不做额外模型调用。
+支持 `SendMessage`、`SendStreamingMessage`、`GetTask`、`ListTasks`、`CancelTask`、`SubscribeToTask`、
+`GetExtendedAgentCard`，以及 `Create/Get/List/DeleteTaskPushNotificationConfig(s)` 四个推送配置操作。
+具体操作是否可用取决于上游能力声明及实现。消息、上下文、任务 ID 和响应体原样转发，不做额外模型调用。
 Flowlet 不重试 A2A 请求，避免断流、超时或 5xx 后重复执行任务。断流后用已收到的 task ID 查询。
+
+## 可选能力与标准错误
+
+| 操作 / 场景 | 规范行为 |
+|---|---|
+| 未声明 streaming 的流式发送或任务订阅 | `-32004 UnsupportedOperationError` |
+| 未声明 pushNotifications 的四个配置操作，或消息内附带推送配置 | `-32003 PushNotificationNotSupportedError` |
+| 未声明 extendedAgentCard 的扩展 Card 请求 | `-32004 UnsupportedOperationError` |
+| 上游对已知标准操作返回 method-not-found | 转换为上述不支持错误；未知客户端方法仍为 `-32601` |
+| 上游特定任务、取消、内容或扩展 Card 错误 | 原样保留 code/message/data，不伪造成功 |
+| 版本不支持 / 缺失 | `-32009 VersionNotSupportedError`；缺失按规范表示 0.3 |
+| 缺少上游声明为 required 的扩展 | `-32008 ExtensionSupportRequiredError` |
+| 无效上游 JSON-RPC 响应 | `-32006 InvalidAgentResponseError` |
+
+外部 RPC 请求必须携带 `A2A-Version: 1.0`（也接受同名查询参数）；管理台调用测试固定使用 1.0。
+`A2A-Extensions` 请求头和响应头按协议转发，其他客户端 Header 不转发；扩展 JSON 数据不解释、不执行。
+Agent Card 在验证保存时刷新；上游能力变化后应重新验证保存。配置与密钥热更新，网关代码升级需重启 Host。
+
+推送回调由上游 Agent 直接发送给调用方配置的 Webhook。Flowlet 透传配置与回调认证信息，
+不代发、不下载回调地址，也不把网关调用密钥自动附加给 Webhook；重试和通知安全由上游实现。
+任务执行、异步处理、历史分页、取消语义、鉴权补充与会话记忆均由上游负责，网关不自建第二套任务状态机。
+文件 `raw`（base64）、文件 `url`、结构化 `data` 与 Artifact 原样透传；单次请求和 JSON 响应上限 4 MiB。
+不下载文件 URL，不将任意上游 multipart 上传接口包装进网关。需要补充输入/鉴权的状态表示本轮暂停，
+不会被记为成功完成，也不会把正常暂停的流误报为异常断流。
 
 ## 登记与认证
 
@@ -52,7 +77,9 @@ Flowlet 不重试 A2A 请求，避免断流、超时或 5xx 后重复执行任�
 | `POST /a2a/<id>` | 带 A2A 调用密钥发送 JSON-RPC 2.0 请求 |
 
 Card 中的接口地址和安全声明改为网关地址与 Bearer；上游签名被移除（改写后原签名不再有效）。
-只保留选中的 JSONRPC v1 接口及其 tenant 声明，不向客户端宣传不支持的传输或 push 能力。
+只保留选中的 JSONRPC v1 接口及其 tenant 声明，不向客户端宣传不支持的传输。可选能力沿用上游声明；扩展 Card 同样改写接口、安全声明并移除签名。
+安全声明使用 1.0 `securityRequirements[].schemes`，同时保留一致的 legacy `security` 便于旧客户端发现；
+技能级安全声明也统一改为网关 Bearer。
 生产反代设置 `FLOWLET_PUBLIC_A2A_URL=https://flowlet.example.com`，
 供 Card 生成绝对调用地址；未设置时按直接访问 Host 的 HTTP 地址生成（不信任 forwarded headers）。
 该变量只接受根地址，配置改变需要重启 Host。
@@ -60,6 +87,7 @@ Card 中的接口地址和安全声明改为网关地址与 Bearer；上游签�
 ```bash
 curl http://localhost:8080/a2a/research \
   -H "Authorization: Bearer $FLOWLET_A2A_KEY" \
+  -H 'A2A-Version: 1.0' \
   -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":"example-1","method":"SendMessage","params":{"message":{"messageId":"msg-1","role":"ROLE_USER","parts":[{"text":"你好"}]}}}'
 ```
@@ -74,7 +102,7 @@ SQLite 新增 `a2a_agents`、`a2a_keys`、`a2a_calls` 三张独立表及索引�
 不改变现有模型表与请求日志表，旧 Rust 宿主会忽略新表。备份时连同 `secret.key` 一起保留。
 
 调用记录包含 Agent、调用密钥 ID、方法、耗时、HTTP 状态、task/context ID、上游任务状态和错误。
-HTTP 200 不代表任务完成：JSON-RPC error 与任务状态独立记录，未观察到终态的 SSE 会标记异常结束。
+HTTP 200 不代表任务完成：JSON-RPC error 与任务状态独立记录，未观察到终态或正常暂停状态的 SSE 会标记异常结束。
 最多保留 2000 次调用，界面读取最近 100 条，支持按 Agent 筛选。
 请求/响应正文服从现有 `log_capture.capture_req_body` / `capture_res_body`，每侧最多
 `min(max_body_bytes, 64 KiB)`；正文也受 `body_retention_days` 和 `body_max_size_mb` 控制，

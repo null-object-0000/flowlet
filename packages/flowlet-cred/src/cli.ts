@@ -11,6 +11,7 @@
 // - `gitlab` / `dockhand` / `jenkins` / `beszel` / `uptime-kuma` / `registry` 子命令支持 `--profile`
 //   多实例（键名 {PREFIX}_URL/{PREFIX}_TOKEN，jenkins 额外有 {PREFIX}_USER，beszel 用 _EMAIL/_PASSWORD，
 //   uptime-kuma 用 _API_KEY，registry 用 _HOST/_USER/_TOKEN）。
+import { a2aCommand, A2A_USAGE } from "./a2a-command.ts";
 import { spawn, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { hostname } from "node:os";
@@ -145,6 +146,7 @@ OCI 镜像仓库（Docker Registry HTTP API V2 / OCI Distribution，用户名 + 
   （校验打两次：带 token 一次、不带一次；匿名也能 2xx 时只能说「地址可达」，
     不会谎报 token 有效）
 
+${A2A_USAGE}
 远程同步（Docker / 服务端管理的凭据 → 本机 .env）：
   flowlet login --server=http://10.100.217.60:20134 [--name=机器名] [--no-browser] [--insecure] [--timeout=180]
                                             浏览器授权（登录管理台后确认），只保存仅能读服务凭据的本机授权
@@ -408,6 +410,8 @@ async function run(argv: string[]): Promise<number> {
       return registryCommand(rest);
     case "http-bearer":
       return httpBearerCommand(rest);
+    case "a2a":
+      return a2aCommand(rest);
     default:
       throw new Error(`未知命令：${command}\n\n${USAGE}`);
   }

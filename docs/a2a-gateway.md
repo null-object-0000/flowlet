@@ -46,6 +46,12 @@ Agent Card 在验证保存时刷新；上游能力变化后应重新验证保存
 不下载文件 URL，不将任意上游 multipart 上传接口包装进网关。需要补充输入/鉴权的状态表示本轮暂停，
 不会被记为成功完成，也不会把正常暂停的流误报为异常断流。
 
+## 本地 Agent 调用
+
+Node CLI 原生提供 `flowlet a2a discover/send/tasks/session/rpc`，直接读取已同步的通用 URL/Bearer 凭据。
+使用说明见 [a2a-cli.md](a2a-cli.md)。CLI 仅实现标准 A2A 1.0 JSON-RPC/SSE，不包含任何特定 Agent 的上传、
+换票、内部会话或业务 API；各 Agent 的输入格式、权限与任务语义仍由其独立服务负责。
+
 ## 登记与认证
 
 1. 登记 ID、名称、完整 Agent Card URL；按需要填写上游 Bearer Token。

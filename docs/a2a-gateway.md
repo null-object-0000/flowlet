@@ -1,7 +1,7 @@
 # 通用 A2A 网关
 
 Flowlet Node Host（Electron 本机宿主及 Web/Docker）可登记外部 A2A Agent，统一管理调用入口、
-访问密钥和调用记录。入口位于「会话管理 → A2A 网关」。旧 Rust/Tauri/Android 宿主暂不提供此能力。
+访问密钥和调用记录。入口位于左侧「工作台 → A2A 网关」，会话管理页也保留快捷入口。旧 Rust/Tauri/Android 宿主暂不提供此能力。
 Electron 客户端模式管理的是远程 Node Host 的 Agent；调用方应连接远程 Host，不能把客户端本机网关当作 A2A 入口。
 
 ## 范围与调用链

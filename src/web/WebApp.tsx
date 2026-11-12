@@ -276,6 +276,7 @@ function WebSession() {
           availableRoutes={[
             "/",
             "/models",
+            "/a2a",
             "/credentials",
             "/logs",
             "/sessions",

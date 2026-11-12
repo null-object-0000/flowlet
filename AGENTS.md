@@ -494,7 +494,7 @@ Client Token 与渠道 API Key 不同，可以在客户端访问信息中展示�
 
 ### 通用 A2A 网关
 
-Node Host 支持登记外部 A2A v1 JSON-RPC/SSE Agent，入口为「会话管理 → A2A 网关」。
+Node Host 支持登记外部 A2A v1 JSON-RPC/SSE Agent，入口为左侧「工作台 → A2A 网关」，会话管理页保留快捷入口。
 外部 A2A Agent 与下述本机客户端 Adapter、模型目录和渠道路由独立；登记外部 Agent 不应
 新增内置 Adapter 或修改 `plugin-registry.json`。专用调用密钥与管理凭据、模型 Client Token
 分开；任务、会话 ID 和消息透传，不自动重试任务。第三方的登录、换票、业务 API 或特殊

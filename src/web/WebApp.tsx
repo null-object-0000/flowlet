@@ -81,6 +81,7 @@ const UsageAnalysisPage = lazy(() => import("../pages/usage-analysis/UsageAnalys
 // 会话管理在 Web Host 只展示经过本实例的请求观测会话；页面内部按 hostMode="web" 隐藏
 // 本机 Agent 原生会话、OpenCode 实时权限与桌面 Agent 数据同步。
 const AgentSessionsPage = lazy(() => import("../pages/agent-sessions/AgentSessionsPage").then((module) => ({ default: module.AgentSessionsPage })));
+const A2aPage = lazy(() => import("../pages/a2a/A2aPage").then(module => ({ default: module.A2aPage })));
 
 function WebPageFallback({ title }: { title: string }) {
   const { t } = useAppPreferences();
@@ -290,6 +291,7 @@ function WebSession() {
         <Route path="accounts" element={<Navigate to="/" replace />} />
         <Route path="models" element={<ModelServicesPage />} />
         <Route path="credentials" element={<CredentialsPage />} />
+        <Route path="a2a" element={<Suspense fallback={<WebPageFallback title="A2A 网关" />}><A2aPage /></Suspense>} />
         <Route path="logs" element={<RequestLogsPage />} />
         <Route
           path="sessions"

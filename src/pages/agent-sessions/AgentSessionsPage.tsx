@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Button, Pagination, Toast, Typography } from "@douyinfe/semi-ui-19";
 import { IconRefresh } from "@douyinfe/semi-icons";
 import { useNavigate } from "react-router-dom";
+import { isDesktopHost } from "../../platform/desktop/mode";
 import { useAppPreferences } from "../../app/preferences/AppPreferences";
 import { agentSessionLabel, DEFAULT_AGENT_SESSION_FILTER, hermesSessionOrigin, type AgentSessionFilter, type AgentSessionInteractionEvent, type AgentSessionNativeSummary, type AgentSessionNativeUsage, type AgentSessionRow, type AgentSessionsPage, type AgentSessionType } from "../../domains/agent-session/types";
 import { AGENT_SESSION_OPTIONS } from "../../domains/pluginRegistry";
@@ -182,6 +183,7 @@ export function AgentSessionsPage({ hostMode = "desktop" }: { hostMode?: AgentSe
         )}
         subtitle={t("统一查看 Agent 会话与 Flowlet 请求观测")}
       >
+        {(webHost || isDesktopHost) && <Button theme="borderless" onClick={() => navigate("/a2a")}>A2A 网关</Button>}
         <RefreshControl
           autoRefresh={refresh.autoRefresh}
           onToggleAutoRefresh={refresh.toggleAutoRefresh}

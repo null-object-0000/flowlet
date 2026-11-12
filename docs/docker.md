@@ -151,6 +151,7 @@ Docker 版升级只替换 `flowlet` 容器，**不重建 `flowlet-egress`**（�
 | `FLOWLET_WEB_PORT` | Compose 宿主机 Web 端口，默认 `20134` |
 | `FLOWLET_PROXY_PORT` | Compose 宿主机模型入口端口，默认 `20135` |
 | `FLOWLET_PUBLIC_PROXY_URL` | 在界面显示的模型入口，不含 `/v1`；端口映射或反向代理部署时应填写 |
+| `FLOWLET_PUBLIC_A2A_URL` | Node Host 的 A2A 对外根地址，如 `https://flowlet.example.com`；反代时填写，用于 Agent Card，改变需重启 |
 | `FLOWLET_BIND_ADDR` | 容器内默认 `0.0.0.0:18640` |
 | `FLOWLET_WEB_ADDR` | 容器内默认 `0.0.0.0:8080` |
 | `FLOWLET_DB_PATH` | `/data/flowlet.sqlite` |

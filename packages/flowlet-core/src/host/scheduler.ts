@@ -21,6 +21,7 @@ import { resolveAccountCredentials, syncAccount } from "../web/qwen-platform.ts"
 import { presetSupportsBalance } from "../web/config-state.ts";
 import { loadLogCaptureConfig } from "../config/index.ts";
 import { cleanupScheduledBodies } from "../storage/maintenance.ts";
+import { cleanupA2aBodies } from "../storage/a2a.ts";
 import type { CaptureRewrite, CaptureRewriteJob } from "../storage/capture-compaction.ts";
 
 export const STORAGE_CLEANUP_FIRST_DELAY_MS = 15 * 60_000;
@@ -155,6 +156,7 @@ export function createHostScheduler(options: HostSchedulerOptions): HostSchedule
         signal,
       }, rewrite);
       if (signal.aborted) return;
+      storage.withDatabase(db => cleanupA2aBodies(db, logCapture.body_retention_days, logCapture.body_max_size_mb));
       const [expiredSnapshots, overLimitSnapshots] = storage.pruneBalanceSnapshots(
         retention.balanceSnapshotRetentionDays,
         retention.balanceSnapshotMaxPerAccount,

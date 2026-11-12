@@ -13,6 +13,7 @@ const UsageCostPage = lazy(() => import("../pages/usage/UsageCostPage").then((mo
 const UsageAnalysisPage = lazy(() => import("../pages/usage-analysis/UsageAnalysisPage").then((module) => ({ default: module.UsageAnalysisPage })));
 const CredentialsPage = lazy(() => import("../pages/credentials/CredentialsPage").then((module) => ({ default: module.CredentialsPage })));
 const AgentSessionsPage = lazy(() => import("../pages/agent-sessions/AgentSessionsPage").then((module) => ({ default: module.AgentSessionsPage })));
+const A2aPage = lazy(() => import("../pages/a2a/A2aPage").then(module => ({ default: module.A2aPage })));
 
 function PageRouteFallback({ title }: { title: string }) {
   const { t } = useAppPreferences();
@@ -30,6 +31,7 @@ export function AppRouter() {
           <Route path="logs" element={<Suspense fallback={<RequestLogsRouteFallback />}><RequestLogsPage /></Suspense>} />
           <Route path="credentials" element={<Suspense fallback={<PageRouteFallback title="服务凭据" />}><CredentialsPage /></Suspense>} />
           <Route path="sessions" element={<Suspense fallback={<PageRouteFallback title="会话管理" />}><AgentSessionsPage /></Suspense>} />
+          <Route path="a2a" element={<Suspense fallback={<PageRouteFallback title="A2A 网关" />}><A2aPage /></Suspense>} />
           <Route path="usage" element={<Suspense fallback={<PageRouteFallback title="用量统计" />}><UsageCostPage /></Suspense>} />
           <Route path="usage-analysis" element={<Suspense fallback={<PageRouteFallback title="用量洞察" />}><UsageAnalysisPage /></Suspense>} />
           <Route path="settings" element={<Suspense fallback={<PageRouteFallback title="应用设置" />}><SettingsPage /></Suspense>} />

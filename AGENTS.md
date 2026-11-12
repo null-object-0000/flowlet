@@ -84,7 +84,7 @@ Flowlet 采用前端优先的桌面应用架构。
   `ctx.desktop.host.invoke(channel, payload)` 调用，**禁止在命令层 import electron**；
 - **Tauri/Rust 宿主**（`src-tauri/`）：**回滚路径**，迁移完成前继续可用，不得删除；
   Android 端仍在此路径，未迁移；
-- **Web/Docker Host**（`packages/flowlet-core`）：生产管理台，命令面 = Web 白名单 66 条；
+- **Web/Docker Host**（`packages/flowlet-core`）：生产管理台，命令面使用显式 Web 白名单（含 A2A 管理命令）；
   桌面命令在 `packages/flowlet-core/src/desktop/` 注册，仅在 `ctx.desktop` 存在时生效，
   Web Host 行为不变。
 - **桌面运行模式**：桌面端支持 `host`（本机 Node Host + 桌面命令超集，默认）与 `client`
@@ -491,6 +491,15 @@ Client Token 与渠道 API Key 不同，可以在客户端访问信息中展示�
 ---
 
 ## 8. Agent 接入方向
+
+### 通用 A2A 网关
+
+Node Host 支持登记外部 A2A v1 JSON-RPC/SSE Agent，入口为「会话管理 → A2A 网关」。
+外部 A2A Agent 与下述本机客户端 Adapter、模型目录和渠道路由独立；登记外部 Agent 不应
+新增内置 Adapter 或修改 `plugin-registry.json`。专用调用密钥与管理凭据、模型 Client Token
+分开；任务、会话 ID 和消息透传，不自动重试任务。第三方的登录、换票、业务 API 或特殊
+响应解析必须留在它自己的封装服务中，禁止按域名或 Agent 名称把专属逻辑写入 Flowlet。
+首版范围、共享上游身份边界、存储与验证契约见 `docs/a2a-gateway.md`。
 
 Flowlet 的长期差异化重点是 Agent 接入，而不是通用网关能力。
 

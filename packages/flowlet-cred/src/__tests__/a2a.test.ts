@@ -137,6 +137,10 @@ before(async () => {
     const rpc = JSON.parse(raw);
     requests.push(rpc);
     assert.equal(rpc.params.tenant, "research");
+    if (mode === "null-task" && rpc.method === "SendMessage") {
+      reply(rpc.id, { task: null });
+      return;
+    }
     if (mode === "rpc-error") {
       reply(rpc.id, undefined, {
         code: -32007,
@@ -175,7 +179,14 @@ before(async () => {
         return;
       }
       value.status.state = "TASK_STATE_WORKING";
-      const events: any[] = [{ task: publicTask(value) }];
+      const events: any[] = [
+        {
+          task:
+            mode === "malformed-stream"
+              ? { status: { state: "TASK_STATE_COMPLETED" } }
+              : publicTask(value),
+        },
+      ];
       if (mode !== "dropped")
         events.push(
           {
@@ -379,6 +390,17 @@ describe("generic A2A CLI through actual subprocess and HTTP boundaries", () => 
     assert.equal(events[0].task.id, "task-1");
     assert.equal(events[1].artifactUpdate.artifact.parts[0].text, "你好世界");
     assert.equal(events[2].statusUpdate.status.state, "TASK_STATE_COMPLETED");
+  });
+  it("rejects malformed successful responses instead of reporting completion", async () => {
+    mode = "null-task";
+    let result = await run(["send", "question"]);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /标准 Task/);
+    assert.equal(requests.filter((r) => r.method === "SendMessage").length, 1);
+    mode = "malformed-stream";
+    result = await run(["send", "stream", "--stream"]);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /无效的 A2A SSE Task/);
   });
   it("records task IDs and fails unfinished streams, with no POST retry", async () => {
     mode = "dropped";

@@ -431,7 +431,16 @@ export async function a2aCommand(args: string[]): Promise<number> {
       let result = await client.call("SendMessage", params);
       if ((result.task === undefined) === (result.message === undefined))
         throw new Error("SendMessage 必须返回 task 或 message 中的一种");
-      if (result.task) validTask(object(result.task));
+      if (result.task !== undefined) validTask(object(result.task));
+      if (result.message !== undefined) {
+        const message = object(result.message);
+        if (
+          typeof message.messageId !== "string" ||
+          message.role !== "ROLE_AGENT" ||
+          !Array.isArray(message.parts)
+        )
+          throw new Error("SendMessage 未返回有效的标准 Message");
+      }
       observe(result);
       if (result.task && !flag("async"))
         result = {

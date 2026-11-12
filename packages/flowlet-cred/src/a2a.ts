@@ -262,8 +262,46 @@ export class A2aClient {
         this.unwrap(await readJson(response.body), id);
         throw new A2aError("该流式操作没有返回 SSE");
       }
-      for await (const value of a2aEvents(response.body))
-        yield this.unwrap(value, id);
+      for await (const value of a2aEvents(response.body)) {
+        const event = this.unwrap(value, id);
+        const keys = [
+          "task",
+          "message",
+          "statusUpdate",
+          "artifactUpdate",
+        ].filter((key) => event[key] !== undefined);
+        if (keys.length !== 1)
+          throw new A2aError("无效的 A2A SSE result：应只包含一种标准事件");
+        const key = keys[0];
+        const item = object(event[key]);
+        if (
+          key === "task" &&
+          (typeof item.id !== "string" ||
+            typeof object(item.status).state !== "string")
+        )
+          throw new A2aError("无效的 A2A SSE Task");
+        if (
+          key === "message" &&
+          (typeof item.messageId !== "string" ||
+            item.role !== "ROLE_AGENT" ||
+            !Array.isArray(item.parts))
+        )
+          throw new A2aError("无效的 A2A SSE Message");
+        if (
+          key === "statusUpdate" &&
+          (typeof item.taskId !== "string" ||
+            typeof object(item.status).state !== "string")
+        )
+          throw new A2aError("无效的 A2A SSE 状态事件");
+        if (
+          key === "artifactUpdate" &&
+          (typeof item.taskId !== "string" ||
+            typeof object(item.artifact).artifactId !== "string" ||
+            !Array.isArray(object(item.artifact).parts))
+        )
+          throw new A2aError("无效的 A2A SSE 产物事件");
+        yield event;
+      }
     } finally {
       response.body.destroy();
     }

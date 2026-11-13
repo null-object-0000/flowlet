@@ -8,6 +8,7 @@ import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { CommandError } from "../types.ts";
+import { a2aGateway } from "../a2a/gateway.ts";
 import type { JsonRow } from "../types.ts";
 import type { WebContext } from "./context.ts";
 import {
@@ -430,6 +431,24 @@ export async function dispatch(ctx: WebContext, command: string, rawArgs: unknow
   const s = storageOf(ctx);
 
   switch (command) {
+    case "list_a2a_agents":
+      return a2aGateway(ctx).list();
+    case "inspect_a2a_agent":
+      return a2aGateway(ctx).inspect(args.input);
+    case "save_a2a_agent":
+      return a2aGateway(ctx).save(args.input);
+    case "delete_a2a_agent":
+      a2aGateway(ctx).store.remove(argString(args, "id")); return null;
+    case "list_a2a_keys":
+      return a2aGateway(ctx).store.keys();
+    case "create_a2a_key":
+      return a2aGateway(ctx).createKey(args.name, args.agentIds);
+    case "revoke_a2a_key":
+      a2aGateway(ctx).store.revokeKey(argString(args, "id")); return null;
+    case "list_a2a_calls":
+      return a2aGateway(ctx).calls(argOptionalString(args, "agentId") ?? undefined);
+    case "invoke_a2a_agent":
+      return a2aGateway(ctx).invoke(argString(args, "id"), args.rpc);
     case "ipc_ping":
       return { ok: true, host: "web" };
     case "list_channel_presets":

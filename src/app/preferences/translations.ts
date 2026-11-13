@@ -77,6 +77,7 @@ const english: Record<string, string> = {
   "运行记录": "Activity",
   "分析": "Insights",
   "模型服务": "Models",
+  "A2A 网关": "A2A gateway",
   "更新于 {time}": "Updated {time}",
   "会话视角": "Sessions",
   "按实时运行状态展示该目录及其子目录中的主会话。": "Main sessions in this directory and its subdirectories, grouped by live runtime status.",

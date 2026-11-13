@@ -77,6 +77,46 @@ flowlet logout --server=<origin>                 # 删除本机登录记录
 flowlet pull --server=<origin> [--dry-run]       # 自动使用 login 的本机授权
 ```
 
+## A2A Agent 原生调用
+
+`flowlet a2a` 是通用 A2A 1.0 JSON-RPC/SSE 客户端；直接读取凭据库，无需 Python 脚本或手动取出密钥。
+
+```bash
+flowlet login --server=http://<Flowlet 地址>:20134
+flowlet pull --server=http://<Flowlet 地址>:20134
+
+# 先从本机同步配置发现 Agent、技能、profile 和调用参数
+flowlet a2a list
+
+# --profile=RESEARCH 对应 FLOWLET_A2A_RESEARCH_URL / FLOWLET_A2A_RESEARCH_TOKEN
+# 已有任意环境前缀则使用 --prefix=MY_AGENT（与 --profile 互斥）
+flowlet a2a discover --profile=RESEARCH
+flowlet a2a send '请记住虚构项目名为青柠灯塔。' --profile=RESEARCH --session=demo --new
+flowlet a2a send '刚才的项目名是什么？' --profile=RESEARCH --session=demo
+flowlet a2a send '请读取附件正文。' --file=./notes.txt --profile=RESEARCH --session=demo
+flowlet a2a send '请分析图片。' --file=./image.png --profile=RESEARCH --session=demo
+
+flowlet a2a send '长任务' --async --profile=RESEARCH --session=job
+flowlet a2a tasks get --profile=RESEARCH --session=job
+flowlet a2a tasks wait --profile=RESEARCH --session=job
+flowlet a2a tasks cancel --profile=RESEARCH --session=job
+flowlet a2a tasks subscribe --profile=RESEARCH --session=job
+flowlet a2a tasks list --profile=RESEARCH --page-size=10
+flowlet a2a session show --profile=RESEARCH --session=demo
+```
+
+- list 自动枚举 FLOWLET_A2A 命名空间；可用性表示 Card 发现成功，单个失败单独列 error。自定义前缀可用 list --prefix 指定。
+- 普通输出为 JSON，`send --stream` / `tasks subscribe` 输出 NDJSON 标准事件；所有请求发送 A2A-Version: 1.0。
+- send 默认等待任务结束；异步返回用 --async；查询/取消返回标准 Task，SendMessage 返回 `{task: ...}` 或 `{message: ...}`。
+- 每个 Agent 会话使用独立 --session 名称；也可显式 --state=FILE、--context=ID。续聊不回传旧 taskId；
+  --task=ID 仅用于显式继续上游允许继续的暂停任务。
+- 会话记录绑定实例与凭据前缀，0600、原子写，不包含调用密钥；同名会话发送串行化。
+- --file 使用标准 raw Part，--file-url 使用标准 URL Part，CLI 不下载 URL；--data=JSON 可发送结构化 Part。
+  MIME 按常见扩展名推断，未知类型为 application/octet-stream；单附件可用 --media-type 显式指定。
+  请求合计上限4 MiB，实际附件数量/格式/大小由上游能力决定，不在 CLI 写特定 Agent 限制。
+- 网络错误、超时和断流不自动重发消息；先 tasks get 查询已保存任务。中断本地等待/订阅不会取消上游任务，取消需显式 tasks cancel。
+- send/wait 任务失败、取消或暂停时退出2，协议/网络错误退出1；会话文件中保存已获取的任务 ID。
+
 ## 多实例与环境前缀
 
 - `flowlet pull` 按服务凭据的「环境前缀」写键：一般 provider 是两把

@@ -3,8 +3,8 @@
 > **迁移状态（2026-11）**：Docker 版已从 Rust `headless` 二进制切换到
 > **Node Host**（`packages/flowlet-core`，Node 26 直接执行 TypeScript）。迁移目标是行为等价替换：
 > 镜像不再包含 Rust 工具链与编译产物，环境变量、端口、`/data` 数据卷、SQLite schema、管理端
-> 鉴权（token / GitLab OIDC）全部保持相同契约。当前线上实例（10.100.217.60）已于 **2026-11-10 切换为 Node Host 镜像**
-> `flowlet:docker-20261110-nodehost`（回滚点 `flowlet:docker-20261109-gitlab-sso`）。实现契约见 [migration/node-host.md](migration/node-host.md)，
+> 鉴权（token / GitLab OIDC）全部保持相同契约。当前线上实例（10.100.217.60）于 **2026-11-12 更新通用 A2A 网关**，
+> 镜像 `flowlet:node-20261112-a2a-sidebar-a937589`（回滚点 `flowlet:node-20261112-a2a-bf06412`）。Node Host 于 2026-11-10 首次上线。实现契约见 [migration/node-host.md](migration/node-host.md)，
 > 镜像与冒烟记录见 [migration/docker-node.md](migration/docker-node.md)。
 
 Docker 版由独立服务和 React 管理界面组成，不需要 Tauri、GTK、显示服务或桌面登录会话。
@@ -151,6 +151,7 @@ Docker 版升级只替换 `flowlet` 容器，**不重建 `flowlet-egress`**（�
 | `FLOWLET_WEB_PORT` | Compose 宿主机 Web 端口，默认 `20134` |
 | `FLOWLET_PROXY_PORT` | Compose 宿主机模型入口端口，默认 `20135` |
 | `FLOWLET_PUBLIC_PROXY_URL` | 在界面显示的模型入口，不含 `/v1`；端口映射或反向代理部署时应填写 |
+| `FLOWLET_PUBLIC_A2A_URL` | Node Host 的 A2A 对外根地址，如 `https://flowlet.example.com`；反代时填写，用于 Agent Card，改变需重启 |
 | `FLOWLET_BIND_ADDR` | 容器内默认 `0.0.0.0:18640` |
 | `FLOWLET_WEB_ADDR` | 容器内默认 `0.0.0.0:8080` |
 | `FLOWLET_DB_PATH` | `/data/flowlet.sqlite` |

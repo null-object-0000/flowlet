@@ -216,6 +216,9 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 
 **行为**：
 
+- Node Host 的 A2A 调用正文也读取上述捕获开关、单条上限与保留天数；每侧另限 64 KiB，
+  独立计算 A2A 正文容量并按最老调用清理，不套用模型 Token 完整性条件或 `body_prune_ratio`。
+  不捕获 A2A 认证头。独立表、总条数限制与清理时机见 [A2A 网关](a2a-gateway.md)。
 - 缺失任何字段时使用上述默认值。
 - 修改后立即生效（热读），无需重启代理。设置页（桌面与 Web / Docker）保存的捕获配置写入
   SQLite `app_meta` 的 `log_capture_config`，优先级高于 `config.json`；手改文件仅在下一次

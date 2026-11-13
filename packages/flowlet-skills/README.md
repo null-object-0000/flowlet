@@ -2,7 +2,7 @@
 
 Flowlet 提供给 AI Agent 的通用 Skills 包。当前包含：
 
-- `flowlet-credentials/`：通过 `flowlet` CLI 使用 Flowlet 全局凭据库（含多实例环境前缀约定与安全规则）。
+- `flowlet-credentials/`：通过 `flowlet` CLI 使用 Flowlet 全局凭据库（含多实例环境前缀约定、安全规则及原生 `flowlet a2a` Agent 调用）。
 
 ## 安装
 

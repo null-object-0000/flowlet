@@ -11,6 +11,7 @@
 //   token 模式：Bearer + HMAC 常量时间比较；OIDC 模式：HttpOnly Cookie 会话 + CSRF。
 //   受保护响应统一 Cache-Control: no-store（401/403 由中间件提前返回，不带该头，与 Rust 一致）。
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { a2aGateway, closeA2aGateway } from "../a2a/gateway.ts";
 
 import type {
   DeviceIdentity,
@@ -262,6 +263,12 @@ export function createWebHost(options: WebHostOptions): WebHost {
     const method = request.method ?? "GET";
     const head = method === "HEAD";
     const authInfo = { headers: request.headers, url: rawUrl };
+
+    // A2A data plane lives on the Host port and uses dedicated scoped keys.
+    // Never fall through to admin authentication or the SPA.
+    if (pathname === "/a2a" || pathname.startsWith("/a2a/")) {
+      return a2aGateway(ctx).handle(request, response, pathname);
+    }
 
     // ── 公开 OIDC 路由（与 Rust 的 public Router 一致：无鉴权、无 no-store 中间件） ──
     if (
@@ -572,7 +579,8 @@ export function createWebHost(options: WebHostOptions): WebHost {
       if (bound === null || bound === undefined || typeof bound === "string") return null;
       return { host: bound.address, port: bound.port };
     },
-    close(): Promise<void> {
+    async close(): Promise<void> {
+      await closeA2aGateway(ctx);
       const active = server;
       if (active === null) return Promise.resolve();
       return new Promise((resolve) => {

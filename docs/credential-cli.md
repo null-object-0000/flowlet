@@ -1,6 +1,7 @@
 # 全局凭据库与 `flowlet`
 
-状态：v7（**新增 OCI 镜像仓库（registry）provider（标准 Docker Registry HTTP API V2 / OCI
+状态：v8（新增通用 `flowlet a2a` 客户端，详见 `docs/a2a-cli.md`）。
+既有 v7（**新增 OCI 镜像仓库（registry）provider（标准 Docker Registry HTTP API V2 / OCI
 Distribution：`GET /v2/` + `WWW-Authenticate` Bearer 质询）**）；
 `flowlet registry` 子命令、`pull` 为 registry 生成 `{PREFIX}_HOST` / `{PREFIX}_USER` / `{PREFIX}_TOKEN`。
 v6 新增 Beszel provider（邮箱 + 密码换短期 token，PocketBase 底座）；
@@ -922,3 +923,9 @@ Web Host 的「服务凭据」页提供「本机接入」抽屉（桌面模式�
   （带 `username`）。
 
 `FLOWLET_CRED_DIR` 可在两条验收里都指向临时目录，避免污染真实凭据。
+
+## 原生 A2A 客户端（Node CLI）
+
+客户端命令、会话记录、安全边界与完整示例见 [a2a-cli.md](a2a-cli.md)。
+该功能仅增加 Node CLI 命令，不修改 legacy Rust CLI；既有凭据格式、login/pull 和服务端表结构不变。
+CLI 与 Skills 下载包包含该能力，已安装机器重新运行安装脚本更新，无需重新授权或重建凭据库。

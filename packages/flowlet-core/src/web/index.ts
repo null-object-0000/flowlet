@@ -22,8 +22,13 @@ import type {
 } from "../types.ts";
 import { CommandError } from "../types.ts";
 import type { SqliteStorage } from "../storage/index.ts";
-import { AdminAuth, viewerCanRunCommand, type AuthResponse } from "./auth.ts";
+import { AdminAuth, viewerCanRunCommand, type AuthProviderId, type AuthResponse } from "./auth.ts";
 import { hasStoredGithubProvider, readGithubProvider } from "./auth-providers.ts";
+import {
+  hasStoredOidcProvider,
+  readLoginMode,
+  readOidcProviderOverride,
+} from "./auth-oidc-provider.ts";
 import { CLI_ALLOWED_COMMANDS, createCliAuth, type CliAuthStorage } from "./cli-auth.ts";
 import {
   prepareEnvPrefixTarget,
@@ -251,6 +256,23 @@ export function createWebHost(options: WebHostOptions): WebHost {
   // 库里有记录（含「已关闭」的墓碑）就以库为准，没有记录才用环境变量当种子。
   if (hasStoredGithubProvider(options.storage)) {
     auth.applyGithubConfig(readGithubProvider(options.storage, options.secrets));
+  }
+  // OIDC 准入/展示覆盖：墓碑恢复部署默认，部署凭据和协议参数始终不变。
+  // 只有部署级 OIDC 解析成功时才读库——否则 oidc 为 null，没什么可覆盖的。
+  if (auth.oidcDeployed() && hasStoredOidcProvider(options.storage)) {
+    const override = readOidcProviderOverride(options.storage);
+    if (override !== null) auth.applyOidcRuntimeConfig(override);
+  }
+  // 登录方式开关：从没保存过时跟随配置（旧部署行为不变）。
+  const loginMode = readLoginMode(options.storage, {
+    oidc: auth.oidcDeployed(),
+    github: auth.config.github !== null,
+  });
+  if (loginMode.source === "stored") {
+    const enabled: AuthProviderId[] = [];
+    if (loginMode.mode.oidc) enabled.push("oidc");
+    if (loginMode.mode.github) enabled.push("github");
+    auth.setEnabledProviders(enabled);
   }
   ctx.auth = auth;
 

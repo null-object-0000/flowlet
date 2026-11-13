@@ -27,8 +27,8 @@ const TRANSACTION_TTL_MS = 600 * 1000;
 const OIDC_HTTP_TIMEOUT_MS = 30 * 1000;
 
 export type AuthMode = "token" | "oidc";
-type PkceMode = "auto" | "required" | "off";
-type NonceMode = "required" | "best_effort" | "off";
+export type PkceMode = "auto" | "required" | "off";
+export type NonceMode = "required" | "best_effort" | "off";
 
 export interface OidcConfig {
   issuer: string;
@@ -56,6 +56,7 @@ export interface OidcConfig {
   pkce: PkceMode;
   nonce: NonceMode;
   signingAlgs: string[];
+
 }
 
 export interface AdminAuthConfig {
@@ -75,6 +76,11 @@ export interface AdminAuthConfig {
   oidc: OidcConfig | null;
   /** 第二提供方：GitHub OAuth（可选）。 */
   github: GithubConfig | null;
+  /**
+   * 登录页展示 / 允许的提供方。`null` = 「跟随是否配置」（兼容旧部署）。
+   * 管理员可以在「设置 → 登录与访问」里自助开关（例如两个都关，只留静态凭据兜底）。
+   */
+  enabledProviders: AuthProviderId[] | null;
 }
 
 /** 登录提供方：目前支持自建 OIDC（公司 GitLab）与 GitHub OAuth。 */
@@ -133,7 +139,7 @@ export type IdentityRole = "admin" | "viewer";
  */
 export function viewerCanRunCommand(command: string): boolean {
   if (!/^(get|list|read|query|describe|check)_/.test(command)) return false;
-  return !/(credential|secret|token|auth|cli|export|key|reveal|config|setting)/i.test(
+  return !/(credential|secret|token|auth|login|cli|export|key|reveal|config|setting)/i.test(
     command.replace(/^[a-z]+_/, ""),
   );
 }
@@ -369,6 +375,7 @@ export function adminAuthConfigFromEnv(
       sessionTtlMs,
       oidc: null,
       github: null,
+      enabledProviders: null,
     };
   }
 
@@ -395,6 +402,7 @@ export function adminAuthConfigFromEnv(
       sessionTtlMs,
       oidc: null,
       github,
+      enabledProviders: null,
     };
   }
   const allowHttpIssuer = envBool(env, "FLOWLET_OIDC_ALLOW_HTTP_ISSUER", false);
@@ -524,6 +532,7 @@ export function adminAuthConfigFromEnv(
       signingAlgs,
     },
     github,
+    enabledProviders: null,
   };
 }
 
@@ -740,9 +749,11 @@ export class AdminAuth {
   #discovery: Cached<DiscoveryDoc> | null = null;
   #jwks: Cached<Jwk[]> | null = null;
   #sessionStore: AdminSessionStore | null;
+  readonly oidcDeployment: OidcConfig | null;
 
   private constructor(config: AdminAuthConfig, sessionStore: AdminSessionStore | null = null) {
     this.config = config;
+    this.oidcDeployment = config.oidc === null ? null : structuredClone(config.oidc);
     this.#sessionStore = sessionStore;
   }
 
@@ -756,6 +767,58 @@ export class AdminAuth {
    */
   applyGithubConfig(github: GithubConfig | null): void {
     this.config.github = github;
+  }
+
+  /**
+   * 热替换 OIDC 的**运行时**部分（准入名单、角色名单、展示名、scope）。
+   *
+   * 部署级字段（issuer / discovery / client 凭据 / 签名算法）仍然只来自环境变量：
+   * 它们要与 GitLab 应用登记的回调地址、容器网络可达性对齐，改了必须重新部署。
+   * 有没有部署级 OIDC 配置与「OIDC 是否启用」是两件事（见 `setEnabledProviders`）。
+   */
+  applyOidcRuntimeConfig(patch: Partial<Pick<OidcConfig,
+    "scopes" | "displayName" | "allowedSubs" | "allowedGroups" | "allowedEmails" |
+    "allowedDomains" | "adminSubs" | "adminEmails" | "allowAny">>): void {
+    if (this.config.oidc === null) return;
+    this.config.oidc = { ...this.config.oidc, ...patch };
+    // 发现文档 / JWKS 与准入无关；展示名等变化也不需要重取。
+  }
+
+  /**
+   * 把 OIDC 运行时字段恢复成部署默认值（管理台移除库内覆盖后调用）。
+   *
+   * 部署级字段（issuer / discovery / client）不动；只重设准入、角色与展示。
+   */
+  resetOidcRuntimeConfig(): void {
+    if (this.oidcDeployment !== null) this.config.oidc = structuredClone(this.oidcDeployment);
+  }
+
+  /** 当前部署有没有可用的 OIDC 配置（与开关无关）。 */
+  oidcDeployed(): boolean {
+    return this.config.oidc !== null;
+  }
+
+  /** 登录方式开关：`null` 表示跟随配置（旧的「配了谁就开谁」）。 */
+  enabledProviders(): AuthProviderId[] {
+    if (this.config.mode !== "oidc") return [];
+    const explicit = this.config.enabledProviders;
+    if (explicit !== null) return explicit.filter(id =>
+      id === "oidc" ? this.config.oidc !== null : this.config.github !== null,
+    );
+    const out: AuthProviderId[] = [];
+    if (this.config.oidc !== null) out.push("oidc");
+    if (this.config.github !== null) out.push("github");
+    return out;
+  }
+
+  setEnabledProviders(providers: AuthProviderId[] | null): void {
+    this.config.enabledProviders = providers === null ? null : [...new Set(providers)];
+  }
+
+  /** 某个提供方此刻是否可登录：既要被打开，也要真的有配置。 */
+  #providerEnabled(id: AuthProviderId): boolean {
+    if (!this.enabledProviders().includes(id)) return false;
+    return id === "oidc" ? this.config.oidc !== null : this.config.github !== null;
   }
 
   /**
@@ -1068,19 +1131,22 @@ export class AdminAuth {
   // ── handlers ─────────────────────────────────────────────────────────────
 
   configHandler(): AuthResponse {
+    // 登录页只展示**已启用**的提供方（开关由管理台自助设置）。
+    const providers: Array<{ id: AuthProviderId; display_name: string }> = [];
     const oidc = this.config.oidc;
+    if (oidc !== null && this.#providerEnabled("oidc")) {
+      providers.push({ id: "oidc", display_name: oidc.displayName });
+    }
+    if (this.config.github !== null && this.#providerEnabled("github")) {
+      providers.push({ id: "github", display_name: this.config.github.displayName });
+    }
     return jsonResponse(
       200,
       {
         mode: this.config.mode,
-        provider: { display_name: oidc?.displayName ?? this.config.github?.displayName ?? null },
-        // 登录页据此渲染按钮：公网入口用 GitHub，内网入口用公司 OIDC（`?provider=` 可覆盖）。
-        providers: [
-          ...(oidc === null ? [] : [{ id: "oidc", display_name: oidc.displayName }]),
-          ...(this.config.github === null
-            ? []
-            : [{ id: "github", display_name: this.config.github.displayName }]),
-        ],
+        provider: { display_name: providers[0]?.display_name ?? null },
+        // 登录页据此渲染按钮；`?provider=` 可覆盖默认选择。
+        providers,
         login_path: "/api/auth/login",
         token_login:
           this.config.mode === "token" ||
@@ -1123,18 +1189,27 @@ export class AdminAuth {
     } catch {
       explicit = null;
     }
+    const enabled = this.enabledProviders();
     const wanted = (explicit ?? "").trim().toLowerCase();
     if (wanted !== "") {
-      if (wanted === "github") return this.config.github === null ? null : "github";
+      if (wanted === "github") return this.#providerEnabled("github") ? "github" : null;
       if (wanted === "oidc" || wanted === "gitlab") {
-        return this.config.oidc === null ? null : "oidc";
+        return this.#providerEnabled("oidc") ? "oidc" : null;
       }
       return null;
     }
-    // 没指定：https 入口（公网域名 / 隧道）走 GitHub，内网 http 入口走公司 OIDC。
-    if (requestScheme(info.headers) === "https" && this.config.github !== null) return "github";
-    if (this.config.oidc !== null) return "oidc";
-    return this.config.github === null ? null : "github";
+    // 没指定：https 入口（公网域名 / 隧道）走 GitHub，内网 http 入口走公司 OIDC；
+    // 只在已启用的提供方里挑。
+    if (
+      requestScheme(info.headers) === "https" &&
+      enabled.includes("github") &&
+      this.#providerEnabled("github")
+    ) {
+      return "github";
+    }
+    if (enabled.includes("oidc") && this.#providerEnabled("oidc")) return "oidc";
+    if (enabled.includes("github") && this.#providerEnabled("github")) return "github";
+    return null;
   }
 
   async #oidcLogin(info: AuthRequestInfo): Promise<AuthResponse> {
@@ -1496,6 +1571,9 @@ export class AdminAuth {
     ) {
       return redirectResponse(303, "/?auth_error=state_invalid", [...this.#clearBrowserCookie()]);
     }
+    if (!this.#providerEnabled(transaction.provider)) {
+      return redirectResponse(303, "/?auth_error=auth_not_configured", [...this.#clearBrowserCookie()]);
+    }
     const obtained: Identity | string =
       transaction.provider === "github"
         ? this.config.github === null
@@ -1507,6 +1585,9 @@ export class AdminAuth {
     if (typeof obtained === "string") {
       console.warn(`SSO 登录失败：provider=${transaction.provider} reason=${obtained}`);
       return redirectResponse(303, `/?auth_error=${obtained}`, [...this.#clearBrowserCookie()]);
+    }
+    if (!this.#providerEnabled(transaction.provider)) {
+      return redirectResponse(303, "/?auth_error=auth_not_configured", [...this.#clearBrowserCookie()]);
     }
     const identity = obtained;
     const allowed =

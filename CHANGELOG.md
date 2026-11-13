@@ -41,6 +41,12 @@
 
 ### 新增
 
+- **管理台登录方式与准入可在界面自助设置**：「设置 → 登录与访问」新增 GitLab / OIDC 配置区与
+  两个「启用」开关（OIDC / GitHub）。准入（GitLab 用户 ID、组、邮箱、邮箱域）与管理员名单
+  保存后供新登录使用，并持久化到数据卷 SQLite（不复制部署 secret），不用改 compose、不用重启容器；
+  issuer / discovery / client 凭据 / 回调地址仍以部署环境变量为准（界面展示、不回写）。
+  关闭或删除最后一个登录方式前要求存在静态凭据兜底，否则拒绝；禁用入口同时拒绝待完成的登录回调，已有会话不变。新增 Node Host 命令
+  `get/set/delete/check_oidc_auth_provider`、`get/set_admin_login_mode`。
 - **桌面端 Electron + Node/TS 重构（第一阶段）**：桌面端不再依赖 Rust/Tauri 承载业务逻辑，
   改为 Electron 宿主（`packages/flowlet-desktop/`）+ 复用 `packages/flowlet-core` 的 Node
   命令面与代理核心，渲染层直接加载现有 React 界面（`vite build --mode desktop` → `dist-desktop`），

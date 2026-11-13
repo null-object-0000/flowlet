@@ -98,7 +98,7 @@ export function useSettingsTabMeta(): Record<SettingsTab, { title: string; desc:
     general: { title: t("通用设置"), desc: t("调整 Flowlet 的显示、主题与启动行为") },
     capture: { title: t("数据捕获"), desc: t("控制请求 / 响应内容的捕获、保留和脱敏策略") },
     sync: { title: t("同步管理"), desc: t("管理云端同步、设备连接与用量汇总") },
-    auth: { title: t("登录与访问"), desc: t("配置管理台的登录方式（GitHub OAuth）与准入名单") },
+    auth: { title: t("登录与访问"), desc: t("配置管理台的登录方式（GitLab OIDC / GitHub）与准入名单") },
     storage: { title: t("存储管理"), desc: t("查看本地数据占用并清理不再需要的内容") },
     maintenance: { title: t("数据维护"), desc: t("检查并修复历史统计数据") },
     about: { title: t("关于 Flowlet"), desc: t("版本信息、数据目录与诊断工具") },

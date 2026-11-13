@@ -204,9 +204,11 @@ function WebSession() {
     );
   if (!authenticated) {
     const oidc = authConfig?.mode === "oidc";
-    const providerName = authConfig?.provider.display_name ?? "GitLab";
     // 配了多个提供方（内网 OIDC + 公网 GitHub）就逐个给按钮，不再猜。
+    // 提供方开关由管理台自助设置：关掉之后这里就不再有对应入口。
     const providers = authConfig?.providers ?? [];
+    const providerName = providers[0]?.display_name ?? authConfig?.provider.display_name ?? "GitLab";
+    const noProvider = providers.length === 0;
     const loginWith = (id?: string) => {
       if (!authConfig) return;
       const target =
@@ -230,13 +232,19 @@ function WebSession() {
                 ))}
               </>
             )}
-            {oidc && providers.length <= 1 && (
+            {oidc && providers.length === 1 && (
               <>
                 <Typography.Text>使用 {providerName} 账号登录 Flowlet 管理台。</Typography.Text>
                 <Button theme="solid" onClick={() => loginWith()}>
                   使用 {providerName} 登录
                 </Button>
               </>
+            )}
+            {noProvider && !authConfig?.token_login && (
+              <Banner
+                type="warning"
+                description="当前没有启用中的登录方式。请联系部署者开启静态管理凭据兜底，或在部署环境重新启用 GitLab OIDC / GitHub 登录。"
+              />
             )}
             {(!oidc || authConfig?.token_login) && (
               <form

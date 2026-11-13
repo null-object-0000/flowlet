@@ -29,6 +29,7 @@ import {
   argOptionalString,
   argString,
   argsObject,
+  invalidType,
   requireFields,
 } from "./errors.ts";
 import {
@@ -46,7 +47,16 @@ import {
   saveGithubProvider,
   type GithubProviderInput,
 } from "./auth-providers.ts";
-import type { GithubConfig } from "./auth.ts";
+import {
+  checkOidcProvider,
+  deleteOidcProvider,
+  readLoginMode,
+  readOidcProviderSummary,
+  saveLoginMode,
+  saveOidcProvider,
+  type OidcProviderInput,
+} from "./auth-oidc-provider.ts";
+import type { AuthProviderId, GithubConfig } from "./auth.ts";
 import {
   logout as qwenPlatformLogout,
   pollLogin as qwenPlatformPollLogin,
@@ -156,6 +166,52 @@ function parseGithubProviderArg(args: JsonRow): GithubProviderInput {
     authorize_url: orCamel("authorize_url", "authorizeUrl"),
     token_url: orCamel("token_url", "tokenUrl"),
     api_base: orCamel("api_base", "apiBase"),
+  };
+}
+
+/** 可选的字符串数组参数：缺省 / null 视为「没传」。 */
+function optionalStringList(args: JsonRow, name: string): string[] | null {
+  const value = args[name];
+  if (value === null || value === undefined) return null;
+  if (!Array.isArray(value)) throw invalidType(value, "a sequence", name);
+  return value.map((item) => {
+    if (typeof item !== "string") throw invalidType(item, "a string", name);
+    return item;
+  });
+}
+
+/** OIDC 登录提供方表单参数：与 GitHub 同一套 snake_case / camelCase 兼容规则。 */
+function parseOidcProviderArg(args: JsonRow): OidcProviderInput {
+  const str = (key: string): string | null => {
+    const value = args[key];
+    return typeof value === "string" ? value : null;
+  };
+  const orCamel = (snake: string, camel: string): string | null => str(snake) ?? str(camel);
+  const list = (key: string): string[] | null => optionalStringList(args, key);
+  const bool = (key: string): boolean | null =>
+    typeof args[key] === "boolean" ? (args[key] as boolean) : null;
+  return {
+    issuer: str("issuer"),
+    discovery_url: orCamel("discovery_url", "discoveryUrl"),
+    client_id: orCamel("client_id", "clientId"),
+    client_secret: orCamel("client_secret", "clientSecret"),
+    scopes: str("scopes"),
+    redirect_urls: list("redirect_urls") ?? list("redirectUrls"),
+    display_name: orCamel("display_name", "displayName"),
+    email_claim: orCamel("email_claim", "emailClaim"),
+    name_claim: orCamel("name_claim", "nameClaim"),
+    groups_claim: orCamel("groups_claim", "groupsClaim"),
+    allowed_subs: list("allowed_subs") ?? list("allowedSubs"),
+    allowed_groups: list("allowed_groups") ?? list("allowedGroups"),
+    allowed_emails: list("allowed_emails") ?? list("allowedEmails"),
+    allowed_domains: list("allowed_domains") ?? list("allowedDomains"),
+    admin_subs: list("admin_subs") ?? list("adminSubs"),
+    admin_emails: list("admin_emails") ?? list("adminEmails"),
+    allow_any: bool("allow_any") ?? bool("allowAny"),
+    allow_http_issuer: bool("allow_http_issuer") ?? bool("allowHttpIssuer"),
+    insecure_http: bool("insecure_http") ?? bool("insecureHttp"),
+    pkce: str("pkce"),
+    nonce: str("nonce"),
   };
 }
 
@@ -715,10 +771,117 @@ export async function dispatch(ctx: WebContext, command: string, rawArgs: unknow
       return null;
     }
     case "delete_github_auth_provider": {
+      const auth = ctx.auth;
+      if (auth && auth.enabledProviders().includes("github") &&
+          !auth.enabledProviders().some((id) => id === "oidc" && auth.oidcDeployed()) &&
+          auth.mode() !== "token" && !auth.config.allowTokenLogin) {
+        throw CommandError.badRequest("不能删除最后一个可用登录方式，请先启用 OIDC 或静态管理凭据兜底");
+      }
       deleteGithubProvider(ctx.storage);
       ctx.auth?.applyGithubConfig(null);
       return null;
     }
+    // ── 管理台登录提供方（OIDC / GitLab）：准入与角色可在界面上改，改完立即生效 ──
+    case "get_oidc_auth_provider": {
+      const summary = readOidcProviderSummary(ctx.storage, ctx.auth?.config.oidc ?? null);
+      // 部署级配置缺失时，光有库里记录也登录不了：明确告诉界面「开关无效」。
+      return { ...summary, deployment_ready: ctx.auth?.oidcDeployed() === true };
+    }
+    case "set_oidc_auth_provider": {
+      const input = parseOidcProviderArg(args);
+      let override: ReturnType<typeof saveOidcProvider>;
+      try {
+        override = saveOidcProvider(ctx.storage, input, ctx.auth?.oidcDeployment ?? null);
+      } catch (error) {
+        throw CommandError.badRequest(error instanceof Error ? error.message : String(error));
+      }
+      ctx.auth?.applyOidcRuntimeConfig(override);
+      return null;
+    }
+    case "delete_oidc_auth_provider": {
+      const auth = ctx.auth;
+      if (auth === undefined || auth.config.oidc === null) {
+        deleteOidcProvider(ctx.storage);
+        return null;
+      }
+      deleteOidcProvider(ctx.storage);
+      auth.resetOidcRuntimeConfig();
+      return null;
+    }
+    case "check_oidc_auth_provider": {
+      const env = ctx.auth?.oidcDeployment;
+      if (!env) throw CommandError.badRequest("请先在部署环境配置 OIDC");
+      return await checkOidcProvider({
+        issuer: env.issuer,
+        discoveryUrl: env.discoveryUrl,
+        clientId: env.clientId,
+        clientSecret: env.clientSecret,
+        insecureHttp: env.insecureHttp,
+      });
+    }
+
+    // ── 启用哪些登录方式：oidc / github 可各自开关 ─────────────────────────
+    case "get_admin_login_mode": {
+      const auth = ctx.auth;
+      const resolved = readLoginMode(ctx.storage, {
+        oidc: auth?.oidcDeployed() === true,
+        github: auth?.config.github != null,
+      });
+      const enabled = auth?.enabledProviders() ?? [];
+      return {
+        enabled,
+        source: resolved.source,
+        oidc_configured: auth?.oidcDeployed() === true,
+        github_configured: auth?.config.github != null,
+        token_login: auth?.config.allowTokenLogin === true || auth?.mode() === "token",
+      };
+    }
+    case "set_admin_login_mode": {
+      const requested = optionalStringList(args, "enabled");
+      if (requested === null || requested.some((id) => id !== "oidc" && id !== "github")) {
+        throw CommandError.badRequest("enabled 必须是 oidc / github 字符串数组");
+      }
+      const enabled = [...new Set(requested)] as AuthProviderId[];
+      const auth = ctx.auth;
+      if (auth !== undefined) {
+        if (enabled.length > 0 && auth.mode() !== "oidc") {
+          throw CommandError.badRequest("启用 SSO 登录前，请先在部署环境设置 FLOWLET_ADMIN_AUTH_MODE=oidc");
+        }
+        if (enabled.some((id) => id === "oidc" ? !auth.oidcDeployed() : !auth.config.github)) {
+          throw CommandError.badRequest("不能启用尚未配置的登录方式");
+        }
+        const previous = auth.config.enabledProviders;
+        const tokenUsable = auth.mode() === "token" || auth.config.allowTokenLogin;
+        const stillHasProvider = enabled.some((id) =>
+          id === "oidc" ? auth.oidcDeployed() : auth.config.github != null,
+        );
+        if (!stillHasProvider && !tokenUsable) {
+          // OIDC-only 部署里关掉最后一个登录方式 = 把自己锁在门外（静态凭据要
+          // FLOWLET_ADMIN_ALLOW_TOKEN_LOGIN=1 才生效）。先拒绝，别等保存完才发现。
+          throw CommandError.badRequest(
+            "至少要保留一个可用的登录方式：请保留 OIDC / GitHub 之一，或先在部署环境开启静态管理凭据兜底（FLOWLET_ADMIN_ALLOW_TOKEN_LOGIN=1）",
+          );
+        }
+        auth.setEnabledProviders(enabled);
+        // 持久化失败就把开关退回原值，避免「界面显示关了、重启又打开」。
+        try {
+          saveLoginMode(ctx.storage, {
+            oidc: enabled.includes("oidc"),
+            github: enabled.includes("github"),
+          });
+        } catch (error) {
+          auth.setEnabledProviders(previous);
+          throw error;
+        }
+      } else {
+        saveLoginMode(ctx.storage, {
+          oidc: enabled.includes("oidc"),
+          github: enabled.includes("github"),
+        });
+      }
+      return { oidc: enabled.includes("oidc"), github: enabled.includes("github") };
+    }
+
     case "check_github_auth_provider": {
       const input = parseGithubProviderArg(args);
       const stored = readGithubProvider(ctx.storage, ctx.secrets) ?? ctx.auth?.config.github ?? null;

@@ -1,6 +1,6 @@
 # 管理端 OAuth / OIDC 单点登录设计
 
-状态：**v0.5 已实现并完成真实 GitLab 登录验证（2026-11-09）**；首个 IdP = GitLab，v1 准入使用单用户 `sub`
+状态：**v0.6：准入 / 管理员 / 登录方式开关改为管理台自助配置（2026-11-13）**；v0.5 已实现并完成真实 GitLab 登录验证（2026-11-09）；首个 IdP = GitLab
 日期：2026-11-09（v0.2 纳入了规范、各 IdP 与 Rust crate 的实机核验；v0.3 收窄首个 IdP 落地细节）
 范围：headless / Docker Web Host 的浏览器管理台（`FLOWLET_WEB_ADDR` 暴露的 Web UI 与
 `/api/*` 管理接口）
@@ -38,6 +38,51 @@
    管理台却要求再维护一套独立密码。
 
 本文设计的就是上面第 1–5 条背后的管理员身份能力（管理台 OIDC/SSO 登录），**不涉及**代理转发和渠道账号。
+
+### 2.2 v0.6：登录方式与准入改为管理员自助配置（2026-11-13）
+
+v0.5 的问题：OIDC 的准入名单、管理员名单、启用与否都写在 `FLOWLET_OIDC_*` 环境变量里，
+换一个同事进来就得改 compose + 重启容器；而 GitHub 那侧早就有「设置 → 登录与访问」自助配置，
+两边体验不一致。实际上公司内网 GitLab 同样需要「谁能登录 / 谁能管理」这层。
+
+v0.6 的做法（与 GitHub 提供方同一套存储习惯）：
+
+| 能力 | 位置 | 热生效 | 持久化 |
+| --- | --- | --- | --- |
+| OIDC 准入（sub / 组 / 邮箱 / 域）与管理员（sub / 邮箱） | `auth-oidc-provider.ts`，app_meta `auth_provider_oidc_v1` | 是（`AdminAuth.applyOidcRuntimeConfig`） | SQLite，仅保存准入与展示，不复制部署 secret |
+| 启用哪些登录方式（oidc / github） | app_meta `auth_login_mode_v1`，`AdminAuth.setEnabledProviders` | 是 | SQLite |
+| issuer / discovery / client 凭据 / 回调白名单 | 仍只认环境变量 | 否（部署级） | 环境变量 |
+
+为什么部署级字段不放开：issuer 与回调地址必须和 GitLab 应用里登记的 Redirect URI、容器到
+GitLab 的网络可达性一致，应用进程无法自证；放开会让「界面看起来配好了、登录却 400」变成常态。
+
+安全约束：
+
+- 准入为空且未勾「允许任何人登录」时保存被拒绝（管理台能读全部服务凭据，fail-closed）；
+- http issuer / HTTP 端点许可、PKCE、nonce、claim 映射与回调白名单继续只由部署环境配置；
+- 关闭最后一个登录方式前要求存在静态管理凭据兜底（token 模式或 `ALLOW_TOKEN_LOGIN=1`），
+  否则 400 拒绝——OIDC-only 部署里这一步等于把自己锁在门外；
+- 库内准入与展示覆盖优先环境变量；移除覆盖恢复当前进程启动时的部署默认，保持登录开关不变；重启后从数据卷恢复；
+- 禁用提供方同时拒绝已经发起但未完成的登录回调，不终止已有会话；准入与角色修改在下一次登录时使用，已有会话保留原角色直至退出或过期；
+- 删除 GitHub 提供方同样检查最后一个登录入口；未配置的提供方不能开启；
+- 损坏的持久化 OIDC 准入或登录方式配置阻止启动，不静默恢复可能更宽的环境准入；
+- 所有新命令继续经过管理员身份、Cookie CSRF 与 CLI 命令限制，viewer 不可读取或修改登录配置。
+
+连通性检查只使用部署配置，不把部署 secret 发往表单输入的地址。Discovery 要求 issuer 完全一致，
+HTTP 端点必须由部署显式许可，Discovery 与 token 请求均不跟随重定向；异常状态不会报告成功。
+无效测试授权码被拒绝只能说明端点可达，应用凭据仍需实际登录验证。
+
+对应命令（Node Host Web 白名单；桌面/Rust 宿主无登录页，不实现）：
+`get_oidc_auth_provider` / `set_oidc_auth_provider` / `delete_oidc_auth_provider` /
+`check_oidc_auth_provider` / `get_admin_login_mode` / `set_admin_login_mode`。
+`get_oidc_auth_provider` 额外返回 `deployment_ready`（部署级 OIDC 是否解析成功），界面据此决定
+「启用」开关是否可用。
+
+回归（2026-11-13）：鉴权/提供方/CLI 授权82项、界面18项通过，Node Host 与前端类型检查、
+Web 构建通过。覆盖持久化重建、移除恢复、隐藏部署字段保留、防锁死、未完成回调拒绝、
+匿名/viewer/CSRF 边界、错误端点响应、持久化失败回滚与两提供方连续保存。
+本次仅 Node/TS 与 React 变更，无 Rust 或数据库表结构迁移；新增两条 `app_meta` 配置记录。
+部署身份、凭据及协议参数仍需重启后读取，准入/展示与登录开关下一次登录即使用新值。
 
 ## 2. 目标与非目标
 

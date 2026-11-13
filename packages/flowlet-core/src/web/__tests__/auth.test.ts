@@ -40,6 +40,8 @@ const AUTH_ENV_KEYS = [
   "FLOWLET_OIDC_SCOPES",
   "FLOWLET_OIDC_DISPLAY_NAME",
   "FLOWLET_OIDC_ALLOWED_SUBS",
+  "FLOWLET_OIDC_ADMIN_SUBS",
+  "FLOWLET_OIDC_ADMIN_EMAILS",
   "FLOWLET_OIDC_ALLOWED_EMAILS",
   "FLOWLET_OIDC_ALLOWED_DOMAINS",
   "FLOWLET_OIDC_ALLOWED_GROUPS",
@@ -90,9 +92,10 @@ after(async () => {
 interface TestHost {
   baseUrl: string;
   close: () => Promise<void>;
+  auth: AdminAuth;
 }
 
-async function startHost(env: Record<string, string>, sessionStoreFile?: string): Promise<TestHost> {
+async function startHost(env: Record<string, string>, sessionStoreFile?: string, meta = new Map<string, string>()): Promise<TestHost> {
   clearAuthEnv();
   Object.assign(process.env, env);
   let port: number;
@@ -134,8 +137,8 @@ async function startHost(env: Record<string, string>, sessionStoreFile?: string)
   };
   const web = createWebHost({
     storage: {
-      getAppMeta: () => null,
-      setAppMeta: () => {},
+      getAppMeta: (key: string) => meta.get(key) ?? null,
+      setAppMeta: (key: string, value: string) => { meta.set(key, value); },
       listChannelModels: () => [],
     } as unknown as never,
     proxy: {
@@ -178,7 +181,7 @@ async function startHost(env: Record<string, string>, sessionStoreFile?: string)
     rmSync(workDir, { recursive: true, force: true });
   };
   cleanupCallbacks.push(close);
-  return { baseUrl, close };
+  return { baseUrl, close, auth };
 }
 
 interface TestResponse {
@@ -569,6 +572,67 @@ describe("OIDC 模式", () => {
     // 未登录会话探测 → 401（与 Rust 中间件一致）
     const session = await request(host.baseUrl, "/api/session");
     assert.equal(session.status, 401);
+  });
+
+  it("新命令保留未登录、viewer 与 CSRF 边界", async () => {
+    const provider = new MockOidcProvider();
+    await provider.start();
+    const host = await startOidcHost(provider, { FLOWLET_OIDC_ADMIN_SUBS: "other-admin" });
+    const session = await loginFlow(host, provider);
+    for (const command of ["get_oidc_auth_provider", "set_oidc_auth_provider", "delete_oidc_auth_provider", "check_oidc_auth_provider", "get_admin_login_mode", "set_admin_login_mode"]) {
+      const url = `/api/commands/${command}`;
+      assert.equal((await request(host.baseUrl, url, { method: "POST", body: "{}" })).status, 401);
+      assert.equal((await request(host.baseUrl, url, { method: "POST", body: "{}", headers: {
+        cookie: session.sessionCookie, origin: host.baseUrl, "x-csrf-token": session.csrfToken, "content-type": "application/json",
+      } })).status, 403);
+    }
+    const adminHost = await startOidcHost(provider);
+    const admin = await loginFlow(adminHost, provider);
+    assert.equal((await request(adminHost.baseUrl, "/api/commands/set_admin_login_mode", {
+      method: "POST", body: '{"enabled":[]}', headers: { cookie: admin.sessionCookie, origin: adminHost.baseUrl, "content-type": "application/json" },
+    })).status, 403);
+  });
+
+  it("Web Host 重建读取准入与开关，删除覆盖恢复部署默认", async () => {
+    const provider = new MockOidcProvider();
+    await provider.start();
+    const meta = new Map<string, string>();
+    const port = await freePort();
+    const env = oidcEnv(provider, `http://127.0.0.1:${port}`, { FLOWLET_ADMIN_ALLOW_TOKEN_LOGIN: "1", FLOWLET_ADMIN_TOKEN: ADMIN_TOKEN });
+    const host = await startHost(env, undefined, meta);
+    const headers = { authorization: `Bearer ${ADMIN_TOKEN}`, "content-type": "application/json" };
+    const saved = await request(host.baseUrl, "/api/commands/set_oidc_auth_provider", {
+      method: "POST", headers, body: JSON.stringify({ allowed_subs: ["user-7"], display_name: "Stored IdP" }),
+    });
+    assert.equal(saved.status, 200);
+    assert.equal((await request(host.baseUrl, "/api/commands/set_admin_login_mode", { method: "POST", headers, body: '{"enabled":[]}' })).status, 200);
+    // 独立 Host 实例模拟重启，用相同 app_meta 持久化记录。
+    const nextPort = await freePort();
+    const next = await startHost({ ...env, FLOWLET_PUBLIC_WEB_URL: `http://127.0.0.1:${nextPort}` }, undefined, meta);
+    assert.deepEqual(next.auth.config.oidc?.allowedSubs, ["user-7"]);
+    assert.deepEqual((await request(next.baseUrl, "/api/auth/config")).json?.providers, []);
+    assert.equal((await request(next.baseUrl, "/api/commands/delete_oidc_auth_provider", { method: "POST", headers, body: "{}" })).status, 200);
+    assert.deepEqual(next.auth.config.oidc?.allowedSubs, ["user-1"]);
+    assert.deepEqual(next.auth.enabledProviders(), []);
+  });
+
+  it("禁用提供方会拒绝已发起的 callback，现有会话仍可用", async () => {
+    const provider = new MockOidcProvider();
+    await provider.start();
+    const host = await startOidcHost(provider, { FLOWLET_ADMIN_ALLOW_TOKEN_LOGIN: "1", FLOWLET_ADMIN_TOKEN: ADMIN_TOKEN });
+    const session = await loginFlow(host, provider);
+    const pending = await beginLogin(host);
+    provider.claims = { nonce: pending.nonce };
+    const response = await request(host.baseUrl, "/api/commands/set_admin_login_mode", {
+      method: "POST", headers: { cookie: session.sessionCookie, "x-csrf-token": session.csrfToken,
+        origin: host.baseUrl, "content-type": "application/json" }, body: JSON.stringify({ enabled: [] }),
+    });
+    assert.equal(response.status, 200);
+    const callback = await runCallback(host, pending);
+    assert.equal(callback.location, "/?auth_error=auth_not_configured");
+    assert.equal(callback.sessionCookie, null);
+    assert.equal((await request(host.baseUrl, "/api/session", { headers: { cookie: session.sessionCookie } })).status, 200);
+    assert.equal((await request(host.baseUrl, "/api/auth/login?provider=oidc")).status, 404);
   });
 
   it("完整登录 → callback → 会话 → 受保护命令（CSRF） → logout", async () => {

@@ -1,0 +1,56 @@
+name: Deploy website to global EdgeOne
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "website/**"
+      - "packages/product-ui/**"
+      - "package.json"
+      - "package-lock.json"
+      - "scripts/edgeone/**"
+      - ".github/workflows/deploy-website-edgeone.yml"
+  pull_request:
+    paths:
+      - "website/**"
+      - "packages/product-ui/**"
+      - "package.json"
+      - "package-lock.json"
+      - "scripts/edgeone/**"
+      - ".github/workflows/deploy-website-edgeone.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: edgeone-website-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  website:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            scripts/edgeone/package-lock.json
+      - run: npm ci
+      - name: Check website types
+        run: npm run website:check
+      - name: Build website
+        run: npm run website:build
+      - name: Install deployment SDK
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: npm ci --prefix scripts/edgeone
+      - name: Publish website to global EdgeOne
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: node scripts/edgeone/deploy.mjs
+        env:
+          TENCENT_CLOUD_SECRET_ID: ${{ secrets.TENCENT_CLOUD_SECRET_ID }}
+          TENCENT_CLOUD_SECRET_KEY: ${{ secrets.TENCENT_CLOUD_SECRET_KEY }}

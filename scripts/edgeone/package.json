@@ -1,0 +1,8 @@
+{
+  "name": "flowlet-website-edgeone-deploy",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@edgeone/makers-sdk": "0.2.0"
+  }
+}

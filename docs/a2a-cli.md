@@ -150,6 +150,11 @@ RPC 仅接受 A2A 1.0 标准方法，params 原样传递（另按选定接口补
 覆盖标准发现、任务/直接消息、跨进程会话、附件与 URL、SSE、超时、并发取消、信号、凭据边界及错误。
 百晓生只作为真实接入验证服务，不是 CLI 的适配器或内置 Agent。
 
+Windows 的信号回归使用 `__tests__/fixtures/signal-cli.ts` 在真实 CLI 子进程内触发其
+SIGINT 事件处理器；POSIX 继续使用系统 SIGINT。Windows `child.kill("SIGINT")` 是强制终止，
+不能用于验证正常中断清理。测试固定退出码 130、无信号强杀、保留 task/context、释放并重新
+获取同一会话锁，以及远端任务仍在运行且没有 `CancelTask` 或自动重发。测试驱动不进入分发包。
+
 CLI 与通用技能由 `node scripts/build-local-access.mjs` 打入 Web Host 下载包。
 更新已安装 CLI 可重新运行管理台的安装命令，既有凭据和 CLI 授权保留。
 服务端网关无新增 API、数据表或热更新规则；本地新增会话文件，CLI 升级无需修改 Agent 注册信息。

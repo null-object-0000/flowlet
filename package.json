@@ -44,7 +44,7 @@
     "node:e2e": "node scripts/e2e-node-host.mjs",
     "flowlet": "node packages/flowlet-cred/src/cli.ts",
     "cred": "node packages/flowlet-cred/src/cli.ts",
-    "cred:test": "node --test packages/flowlet-cred/src/__tests__/",
+    "cred:test": "node --test \"packages/flowlet-cred/src/**/*.test.ts\"",
     "cred:compat": "node packages/flowlet-cred/scripts/compat.mjs",
     "cred:typecheck": "tsc -p packages/flowlet-cred/tsconfig.json",
     "desktop:dev": "node scripts/build-desktop.mjs --dev",

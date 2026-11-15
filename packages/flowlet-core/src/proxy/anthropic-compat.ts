@@ -1,6 +1,6 @@
 // Anthropic SSE `content_block_start` 缺失字段修复（thinking / tool_use）。
 //
-// 逐段对照 `src-tauri/src/core/proxy_anthropic_compat.rs::ContentBlockStartCompat`。
+// 对应 `packages/flowlet-core/src/proxy/anthropic-compat.ts`。
 // 必须在捕获之后应用：日志保留上游原文，客户端收到修复后的流。
 import { isRecord, parseJson, stringifySorted } from "./util.ts";
 

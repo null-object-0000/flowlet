@@ -1,9 +1,9 @@
 // Web Host 进程级配置：log_capture / upstream_proxy / bind config。Owner: node-web.
 //
-// 初始化顺序与 Rust `FlowletServices::open` 一致：
+// Host 初始化顺序：
 // - `log_capture_config`：app_meta 优先（严格 serde 解析失败则回落），缺失回落 config.json.log_capture；
 // - `upstream_proxy_config`：app_meta 优先，缺失回落 config.json.network.upstream_proxy。
-// 保存命令只写回 app_meta（与 core/web/commands.rs 一致），进程内状态同步更新。
+// 保存命令只写回 app_meta（与 packages/flowlet-core/src/web/commands.ts 一致），进程内状态同步更新。
 import { readFileSync } from "node:fs";
 
 import type { ProxyBindConfig } from "../types.ts";
@@ -43,7 +43,7 @@ export const DEFAULT_LOG_CAPTURE: LogCaptureConfig = defaultLogCaptureConfig() a
 
 const LOG_CAPTURE_FIELDS = Object.keys(DEFAULT_LOG_CAPTURE) as (keyof LogCaptureConfig)[];
 
-/** 读取 config.json 原文；失败返回空对象（Rust 侧 read_config_raw 失败同样是 None）。 */
+/** 读取 config.json 原文；失败返回空对象（Host 侧 read_config_raw 失败同样是 None）。 */
 export function readConfigJson(configPath: string): JsonRow {
   try {
     const parsed: unknown = JSON.parse(readFileSync(configPath, "utf8"));
@@ -55,7 +55,7 @@ export function readConfigJson(configPath: string): JsonRow {
   }
 }
 
-/** Rust `extract_log_capture`：config.json 的 log_capture 缺失字段逐个回落默认值。 */
+/** 既有 `extract_log_capture`：config.json 的 log_capture 缺失字段逐个回落默认值。 */
 export function extractLogCapture(config: JsonRow): LogCaptureConfig {
   return extractLogCaptureConfig(config) as LogCaptureConfig;
 }
@@ -109,7 +109,7 @@ function describe(value: unknown): string {
 
 // ─── Upstream proxy ─────────────────────────────────────────────────────────
 
-/** Rust `UpstreamProxyConfig::normalized`（url 去空白，空 url → disabled）。 */
+/** 既有 `UpstreamProxyConfig::normalized`（url 去空白，空 url → disabled）。 */
 export function normalizeUpstreamProxy(config: Partial<UpstreamProxyConfig>): UpstreamProxyConfig {
   return normalizeUpstreamProxyConfig(config) as UpstreamProxyConfig;
 }
@@ -121,7 +121,7 @@ export function resolveUpstreamProxyConfig(
   return loadUpstreamProxyConfig(storage, config) as UpstreamProxyConfig;
 }
 
-/** `set_upstream_proxy_config` 参数解析（字段均有 serde default）。 */
+/** `set_upstream_proxy_config` 参数解析（字段均有 默认值）。 */
 export function parseUpstreamProxyArg(args: JsonRow): UpstreamProxyConfig {
   const value = argObject(args, "config", "UpstreamProxyConfig");
   const enabled = value.enabled;
@@ -135,7 +135,7 @@ export function parseUpstreamProxyArg(args: JsonRow): UpstreamProxyConfig {
   return normalizeUpstreamProxy({ enabled: enabled === true, url: typeof url === "string" ? url : "" });
 }
 
-/** Rust `UpstreamProxyConfig::validate`（错误文本逐字一致）。 */
+/** Node Host `UpstreamProxyConfig::validate`（错误文本逐字一致）。 */
 export function validateUpstreamProxy(config: UpstreamProxyConfig): void {
   validateUpstreamProxyConfig(config);
 }
@@ -144,7 +144,7 @@ export function validateUpstreamProxy(config: UpstreamProxyConfig): void {
 
 export const DEFAULT_CLIENT_TOKEN = "flowlet-local-token";
 
-/** Rust `ProxyBindConfig::normalized`：host 由 allow_lan 决定，port 0 → 18640。 */
+/** Node Host `ProxyBindConfig::normalized`：host 由 allow_lan 决定，port 0 → 18640。 */
 export function normalizeBindConfig(config: ProxyBindConfig): ProxyBindConfig {
   return {
     host: config.allow_lan ? "0.0.0.0" : "127.0.0.1",
@@ -154,7 +154,7 @@ export function normalizeBindConfig(config: ProxyBindConfig): ProxyBindConfig {
   };
 }
 
-/** Rust `set_bind_config` 的校验：监听地址必须能 parse 成 SocketAddr。 */
+/** Node Host `set_bind_config` 的校验：监听地址必须能 parse 成 SocketAddr。 */
 export function validateBindConfig(config: ProxyBindConfig): void {
   const addr = `${config.host}:${config.port}`;
   if (!isSocketAddr(addr)) {
@@ -163,7 +163,7 @@ export function validateBindConfig(config: ProxyBindConfig): void {
 }
 
 function CommandBindError(): Error {
-  // 保持与 Rust 相同的错误文本 / 形状（400 command_failed）。
+  // 保持与 Node Host 相同的错误文本 / 形状（400 command_failed）。
   const error = new Error("代理监听地址无效") as Error & { status?: number; code?: string };
   error.status = 400;
   error.code = "command_failed";
@@ -181,7 +181,7 @@ function isSocketAddr(addr: string): boolean {
   return true;
 }
 
-/** `set_proxy_bind_config` 参数解析（default_client_token 有 serde default）。 */
+/** `set_proxy_bind_config` 参数解析（default_client_token 有 默认值）。 */
 export function parseBindConfigArg(args: JsonRow): ProxyBindConfig {
   const value = argObject(args, "config", "ProxyBindConfig");
   requireFields(value, "config", ["host", "port", "allow_lan"]);
@@ -216,13 +216,13 @@ export function readChannelsConfig(config: JsonRow): JsonRow {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as JsonRow) : {};
 }
 
-/** Rust `sync::openai_models_url`。 */
+/** Node Host `sync::openai_models_url`。 */
 export function openaiModelsUrl(baseUrl: string): string {
   const base = baseUrl.trim().replace(/\/+$/, "");
   return base.endsWith("/v1") ? `${base}/models` : `${base}/v1/models`;
 }
 
-/** Rust `ChannelsConfig::models_endpoint_url`（账号级 Base URL 覆盖优先）。 */
+/** Node Host `ChannelsConfig::models_endpoint_url`（账号级 Base URL 覆盖优先）。 */
 export function modelsEndpointUrl(channelsConfig: JsonRow, channelId: string): string | null {
   const endpoints = channelsConfig.endpoints;
   if (endpoints !== null && typeof endpoints === "object" && !Array.isArray(endpoints)) {
@@ -252,7 +252,7 @@ export function modelsEndpointUrl(channelsConfig: JsonRow, channelId: string): s
   }
 }
 
-/** Rust `account_models_url` / test_connection 的 URL 解析（account override 优先）。 */
+/** Node Host `account_models_url` / test_connection 的 URL 解析（account override 优先）。 */
 export function accountModelsUrl(account: JsonRow, channelsConfig: JsonRow): string | null {
   const override = effectiveOpenaiBaseUrl(account);
   if (override) return openaiModelsUrl(override);

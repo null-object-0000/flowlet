@@ -1,7 +1,7 @@
 // 余额快照存储（桌面命令层的领域纯函数）。
 //
-// 权威行为：src-tauri/src/core/storage/config.rs 的 `save_balance_snapshot` /
-// `list_balance_snapshots`（SQL 与列顺序逐句对照，行映射为 Rust 的 snake_case）。
+// 实现入口：packages/flowlet-core/src/storage/scrape.ts 的 `save_balance_snapshot` /
+// `list_balance_snapshots`（SQL 与列顺序逐句对照，行映射为 Node Host 的 snake_case）。
 // 这些函数由 `ctx.storage.withDatabase((db) => ...)` 调用，避免与其它领域争抢
 // `storage/index.ts` 的方法列表。
 import type { DatabaseSync } from "node:sqlite";
@@ -39,7 +39,7 @@ function balanceFromRow(row: JsonRow): JsonRow {
   };
 }
 
-/** Rust `Storage::save_balance_snapshot`（列顺序与占位符逐字一致）。 */
+/** 既有 `Storage::save_balance_snapshot`（列顺序与占位符逐字一致）。 */
 export function saveBalanceSnapshot(db: DatabaseSync, snapshot: JsonRow): void {
   db.prepare(
     `INSERT INTO account_balance_snapshots (
@@ -66,7 +66,7 @@ export function saveBalanceSnapshot(db: DatabaseSync, snapshot: JsonRow): void {
   );
 }
 
-/** Rust `Storage::list_balance_snapshots`：按 created_at DESC 取最近 10 条。 */
+/** 既有 `Storage::list_balance_snapshots`：按 created_at DESC 取最近 10 条。 */
 export function listBalanceSnapshots(db: DatabaseSync, accountId: string): JsonRow[] {
   const rows = db
     .prepare(
@@ -77,7 +77,7 @@ export function listBalanceSnapshots(db: DatabaseSync, accountId: string): JsonR
   return rows.map(balanceFromRow);
 }
 
-/** Rust `Storage::latest_balance_snapshots`（每个账号一条）。 */
+/** Node Host `Storage::latest_balance_snapshots`（每个账号一条）。 */
 export function latestBalanceSnapshots(db: DatabaseSync): JsonRow[] {
   const rows = db
     .prepare(

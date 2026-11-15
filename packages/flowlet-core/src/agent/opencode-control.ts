@@ -1,4 +1,4 @@
-// OpenCode 权限确认桥（Rust core/opencode_control.rs 的 TS 移植）。
+// OpenCode 权限确认桥（Node Host packages/flowlet-core/src/agent/opencode-control.ts 的 TS 移植）。
 //
 // Owner: desktop-observability。两条通道：
 // 1. 权限桥：OpenCode 侧受管桥接把实时状态写入 `<home>/.flowlet/opencode-control/state-*.json`
@@ -6,7 +6,7 @@
 // 2. 控制服务回退：`http://127.0.0.1:4096` 的 `/permission` 与
 //    `/permission/{id}/reply`。
 //
-// 字段命名：Rust 结构是 `#[serde(rename_all = "camelCase")]`，输出 `serverUrl` 等；
+// 字段命名：Node Host 结构是 `#[serde(rename_all = "camelCase")]`，输出 `serverUrl` 等；
 // 输入侧兼容 OpenCode 自己的 `sessionID` / `messageID` / `callID` 写法。
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -206,14 +206,14 @@ function validatePermissionId(permissionId: string): void {
   }
 }
 
-/** Rust `list_permissions`：全部会话的待确认权限（桥接优先，控制服务回退）。 */
+/** Node Host `list_permissions`：全部会话的待确认权限（桥接优先，控制服务回退）。 */
 export async function listPermissions(): Promise<OpenCodePermissionReport> {
   const bridge = listBridgePermissionsAll();
   if (bridge !== null) return bridge;
   return listPermissionsFrom(LEGACY_CONTROL_URL, null);
 }
 
-/** Rust `pending_session_ids`：控制服务不可用时返回空集合。 */
+/** Node Host `pending_session_ids`：控制服务不可用时返回空集合。 */
 export async function pendingSessionIds(): Promise<Set<string>> {
   const report = await listPermissions();
   if (!report.available) return new Set();
@@ -257,7 +257,7 @@ async function listPermissionsFrom(
   return { available: true, serverUrl: baseUrl, permissions, error: null };
 }
 
-/** Rust `list_session_permissions`：桥接优先，控制服务回退；永不抛错。 */
+/** Node Host `list_session_permissions`：桥接优先，控制服务回退；永不抛错。 */
 export async function listSessionPermissions(sessionId: string): Promise<OpenCodePermissionReport> {
   const bridge = listBridgePermissions(sessionId);
   if (bridge !== null) return bridge;
@@ -299,7 +299,7 @@ async function replyPermissionAt(
   }
 }
 
-/** Rust `reply_permission`。 */
+/** Node Host `reply_permission`。 */
 export async function replyPermission(
   permissionId: string,
   decision: OpenCodePermissionDecision,
@@ -312,7 +312,7 @@ export async function replyPermission(
   await replyPermissionAt(LEGACY_CONTROL_URL, permissionId, decision);
 }
 
-/** 解析并校验前端传入的 decision 字符串（Rust serde 枚举拒绝其它值）。 */
+/** 解析并校验前端传入的 decision 字符串（Node Host serde 枚举拒绝其它值）。 */
 export function parsePermissionDecision(value: unknown): OpenCodePermissionDecision {
   if (value === ALLOW_ONCE || value === REJECT) return value;
   // 与 serde 枚举反序列化错误文案一致：字符串值不带引号。

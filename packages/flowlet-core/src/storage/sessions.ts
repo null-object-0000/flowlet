@@ -1,7 +1,7 @@
-// Web Host 的「已观测 Agent 会话」目录（Rust storage_usage.rs list_observed_*）。
+// Web Host 的「已观测 Agent 会话」目录（Node Host packages/flowlet-core/src/storage/usage.ts list_observed_*）。
 //
 // 数据来源只有 request_logs 的聚合：Web/Docker 不读取服务器本机 Agent 原生会话文件。
-// 字段命名：Rust AgentSessionRow / AgentSessionsPageResult 均 camelCase。
+// 字段命名：Node Host AgentSessionRow / AgentSessionsPageResult 均 camelCase。
 import type { DatabaseSync } from "node:sqlite";
 import type { JsonRow } from "../types.ts";
 
@@ -23,7 +23,7 @@ function sessionKey(row: JsonRow): string {
   return `${row.agentType}\0${row.sessionId}`;
 }
 
-/** Rust agent_session_metadata::session_time_millis。 */
+/** Node Host agent_session_metadata::session_time_millis。 */
 export function sessionTimeMillis(value: string): number {
   const rfc = Date.parse(value);
   if (!Number.isNaN(rfc)) return rfc;
@@ -56,7 +56,7 @@ function sessionMatchesProjectPath(row: JsonRow, projectPath: string): boolean {
   return session === project || session.startsWith(`${project}/`);
 }
 
-/** 命中搜索/项目路径的会话向上追溯到根会话（与 Rust matching_root_session_keys 一致）。 */
+/** 命中搜索/项目路径的会话向上追溯到根会话（与 Node Host matching_root_session_keys 一致）。 */
 function matchingRootKeys(
   catalog: JsonRow[],
   matches: (row: JsonRow) => boolean,
@@ -104,8 +104,8 @@ function metadataText(value: unknown): string | null {
 /**
  * 写入一条会话派生元数据（docs/agent-session-metadata.md §2）。
  *
- * 与 Rust 的对齐关系：表结构/写入语义是 Node Host 与桌面 Rust 共用的 schema 契约，只是当前
- * 仅 Node Host 写入（Rust 侧读不到该表时忽略）。SQL 逐句照搬文档：`ON CONFLICT DO UPDATE`
+ * 与 Node Host 的对齐关系：表结构/写入语义是 Node Host 与桌面 Node Host 共用的 schema 契约，只是当前
+ * 仅 Node Host 写入（Node Host 侧读不到该表时忽略）。SQL 逐句照搬文档：`ON CONFLICT DO UPDATE`
  * 只 COALESCE 覆盖 title / project_path，并始终刷新 updated_at。
  *
  * - `agent_type` / `session_id` 为空直接 return：没有会话身份就没有可聚合的键，写进去只会
@@ -138,7 +138,7 @@ export function upsertAgentSessionMetadata(db: DatabaseSync, row: JsonRow): void
   );
 }
 
-/** Rust list_observed_agent_sessions：按 (agent_type, agent_session_id) 聚合请求观测。 */
+/** Node Host list_observed_agent_sessions：按 (agent_type, agent_session_id) 聚合请求观测。 */
 export function listObservedAgentSessions(db: DatabaseSync): JsonRow[] {
   const rows = db
     .prepare(
@@ -220,7 +220,7 @@ export function listObservedAgentSessions(db: DatabaseSync): JsonRow[] {
   });
 }
 
-/** Rust agent_sessions_page + list_observed_agent_sessions_page（筛选/搜索/分页）。 */
+/** Node Host agent_sessions_page + list_observed_agent_sessions_page（筛选/搜索/分页）。 */
 export function listObservedAgentSessionsPage(db: DatabaseSync, filter: JsonRow): JsonRow {
   const page = Math.max(1, Number(filter.page ?? 1));
   const pageSize = Math.min(500, Math.max(1, Number(filter.page_size ?? 20)));
@@ -253,7 +253,7 @@ export function listObservedAgentSessionsPage(db: DatabaseSync, filter: JsonRow)
   };
 }
 
-/** Rust list_observed_agent_session_children。 */
+/** Node Host list_observed_agent_session_children。 */
 export function listObservedAgentSessionChildren(
   db: DatabaseSync,
   agentType: string,
@@ -268,7 +268,7 @@ export function listObservedAgentSessionChildren(
   return sortByActivity(rows);
 }
 
-/** Rust AgentSessionFlowletUsage（list_agent_sessions 详情用量）。 */
+/** Node Host AgentSessionFlowletUsage（list_agent_sessions 详情用量）。 */
 export function agentSessionFlowletUsage(
   db: DatabaseSync,
   agentType: string,

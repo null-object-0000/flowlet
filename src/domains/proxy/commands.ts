@@ -11,7 +11,7 @@ import type { ProxyBindConfig, ProxyStatus } from "./types";
 
 function mapProxyError(err: unknown, fallbackCode: string): AppError {
   const app = toAppError(err, fallbackCode);
-  // Rust surfaces a few recognizable situations; map them to stable codes
+  // Node Host surfaces a few recognizable situations; map them to stable codes
   // without relying on fragile substring logic for business decisions.
   const lower = (app.message ?? "").toLowerCase();
   if (lower.includes("已经在运行") || lower.includes("already running")) {

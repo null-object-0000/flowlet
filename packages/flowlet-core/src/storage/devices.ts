@@ -1,11 +1,11 @@
-// 设备目录 / 日用量 / 小时用量（Rust storage_device_usage.rs + device_usage.rs）。
+// 设备目录 / 日用量 / 小时用量（Node Host packages/flowlet-core/src/storage/devices.ts + packages/flowlet-core/src/storage/devices.ts）。
 //
-// 与 Rust 一致的口径：
+// 保持既有兼容行为的口径：
 // - 本机 = usage_records（代理） + agent_usage_events（原生）；
 // - 全部设备 = 本机 + 已导入的 device_daily_usage / device_hourly_usage 快照；
 // - 已同步设备目录来自 known_devices + 其日用量聚合。
 //
-// 注意字段命名：Rust `KnownDevice` / `DailyUsageTotal` / `HourlyUsageTotal` 全部
+// 注意字段命名：既有 `KnownDevice` / `DailyUsageTotal` / `HourlyUsageTotal` 全部
 // `#[serde(rename_all = "camelCase")]`，这里返回 camelCase（daily/hourly 的 SQL 列名仍是 snake_case）。
 import { readFileSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
@@ -15,7 +15,7 @@ function reqNum(value: unknown): number {
   return Number(value ?? 0);
 }
 
-// ─── 平台显示名（Rust device_identity.rs） ───────────────────────────────────
+// ─── 平台显示名（Node Host packages/flowlet-core/src/device/identity.ts） ───────────────────────────────────
 
 const PLATFORM_LABELS: Record<string, string> = {
   windows: "Windows",
@@ -48,7 +48,7 @@ function platformLabel(platform: string): string {
 }
 
 /**
- * Rust device_identity::current_platform：Linux 读取 /etc/os-release 的 ID（如 ubuntu），
+ * Node Host device_identity::current_platform：Linux 读取 /etc/os-release 的 ID（如 ubuntu），
  * macOS/Windows 返回 "...os" 的规范键，其余 unknown。
  */
 export function detectPlatform(): string {
@@ -71,7 +71,7 @@ export function detectPlatform(): string {
   return "unknown";
 }
 
-/** Rust device_identity::resolve_platform：平台键与当前系统收敛（含 linux → 发行版升级）。 */
+/** Node Host device_identity::resolve_platform：平台键与当前系统收敛（含 linux → 发行版升级）。 */
 export function resolvePlatform(existing: string, detected: string, os: string): string {
   const matchesOs = (platform: string): boolean => {
     if (os === "windows") return platform === "windows";
@@ -86,12 +86,12 @@ export function resolvePlatform(existing: string, detected: string, os: string):
   return existing;
 }
 
-/** 当前系统族（对齐 Rust std::env::consts::OS）。 */
+/** 当前系统族（对齐 Node Host std::env::consts::OS）。 */
 export function currentOsFamily(): string {
   return process.platform === "darwin" ? "macos" : process.platform;
 }
 
-/** Rust device_identity::resolve_device_display_name。 */
+/** Node Host device_identity::resolve_device_display_name。 */
 export function resolveDeviceDisplayName(
   displayName: string,
   platform: string,
@@ -172,19 +172,19 @@ function mergeTotals(items: JsonRow[], keyField: string, fields: ReadonlyArray<r
   );
 }
 
-/** Rust merge_daily_usage_totals（按日期升序合并多个来源）。 */
+/** Node Host merge_daily_usage_totals（按日期升序合并多个来源）。 */
 export function mergeDailyUsageTotals(items: JsonRow[]): JsonRow[] {
   return mergeTotals(items, "date", DAILY_FIELDS);
 }
 
-/** Rust merge_hourly_usage_totals（按小时升序合并多个来源）。 */
+/** Node Host merge_hourly_usage_totals（按小时升序合并多个来源）。 */
 export function mergeHourlyUsageTotals(items: JsonRow[]): JsonRow[] {
   return mergeTotals(items, "hour", HOURLY_FIELDS);
 }
 
 // ─── 本机聚合 ────────────────────────────────────────────────────────────────
 
-/** Rust daily_usage_totals：本机代理用量按本地自然日聚合。 */
+/** Node Host daily_usage_totals：本机代理用量按本地自然日聚合。 */
 export function dailyUsageTotals(db: DatabaseSync): JsonRow[] {
   const rows = db
     .prepare(
@@ -209,7 +209,7 @@ export function dailyUsageTotals(db: DatabaseSync): JsonRow[] {
   return rows.map(mapDailyRow);
 }
 
-/** Rust agent_native_daily_usage_totals：未经过 Flowlet 的原生事件按日聚合。 */
+/** Node Host agent_native_daily_usage_totals：未经过 Flowlet 的原生事件按日聚合。 */
 export function agentNativeDailyUsageTotals(db: DatabaseSync): JsonRow[] {
   const rows = db
     .prepare(
@@ -237,12 +237,12 @@ export function agentNativeDailyUsageTotals(db: DatabaseSync): JsonRow[] {
   return rows.map(mapDailyRow);
 }
 
-/** Rust local_daily_usage_totals_with_native：本机代理 + 原生合并。 */
+/** Node Host local_daily_usage_totals_with_native：本机代理 + 原生合并。 */
 export function localDailyUsageTotalsWithNative(db: DatabaseSync): JsonRow[] {
   return mergeDailyUsageTotals([...dailyUsageTotals(db), ...agentNativeDailyUsageTotals(db)]);
 }
 
-/** Rust hourly_usage_totals：最近 180 天本机代理小时聚合。 */
+/** Node Host hourly_usage_totals：最近 180 天本机代理小时聚合。 */
 export function hourlyUsageTotals(db: DatabaseSync): JsonRow[] {
   const rows = db
     .prepare(
@@ -274,7 +274,7 @@ export function hourlyUsageTotals(db: DatabaseSync): JsonRow[] {
   return rows.map(mapHourlyRow);
 }
 
-/** Rust agent_native_hourly_usage_totals：最近 180 天原生事件小时聚合。 */
+/** Node Host agent_native_hourly_usage_totals：最近 180 天原生事件小时聚合。 */
 export function agentNativeHourlyUsageTotals(db: DatabaseSync): JsonRow[] {
   const rows = db
     .prepare(
@@ -303,14 +303,14 @@ export function agentNativeHourlyUsageTotals(db: DatabaseSync): JsonRow[] {
   return rows.map(mapHourlyRow);
 }
 
-/** Rust local_hourly_usage_totals_with_native：本机代理 + 原生合并。 */
+/** Node Host local_hourly_usage_totals_with_native：本机代理 + 原生合并。 */
 export function localHourlyUsageTotalsWithNative(db: DatabaseSync): JsonRow[] {
   return mergeHourlyUsageTotals([...hourlyUsageTotals(db), ...agentNativeHourlyUsageTotals(db)]);
 }
 
 // ─── 已导入设备 ──────────────────────────────────────────────────────────────
 
-/** Rust imported_known_devices：known_devices + 其日用量聚合（KnownDevice camelCase）。 */
+/** Node Host imported_known_devices：known_devices + 其日用量聚合（KnownDevice camelCase）。 */
 export function importedKnownDevices(db: DatabaseSync): JsonRow[] {
   const rows = db
     .prepare(
@@ -348,7 +348,7 @@ export function importedKnownDevices(db: DatabaseSync): JsonRow[] {
   }));
 }
 
-/** Rust imported_daily_usage：按日汇总已导入快照（deviceId 为空时汇总全部设备）。 */
+/** Node Host imported_daily_usage：按日汇总已导入快照（deviceId 为空时汇总全部设备）。 */
 export function importedDailyUsage(db: DatabaseSync, deviceId?: string | null): JsonRow[] {
   const sql = `SELECT usage_date, sum(request_count) AS request_count, sum(known_tokens) AS known_tokens,
                       sum(input_tokens) AS input_tokens, sum(input_cached_tokens) AS input_cached_tokens,
@@ -372,7 +372,7 @@ export function importedDailyUsage(db: DatabaseSync, deviceId?: string | null): 
   return rows.map(mapDailyRow);
 }
 
-/** Rust imported_hourly_usage：按小时汇总已导入快照。 */
+/** Node Host imported_hourly_usage：按小时汇总已导入快照。 */
 export function importedHourlyUsage(db: DatabaseSync, deviceId?: string | null): JsonRow[] {
   const sql = `SELECT usage_hour, sum(request_count) AS request_count, sum(known_tokens) AS known_tokens,
                       sum(input_tokens) AS input_tokens, sum(input_cached_tokens) AS input_cached_tokens,
@@ -395,10 +395,10 @@ export function importedHourlyUsage(db: DatabaseSync, deviceId?: string | null):
   return rows.map(mapHourlyRow);
 }
 
-// ─── device_usage.rs 等价入口（web 命令直接调用） ─────────────────────────────
+// ─── packages/flowlet-core/src/storage/devices.ts 等价入口（web 命令直接调用） ─────────────────────────────
 
 /**
- * 设备身份输入：同时接受 Node/Rust 的 snake_case 字段与 Rust 身份文件（camelCase）字段，
+ * 设备身份输入：同时接受 Node/Node Host 的 snake_case 字段与 Node Host 身份文件（camelCase）字段，
  * 便于 web/proxy/测试直接传 `flowlet-device.json` 的解析结果。
  */
 export interface DeviceIdentityLike {
@@ -432,7 +432,7 @@ function normalizedIdentity(identity: DeviceIdentityLike): {
 }
 
 /**
- * Rust device_usage::known_devices：当前设备固定首位并标记 isCurrent，其余来自同步快照。
+ * Node Host device_usage::known_devices：当前设备固定首位并标记 isCurrent，其余来自同步快照。
  * 未提供 identity 时只返回已同步设备。
  */
 export function knownDevices(db: DatabaseSync, identity?: DeviceIdentityLike): JsonRow[] {
@@ -442,7 +442,7 @@ export function knownDevices(db: DatabaseSync, identity?: DeviceIdentityLike): J
   const devices = importedKnownDevices(db).filter(
     (device) => String(device.deviceId) !== current.deviceId,
   );
-  // Rust DeviceIdentity::read_and_validate 每次加载都会把平台键收敛到当前系统检测值，
+  // Node Host DeviceIdentity::read_and_validate 每次加载都会把平台键收敛到当前系统检测值，
   // 因此 known_devices 的当前设备行必须使用 resolvePlatform，而不是文件里的原始值
   // （例如身份文件中的 "linux" 在 Ubuntu 上应显示为 "ubuntu"）。
   const resolvedPlatform = resolvePlatform(
@@ -470,7 +470,7 @@ export function knownDevices(db: DatabaseSync, identity?: DeviceIdentityLike): J
   return devices;
 }
 
-/** Rust device_usage::daily_usage。 */
+/** Node Host device_usage::daily_usage。 */
 export function deviceDailyUsage(
   db: DatabaseSync,
   currentDeviceId: string,
@@ -484,7 +484,7 @@ export function deviceDailyUsage(
   ]);
 }
 
-/** Rust device_usage::hourly_usage。 */
+/** Node Host device_usage::hourly_usage。 */
 export function deviceHourlyUsage(
   db: DatabaseSync,
   currentDeviceId: string,

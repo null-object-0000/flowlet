@@ -5,7 +5,7 @@ import { formatCompactNumber, type NumberLanguage } from "../../shared/formatter
 /**
  * 千问 API 按量付费福利页（权益）抓取结果的解析。
  *
- * raw_scraped_json 是 Rust 侧聚合的 slot bundle：
+ * raw_scraped_json 是 Host 侧聚合的 slot bundle：
  * - freetier_list      ListBailianFreetier（freetier 模板清单 + 安全模式）
  * - fq_instance        DescribeFqInstance 跨批合并结果（已按 Template.Code 去重裁剪，
  *                      信封仍为 { data: { Data: [...] } }）

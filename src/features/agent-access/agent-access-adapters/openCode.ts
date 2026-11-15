@@ -111,7 +111,7 @@ export const openCodeAdapter: AgentAccessAdapter = {
   manualSnippets: (context) => {
     const options = modelOptions(context, OPENCODE_PROTOCOLS);
     const model = manualModelValue(options, context.globalConfig?.primary_model);
-    // small_model 的 fast 缺省等于主模型（前端不提供 fast 选择器，由 Rust 写入端缺省）。
+    // small_model 的 fast 缺省等于主模型（前端不提供 fast 选择器，由 Host 写入端缺省）。
     const provider = JSON.stringify({
       $schema: "https://opencode.ai/config.json",
       model: `flowlet/${model}`,
@@ -121,7 +121,7 @@ export const openCodeAdapter: AgentAccessAdapter = {
           name: "Flowlet",
           npm: "@ai-sdk/openai-compatible",
           options: { baseURL: context.endpoint },
-          // 与 Rust 写入端一致：受管 Provider 只声明所选（主/快速）模型条目。
+          // 与 Node Host 写入端一致：受管 Provider 只声明所选（主/快速）模型条目。
           models: { [model]: { name: model } },
         },
       },

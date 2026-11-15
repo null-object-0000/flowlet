@@ -1,7 +1,7 @@
 // Web 命令 test_connection / fetch_channel_models 的实现。Owner: node-web.
 //
-// 权威实现：src-tauri/src/core/sync.rs（test_channel_connection / 各渠道模型同步）
-// 与 core/web/commands.rs 的 "test_connection" | "fetch_channel_models" 分支。
+// 实现入口：packages/flowlet-core/src/web/model-sync.ts（test_channel_connection / 各渠道模型同步）
+// 与 packages/flowlet-core/src/web/commands.ts 的 "test_connection" | "fetch_channel_models" 分支。
 // Web Host 只对「账号连接参数」做一次性拉取，不读写账号表（保存由前端 save_channel_accounts 完成）。
 import type { JsonRow } from "../types.ts";
 import { CommandError } from "../types.ts";
@@ -15,7 +15,7 @@ export interface ModelSyncResult {
   errors: string[];
 }
 
-/** 构造与 Rust `ChannelAccount` 默认值一致的最小连接参数。 */
+/** 构造与 既有 `ChannelAccount` 默认值一致的最小连接参数。 */
 export function transientAccount(args: {
   channelId: string;
   apiKey: string;
@@ -76,7 +76,7 @@ async function fetchModelsRaw(
   return { ...response, url };
 }
 
-/** Rust `sync::test_channel_connection`：成功返回 null，失败 400 command_failed。 */
+/** Node Host `sync::test_channel_connection`：成功返回 null，失败 400 command_failed。 */
 export async function testChannelConnection(ctx: WebContext, account: JsonRow): Promise<null> {
   if (String(account.api_key ?? "").trim() === "") {
     throw CommandError.badRequest("API Key 未配置");
@@ -133,7 +133,7 @@ function channelModel(
   };
 }
 
-/** Rust `channel_capability_adapter::sync_channel_models` 的最小等价实现。 */
+/** Node Host `channel_capability_adapter::sync_channel_models` 的最小等价实现。 */
 export async function fetchChannelModels(ctx: WebContext, account: JsonRow): Promise<ModelSyncResult> {
   const channelId = String(account.channel_id ?? "");
   const preset = presetOf(ctx, channelId);

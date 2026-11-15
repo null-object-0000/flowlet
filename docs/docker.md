@@ -4,8 +4,8 @@
 > **Node Host**（`packages/flowlet-core`，Node 26 直接执行 TypeScript）。迁移目标是行为等价替换：
 > 镜像不再包含 Rust 工具链与编译产物，环境变量、端口、`/data` 数据卷、SQLite schema、管理端
 > 鉴权（token / GitLab OIDC）全部保持相同契约。当前线上实例（10.100.217.60）于 **2026-11-12 更新通用 A2A 网关**，
-> 镜像 `flowlet:node-20261112-a2a-sidebar-a937589`（回滚点 `flowlet:node-20261112-a2a-bf06412`）。Node Host 于 2026-11-10 首次上线。实现契约见 [migration/node-host.md](migration/node-host.md)，
-> 镜像与冒烟记录见 [migration/docker-node.md](migration/docker-node.md)。
+> 镜像 `flowlet:node-20261112-a2a-sidebar-a937589`（回滚点 `flowlet:node-20261112-a2a-bf06412`）。Node Host 于 2026-11-10 首次上线。实现契约见 [migration/node-host.md](archive/tauri-migration/node-host.md)，
+> 镜像与冒烟记录见 [migration/docker-node.md](archive/tauri-migration/docker-node.md)。
 
 Docker 版由独立服务和 React 管理界面组成，不需要 Tauri、GTK、显示服务或桌面登录会话。
 使用与桌面端相同的渠道适配器、模型白名单、SQLite 存储和运行时路由。管理台支持静态管理凭据（token 模式）或 GitLab OIDC 单点登录（oidc 模式，见下文）。当前支持 API Key 渠道账号的新增、编辑、启停、删除、模型列表拉取、模型及候选路由启停/优先级调整、请求日志、「会话管理」，以及与桌面端一致的「用量统计」「用量洞察」页面（设备切换、日/周/月热力图、Token 明细、费用折算和未识别 Token 请求明细）。
@@ -61,7 +61,7 @@ HTTP 部署下 Cookie 不带 `Secure`，只应在可信内网使用；需要公�
 ## 管理端 GitLab OIDC SSO
 
 目标实例：公司 GitLab（`https://git.17usoft.com`，GitLab CE 10.8.7 + 定制 OIDC）。
-完整方案、M0 验证结果与安全边界见 [`admin-sso-design.md`](./admin-sso-design.md)。
+完整方案、M0 验证结果与安全边界见 [`admin-sso-design.md`](archive/tauri-migration/admin-sso-design.md)。
 
 1. 在 GitLab 创建 OAuth 应用（个人应用即可）：Redirect URI 填
    `http://10.100.217.60:20134/api/auth/callback`；Scopes **只勾 `openid`**；

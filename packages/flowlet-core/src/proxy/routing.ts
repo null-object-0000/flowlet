@@ -1,5 +1,5 @@
 // Candidate matching, round-robin, Files account binding and fallback rules.
-// 逐段对照 `src-tauri/src/core/proxy_routing.rs`。
+// 对应 `packages/flowlet-core/src/proxy/routing.ts`。
 import {
   asArray,
   bool,
@@ -78,7 +78,7 @@ export const ACCOUNT_CREDENTIAL_INVALID_KEY = "invalid_key";
 
 const PROTOCOLS: Protocol[] = ["openai", "anthropic", "responses"];
 
-/** 宽松把快照里的 JSON 行解析成强类型（缺失字段落 Rust serde 默认值）。 */
+/** 宽松把快照里的 JSON 行解析成强类型（缺失字段落 Node Host serde 默认值）。 */
 export function asChannel(raw: unknown): ChannelRow {
   const row = isRecord(raw) ? raw : {};
   const protocols = asArray<unknown>(row.supported_protocols).filter(
@@ -432,7 +432,7 @@ export function enrichUpstreamErrorLog(log: JsonRow, status: number): void {
   }
 }
 
-/** 请求是否包含图片输入（`model_input_capabilities.rs::request_uses_image`）。 */
+/** 请求是否包含图片输入（`packages/flowlet-core/src/proxy/catalog.ts::request_uses_image`）。 */
 export function requestUsesImage(body: Buffer, protocol: Protocol): boolean {
   const parsed = safeJson(body);
   if (parsed === null) return false;

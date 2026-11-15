@@ -1,6 +1,6 @@
 // 数据完整性检查四阶段在 Web Host 命令层的接线契约。
 //
-// 前端 `src/domains/data-repair/commands.ts` 通过 Tauri command 名调用：
+// 前端 `src/domains/data-repair/commands.ts` 通过 Host command 名调用：
 // repair_agent_sessions / repair_captured_usage / repair_unknown_usage / repair_usage_costs，
 // 参数均按 camelCase `timeRange` 传递。这里只验证 dispatch 路由、参数解析和 ua_rules 加载，
 // 不重复存储层修复语义（见 storage/__tests__/repair.test.ts）。

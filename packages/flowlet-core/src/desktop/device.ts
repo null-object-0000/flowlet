@@ -9,10 +9,10 @@
 // refresh_shared_device_usage_lan / lan_server_status / probe_lan_peers /
 // export_device_usage_bundle / preview_device_usage_import / import_device_usage_bundle。
 //
-// 权威行为：src-tauri/src/commands/device_sync.rs 与 core/device_sync.rs、core/lan_sync.rs。
+// 实现入口：packages/flowlet-core/src/desktop/device.ts 与 packages/flowlet-core/src/services/s3.ts、packages/flowlet-core/src/device/lan.ts。
 // 约束：
 // - S3 Secret 只走宿主凭据库（channel keyring.*），绝不写 SQLite / 明文文件；
-// - 字段风格与 Rust 逐字段一致（这些结构体全部 `#[serde(rename_all = "camelCase")]`）；
+// - 字段风格与 Node Host 逐字段一致（这些结构体全部 `#[serde(rename_all = "camelCase")]`）；
 // - 新增 SQL 在 ../storage/device-sync.ts、../storage/lan.ts，通过 withDatabase 调用。
 import {
   existsSync,
@@ -161,7 +161,7 @@ function structBool(object: JsonRow, field: string): boolean {
   return value;
 }
 
-/** Rust `S3SyncConfigInput` 的 serde 反序列化（secretAccessKey 为 Option，可缺省）。 */
+/** 既有 `S3SyncConfigInput` 的 serde 反序列化（secretAccessKey 为 Option，可缺省）。 */
 function parseS3ConfigArgument(rawArgs: JsonRow): S3SyncConfigInput {
   const object = argObject(rawArgs, "config", "S3SyncConfigInput");
   requireFields(object, "config", [
@@ -188,8 +188,8 @@ function snapshotKey(config: S3SyncConfig, deviceId: string): string {
 }
 
 /**
- * ETag 规范化：Rust 版在 app_meta 与比较中都使用带引号的原始 ETag（rusty-s3 解析保留引号），
- * 而 services/s3.ts 的 ListObjectsV2 解析会去掉引号。为了与 Rust 版共用 app_meta 缓存、
+ * ETag 规范化：Node Host 版在 app_meta 与比较中都使用带引号的原始 ETag（rusty-s3 解析保留引号），
+ * 而 services/s3.ts 的 ListObjectsV2 解析会去掉引号。为了与 Node Host 版共用 app_meta 缓存、
  * 并给 PutObject 的 If-Match 发送合法带引号值，本层统一成 `"xxx"` 形式后持久化/比较。
  */
 function canonicalEtag(etag: string): string {
@@ -206,7 +206,7 @@ function normalizeRemoteObjects(objects: RemoteObject[]): RemoteObject[] {
   return objects.map((object) => ({ ...object, etag: canonicalEtag(object.etag) }));
 }
 
-/** Rust `snapshot_object_label`。 */
+/** Node Host `snapshot_object_label`。 */
 function snapshotObjectLabel(key: string): string {
   const suffix = "/snapshot.json";
   if (!key.endsWith(suffix)) return "未知设备快照";
@@ -219,7 +219,7 @@ function rfc3339Now(): string {
   return new Date().toISOString();
 }
 
-/** Rust `prefer_lan_bundle` 的新旧比较（两段都必须是 RFC3339）。 */
+/** Node Host `prefer_lan_bundle` 的新旧比较（两段都必须是 RFC3339）。 */
 function snapshotIsNewer(candidate: string, fallback: string): boolean {
   const candidateMillis = Date.parse(candidate);
   const fallbackMillis = Date.parse(fallback);
@@ -227,7 +227,7 @@ function snapshotIsNewer(candidate: string, fallback: string): boolean {
   return candidateMillis > fallbackMillis;
 }
 
-// ─── 同步互斥（Rust JobRuntime 的 device-sync scope） ─────────────────────────
+// ─── 同步互斥（Node Host JobRuntime 的 device-sync scope） ─────────────────────────
 
 let activeSync: { scope: string } | null = null;
 
@@ -276,7 +276,7 @@ async function buildDeviceSnapshot(ctx: DesktopContext): Promise<DeviceUsageSnap
   return snapshot;
 }
 
-/** Rust `current_descriptor`：刷新端点/有效期并回写 app_meta（不负责启动服务）。 */
+/** Node Host `current_descriptor`：刷新端点/有效期并回写 app_meta（不负责启动服务）。 */
 async function refreshCurrentDescriptor(
   ctx: DesktopContext,
 ): Promise<DeviceUsageBundle["snapshot"]["lanPeer"]> {
@@ -350,7 +350,7 @@ function loadPeerDescriptor(ctx: DesktopContext, deviceId: string) {
 }
 
 /**
- * Rust `refresh_known_peers`：对已知 peer 拉取 LAN 快照并导入。
+ * 既有 `refresh_known_peers`：对已知 peer 拉取 LAN 快照并导入。
  * 返回 attempted / refreshed / failed 三个计数。
  */
 async function refreshKnownPeers(
@@ -389,7 +389,7 @@ async function refreshKnownPeers(
 
 function validateLanBundle(bundle: DeviceUsageBundle): boolean {
   try {
-    // 局域网快照必须通过与文件导入一致的校验（Rust `bundle.validate()`）。
+    // 局域网快照必须通过与文件导入一致的校验（既有 `bundle.validate()`）。
     parseBundleBytes(Buffer.from(JSON.stringify(bundle), "utf8"));
     return true;
   } catch {
@@ -449,7 +449,7 @@ async function loadStore(ctx: DesktopContext): Promise<{ config: S3SyncConfig; s
   return { config, store: new S3Store(config, secret) };
 }
 
-/** Rust `prefer_lan_bundle`：LAN 快照更新时优先使用，否则回退 S3。 */
+/** 既有 `prefer_lan_bundle`：LAN 快照更新时优先使用，否则回退 S3。 */
 async function preferLanBundle(
   ctx: DesktopContext,
   fallback: DeviceUsageBundle,
@@ -474,7 +474,7 @@ async function preferLanBundle(
   }
 }
 
-/** Rust `pull_device_usage`。 */
+/** 既有 `pull_device_usage`。 */
 async function pullDeviceUsage(
   ctx: DesktopContext,
   preferLan: boolean,
@@ -540,7 +540,7 @@ async function pullDeviceUsage(
         ),
       );
       try {
-        // Rust 对 breakdown 导入失败只 tracing::warn，不计入 failedObjects。
+        // Node Host 对 breakdown 导入失败只 tracing::warn，不计入 failedObjects。
         ctx.storage.withDatabase((db) =>
           importDeviceUsageBreakdowns(
             db,
@@ -550,7 +550,7 @@ async function pullDeviceUsage(
           ),
         );
       } catch {
-        /* 与 Rust 一致：维度用量失败只告警，不影响设备导入结果 */
+        /* 与 Node Host 一致：维度用量失败只告警，不影响设备导入结果 */
       }
       try {
         ctx.storage.withDatabase((db) =>
@@ -585,7 +585,7 @@ async function pullDeviceUsage(
   };
 }
 
-/** Rust `pull_device_usage_for_device`（指定设备只读唯一对象，不列举其它）。 */
+/** Node Host `pull_device_usage_for_device`（指定设备只读唯一对象，不列举其它）。 */
 async function pullDeviceUsageForDevice(
   ctx: DesktopContext,
   deviceId: string,
@@ -729,7 +729,7 @@ interface S3DeviceSyncResult {
   uploadMs: number;
 }
 
-/** Rust `sync_device_usage`：先拉取其它设备，再上传本机快照（含 ETag 冲突检查）。 */
+/** Node Host `sync_device_usage`：先拉取其它设备，再上传本机快照（含 ETag 冲突检查）。 */
 async function syncDeviceUsage(ctx: DesktopContext): Promise<S3DeviceSyncResult> {
   const { config, store } = await loadStore(ctx);
   const prefix = deviceObjectPrefix(config);
@@ -927,7 +927,7 @@ async function syncDeviceUsage(ctx: DesktopContext): Promise<S3DeviceSyncResult>
   };
 }
 
-/** Rust `run_configured_sync`：状态持久化 + 进程内互斥。 */
+/** Node Host `run_configured_sync`：状态持久化 + 进程内互斥。 */
 async function runConfiguredSync(
   ctx: DesktopContext,
   triggerSource: string,
@@ -1468,7 +1468,7 @@ export const handlers: DesktopHandlerMap = {
           snapshot.accountResources,
         );
       });
-      // Rust 命令固定返回 0/0（导入明细由 preview 提供），保持一致。
+      // Node Host 命令固定返回 0/0（导入明细由 preview 提供），保持一致。
       return { deviceId: snapshot.deviceId, importedDays: 0, unchangedDays: 0 };
     } catch (error) {
       throw badRequest(error);

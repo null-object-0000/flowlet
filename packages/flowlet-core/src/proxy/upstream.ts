@@ -21,7 +21,7 @@ export interface UpstreamResponse {
 
 export type ForwardErrorKind = "network" | "timeout" | "proxy_configuration";
 
-/** 与 Rust `ProxyForwardError` 对应的错误类型（route_reason 由 kind/phase 派生）。 */
+/** 与 既有 `ProxyForwardError` 对应的错误类型（route_reason 由 kind/phase 派生）。 */
 export class ForwardError extends Error {
   readonly kind: ForwardErrorKind;
   readonly phase: string;
@@ -79,7 +79,7 @@ function validateProxySettings(settings: UpstreamProxySettings): void {
   }
 }
 
-/** 与 Rust 渠道能力声明一致：当前只有 openai-api 渠道历史上默认走上游代理。 */
+/** 与 Node Host 渠道能力声明一致：当前只有 openai-api 渠道历史上默认走上游代理。 */
 const LEGACY_PROXY_CHANNELS = new Set(["openai-api"]);
 
 export interface SelectedClient {
@@ -104,12 +104,12 @@ export class UpstreamTransport {
       keepAliveMaxTimeout: 600_000,
     } as const;
     this.#direct = new Agent(common);
-    // Node/undici 默认完全不用系统代理，而 Rust reqwest 默认使用；用 EnvHttpProxyAgent
+    // Node/undici 默认完全不用系统代理，而 Node Host reqwest 默认使用；用 EnvHttpProxyAgent
     // 近似 http_proxy/https_proxy/no_proxy 语义（平台系统设置仍需后续补齐）。
     this.#systemProxy = new EnvHttpProxyAgent(common);
   }
 
-  /** 按账号/全局配置选择 dispatcher（Rust `model_forwarding_client`）。 */
+  /** 按账号/全局配置选择 dispatcher（Node Host `model_forwarding_client`）。 */
   select(account: {
     channel_id: string;
     use_upstream_proxy: boolean | null;
@@ -250,7 +250,7 @@ export function isConnectError(error: unknown): boolean {
   return false;
 }
 
-/** 读取整个上游响应体（绝对超时，Rust `read_buffered_body`）。 */
+/** 读取整个上游响应体（绝对超时，Node Host `read_buffered_body`）。 */
 export function readBodyWithTimeout(body: Readable, timeoutSeconds: number): Promise<Buffer> {
   return new Promise<Buffer>((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -277,7 +277,7 @@ export function readBodyWithTimeout(body: Readable, timeoutSeconds: number): Pro
   });
 }
 
-/** 连接失败时对 OpenAI 渠道保留 cause 细节（Rust `model_network_error`）。 */
+/** 连接失败时对 OpenAI 渠道保留 cause 细节（Node Host `model_network_error`）。 */
 export function modelNetworkError(channelId: string, error: unknown): string {
   const detail = error instanceof Error ? error.message : String(error);
   if (!LEGACY_PROXY_CHANNELS.has(channelId)) return detail;
@@ -314,7 +314,7 @@ function noProxyMatches(host: string, port: number, pattern: string): boolean {
   return false;
 }
 
-/** 近似 Rust `Matcher::from_system`：环境变量代理是否作用于该 URL。 */
+/** 近似 Node Host `Matcher::from_system`：环境变量代理是否作用于该 URL。 */
 export function systemProxyUsed(url: string): boolean | null {
   let parsed: URL;
   try {

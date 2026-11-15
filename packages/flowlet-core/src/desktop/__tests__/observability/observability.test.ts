@@ -301,7 +301,7 @@ describe("后台任务命令", () => {
       (second.rows as JsonRow[]).map((row) => row.id),
       ["job-1"],
     );
-    // 行字段 camelCase（Rust BackgroundJobRow）。
+    // 行字段 camelCase（Node Host BackgroundJobRow）。
     const row = (first.rows as JsonRow[])[0] as JsonRow;
     assert.equal(row.jobType, "agent-data-sync");
     assert.equal(row.triggerSource, "manual");
@@ -630,7 +630,7 @@ describe("Agent 原生会话时间线", () => {
         }),
       /暂不支持读取 Agent 会话时间线：cursor-agent/,
     );
-    // DeepSeek Harness 已支持；会话文件不存在时按 Rust 语义报「未找到」，不返回空数据。
+    // DeepSeek Harness 已支持；会话文件不存在时按 Node Host 语义报「未找到」，不返回空数据。
     await assert.rejects(
       () =>
         invoke(makeContext(), "get_agent_session_timeline", {

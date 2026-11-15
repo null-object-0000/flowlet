@@ -92,7 +92,7 @@ export function effectiveAnthropicBaseUrl(account: ChannelAccount): string | nul
 }
 
 /** Initial blank account draft for the create form. The id is assigned here
- *  but Rust side normalizes the list on save. */
+ *  but Host normalizes the list on save. */
 export function newAccount(channelId: string, index: number): ChannelAccount {
   return {
     id: `account-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,

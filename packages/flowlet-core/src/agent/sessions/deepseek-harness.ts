@@ -1,14 +1,14 @@
-// DeepSeek Harness 原生会话解析（Rust core/agent_session_adapter/adapters/deepseek_harness.rs 的移植）。
+// DeepSeek Harness 原生会话解析（Node Host core/agent_session_adapter/adapters/packages/flowlet-core/src/agent/adapters/deepseek-harness.ts 的移植）。
 //
 // Owner: desktop-observability。支持 `sessions/**/session[.vN].jsonl[.zstd]` 的
 // v0–v4 代际（v4 与 v3 的记录形状只差 `tool/result`，统一按两种形状解析）：
 // - 会话列表（标题/项目/父子/运行态/原生用量摘要）；
 // - 完整时间线（turn / step / tool / approval / compaction / request 事件 + trace）；
 // - 最后一轮交互；
-// - 缺失文件 / 未知代际 / 不完整 header 返回与 Rust 一致的明确错误，不返回伪造空数据。
+// - 缺失文件 / 未知代际 / 不完整 header 返回保持既有兼容行为的明确错误，不返回伪造空数据。
 //
 // 平台能力：zstd 解压使用 Node 内建 `node:zlib`（zstdDecompressSync，Node 26 可用）。
-// 撕裂尾部（torn tail）与 Rust 一样只保留「已完整提交的前缀」，不会因尾部损坏隐藏整份会话。
+// 撕裂尾部（torn tail）与 Node Host 一样只保留「已完整提交的前缀」，不会因尾部损坏隐藏整份会话。
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -29,7 +29,7 @@ const MAX_RUNTIME_STATUS_BYTES = 256 * 1024;
 // ─── 文件发现 ───────────────────────────────────────────────────────────────
 
 function dshSessionsRoot(): string | null {
-  // Rust `dsh_sessions_root`：DSH_HOME 已是 harness 根目录；未设置时回退 ~/.dsh。
+  // 既有 `dsh_sessions_root`：DSH_HOME 已是 harness 根目录；未设置时回退 ~/.dsh。
   const override = process.env.DSH_HOME;
   if (override !== undefined && override !== "") return path.join(override, "sessions");
   const home = homeDir();
@@ -123,7 +123,7 @@ export interface DshSessionHeader {
   isSeeded: boolean;
 }
 
-/** Rust `parse_session_header`。 */
+/** 既有 `parse_session_header`。 */
 export function parseSessionHeader(header: JsonRow): DshSessionHeader {
   if (header.type !== "session") throw new Error("DSH 会话缺少 session 头");
   const version = typeof header.version === "number" ? header.version : null;
@@ -167,7 +167,7 @@ function localEventRecords(
   };
 }
 
-/** Rust `read_session`：解压读取并返回本地正文记录。 */
+/** Node Host `read_session`：解压读取并返回本地正文记录。 */
 export function readDshSession(filePath: string): { header: DshSessionHeader; records: JsonRow[] } {
   const records = readDshRecords(filePath);
   const headerValue = records[0];
@@ -182,7 +182,7 @@ function readFileBytes(filePath: string): Buffer {
   return readFileSync(filePath);
 }
 
-/** Rust `read_records`：正常整流解码；失败时逐完整分帧解码并尽力恢复撕裂尾部。 */
+/** Node Host `read_records`：正常整流解码；失败时逐完整分帧解码并尽力恢复撕裂尾部。 */
 export function readDshRecords(filePath: string): JsonRow[] {
   let bytes: Buffer;
   try {
@@ -285,7 +285,7 @@ export function zstdFrameRanges(bytes: Buffer): { frames: Array<[number, number]
   return { frames, tornStart: null };
 }
 
-/** 会话根目录存在时，DSH 才被视为可用原生来源（Rust `source_watches`）。 */
+/** 会话根目录存在时，DSH 才被视为可用原生来源（Node Host `source_watches`）。 */
 export function dshSessionsRootExists(): boolean {
   const root = dshSessionsRoot();
   return root !== null && isDirectory(root);
@@ -472,7 +472,7 @@ interface CachedDshSession {
   openTurn: boolean;
 }
 
-/** 与 Rust `DSH_SESSION_CACHE` 一致：文件长度/mtime 未变时复用解析结果。 */
+/** 与 Node Host `DSH_SESSION_CACHE` 一致：文件长度/mtime 未变时复用解析结果。 */
 const dshSessionCache = new Map<string, CachedDshSession>();
 
 function cachedDshSessionRow(filePath: string): JsonRow | null {
@@ -507,7 +507,7 @@ function cachedDshSessionRow(filePath: string): JsonRow | null {
   return parsed.row;
 }
 
-/** Rust adapter `list_sessions`：按 activityAt 字符串倒序。 */
+/** Node Host adapter `list_sessions`：按 activityAt 字符串倒序。 */
 export function dshNativeSessions(): JsonRow[] {
   const files = sessionFiles();
   const current = new Set(files);
@@ -527,7 +527,7 @@ export function dshNativeSessions(): JsonRow[] {
 
 // ─── 时间线 ─────────────────────────────────────────────────────────────────
 
-/** Rust `timeline`：找不到会话文件时返回明确错误。 */
+/** Node Host `timeline`：找不到会话文件时返回明确错误。 */
 export function readDshTimeline(sessionId: string): AgentSessionTimeline {
   const filePath = findDshSessionFile(sessionId);
   if (filePath === null) throw new Error(`未找到 DeepSeek Harness 会话 ${sessionId}`);
@@ -535,7 +535,7 @@ export function readDshTimeline(sessionId: string): AgentSessionTimeline {
   return readTimelineRecords(records);
 }
 
-/** Rust `last_interaction`：无会话文件返回 null，否则保留最后一条 user-message 起的事件。 */
+/** Node Host `last_interaction`：无会话文件返回 null，否则保留最后一条 user-message 起的事件。 */
 export function readDshLastInteraction(sessionId: string): AgentSessionTimeline | null {
   const filePath = findDshSessionFile(sessionId);
   if (filePath === null) return null;
@@ -574,7 +574,7 @@ function isSurfaceType(kind: string): boolean {
   );
 }
 
-/** Rust `shadowed_event_seqs`：收集被 surfaceOp 覆盖的闭区间序号。 */
+/** Node Host `shadowed_event_seqs`：收集被 surfaceOp 覆盖的闭区间序号。 */
 function shadowedEventSeqs(events: JsonRow[]): Set<number> {
   const shadowed = new Set<number>();
   for (const value of events) {
@@ -588,7 +588,7 @@ function shadowedEventSeqs(events: JsonRow[]): Set<number> {
   return shadowed;
 }
 
-/** Rust `surface_survivor_seqs`。 */
+/** Node Host `surface_survivor_seqs`。 */
 function surfaceSurvivorSeqs(events: JsonRow[], shadowed: Set<number>): Set<number> {
   const survivors = new Set<number>();
   for (const value of events) {
@@ -835,7 +835,7 @@ function nativeUsage(value: unknown): AgentSessionNativeUsage | null {
   };
 }
 
-/** Rust `read_timeline_records`（v0–v4 统一投影）。 */
+/** Node Host `read_timeline_records`（v0–v4 统一投影）。 */
 export function readTimelineRecords(records: JsonRow[]): AgentSessionTimeline {
   const headerRecord = records.find((value) => value.type === "session");
   if (headerRecord !== undefined) parseSessionHeader(headerRecord);

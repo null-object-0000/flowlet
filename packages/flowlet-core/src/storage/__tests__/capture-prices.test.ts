@@ -119,7 +119,7 @@ test(".flcap 帧：段大小轮转与非法路径拒绝", () => {
     // 无会话 → unassigned/<date>/<sha256(request_id)[:2]>/
     const unassigned = store.append(recordFrom({ ...logInput(), agent_type: null, agent_session_id: null }, "log-3"));
     assert.match(unassigned.storage_key, /^unassigned\/\d{4}-\d{2}-\d{2}\/[0-9a-f]{2}\/000001\.flcap$/);
-    // 越界 key 必须拒绝（Rust InvalidPath）。
+    // 越界 key 必须拒绝（Node Host InvalidPath）。
     assert.throws(() => store.removeSegment("../flowlet.sqlite"), /invalid|非法/i);
     assert.throws(
       () =>
@@ -364,8 +364,8 @@ test("prune_oldest_body_data / cleanup_old_logs：按体积与保留天数删除
       .prepare("SELECT COUNT(*) AS total FROM request_logs WHERE request_id = 'req-cleanup'")
       .get() as { total: number };
     assert.equal(Number(remaining.total), 0);
-    // Rust cleanup_old_logs 先把帧重写为 cleared（body 置空）再删行，FK 级联删 refs；
-    // 不含 body 的 compacted 段会作为无害孤儿保留（Rust 行为一致），因此这里只校验
+    // Node Host cleanup_old_logs 先把帧重写为 cleared（body 置空）再删行，FK 级联删 refs；
+    // 不含 body 的 compacted 段会作为无害孤儿保留（Node Host 行为一致），因此这里只校验
     // Body 计费体积已归零、cleared 段不含 body。
     const frames = storage.captureDiskUsage();
     assert.ok(frames.segments >= 0);
@@ -497,7 +497,7 @@ test("价格解析：分档与每日峰谷时段与 Rust resolve_prices_at 语�
   const inIdle = Date.parse("2026-11-10T00:30:00Z");
   assert.deepEqual(resolvePricesAt(scheduled, null, inIdle), [2, 0.2, null, 4]);
   // 周六 UTC 04:00 = 周六 12:00：促销仅工作日 → 无 schedule 命中 → null；
-  // resolvePrices 回退扁平单价（Rust 同）。
+  // resolvePrices 回退扁平单价（Node Host 同）。
   const weekend = Date.parse("2026-11-14T04:00:00Z");
   assert.equal(resolvePricesAt(scheduled, null, weekend), null);
   assert.deepEqual(resolvePrices(scheduled, null, weekend), [2, 0.2, null, 4]);

@@ -1,15 +1,15 @@
-// Agent 原生数据同步（Rust core/storage_tasks.rs sync_agent_data 的等价实现）。
+// Agent 原生数据同步（Node Host packages/flowlet-core/src/host/scheduler.ts sync_agent_data 的等价实现）。
 //
 // Owner: desktop-observability。范围：
 // - 扫描本机 Claude Code / Codex / Pi / OpenCode / Hermes / DeepSeek Harness 原生会话；
 // - 对新增或变化的会话解析原生摘要，写入 `agent_session_snapshots` 与 `agent_usage_events`；
 // - 标记源文件已删除的会话（summary.sourceAvailable=false）；
 // - 维护 `agent_source_sync_state`；
-// - 进程内租约去重（Rust `JobRuntime::try_acquire_definition(AGENT_DATA_SYNC)`）。
+// - 进程内租约去重（既有 `JobRuntime::try_acquire_definition(AGENT_DATA_SYNC)`）。
 //
-// 与 Rust 的差异（交付汇报中标注）：
+// 与 Node Host 的差异（交付汇报中标注）：
 // - 未实现增量 checkpoint：变化会话全量解析（结果一致，长会话更慢）。
-// - DeepSeek Harness 不写 agent_usage_events（Rust DSH adapter 未实现
+// - DeepSeek Harness 不写 agent_usage_events（Node Host DSH adapter 未实现
 //   timeline_with_usage_events / incremental_source，原生账本由会话摘要承担）。
 import { randomUUID } from "node:crypto";
 import type { JsonRow } from "../../types.ts";
@@ -47,7 +47,7 @@ const MAX_MANUAL_SYNC_SESSIONS = 20;
 const JOB_TYPE = "agent-data-sync";
 const JOB_TITLE = "Agent 数据同步";
 
-/** Rust `AgentDataSyncResult`（camelCase）。 */
+/** 既有 `AgentDataSyncResult`（camelCase）。 */
 export interface AgentDataSyncResult {
   started: boolean;
   jobId: string | null;
@@ -57,7 +57,7 @@ export interface AgentDataSyncResult {
   message: string;
 }
 
-// ─── 进程内租约（Rust JobRuntime::try_acquire_definition） ───────────────────
+// ─── 进程内租约（Node Host JobRuntime::try_acquire_definition） ───────────────────
 
 let agentDataSyncLeaseHeld = false;
 
@@ -179,7 +179,7 @@ function updateSourceStates(
 // ─── 原生摘要 / 用量事件 ────────────────────────────────────────────────────
 
 function eventsFromTimeline(agentType: string, sessionId: string): AgentUsageEventRow[] {
-  // Rust DSH 适配器没有实现 timeline_with_usage_events，因此不产生消息级账本行。
+  // Node Host DSH 适配器没有实现 timeline_with_usage_events，因此不产生消息级账本行。
   if (agentType === "deepseek-harness") return [];
   const timeline = getNativeAgentSessionTimeline(agentType, sessionId);
   const events: AgentUsageEventRow[] = [];
@@ -207,7 +207,7 @@ function eventsFromTimeline(agentType: string, sessionId: string): AgentUsageEve
 // ─── 同步 ───────────────────────────────────────────────────────────────────
 
 /**
- * Rust `Storage::sync_agent_data_with_job`。调用方必须已经持有租约
+ * Node Host `Storage::sync_agent_data_with_job`。调用方必须已经持有租约
  * （`sync_agent_data` 命令负责 acquire/release）。
  */
 export function syncAgentData(
@@ -355,7 +355,7 @@ export function syncAgentData(
   });
 }
 
-/** Rust `get_agent_sync_status`：进程内运行态 + 各来源状态。 */
+/** Node Host `get_agent_sync_status`：进程内运行态 + 各来源状态。 */
 export function agentSyncStatus(storage: SqliteStorage): {
   running: boolean;
   sources: AgentSourceSyncState[];

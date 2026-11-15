@@ -1,6 +1,6 @@
 // 全局凭据库：dotenv + 元数据 sidecar。Owner: node-web（flowlet）.
 //
-// 权威实现：src-tauri/src/core/credential_store.rs（728 行）逐行为等价：
+// 实现入口：packages/flowlet-cred/src/store.ts（728 行）保持既有行为：
 // - 单一事实源是 credentials.env 文本（Agent 可直接 cat/source）；
 // - 写入只经 CLI：原子写（tmp + rename）+ 0600，目录 0700；
 // - 元数据（kind/note/created_at/updated_at）放 credentials.json（BTreeMap 排序 + 2 空格缩进）；
@@ -75,11 +75,11 @@ export function defaultDir(env: NodeJS.ProcessEnv = process.env): string {
   return path.join(base, "flowlet", "credentials");
 }
 
-// ─── 解析 / 编码（与 Rust parse_env / encode_value / decode_value 一致） ────
+// ─── 解析 / 编码（与 Node Host parse_env / encode_value / decode_value 一致） ────
 
 export function parseEnv(text: string): EnvLine[] {
   const rawLines = text.split("\n");
-  // Rust str::lines() 不返回末尾换行产生的空行。
+  // Node Host str::lines() 不返回末尾换行产生的空行。
   if (rawLines.length > 0 && rawLines[rawLines.length - 1] === "") rawLines.pop();
   const lines: EnvLine[] = [];
   for (const rawWithCr of rawLines) {
@@ -195,7 +195,7 @@ export function writeAtomic(target: string, content: string): void {
   mkdirSync(parent, { recursive: true });
   const temp = path.join(parent, `.${path.basename(target)}.tmp-${process.pid}`);
   try {
-    // 同步写 + fsync：与 Rust write_atomic 一致，避免留下半截文件。
+    // 同步写 + fsync：与 Node Host write_atomic 一致，避免留下半截文件。
     const fd = openSync(temp, "w", 0o600);
     try {
       writeSync(fd, content, null, "utf8");
@@ -397,7 +397,7 @@ export class CredentialStore {
           report.push(`警告：环境文件权限为 ${mode.toString(8)}，其他用户可读，建议 600`);
         }
       } catch {
-        /* 忽略：与 Rust if let Ok 一致 */
+        /* 忽略：与 Node Host if let Ok 一致 */
       }
     }
     const raw = parseEnv(this.readEnvText());

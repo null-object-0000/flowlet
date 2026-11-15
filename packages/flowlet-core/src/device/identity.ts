@@ -1,9 +1,9 @@
 // 安装实例身份（flowlet-device.json）读写。Owner: desktop-device。
 //
-// 权威实现：src-tauri/src/core/device_identity.rs（DeviceIdentity::update_display_name /
-// validate_display_name / load_or_create）。该文件必须留在 SQLite 之外，且格式与 Rust
+// 实现入口：packages/flowlet-core/src/device/identity.ts（DeviceIdentity::update_display_name /
+// validate_display_name / load_or_create）。该文件必须留在 SQLite 之外，且格式与 Node Host
 // 完全一致（camelCase）：{ schemaVersion, deviceId, createdAt, displayName, platform }。
-// 注意：不做 app_version 写回（Rust 反序列化结构里没有该字段，写回去会被忽略但会污染文件）。
+// 注意：不做 app_version 写回（Node Host 反序列化结构里没有该字段，写回去会被忽略但会污染文件）。
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -13,7 +13,7 @@ import { charCount, hasControlChars, isUuid } from "./bundle.ts";
 export const DEVICE_IDENTITY_FILE = "flowlet-device.json";
 export const DEVICE_IDENTITY_SCHEMA_VERSION = 1;
 
-/** 与 Rust `DeviceIdentity` 对齐的进程内结构（snake_case）。 */
+/** 与 既有 `DeviceIdentity` 对齐的进程内结构（snake_case）。 */
 export interface DeviceIdentityRecord {
   schema_version: number;
   device_id: string;
@@ -30,7 +30,7 @@ interface SerializedDeviceIdentity {
   platform: string;
 }
 
-/** Rust `validate_display_name`，错误文案保留 `设备名称无效: ` 前缀。 */
+/** 既有 `validate_display_name`，错误文案保留 `设备名称无效: ` 前缀。 */
 export function validateDisplayName(displayName: string): void {
   const count = charCount(displayName);
   if (count === 0) throw new Error("设备名称无效: 名称不能为空");
@@ -60,7 +60,7 @@ export function readDeviceIdentityFile(dataDir: string): DeviceIdentityRecord | 
 }
 
 /**
- * Rust `DeviceIdentity::update_display_name`：临时文件 + 备份 + rename 的原子替换。
+ * 既有 `DeviceIdentity::update_display_name`：临时文件 + 备份 + rename 的原子替换。
  * 只更新 displayName，device_id / createdAt 保持不变。
  */
 export function updateDisplayName(
@@ -114,7 +114,7 @@ export function updateDisplayName(
   identity.display_name = trimmed;
 }
 
-/** Rust `resolve_device_display_name`（空白时按平台 + 设备 ID 后缀生成）。 */
+/** Node Host `resolve_device_display_name`（空白时按平台 + 设备 ID 后缀生成）。 */
 export function defaultDisplayNameFallback(
   resolveDisplayName: (displayName: string, platform: string, deviceId: string) => string,
   identity: DeviceIdentityRecord,

@@ -30,7 +30,7 @@ describe("dockhand normalizeBaseUrl", () => {
     assert.throws(() => normalizeBaseUrl("   "), /Dockhand 地址不能为空/);
     assert.throws(() => normalizeBaseUrl("ftp://host:3000"), /Dockhand 地址必须是 http 或 https/);
     assert.throws(() => normalizeBaseUrl("http://host:badport"), /Dockhand 地址无法解析/);
-    // 不带 scheme 的 `host:port` 会被 URL 解析成 scheme，最终落到 scheme 校验（与 Rust 一致）。
+    // 不带 scheme 的 `host:port` 会被 URL 解析成 scheme，最终落到 scheme 校验（保持既有兼容行为）。
     assert.throws(() => normalizeBaseUrl("dockhand.example.com:3000"), /Dockhand 地址必须是 http 或 https/);
     assert.throws(() => normalizeBaseUrl("http://"), /Dockhand 地址无法解析/);
     assert.throws(() => normalizeBaseUrl("http://host:3000/?a=1"), /Dockhand 地址不能带查询参数或锚点/);

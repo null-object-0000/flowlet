@@ -1,7 +1,7 @@
-// Flowlet Node host entry point — behavioural replacement for the Rust
-// `headless` binary (src-tauri/src/bin/headless.rs). Owner: lead.
+// Flowlet Node host entry point — behavioural replacement for the Node Host
+// `headless` binary (packages/flowlet-core/src/index.ts). Owner: lead.
 //
-// 启动顺序必须与 Rust 一致：凭据校验 → DB/配置 → presets → bind config →
+// 启动顺序必须保持既有兼容行为：凭据校验 → DB/配置 → presets → bind config →
 // 自动 start_proxy → 静态目录校验 → 启动 Web 服务 → 后台任务 → 信号优雅退出。
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -31,7 +31,7 @@ import {
   resolvePlatform,
 } from "./storage/devices.ts";
 
-/** 与 Rust core/device_identity.rs 一致。 */
+/** 与 Node Host packages/flowlet-core/src/device/identity.ts 一致。 */
 const DEVICE_IDENTITY_SCHEMA_VERSION = 1;
 
 // 仓库根：本文件位于 <repo>/packages/flowlet-core/src/index.ts，上溯三级即仓库根。
@@ -54,9 +54,9 @@ function readNonNegativeMs(raw: string | undefined, fallback: number): number {
   return Math.floor(parsed);
 }
 
-/** 与 Rust headless 完全一致的 env → HostOptions 解析。 */
+/** 与 Node Host headless 完全一致的 env → HostOptions 解析。 */
 export function readHostOptions(env: NodeJS.ProcessEnv = process.env): HostOptions {
-  // 管理端凭据校验由 AdminAuth.from_env() 负责（与 Rust 一致：token 模式 ≥24 字符；
+  // 管理端凭据校验由 AdminAuth.from_env() 负责（保持既有兼容行为：token 模式 ≥24 字符；
   // OIDC 模式可空，仅 ALLOW_TOKEN_LOGIN 启用时才要求）。
   const adminToken = (env.FLOWLET_ADMIN_TOKEN ?? "").trim();
   const dbPath = resolve(envOr("FLOWLET_DB_PATH", "flowlet-data/flowlet.sqlite"));
@@ -93,10 +93,10 @@ function resolveAppVersion(): string {
 /**
  * 设备身份持久化在数据卷，重启后 device_id 不变。
  *
- * 文件格式严格对齐 Rust `core/device_identity.rs`：该结构体是
+ * 文件格式严格对齐 既有 `packages/flowlet-core/src/device/identity.ts`：该结构体是
  * `#[serde(rename_all = "camelCase")]`，即磁盘上是
  * `{ schemaVersion, deviceId, createdAt, displayName, platform }`；
- * 进程内统一用 snake_case，读写时做一次映射。这样 Rust 镜像与 Node 镜像
+ * 进程内统一用 snake_case，读写时做一次映射。这样 Node Host 镜像与 Node 镜像
  * 可以共用同一个 `/data` 卷来回切换。
  */
 interface SerializedDeviceIdentity {
@@ -170,7 +170,7 @@ export async function startHost(
   const dataDir = dirname(options.dbPath);
   // 管理端 OIDC 会话持久化：容器重启/升级不再让所有管理台登录失效（token 模式不产生会话）。
   const sessionStore = openAdminSessionStore(join(dataDir, "admin-sessions.json"));
-  // 与 Rust headless 顺序一致：先解析管理端鉴权配置（配置错误在打开数据库之前失败）。
+  // 与 Node Host headless 顺序一致：先解析管理端鉴权配置（配置错误在打开数据库之前失败）。
   const auth = AdminAuth.fromEnv(process.env, undefined, sessionStore);
   const deviceIdentity = loadOrCreateDeviceIdentity(dataDir);
   // 三方服务凭据的静态加密密钥：secret.key 随数据卷（Docker /data）持久化。
@@ -209,7 +209,7 @@ export async function startHost(
   storage.setAppMeta("proxy_bind_config", JSON.stringify(bindConfig));
 
   const catalog = loadModelCatalog(options.catalogDir, REPO_ROOT);
-  // 与 Rust FlowletServices::open 一致：启动时按 model-catalog + models-cn/dev + config 覆盖
+  // 启动配置合并顺序：启动时按 model-catalog + models-cn/dev + config 覆盖
   // 重建价格表，供 proxy 的 usage 成本估算与 Web 用量页使用。
   storage.rebuildPriceTable(options.catalogDir, configJson);
   const proxy = createProxyController({
@@ -251,7 +251,7 @@ export async function startHost(
   const bound = web.address();
   const webAddr = bound === null ? options.webAddr : `${bound.host}:${bound.port}`;
 
-  // 与 Rust headless 一致的后台维护：余额(5m) / 存储清理(15m) / 目录同步(1h)。
+  // 与 Node Host headless 一致的后台维护：余额(5m) / 存储清理(15m) / 目录同步(1h)。
   // 冒烟/对拍/单测可设 FLOWLET_DISABLE_BACKGROUND_TASKS=1 关闭，避免用真实凭据
   // 向真实上游发起余额请求。
   const disableBackgroundTasks = process.env.FLOWLET_DISABLE_BACKGROUND_TASKS === "1";

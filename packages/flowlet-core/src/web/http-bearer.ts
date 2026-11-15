@@ -1,7 +1,7 @@
 // 通用 HTTP Bearer 凭据客户端（「一个地址 + 一把 Bearer token」的三方服务）。
 // Owner: node-web。
 //
-// 权威实现：src-tauri/src/core/http_bearer.rs 逐行为等价（各包独立副本，互相不依赖）：
+// 实现入口：packages/flowlet-core/src/web/http-bearer.ts 保持既有行为（各包独立副本，互相不依赖）：
 // - 地址保留子路径部署（https://host/files），丢弃 fragment；拒绝 query 与账号密码；
 // - 认证头 `Authorization: Bearer <token>`；
 // - 校验打两次（带 token / 不带），401/403 → 失败；带 token 2xx 而匿名也 2xx →
@@ -12,7 +12,7 @@ import { Agent, request } from "undici";
 const DEFAULT_TIMEOUT_MS = 10_000;
 const USER_AGENT = "flowlet/0.2.0";
 
-/** 与 Rust `HttpBearerError` 同形：Display = `HTTP Bearer API {status}: {message}`。 */
+/** 与 既有 `HttpBearerError` 同形：Display = `HTTP Bearer API {status}: {message}`。 */
 export class HttpBearerError extends Error {
   status: number | null;
 
@@ -39,7 +39,7 @@ export interface HttpBearerProbe {
 }
 
 /**
- * 规范化实例地址：与 Rust `normalize_base_url` 一致。
+ * 规范化实例地址：与 Node Host `normalize_base_url` 一致。
  * - 必须 http/https；
  * - 丢弃 fragment；拒绝 query 与账号密码；
  * - 去掉末尾所有 `/`；保留子路径部署（`https://host/files`）。
@@ -70,7 +70,7 @@ export function authorizationHeader(token: string): string {
 }
 
 export interface HttpBearerClientOptions {
-  /** 内网自签证书：跳过 TLS 校验（对应 Rust `danger_accept_invalid_certs`）。 */
+  /** 内网自签证书：跳过 TLS 校验（对应 Node Host `danger_accept_invalid_certs`）。 */
   insecure?: boolean;
 }
 
@@ -159,7 +159,7 @@ export class HttpBearerClient {
       const anonymous = await this.#probeOnce(target, null);
       anonymousAccessible = anonymous >= 200 && anonymous < 300;
     } catch {
-      // 对照请求失败（网络/证书）按「匿名不可访问」处理，与 Rust 侧一致。
+      // 对照请求失败（网络/证书）按「匿名不可访问」处理，与 Node Host 侧一致。
     }
     return { status, anonymousAccessible, endpointMissing: false };
   }

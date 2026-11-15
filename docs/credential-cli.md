@@ -10,7 +10,7 @@ v5 新增 Jenkins provider（用户名 + API Token 的 Basic 认证），服务�
 `flowlet jenkins` 子命令、`pull` 为 Jenkins 生成 `{PREFIX}_URL` / `{PREFIX}_USER` / `{PREFIX}_TOKEN`。
 v4 新增 `flowlet login` 浏览器授权（loopback + PKCE）：OIDC-only 实例不再需要管理凭据；
 v3 起用户侧命令统一为 `flowlet`，并支持同 provider 多实例环境前缀与 `--profile`、Web Host 下载安装引导。
-Node 版 CLI 为默认实现；Rust 版二进制名仍为 `flowlet-cred`，标为 legacy，仅用于对拍）
+Node 版 CLI 为默认实现；Rust CLI 源码已退役；历史二进制仅可作为显式配置的外部兼容性 oracle。
 日期：2026-11-10（v1：Node 移植完成；v2：新增 Dockhand provider；v3：CLI 更名 `flowlet` +
 多实例 env 前缀 + 本机接入下载；v4：`flowlet login` 浏览器授权 + 本机 `auth.json`；
 v5：Jenkins provider + 服务凭据用户名字段；v6：Beszel provider；v7：OCI 镜像仓库 provider）
@@ -28,7 +28,7 @@ Flowlet 的凭据分两种，**不要混为一谈**：
 临时环境变量里；现在集中到一份 dotenv，由 CLI 统一写入，Agent 按需读取或用 CLI 注入。
 
 > **命令名**：用户侧统一是 `flowlet`（第二期由 `flowlet-cred` 更名，不保留别名）。
-> 仓库内仍保留 Rust legacy 二进制 `flowlet-cred` 仅用于兼容性对拍，见 §3.3。
+> 历史二进制 `flowlet-cred` 可显式作为外部兼容性 oracle，见 §3.3。
 
 ## 2. 存储布局
 
@@ -113,14 +113,8 @@ curl -fsSL http://<flowlet-host>:20134/downloads/install-flowlet.sh \
   | sh -s -- --base=http://<flowlet-host>:20134/downloads
 ```
 
-Rust legacy 版（仅兼容性对拍/回滚用，Agent 机器不再需要；二进制名仍为 `flowlet-cred`，
-Cargo feature `legacy-cred` 默认关闭，需要时显式开启）：
-
-```bash
-cargo build --release --manifest-path src-tauri/Cargo.toml \
-  --no-default-features --features legacy-cred --bin flowlet-cred
-# 产物：src-tauri/target/release/flowlet-cred
-```
+历史 Rust CLI 只作为外部兼容性 oracle：必须用 `FLOWLET_RUST_CRED` 显式指定此前保存的
+可信二进制。当前 Android crate 不提供 Rust CLI 构建；普通安装、测试和日常使用只需 Node CLI。
 
 ### 3.2 命令
 
@@ -199,14 +193,14 @@ flowlet uptime-kuma clear [--profile=TW]
   它是第一期行为的对拍基线：`gitlab` 子命令只读写默认前缀（`GITLAB_*`），`pull` 复用共享
   `env_keys` 写 `DOCKHAND_URL` / `DOCKHAND_TOKEN`（或导出条目里的 `envPrefix`），
   且只认 `--token` / `FLOWLET_ADMIN_TOKEN`（不读 `auth.json`）。
-- Rust legacy 二进制名保持 `flowlet-cred`（Cargo 顶层 bin 名 `flowlet` 已被桌面端占用）；
+- 历史 Rust oracle 的二进制名为 `flowlet-cred`，当前 Android Cargo 不再提供该 bin；
   用户侧命令统一 `flowlet`，不保留 `flowlet-cred` 别名。
 - 其余命令的输出、错误文案、dotenv/JSON 文件字节、权限（0700/0600）、原子写行为一致；
   `packages/flowlet-cred/scripts/compat.mjs` 用同一序列对 Rust legacy 与 Node CLI 做逐行对拍
   （路径/RFC3339 时间戳归一化），并验证双向交叉读取：
 
   ```bash
-  npm run cred:compat     # 期望：输出与文件字节级一致
+  FLOWLET_RUST_CRED=/path/to/saved/flowlet-cred npm run cred:compat  # 可选历史兼容性验证
   npm run cred:test       # node:test（本地库 / GitLab mock / Dockhand mock / 多 profile / pull / 兼容性）
   npm run cred:typecheck  # tsc --noEmit
   ```
@@ -511,7 +505,7 @@ flowlet gitlab env --profile=work               # GITLAB_WORK_URL / GITLAB_WORK_
 
 已验证：用 10.8.7 语义的 mock 服务跑通 `set → status(用户+版本 10.8.7) → projects(含
 default_branch/visibility) → api GET /version`，以及错误 token 不落库、未配置时的提示、
-`env`/`clear`；`core/gitlab.rs` 7 个单测覆盖 URL 归一、子路径、项目解析、错误映射、分页头。
+`env`/`clear`；`packages/flowlet-core/src/web/gitlab.ts` 7 个单测覆盖 URL 归一、子路径、项目解析、错误映射、分页头。
 
 ## 10. Dockhand 适配（Bearer API Token）
 
@@ -835,8 +829,8 @@ Web Host 的「服务凭据」页提供「本机接入」抽屉（桌面模式�
   容器内没有用户 `config_dir`，CLI 需要显式设置 `FLOWLET_CRED_DIR` 时才在容器里使用。
 - **与 Web Host 鉴权（OIDC）**：CLI 授权走**独立作用域 token**（`credentials:read`），
   不打开管理 Bearer 兜底、也不复用管理会话 Cookie；详见 §4.2 与
-  [`admin-sso-design.md`](./admin-sso-design.md) §5.1.1 / §7.6。
-- **与 UI**：`core/credential_store.rs` 是纯 Rust 模块，后续可直接被桌面/Web 命令复用
+  [`admin-sso-design.md`](archive/tauri-migration/admin-sso-design.md) §5.1.1 / §7.6。
+- **与 UI**：`packages/flowlet-cred/src/store.ts` 是纯 Rust 模块，后续可直接被桌面/Web 命令复用
   （读列表、读单值、写值、删除），不需要重写存储层。
 
 ## 17. 验收
@@ -874,7 +868,7 @@ Web Host 的「服务凭据」页提供「本机接入」抽屉（桌面模式�
   键名与实例切换）、`pull` 的 `envPrefix` 映射、`DOCKHAND_*` / `JENKINS_*` / `BESZEL_*` /
   `REGISTRY_*` 映射（`_HOST` 为 host[:port]）、Dockhand / Jenkins / Beszel / registry 纯函数
   （URL 归一/路径/解析/错误提示），以及 Rust legacy 对拍；
-- `FLOWLET_RUST_CRED=$PWD/src-tauri/target/debug/flowlet-cred npm run cred:compat`：
+- `FLOWLET_RUST_CRED=/path/to/saved/flowlet-cred npm run cred:compat`：
   Node CLI 与 Rust legacy 在同一序列下输出/文件字节级一致；
 - 端到端（headless + mock GitLab 10.8.7）：`list → save（校验后加密落库）→ test → export →
   delete`，确认 SQLite 中搜不到明文 token、`secret.key` 权限 600、非法 token 不入库、

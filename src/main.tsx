@@ -51,8 +51,8 @@ configureAppOverlayLayers({ mobile: mobileTarget });
 if (!mobileTarget && !demoTarget && !webTarget && import.meta.env.PROD) {
   document.addEventListener("contextmenu", (event) => event.preventDefault());
 }
-// 无边框窗口壳（Tauri 与 Electron desktop 都渲染 WindowControls）：
-// `windowCommands` 内部按运行模式分派——Tauri 走原生 window API，desktop 走
+// 无边框窗口壳（Electron desktop 渲染 WindowControls）：
+// `windowCommands` 在 Electron desktop 下走
 // preload IPC 桥（不触碰 `__TAURI_INTERNALS__`）。抽屉头部的拖动/双击最大化在
 // desktop 下由 `-webkit-app-region` 交给平台处理（HG-2 降级），不再用 JS 拦截。
 if (!mobileTarget && !demoTarget && !webTarget) {
@@ -66,7 +66,7 @@ if (!mobileTarget && !demoTarget && !webTarget) {
 }
 
 async function renderApp() {
-  // 默认分支：Tauri 桌面壳与 Electron desktop 壳都渲染正式桌面应用（App），
+  // 默认桌面分支渲染正式应用（App），
   // 不是 WebApp / mobile / demo。
   const RootApp = webTarget || desktopClientTarget
     ? (await import("./web/WebApp")).WebApp

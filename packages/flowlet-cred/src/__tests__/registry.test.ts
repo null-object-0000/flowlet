@@ -94,7 +94,7 @@ describe("registry normalizeBaseUrl", () => {
       () => normalizeBaseUrl("http://host:5000/#top"),
       /镜像仓库地址不能带查询参数或锚点/,
     );
-    // 与 Node/Rust 对齐：`scheme://` 空主机 → 缺少主机名；`scheme:///` 无法解析。
+    // 与 Node/Node Host 对齐：`scheme://` 空主机 → 缺少主机名；`scheme:///` 无法解析。
     assert.throws(() => normalizeBaseUrl("https://"), /镜像仓库地址缺少主机名/);
     assert.throws(() => normalizeBaseUrl("http://"), /镜像仓库地址缺少主机名/);
     assert.throws(

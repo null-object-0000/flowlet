@@ -1,6 +1,6 @@
 // TOML 解析与注释保留编辑（Codex `~/.codex/config.toml`）。
 //
-// Rust 侧使用 `toml_edit::DocumentMut`（保留注释/格式的文档级编辑）。Node 没有
+// Host 侧使用 `toml_edit::DocumentMut`（保留注释/格式的文档级编辑）。Node 没有
 // 等价的成熟文档编辑器，因此这里采用「smol-toml 只读解析 + 行级外科手术」：
 // - 解析用 `smol-toml`（TOML 1.0，只读；最小依赖）；
 // - 写入只改动 Flowlet 受管的 5 个顶层键与 `[model_providers.flowlet]` 表，
@@ -18,7 +18,7 @@ import { displayPath } from "./paths.ts";
 /** 供备份使用的普通 JSON 值（TomlDate → RFC3339 字符串，bigint → number）。 */
 export type TomlJson = string | number | boolean | null | TomlJson[] | { [key: string]: TomlJson };
 
-/** 读取 TOML 文档；文件不存在返回空对象（Rust `read_codex_document`）。 */
+/** 读取 TOML 文档；文件不存在返回空对象（既有 `read_codex_document`）。 */
 export function readTomlValue(file: string): JsonRow {
   if (readTextOrNull(file) === null) return {};
   return parseToml(readText(file), displayPath(file));
@@ -60,12 +60,12 @@ export function tomlToJson(value: unknown): TomlJson {
   return null;
 }
 
-/** 顶层键读取（Rust `codex_top_level_value`）。 */
+/** 顶层键读取（Node Host `codex_top_level_value`）。 */
 export function tomlTopLevelValue(root: JsonRow, key: string): unknown {
   return Object.prototype.hasOwnProperty.call(root, key) ? root[key] : undefined;
 }
 
-/** `[model_providers.<id>]` 表读取（Rust `codex_flowlet_provider_table`）。 */
+/** `[model_providers.<id>]` 表读取（Node Host `codex_flowlet_provider_table`）。 */
 export function tomlProviderTable(root: JsonRow, providerId: string): JsonRow | undefined {
   const providers = root.model_providers;
   if (providers === null || typeof providers !== "object" || Array.isArray(providers)) {
@@ -301,7 +301,7 @@ export function setTomlProviderTable(
     parsed.lines.splice(headerIndex, bodyEnd - headerIndex, ...rendered);
     return withTrailingNewline(joinLines(parsed), text.endsWith("\n"));
   }
-  // 追加到文件末尾（Rust 新增子表同样渲染在文档尾部）。
+  // 追加到文件末尾（Node Host 新增子表同样渲染在文档尾部）。
   const prefix: string[] = [];
   if (parsed.lines.length > 0 && parsed.lines[parsed.lines.length - 1].trim() !== "") {
     prefix.push("");

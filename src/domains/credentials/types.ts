@@ -1,4 +1,4 @@
-/** 三方服务凭据的领域类型（与 Rust `core::service_credentials` 的 camelCase JSON 对齐）。 */
+/** 三方服务凭据的领域类型（与 既有 `core::service_credentials` 的 camelCase JSON 对齐）。 */
 
 export type CredentialProviderId =
   | "gitlab"

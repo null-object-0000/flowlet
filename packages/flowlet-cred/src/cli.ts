@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // `flowlet`：Flowlet 全局凭据库的 Node 入口。Owner: node-web.
 //
-// 权威实现：src-tauri/src/bin/flowlet_cred.rs（Rust legacy 二进制名仍为 `flowlet-cred`，
-// 仅用于兼容性对拍）+ core/credential_store.rs + core/gitlab.rs + core/dockhand.rs。
-// Node 版为默认实现（不再需要 Rust 产物）；Rust 版标 legacy。
+// 实现入口：packages/flowlet-cred/src/cli.ts（Node Host legacy 二进制名仍为 `flowlet-cred`，
+// 仅用于兼容性对拍）+ packages/flowlet-cred/src/store.ts + packages/flowlet-core/src/web/gitlab.ts + packages/flowlet-core/src/web/dockhand.ts。
+// Node 版为默认实现（不再需要 Rust 产物）；历史版本标 legacy。
 //
-// 与 Rust 的刻意差异（docs/credential-cli.md §3）：
+// 与 Node Host 的刻意差异（docs/credential-cli.md §3）：
 // - `get` 默认掩码，`--reveal` 才输出明文（安全默认）；`--mask` 仍兼容；
 // - 额外提供 `clear` 清空全部凭据（保留注释与文件头）；
 // - `gitlab` / `dockhand` / `jenkins` / `beszel` / `uptime-kuma` / `registry` 子命令支持 `--profile`
@@ -173,7 +173,7 @@ const VERSION = (
   }
 ).version;
 
-// ─── 输出 / 参数解析（对齐 Rust println!/eprintln! 与参数 helper） ─────────
+// ─── 输出 / 参数解析（对齐 Node Host println!/eprintln! 与参数 helper） ─────────
 
 function out(text: string): void {
   process.stdout.write(text);
@@ -201,7 +201,7 @@ function flagPresent(args: string[], flag: string): boolean {
   return args.includes(flag);
 }
 
-/** 支持 `--name=value` 与 `--name value` 两种写法（与 Rust option_value 一致）。 */
+/** 支持 `--name=value` 与 `--name value` 两种写法（与 Node Host option_value 一致）。 */
 function optionValue(args: string[], name: string): string | null {
   const prefix = `${name}=`;
   for (let index = 0; index < args.length; index += 1) {
@@ -276,7 +276,7 @@ function profileKeys(prefix: string, provider?: CredentialProvider): ProfileKeys
 
 /**
  * set 成功文案：只有显式传了 `--profile` 才拼生效别名。
- * 无 `--profile` 时保持第一期文案，Rust legacy 对拍（compat.mjs）逐字节一致。
+ * 无 `--profile` 时保持第一期文案，Node Host legacy 对拍（compat.mjs）逐字节一致。
  */
 function profileDescription(profile: ProfileContext): string {
   return profile.profile === null ? "" : `（profile: ${profile.profile}）`;
@@ -323,7 +323,7 @@ function prettyJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
-/** serde_json::Value 的对象键是 BTreeMap（字典序）；透传端点输出必须按此排序。 */
+/** JSON::Value 的对象键是 BTreeMap（字典序）；透传端点输出必须按此排序。 */
 function prettyJsonSorted(value: unknown): string {
   return JSON.stringify(sortJson(value), null, 2);
 }
@@ -645,7 +645,7 @@ const PROVIDER_DEFAULT_PREFIX: Record<string, string> = {
 function envKeys(entry: ServiceCredentialExport): Array<[string, string, string]> {
   if (PROVIDER_DEFAULT_PREFIX[entry.provider] === undefined) return [];
   const raw = typeof entry.envPrefix === "string" ? entry.envPrefix.trim() : "";
-  // 旧服务端 export 无 envPrefix：回退 provider 大写（与 Rust/Node Host 的默认前缀一致）。
+  // 旧服务端 export 无 envPrefix：回退 provider 大写（与 Node Host/Node Host 的默认前缀一致）。
   const prefix = raw === "" ? entry.provider.toUpperCase() : raw.toUpperCase();
   if (entry.provider === "beszel") {
     // 契约 §7：Beszel 是「邮箱 + 密码」（每次现场换短期 token），三把键顺序固定。
@@ -949,7 +949,7 @@ async function gitlabApi(args: string[], insecure: boolean, profile: ProfileCont
   return 0;
 }
 
-/** Rust `{:?}` for Option<T>：Some(1) / None。 */
+/** Node Host `{:?}` for Option<T>：Some(1) / None。 */
 function debugOption(value: number | null): string {
   return value === null ? "None" : `Some(${value})`;
 }

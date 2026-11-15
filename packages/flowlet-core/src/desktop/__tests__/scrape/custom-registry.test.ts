@@ -1,4 +1,4 @@
-// 自定义抓取描述符注册表（Rust core/custom_scrape.rs）契约测试。
+// 自定义抓取描述符注册表（Node Host packages/flowlet-core/src/scrape/custom-registry.ts）契约测试。
 //
 // 覆盖：发现目录、schema 校验（跳过非法描述符）、accountName/fallback 匹配、
 // 声明式 slot 规则的 classify/satisfies/merge。测试用临时目录，不读用户本机描述符。
@@ -183,7 +183,7 @@ describe("自定义抓取描述符匹配", () => {
   it("accountName 大小写不敏感，先精确后子串", () => {
     assert.equal(accountNameMatches("Friday", "friday"), true);
     assert.equal(accountNameMatches("friday", "Friday Workspace"), true);
-    // Rust 是双向子串匹配（actual.contains(expected) || expected.contains(actual)）。
+    // Node Host 是双向子串匹配（actual.contains(expected) || expected.contains(actual)）。
     assert.equal(accountNameMatches("friday", "Fridayee"), true);
     assert.equal(accountNameMatches("friday workspace", "friday"), true);
     assert.equal(accountNameMatches("", "friday"), false);

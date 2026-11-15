@@ -1,9 +1,9 @@
 // 历史日志 Agent 会话 / 客户端归属修复。
 //
-// 权威实现：`src-tauri/src/core/storage_usage.rs::repair_agent_sessions`
-// （Tauri command 名 `repair_agent_sessions`，前端「设置 → 数据维护 → 数据完整性检查」）。
+// 实现入口：`packages/flowlet-core/src/storage/usage.ts`
+// （Host command 名 `repair_agent_sessions`，前端「设置 → 数据维护 → 数据完整性检查」）。
 //
-// 语义要点（逐条对照 Rust）：
+// 语义要点（对应 Node Host）：
 // - 按 `request_id` 分组取 `MAX(req_headers_json)` 与现有 `MAX(client_id/client_name)`；
 // - Agent 三列（agent_type / agent_session_id / parent_agent_session_id）从 header JSON 用
 //   与实时代理相同的 Identity Adapter 还原，命中即按 request_id 全量更新；
@@ -19,7 +19,7 @@ import {
   type UaClientRule,
 } from "../proxy/identity.ts";
 
-/** Rust `AgentSessionRepairResult`（`#[serde(rename_all = "camelCase")]`）。 */
+/** 既有 `AgentSessionRepairResult`（`#[serde(rename_all = "camelCase")]`）。 */
 export interface AgentSessionRepairResult {
   scannedRequests: number;
   repairedRequests: number;
@@ -28,7 +28,7 @@ export interface AgentSessionRepairResult {
   repairedClients: number;
 }
 
-/** Rust `repair_time_clause`：窗口过滤 SQL 片段（`today` 按本地自然日，其余按 UTC 相对时长）。 */
+/** 既有 `repair_time_clause`：窗口过滤 SQL 片段（`today` 按本地自然日，其余按 UTC 相对时长）。 */
 function repairTimeClause(column: string, timeRange: string): string {
   switch (timeRange) {
     case "1h":
@@ -49,7 +49,7 @@ function nullableString(value: unknown): string | null {
 }
 
 /**
- * Rust `repair_agent_sessions`：从捕获的请求 headers 修复历史 Claude Code / OpenCode /
+ * Node Host `repair_agent_sessions`：从捕获的请求 headers 修复历史 Claude Code / OpenCode /
  * Codex / DSH 等 Agent 会话归因，并补全为空的客户端归属。返回 camelCase 计数。
  */
 export function repairAgentSessions(
@@ -118,7 +118,7 @@ export function repairAgentSessions(
 
       if (newClient !== null) {
         updateClient.run(requestId, newClient.id, newClient.name);
-        // Rust 在识别出归属时就计数，与实际 UPDATE 命中行数无关。
+        // Node Host 在识别出归属时就计数，与实际 UPDATE 命中行数无关。
         repairedClients += 1;
       }
 

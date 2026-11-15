@@ -29,7 +29,7 @@ export type PresetSyncPreview = {
 };
 
 /** Channel-template command adapter. Templates are seeded from config.json on
- *  the Rust side and rarely mutated by the UI, but we expose a type-safe read
+ *  the Host and rarely mutated by the UI, but we expose a type-safe read
  *  path. No mutation for individual accounts lives here (see account/commands). */
 
 export const channelCommands = {

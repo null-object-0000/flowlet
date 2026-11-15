@@ -1,13 +1,13 @@
-// Agent 原生会话时间线读取（Rust core/agent_session_timeline*.rs 的 TS 移植）。
+// Agent 原生会话时间线读取（Node Host packages/flowlet-core/src/agent/sessions/timeline.ts 的 TS 移植）。
 //
 // Owner: desktop-observability。覆盖 Claude Code / Codex(CLI+Desktop) / Pi / OpenCode /
-// Hermes Agent 六种 agent_type；DeepSeek Harness 的原生会话解析工作量极大（Rust 侧
-// core/agent_session_adapter/adapters/deepseek_harness.rs 约 2900 行，v0–v4 四代格式），
+// Hermes Agent 六种 agent_type；DeepSeek Harness 的原生会话解析工作量极大（Host 侧
+// core/agent_session_adapter/adapters/packages/flowlet-core/src/agent/adapters/deepseek-harness.ts 约 2900 行，v0–v4 四代格式），
 // 本批次未移植：对 deepseek-harness 明确返回「暂不支持」，不伪造空时间线。
 //
-// 与 Rust 的刻意差异（交付汇报中标注）：
+// 与 Node Host 的刻意差异（交付汇报中标注）：
 // - 只实现「读取时间线 / 最后一轮 / 摘要」路径，未实现增量 checkpoint（sync 也走全量解析）。
-// - Rust 的 event/content 上限（历史浏览 300 条 / 8000 字符）只用于旧接口；桌面命令
+// - Node Host 的 event/content 上限（历史浏览 300 条 / 8000 字符）只用于旧接口；桌面命令
 //   `get_agent_session_timeline` 明确要求完整会话，因此这里统一不截断。
 import { closeSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
@@ -20,7 +20,7 @@ import { readDshLastInteraction, readDshTimeline } from "./deepseek-harness.ts";
 
 const MAX_SESSION_ID_BYTES = 512;
 
-// ─── 输出结构（Rust config.rs 的 camelCase serde 结构） ───────────────────────
+// ─── 输出结构（Node Host packages/flowlet-core/src/storage/scrape.ts 的 camelCase serde 结构） ───────────────────────
 
 export interface AgentSessionTimelineEvent {
   id: string;
@@ -97,7 +97,7 @@ export interface AgentSessionNativeSummary {
   models: string[];
 }
 
-// ─── 基础字段读取（Rust agent_session_sources.rs / timeline.rs 同名函数） ────
+// ─── 基础字段读取（会话事件公共字段） ────
 
 export function stringField(value: JsonRow, field: string): string | null {
   const raw = value[field];
@@ -331,7 +331,7 @@ function readJsonlLines(filePath: string): JsonRow[] {
       const row = asRow(parsed);
       if (row !== null) rows.push(row);
     } catch {
-      /* 与 Rust 一致：坏行跳过 */
+      /* 与 Node Host 一致：坏行跳过 */
     }
   }
   return rows;
@@ -1415,7 +1415,7 @@ function readHermesLastInteraction(sessionId: string): AgentSessionTimeline {
 
 // ─── 调度 ───────────────────────────────────────────────────────────────────
 
-/** 支持的 agent_type（与 Rust 六个会话适配器一致，DSH 除外）。 */
+/** 支持的 agent_type（与 Node Host 六个会话适配器一致，DSH 除外）。 */
 export const SUPPORTED_TIMELINE_AGENT_TYPES = [
   "claude-code",
   "codex-desktop",
@@ -1438,7 +1438,7 @@ function validateSessionId(sessionId: string): string {
   return trimmed;
 }
 
-/** Rust `get_native_agent_session_timeline`。 */
+/** Node Host `get_native_agent_session_timeline`。 */
 export function getNativeAgentSessionTimeline(
   agentTypeInput: string,
   sessionIdInput: string,
@@ -1464,7 +1464,7 @@ export function getNativeAgentSessionTimeline(
   }
 }
 
-/** Rust `get_native_agent_session_last_interaction`：无 user-message 时返回 null。 */
+/** Node Host `get_native_agent_session_last_interaction`：无 user-message 时返回 null。 */
 export function getNativeAgentSessionLastInteraction(
   agentTypeInput: string,
   sessionIdInput: string,
@@ -1499,7 +1499,7 @@ export function getNativeAgentSessionLastInteraction(
   return timeline.events.some((event) => event.kind === "user-message") ? timeline : null;
 }
 
-/** Rust `summarize_timeline`。 */
+/** Node Host `summarize_timeline`。 */
 export function summarizeTimeline(timeline: AgentSessionTimeline): AgentSessionNativeSummary {
   let turnCount = timeline.turnCount;
   if (turnCount <= 0) {
@@ -1522,7 +1522,7 @@ export function summarizeTimeline(timeline: AgentSessionTimeline): AgentSessionN
   };
 }
 
-/** Rust `get_native_agent_session_summary`。 */
+/** Node Host `get_native_agent_session_summary`。 */
 export function getNativeAgentSessionSummary(
   agentType: string,
   sessionId: string,
@@ -1531,7 +1531,7 @@ export function getNativeAgentSessionSummary(
 }
 
 function parseTimelineTimestamp(value: string): number | null {
-  // Rust `DateTime::parse_from_rfc3339` 要求显式时区；JS Date.parse 过宽，先做形状校验。
+  // Node Host `DateTime::parse_from_rfc3339` 要求显式时区；JS Date.parse 过宽，先做形状校验。
   if (!/^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$/.test(value)) {
     return null;
   }
@@ -1549,7 +1549,7 @@ function parseTimelineBound(value: string | null | undefined, label: string): nu
 }
 
 /**
- * Rust `slice_native_agent_session_timeline`：按 user-message 边界整组保留执行轮次，
+ * Node Host `slice_native_agent_session_timeline`：按 user-message 边界整组保留执行轮次，
  * 过滤后重算 turn_count / models / usage。
  */
 export function sliceNativeAgentSessionTimeline(
@@ -1680,7 +1680,7 @@ function aggregateEstimates(estimates: AgentSessionCostEstimate[]): AgentSession
   };
 }
 
-/** Rust `apply_native_cost_estimate_to_timeline`（只对 codex-* 生效）。 */
+/** Node Host `apply_native_cost_estimate_to_timeline`（只对 codex-* 生效）。 */
 export function applyNativeCostEstimateToTimeline(
   agentType: string,
   timeline: AgentSessionTimeline,
@@ -1720,7 +1720,7 @@ export function applyNativeCostEstimateToTimeline(
   }
 }
 
-/** Rust `apply_native_cost_estimate_to_summary`（只对 codex-* 生效）。 */
+/** Node Host `apply_native_cost_estimate_to_summary`（只对 codex-* 生效）。 */
 export function applyNativeCostEstimateToSummary(
   agentType: string,
   summary: AgentSessionNativeSummary,

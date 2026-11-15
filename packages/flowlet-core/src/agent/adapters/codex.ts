@@ -1,7 +1,7 @@
 // Codex 全局配置 Adapter。
 //
-// 权威实现：`src-tauri/src/core/agent_global_config/adapters/codex.rs` 与
-// `src-tauri/src/core/codex_model_catalog.rs`。
+// 实现入口：`packages/flowlet-core/src/agent/adapters/codex.ts` 与
+// `packages/flowlet-core/src/agent/models.ts`。
 //
 // 文件：`~/.codex/config.toml`（`CODEX_HOME` 可覆盖）、`~/.codex/auth.json`，
 // 以及按所选模型动态生成的 `~/.codex/model-catalog.flowlet.json`。

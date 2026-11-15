@@ -11,7 +11,7 @@ const ANTHROPIC_PROTOCOLS: AgentModelProtocol[] = ["anthropic"];
 function currentModels(context: Parameters<AgentAccessAdapter["applyOptions"]>[0]) {
   const options = modelOptions(context, ANTHROPIC_PROTOCOLS);
   const primary = selectedModelValue(options, context.globalConfig?.primary_model);
-  // fast 缺省等于 primary（Rust 写入端的缺省规则）；未显式配置快速模型时同步展示 primary。
+  // fast 缺省等于 primary（Host 写入端的缺省规则）；未显式配置快速模型时同步展示 primary。
   const fast = selectedModelValue(options, context.globalConfig?.fast_model) || primary;
   return { options, primary, fast };
 }

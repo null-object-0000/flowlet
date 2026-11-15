@@ -1,6 +1,6 @@
-// per-account 抓取会话状态机（Rust AppState 中 scrape_* 各字段的等价实现）。
+// per-account 抓取会话状态机（Node Host AppState 中 scrape_* 各字段的等价实现）。
 //
-// Rust 的状态分散在 AppState：
+// Node Host 的状态分散在 AppState：
 // - `scrape_webviews`      → 窗口由 Electron 宿主持有，命令层只记「已打开」；
 // - `scrape_pending`       → per-account 已捕获响应缓冲 `Vec<(url, body)>`；
 // - `scrape_modes`         → per-account 抓取模式（解析一次的 ScrapeModeRuntime）；
@@ -11,11 +11,11 @@
 //
 // 命令层必须持有这些状态：`handle_intercepted_response` /
 // `handle_scrape_interceptor_ready` 是页面回调入口，`probe_scrape_login` /
-// `scrape_balance` 依赖同一份缓冲与「已就绪」事实。状态生命周期与 Rust 一致：
+// `scrape_balance` 依赖同一份缓冲与「已就绪」事实。状态生命周期保持既有兼容行为：
 // 关闭控制台时全部清空（登录态在 partition 里，不依赖状态）。
 import type { ScrapeMode } from "./slot-engine.ts";
 
-/** Rust `ScrapeInterceptorReady`。 */
+/** 既有 `ScrapeInterceptorReady`。 */
 export interface ScrapeInterceptorReady {
   documentId: string;
   pageUrl: string;
@@ -25,23 +25,23 @@ export interface ScrapeSession {
   readonly accountId: string;
   readonly channelId: string;
   mode: ScrapeMode;
-  /** Rust `scrape_pending`：页面 IPC 回传的原始响应（URL, body）。 */
+  /** 既有 `scrape_pending`：页面 IPC 回传的原始响应（URL, body）。 */
   pending: Array<[string, string]>;
   /** runPlan 逐阶段返回的槽位结果（slot → 原始 JSON 文本）。 */
   slots: Map<string, string>;
-  /** Rust `scrape_ready`。 */
+  /** 既有 `scrape_ready`。 */
   ready: ScrapeInterceptorReady | null;
-  /** Rust `scrape_native_ready`：Electron 侧 CDP 已 attach。 */
+  /** 既有 `scrape_native_ready`：Electron 侧 CDP 已 attach。 */
   nativeReady: boolean;
   /** 最近一次探到的页面 URL（宿主 probeLogin 返回）。 */
   pageUrl: string | null;
 }
 
-/** Rust `SCRAPE_WEBVIEW_MAX_LIVE`。 */
+/** 既有 `SCRAPE_WEBVIEW_MAX_LIVE`。 */
 export const SCRAPE_WEBVIEW_MAX_LIVE = 3;
-/** Rust `MAX_SCRAPED_RESPONSE_BYTES`。 */
+/** 既有 `MAX_SCRAPED_RESPONSE_BYTES`。 */
 export const MAX_SCRAPED_RESPONSE_BYTES = 8 * 1024 * 1024;
-/** Rust `handle_scrape_interceptor_ready` 的参数上限。 */
+/** 既有 `handle_scrape_interceptor_ready` 的参数上限。 */
 export const MAX_DOCUMENT_ID_LENGTH = 128;
 export const MAX_INTERCEPTOR_PAGE_URL_LENGTH = 4096;
 
@@ -89,7 +89,7 @@ export class ScrapeSessionStore {
   }
 
   /**
-   * Rust `destroy_scrape_webview`：销毁窗口并清除全部 per-account 状态，
+   * 既有 `destroy_scrape_webview`：销毁窗口并清除全部 per-account 状态，
    * 包括人工刷新/等待人工处理标记（否则账号会被永久跳过自动同步）。
    */
   close(accountId: string): ScrapeSession | undefined {
@@ -108,7 +108,7 @@ export class ScrapeSessionStore {
     return oldest;
   }
 
-  /** 清空缓冲与就绪状态（Rust probe 开始前的清缓冲语义）。 */
+  /** 清空缓冲与就绪状态（Node Host probe 开始前的清缓冲语义）。 */
   resetCapture(accountId: string): void {
     const session = this.sessions.get(accountId);
     if (session === undefined) return;
@@ -149,7 +149,7 @@ export class ScrapeSessionStore {
 }
 
 /**
- * 命令层单例。放在模块作用域而不是 `DesktopContext` 上：Rust 侧同样是
+ * 命令层单例。放在模块作用域而不是 `DesktopContext` 上：Host 侧同样是
  * AppState 的进程级字段，且桌面命令 dispatch 在每个 HTTP 请求间不保留上下文实例。
  */
 export const scrapeSessions = new ScrapeSessionStore();

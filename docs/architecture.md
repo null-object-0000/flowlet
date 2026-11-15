@@ -62,7 +62,7 @@ Flowlet
 
 ### Core 与 Host 边界
 
-`packages/flowlet-core/src/index.ts::startHost` 装配配置、SQLite、模型代理与管理 HTTP
+`packages/flowlet-core/src/index.ts` 装配配置、SQLite、模型代理与管理 HTTP
 API。Electron main 使用同进程 Node Host，平台能力只通过 `DesktopHostBridge` 调用；
 Web/Docker 使用同一份核心，但只注册明确允许的 Web 命令。管理凭据与模型调用密钥分离，
 桌面客户端模式只做远程管理反代，不开放本机能力。
@@ -105,43 +105,35 @@ Node Host 只向前端返回 models.dev 的 `openrouter` provider 子目录。�
 当前不加载第三方动态库、不执行插件脚本，也不允许插件绕过类型化 command、
 SQLite 或运行时配置快照直接修改代理状态。修改内置注册表需要重新构建应用。
 
-旧 Rust `core::plugin_contract` 已退役。Node 侧注册表和能力测试继续负责以下契约：对账注册渠道、`config.json` 预设与预设工厂，
-校验模型同步、余额和控制台抓取的声明/实现一致性，验证抓取 mode 的实际配置，并确保模型目录
-官方归属指向已注册渠道、Agent 的四类编译期 Adapter 与 Surface 全部有效。新增扩展遗漏任一环节
-应由 Node Host 契约测试覆盖，不延迟到运行时静默降级。
-
-历史 Rust 的 `AgentPluginBundle` 是四类 Agent 实现的唯一编译期 roster：Environment、Global Config、
-Session 与 Identity 在同一条 Bundle 中组合，各能力模块只提供实现，不再各自维护 Agent
-数组。`plugin-registry.json` 负责产品声明，Bundle 负责类型化实现；两者在启动校验中严格对账，
-未知或遗漏能力不允许回退到其它 Agent。
+Node Host 的 Agent 元数据以 `packages/flowlet-core/src/agent/registry.ts` 为统一入口，
+产品贡献由根 `plugin-registry.json` 声明；新增 Agent 需同步声明、元数据、环境检测、
+配置写入、会话解析和身份识别，并由契约测试验证。不存在 Rust `AgentPluginBundle`
+或可供桌面复用的 Rust Adapter。
 
 前端 Agent 概览使用 `useQueries` 按注册表一次性创建环境探测 Query，并通过统一的
 `useAgentGlobalConfig(agentId)` 处理配置检查、写入和恢复；领域 command 只保留带 `agentId`
 的通用边界。新增已注册 Agent 不再复制专用 Query/Mutation Hook，但仍必须提供注册表声明的
-Rust 编译期环境与全局配置适配器。接入抽屉同样通过 `globalConfigAdapterId` 选择前端
+Node Host 类型化环境与全局配置适配器。接入抽屉同样通过 `globalConfigAdapterId` 选择前端
 `AgentAccessAdapter`，由适配器提供安装名称、额外状态、配置开关、写入选项和手动配置片段；
 通用 SideSheet 不再按 Agent ID 维护条件分支。Surface 是受控能力枚举：`cli` 表示终端交互面、
 `desktop` 表示原生桌面面、`web` 表示本机 Web；分发方式（如 npm/npx）不再冒充产品 Surface。
-Codex 手动配置中的模型目录按所选模型从前端已加载的 `models-cn` 目录动态生成，规则与 Rust
-`codex_model_catalog` 对齐，不再读取仓库静态快照。前端接入实现分别位于
+Codex 手动配置中的模型目录按所选模型从前端已加载的 `models-cn` 目录动态生成，规则与 Node Host
+`agent/models.ts` 对齐，不再读取仓库静态快照。前端接入实现分别位于
 `features/agent-access/agent-access-adapters/`，统一 `agentAccessAdapter()` 入口保持稳定。
 
-Rust 环境检测入口通过编译期 `AgentEnvironmentAdapter` registry 按 `environmentAdapterId`
-解析实现；各 Agent（含 DeepSeek Harness）的检测编排分别位于
-`agent_environment/adapters/`，公共候选路径发现与安装方式识别由父模块复用，版本子进程、
-超时、输出编码与 package 版本读取集中在 `agent_environment/process.rs`。未知环境适配器
-在注册表校验或调用入口明确失败，不回退到其它 Agent；既有候选路径顺序与 Primary 选择规则不变。
+Node Host 环境检测位于 `agent/environment.ts`，公共路径解析位于 `agent/paths.ts`，
+版本查询位于 `agent/version.ts`；入口按 `environmentAdapterId` 选择实现。
+未知环境适配器明确失败，不回退到其它 Agent。
 
 DeepSeek Harness 是首个 `web` Surface 演练：环境 Adapter 分别报告 `~/.dsh` 数据目录、
 `127.0.0.1:3080` Web 运行状态与 PATH 中稳定的 `dsh` 启动入口。`runtime_running` 明确区分
 “已发现安装/数据目录”和“Web 正在运行”；无歧义时可从 `npx` 临时缓存只读识别包版本，但临时缓存不视为可调度安装。
 
-Rust 全局配置入口通过统一 `AgentGlobalConfigAdapter` 的 `inspect / apply / restore` 接口工作，
-各 Agent 分别由独立编译期 Adapter 模块完整承载配置路径、受管字段、
-备份结构、写入/恢复事务和 Agent 专属扩展源码；父模块只保留公共报告类型、全局互斥锁与通用文件事务。
-插件注册表校验直接查询该 Adapter registry，不再维护另一份全局配置适配器白名单；设备同步也先
-按 Agent 插件声明解析 `globalConfigAdapterId`，不假设公开 Agent ID 与实现 ID 相同。Adapter 不存在时
-在注册表加载或调用入口明确失败，不做静默回退。
+Node Host 全局配置入口位于 `agent/adapters/index.ts`，按 `globalConfigAdapterId`
+提供 inspect / apply / restore；各 Agent 文件承载格式解析、受管字段、备份和恢复。
+公共 JSONC/TOML/YAML 编辑、文件事务和报告分别由 `agent/` 的共享模块提供。
+设备同步按 Agent 描述解析配置适配器 ID，不假设产品 ID 与实现 ID 相同。
+
 每个包含结构化文件改写的 Global Config Adapter 都应提供基于真实上游初始文件的生命周期契约：
 `inspect -> apply -> reapply -> disable optional capability -> restore`，并在每一步重新用上游格式解析器
 验证语义有效、幂等与原字节恢复。DSH 当前固定了官方 `PROFILE_PATCH_TEMPLATE` 作为回归 fixture。
@@ -157,31 +149,13 @@ DSH 基础接入不安装插件、扩展或 Hook，不修改其包与运行时�
 精确会话关联是默认关闭的高级选项，只有用户显式启用时才
 向已初始化 Profile 部署可恢复的受管 Cordis 桥。内部 Plugin Registry 只是 Flowlet 的受控能力声明。
 
-Agent 插件同时声明 `sessionAdapterId`、`identityAdapterId` 与 `sessionTypes`。
-前端会话筛选、会话名称和客户端归属均由
-注册表生成，不再维护页面级枚举。Rust `AgentSessionAdapter` 统一提供原生数据源监听、
-可用运行时会话类型、会话目录枚举、Timeline、最后交互和增量解析来源；Claude Code、OpenCode、
-Pi、Codex 通过编译期 Session Adapter registry 注册。Codex Adapter 显式承载 `codex-cli` 与
-`codex-desktop` 两种运行时会话类型，因此调用方不再散落维护 Agent 类型分支。会话合并与用量账本
-语义保持不变，未知 Session Adapter 在插件注册表加载时明确失败。DeepSeek Harness Adapter
-读取 `~/.dsh/sessions/**/session.jsonl(.zstd)` 的预发布 v0 header、已提交消息、工具事件与原生
-usage；遇到其它格式版本明确拒绝。打包的增量 chunk 行不参与 Flowlet 时间线展示，完整的
-`assistant/message` 仍作为最终消息来源。各能力实现分别位于
-`agent_session_adapter/adapters/`，父模块只保留 Trait、registry 查询和公共默认行为；Claude Code、
-Codex、OpenCode 与 Pi 的文件/SQLite 定位和时间线解析进一步下沉到
-`agent_session_timeline/adapters/`，公共时间线模块保留增量游标、摘要合并、切片、计价与事件工具。
+Agent 声明包含 `sessionAdapterId`、`identityAdapterId` 与 `sessionTypes`。
+Node Host 的原生会话目录、摘要、同步和时间线实现位于 `agent/sessions/`，
+元数据来自 `agent/registry.ts`。Codex 区分 `codex-cli` 与 `codex-desktop` 两类会话；
+DeepSeek Harness 读取原生已提交事件并明确拒绝不支持的格式版本。
+实时请求与历史日志修复均复用 `proxy/identity.ts` 的身份识别；上游转发前由
+`proxy/http.ts::applyRequestHeaders` 剥离 Flowlet 保留头。
 
-`AgentIdentityAdapter` 独立承载客户端 UA 规则、受管标记头身份与 Session Header 提取；实时 HTTP
-请求和历史 Header JSON 修复均委托同一 registry，代理主流程不再按 Agent ID 分支。
-
-`list_agent_capabilities` 从已经对账的声明与 Bundle 生成类型化能力报告，向前端公开 Surface、
-会话类型（含 `clientId`）与配置开关。
-
-当前代码已经接入 SQLite 基础配置存储。后续架构文档不再把 SQLite 视为未来能力，而是把它作为 Channel、Account、Model、Client、模型路由（`virtual_models` / `virtual_model_routes`）、日志、用量、价格和快照数据的本地持久化层。
-
-SQLite 迁移由 `Storage::migrate` 负责。除非需求明确允许且已评估用户数据影响，不得直接删除或重建现有表；新增或调整持久化结构必须提供迁移并补充存储测试。
-
-聚合模型移除通过 `Storage::migrate` 中的一次性、幂等迁移完成：把 `virtual_model_id IN ('flowlet-pro','flowlet-flash')` 的旧路由按 `upstream_model` 归一改写为规范模型 ID，按 `(virtual_model_id, channel_id, account_id, upstream_model, client_protocol)` 去重（保留 priority 最小者，并列取 `created_at` 更早、再取 `id`；`enabled` 取任一为 1），再对受迁移影响的分组按 `(virtual_model_id, client_protocol)` 重排 priority 为 `0..n`；无法归一的旧行保留原样但由路由层的规范身份校验过滤。同一迁移还会删除 `virtual_models` 表中残留的 `flowlet-pro` / `flowlet-flash` 行。表结构与字段名不变，迁移幂等。
 
 ## 当前阶段核心模型
 
@@ -213,7 +187,7 @@ Channel + Account + Protocol + Model
 127.0.0.1:18640  多协议透明代理端口
 ```
 
-后续如需要管理 API，优先通过 Tauri command 给桌面 UI 使用；Docker / Web Console 阶段再引入独立管理端口。
+后续如需要管理 API，优先通过 Host command 给桌面 UI 使用；Docker / Web Console 阶段再引入独立管理端口。
 
 ## 协议入口
 
@@ -291,13 +265,11 @@ Anthropic-compatible Channel Account
 
 ## 运行时配置快照
 
-渠道模板、渠道账号、路由候选、路由规则和模型身份（`virtual_models`）由 Rust 端
-`RuntimeConfigStore` 统一发布为带单调递增 `revision` 的不可变
-`RuntimeConfigSnapshot`。SQLite 仍是持久化事实源；配置 mutation 只有在持久化成功后
+渠道模板、渠道账号、路由候选、路由规则和模型身份（`virtual_models`）由 Node Host 端
+`config/index.ts::RuntimeConfig` 发布带单调递增 `revision` 的配置快照。SQLite 仍是持久化事实源；配置 mutation 只有在持久化成功后
 才发布下一版内存快照。
 
-代理处理单个请求时只读取一次当前快照，并在该请求的完整路由过程中持有同一个
-`Arc<RuntimeConfigSnapshot>`。因此同一请求使用的渠道、账号、路由和规则必定属于同一
+代理处理单个请求时只读取一次当前快照，并在该请求的完整路由过程中保留同一份快照对象引用。因此同一请求使用的渠道、账号、路由和规则必定属于同一
 revision，不会观察到多个配置集合依次更新时的中间状态。旧请求可以继续安全使用旧快照，
 新请求自动读取最新 revision，无需重启代理。
 
@@ -306,22 +278,16 @@ revision，不会观察到多个配置集合依次更新时的中间状态。旧
 
 ## 后台任务运行时
 
-`FlowletServices` 持有统一的 `JobRuntime`。`background_jobs` / `background_job_events` 继续作为
-可查询、可恢复的持久化任务历史；`JobRuntime` 只负责进程内运行状态，两者不混为同一事实源。
-每类任务通过 `JobDefinition` 集中声明稳定 `job_type`、`scope_key`、单次 attempt timeout 和
-retry policy，并通过 `scope_key` 获取 RAII lease：同一作用域拒绝重入，不同作用域仍可并行；
-持久化任务创建后把 `job_id` 关联到 lease，统一取消命令会同时写入 SQLite 并向活动任务发布
-低延迟取消信号，lease 在成功、失败或提前返回时都会自动释放。
+Node Host 的持久化任务与事件记录由 `storage/background-jobs.ts` 管理；
+周期清理由 `host/scheduler.ts` 编排，桌面 Agent、渠道资源与同步命令在各领域模块中执行。
+任务页通过类型化命令查询持久化历史，运行中的状态和持久化任务记录应保持区分。
 
-当前 Agent 数据同步、Codex 账号同步、渠道资源同步、S3 设备同步、渠道账号工作区同步
-和定时存储清理已接入该运行时。存储清理会在各清理阶段之间协作式响应取消。
-任务的业务进度、摘要和事件 schema 保持原样，前端任务页与
-现有 command 返回结构无需调整。模型目录下载作为首个 retryable definition：单次网络 attempt
-上限 30 秒，连接/读取错误、429 和 5xx 最多尝试 3 次并指数退避；JSON 校验和本地原子替换不重试。
+Android 的 `src-tauri/src/core/job_runtime.rs` 是独立的移动同步排他租约，
+只防止手动/后台 pull 在同一作用域重入，不是桌面任务调度器。
 
 ## Agent 本机环境探测
 
-Agent 接入向导通过只读 Tauri command 探测本机 CLI 环境，前端不直接读取文件系统或执行 Shell。调用链为：
+Agent 接入向导通过只读 Host command 探测本机 CLI 环境，前端不直接读取文件系统或执行 Shell。调用链为：
 
 ```text
 Agent 接入组件
@@ -332,7 +298,7 @@ Agent 接入组件
 
 Claude Code 探测同时检查 PATH 和官方常见安装位置，返回当前主安装、全部候选安装、可执行文件路径、安装目录、版本及安装方式。OpenCode 探测同时覆盖 CLI 与 Desktop：CLI 检查 PATH、原生脚本、npm、Bun 等常见位置并执行版本命令；Desktop 检查各平台常见应用位置且不会启动桌面进程。ChatGPT（Codex）同样同时探测 Desktop 与 Codex CLI；CLI 覆盖 PATH、npm 和官方独立安装目录，并通过 `codex --version` 读取版本。保留全部候选用于识别多版本或 CLI/Desktop 并存；探测结果只存在于 TanStack Query 内存缓存，不写入 SQLite 或 `config.json`。
 
-Codex CLI 当前支持安装探测、账号用量复用和原生会话读取。Codex 与 Claude Code、OpenCode、Pi 同为标准一等 Agent，由 `agent_global_config` 模块一键写入 `~/.codex/config.toml`（`[model_providers.flowlet]` 经 Responses wire API 指向本地代理、`requires_openai_auth = true`）与 `~/.codex/config.toml`，受管字段先备份再写入、恢复时还原；Codex CLI、ChatGPT 桌面端与 VS Code 插件共享同一份配置。账号观测（订阅用量、套餐、Credits、重置机会）承载于概览页渠道账号卡片的伪账号行——该伪账号只读、不参与路由、不开放编辑，行点击打开只读详情抽屉。当前准确支持范围见 [`support-matrix.md`](./support-matrix.md)。
+Codex CLI 当前支持安装探测、账号用量复用和原生会话读取。Codex 与 Claude Code、OpenCode、Pi 同为标准一等 Agent，由 `agent_global_config` 模块一键写入 `~/.codex/config.toml`（`[model_providers.flowlet]` 经 Responses wire API 指向本地代理、`requires_openai_auth = true`）与 `~/.codex/config.toml`，受管字段先备份再写入、恢复时还原；Codex CLI、ChatGPT 桌面端与 VS Code 插件共享同一份配置。账号观测（订阅用量、套餐、Credits、重置机会）承载于概览页渠道账号卡片的伪账号行——该伪账号只读、不参与路由、不开放编辑，行点击打开只读详情抽屉。当前准确支持范围见 [`support-matrix.md`](support-matrix.md)。
 
 Antigravity 订阅额度也由概览页渠道账号卡片承载，但使用独立只读观测报告，而不是持久化渠道账号。
 `useAntigravityAccounts -> query_antigravity_accounts` 并行组合 Google OAuth 远端额度与本地服务观测。
@@ -341,11 +307,11 @@ Antigravity 订阅额度也由概览页渠道账号卡片承载，但使用独�
 不安装扩展、不写客户端配置、不参与代理路由。自动刷新由前端每两分钟触发，失败保留上次成功快照并标记过期；
 权限不足或无实测额度时显示错误，不将模型可用性当作 100% 额度。本地发现与授权账号按邮箱去重，授权账号优先。
 详情和兼容边界见
-[`antigravity-account.md`](./antigravity-account.md)。
+[`antigravity-account.md`](antigravity-account.md)。
 
-Claude Code 用户级全局配置由独立的 `agent_global_config` 模块管理。前端只读取脱敏状态并触发应用或恢复；Rust 解析 `CLAUDE_CONFIG_DIR` / `~/.claude/settings.json`，安全合并 Flowlet Base URL、Client Token 和模型别名映射。修改前只备份受管字段，恢复时不覆盖用户后续新增的其他 Claude 设置。完整字段和优先级见 [`claude-code-global-config.md`](./claude-code-global-config.md)。
+Claude Code 用户级全局配置由独立的 `agent_global_config` 模块管理。前端只读取脱敏状态并触发应用或恢复；Rust 解析 `CLAUDE_CONFIG_DIR` / `~/.claude/settings.json`，安全合并 Flowlet Base URL、Client Token 和模型别名映射。修改前只备份受管字段，恢复时不覆盖用户后续新增的其他 Claude 设置。完整字段和优先级见 [`claude-code-global-config.md`](claude-code-global-config.md)。
 
-OpenCode CLI 与 Desktop 共用用户级配置。Flowlet 在 `~/.config/opencode/opencode.jsonc`（或已有的 `opencode.json`）中结构化合并 `provider.flowlet`、`model`（主模型）与 `small_model`（快速模型）；Flowlet 不再修改 `server.hostname` / `server.port`，重新应用配置时会清理由短暂发布版本写入的固定端口字段并恢复备份原值。Client Token 单独写入 `~/.local/share/opencode/auth.json` 的 `flowlet` 凭据项。JSONC 修改保留未受管字段和注释；配置与凭据均先备份受管值，再支持恢复。完整行为见 [`opencode-global-config.md`](./opencode-global-config.md)。
+OpenCode CLI 与 Desktop 共用用户级配置。Flowlet 在 `~/.config/opencode/opencode.jsonc`（或已有的 `opencode.json`）中结构化合并 `provider.flowlet`、`model`（主模型）与 `small_model`（快速模型）；Flowlet 不再修改 `server.hostname` / `server.port`，重新应用配置时会清理由短暂发布版本写入的固定端口字段并恢复备份原值。Client Token 单独写入 `~/.local/share/opencode/auth.json` 的 `flowlet` 凭据项。JSONC 修改保留未受管字段和注释；配置与凭据均先备份受管值，再支持恢复。完整行为见 [`opencode-global-config.md`](opencode-global-config.md)。
 
 Agent 接入抽屉中的 Client Token 默认使用固定长度掩码；查看按钮只在当前抽屉会话中临时展示，关闭后恢复掩码，复制始终使用真实值。Claude Code 手动片段与一键写入字段保持一致；OpenCode 将 Provider 配置和 `auth.json` 凭据拆成两个片段。OpenCode 配置与凭据采用双文件事务写入，第二个文件失败时恢复两个文件的原始字节内容。
 
@@ -409,7 +375,7 @@ Channel contribution (plugin-registry.json)
 余额查询只用于异步同步和配置辅助。主请求转发仍然走 `proxy`，响应仍然零改写。
 
 官方余额的 HTTP 请求、渠道响应 DTO 与解析错误现在由 DeepSeek、Kimi、OpenRouter 各自的 Adapter
-承载。控制台抓取的 WebView 生命周期、阶段等待和响应缓冲仍由 `scrape_console.rs` 统一维护；
+承载。控制台抓取的 WebView 生命周期、阶段等待和响应缓冲仍由 `packages/flowlet-desktop/src/scrape.ts` 统一维护；
 LongCat 的业务 URL 分类、资源包列表合并/完成条件，以及 Qwen Token Plan 的响应分类由对应 Adapter
 提供，公共抓取层不再识别渠道专属 URL 或响应结构。
 
@@ -660,9 +626,8 @@ OpenCode 权限读取和“同意本次 / 否决”通过同一认证通道发�
 探测使用新增 `GET /flowlet/v1/ping` 端点，返回 device_id、协议版本、能力和服务端时间；旧版
 Flowlet 返回 404，前端将其归类为“对端版本过旧”，并继续使用 S3 快照作为回退。
 
-移动查看器与桌面端保持在同一仓库和同一个 Rust crate 中，但使用独立的 React Router、
-Shell 与精简的 Tauri 启动入口。`#[cfg(desktop)]` 注册代理、托盘、Agent 与完整数据命令，
-`#[cfg(mobile)]` 注册 S3 配置、只读连接测试、共享设备目录、工作区账号资源摘要、日/小时汇总、会话摘要、
+移动查看器与桌面端保持在同一仓库，使用独立的 React Router 和移动 Shell。
+桌面由 Electron + Node Host 承担；Android 的独立 Rust crate 仅注册 S3 配置、只读连接测试、共享设备目录、工作区账号资源摘要、日/小时汇总、会话摘要、
 设备 Agent 安装与接入摘要、远端刷新，以及经过认证的 LAN 快照读取和 OpenCode 单次权限回复命令。
 移动端复用 `DeviceUsageBundle`、S3 适配器、SQLite 导入与聚合逻辑，不启动本地代理，也不
 扫描本机 Agent 数据。移动设备页按设备懒加载同步的 Agent 摘要，展示安装面与版本，并区分
@@ -722,7 +687,7 @@ OpenCode 会话观测当前不建立独立 `sessions` 表。代理在请求进�
 主会话运行状态按整棵子会话树聚合：任一后代仍在运行时主会话保持运行中，任一后代等待用户确认时
 主会话展示等待确认（优先级高于运行中）；空闲或未知子会话不覆盖主会话自身状态。
 
-查询会话列表时，Rust 会只读、尽力而为地建立本地原生会话目录：OpenCode 从用户本地
+查询会话列表时，Node Host 会只读、尽力而为地建立本地原生会话目录：OpenCode 从用户本地
 `opencode.db` 的 `session` 表读取全部会话的标题、项目目录、父会话和时间；Claude Code 从
 `~/.claude/projects` 下识别根会话 JSONL 与 `subagents` 子会话；ChatGPT（Codex）Desktop 与
 Codex CLI 共享 `$CODEX_HOME/sessions`，Flowlet 根据 `originator` 分别标记为 `codex-desktop`
@@ -752,7 +717,7 @@ Flowlet 请求指标、Agent 原生累计用量和子会话；OpenCode 待确认
 内联在事件流末尾的 Agent 阻塞点展示，此时不再重复显示“正在处理”指示；
 该 Tab 在首次切换时按需读取。桌面通过 `get_agent_session_last_interaction`
 只返回最后一个真实用户输入及其后的全部回复、思考与工具事件；
-`get_agent_session_native_summary` 只返回累计摘要。Rust 内部以只读方式解析 OpenCode
+`get_agent_session_native_summary` 只返回累计摘要。Host 内部以只读方式解析 OpenCode
 `message` / `part`、Claude Code JSONL、Codex rollout JSONL 和 Pi 活动分支：一部分用于计算
 摘要与成本，另一部分仅在生成设备快照时提取最后一个用户回合；解析结果不写入当前设备的
 Agent 会话事实表，也不读取 Codex developer 指令。
@@ -819,7 +784,7 @@ PC 用量分析页的 `usage_summary` 进一步把能够确认具体模型的纯
 
 Codex 账号与用量另有独立的周期性后台同步：应用启动约 20 秒后首次执行，此后固定每 5 分钟一轮，前台与
 后台同周期（Codex 官方用量窗口本身是 5 小时 / 周级粒度，5 分钟足够新鲜，也避免高频调用官方用量接口与
-反复拉起 app-server 进程）。Rust 在同步前先做廉价检查：既没有 `~/.codex/auth.json` 登录凭据、也没有托管
+反复拉起 app-server 进程）。Node Host 在同步前先做廉价检查：既没有 `~/.codex/auth.json` 登录凭据、也没有托管
 多账号目录时直接跳过，不创建任务、不发起网络请求；存在账号时复用 `query_codex_accounts` 刷新当前账号与
 所有托管账号的用量快照，并以 `job_type = codex-account-sync` 记入 `background_jobs` /
 `background_job_events`，单个账号刷新失败只记警告事件、不中断整轮同步。任务记录同时保存账号数量、
@@ -834,9 +799,9 @@ Agent 数据同步在应用启动约 3 秒后首次检查，窗口前台每 1 �
 尽快补查。自动检查只有发现来源指纹变化时才创建任务；会话页手动同步会强制重新整理并始终保留记录。
 前端周期、文件事件与恢复前台触发共用单个执行槽；扫描未完成时合并为一次后续检查，防止生成并行扫描
 和多条周期定时器。窗口隐藏后立即把周期检查延后至后台间隔；卸载后不再刷新查询或重建定时器。
-Rust 使用 `notify` 监听现有 OpenCode 数据库、Claude Code 项目目录和 Codex sessions 目录，文件事件只作为
-“需要重新扫描”的提示，由前端静默 8 秒后触发同一增量同步，并限制文件事件触发间隔至少 30 秒；
-冷却期内的新变化延迟到冷却结束后检查，不直接丢弃。
+Node Host 的原生会话同步入口位于 `agent/sessions/sync.ts`，由前端周期和恢复前台等
+触发条件调用。已退役的 Rust `notify` 监听器不再参与当前桌面同步；文件来源与变化判断
+以 Node Host 的会话扫描实现为准。
 定时轮询始终保留为漏事件和新目录的兜底。扫描指纹时仅短暂持有 SQLite 锁，解析 Agent 原始文件期间
 不占用数据库，确保后台任务记录查询和其他页面查询不会被长任务阻塞。
 同步发现仍可访问数据源中的会话已经消失或归档时，不删除 Flowlet 已保存的摘要快照和
@@ -849,7 +814,7 @@ Claude usage ID 去重集合；后续仅解析追加内容，不把消息或工�
 解析器版本升级时自动从头整理。单轮最多读取 16 MiB，未读完时使用 partial 指纹让下一轮继续推进。
 同一时刻只允许一个 Agent 同步运行，进程内状态由 `JobRuntime` 管理。通用任务执行信息落入 `background_jobs`，阶段事件落入
 `background_job_events`，包含触发方式、进度、结果、警告和错误；应用启动时会把上次未结束的
-任务标记为 `interrupted`。任务调度属于 React 产品编排，Rust command 负责只读扫描、SQLite 一致写入和
+任务标记为 `interrupted`。任务调度属于 React 产品编排，Host command 负责只读扫描、SQLite 一致写入和
 并发互斥；同步失败不会影响代理请求链路，配置变更也不需要重启代理。
 
 自动 Agent 同步单轮最多整理 12 个变化会话，手动同步最多 20 个，优先处理最近活动会话；未处理部分不更新
@@ -934,11 +899,11 @@ Anthropic `/messages/count_tokens` 只计算上下文长度，不执行模型推
 
 规划新增的 `cost_sources`、`usage_events`、`agent_tasks`、`agent_sessions` 和 `cost_allocations` 必须通过 SQLite migration 增量创建。网关请求幂等映射为 `usage_event`；无网关请求的 Agent turn、会话汇总、官方记录和手动用量也可以成为事件，因此 `request_id` 可空。
 
-成本公式、金额精度、事务、账期重算和分配版本由 Rust 保证；React 负责来源配置、业务流程编排、状态反馈和解释展示。Adapter 同步失败不能影响代理或其他 Adapter，未经用户授权不读取第三方本地数据，默认不保存 Prompt、Response、对话正文或凭据。
+成本公式、金额精度、事务、账期重算和分配版本由 Node Host 保证；React 负责来源配置、业务流程编排、状态反馈和解释展示。Adapter 同步失败不能影响代理或其他 Adapter，未经用户授权不读取第三方本地数据，默认不保存 Prompt、Response、对话正文或凭据。
 
 当前已落地的第一步是只读数据源探针：`cost_ledger_source_probe` 复用现有会话元数据与时间线解析器，并通过统一 Observation / Evidence / ProbeReport DTO 报告 Flowlet 网关、Codex、Claude Code 和 OpenCode 的可用粒度、字段缺口、去重键、增量游标、格式指纹及可信度。探针不写 SQLite、不建立账本事实表，也不返回会话正文、凭据或原始文件路径；它用于在 migration 与成本引擎设计前验证真实数据边界。
 
-完整需求、MVP 边界、实施阶段和验收标准见 [`ai-cost-ledger.md`](./ai-cost-ledger.md)。该章节描述目标架构，不代表相关表和引擎已经实现。
+完整需求、MVP 边界、实施阶段和验收标准见 [`ai-cost-ledger.md`](ai-cost-ledger.md)。该章节描述目标架构，不代表相关表和引擎已经实现。
 
 ### analyzer
 
@@ -976,7 +941,11 @@ Anthropic `/messages/count_tokens` 只计算上下文长度，不执行模型推
 “万 / 亿 / 万亿”，英文采用 “K / M / B / T”，默认最多保留 1 位小数；紧凑组件同时通过
 `title` 保留本地化后的精确整数。业务页面不得再分别维护 Token 或请求数的 K/M、万/亿换算。
 
-应用窗口使用 Tauri 无系统边框模式，由前端壳提供可拖动区域以及最小化、最大化/还原、关闭按钮。关闭主窗口隐藏到托盘，只有“退出 Flowlet”才停止代理并退出应用。主窗口通过 `tauri-plugin-window-state` 记住上次的尺寸、位置与最大化状态：启动时自动恢复（无历史状态时保持 `tauri.conf.json` 的 1200×720 客户区），关闭隐藏到托盘、托盘“显示/隐藏”或退出时落盘；不记忆可见性，`--hidden` 后台启动不受影响。Windows 无系统边框窗口仍包含系统用于缩放的不可见边框；`window_size` 会按当前 DPI 测量外框与客户区差值并补偿原生最小尺寸约束，保证主窗口最小时的前端客户区仍不小于 1200×720。历史状态若保存过约 1184×711 的旧客户区，启动恢复后会自动抬回新下限。
+应用窗口使用 Electron `frame: false` 无边框模式，窗口控制通过 preload 平台桥调用，
+标题栏和抽屉拖动区使用 `-webkit-app-region`。关闭主窗口隐藏到托盘，只有“退出 Flowlet”
+才停止代理并退出。`packages/flowlet-desktop/src/window-state.ts` 在数据目录保存尺寸、位置和
+最大化状态，不保存可见性；恢复时按显示器 workArea 校正，客户区最小为 1200×720。
+
 
 全部界面文案使用中文。
 

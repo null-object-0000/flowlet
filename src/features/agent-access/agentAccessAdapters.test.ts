@@ -180,7 +180,7 @@ describe("agent access adapters", () => {
     expect(config.model).toBe("flowlet/deepseek-v4-pro");
     expect(config.small_model).toBe("flowlet/deepseek-v4-pro");
     expect(config.provider.flowlet.models).not.toHaveProperty("modalities");
-    // 与 Rust 写入端一致：受管 Provider 只声明所选模型条目。
+    // 与 Host 写入端一致：受管 Provider 只声明所选模型条目。
     expect(Object.keys(config.provider.flowlet.models)).toEqual(["deepseek-v4-pro"]);
   });
 

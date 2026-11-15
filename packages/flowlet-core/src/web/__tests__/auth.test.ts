@@ -569,7 +569,7 @@ describe("OIDC 模式", () => {
       login_path: "/api/auth/login",
       token_login: false,
     });
-    // 未登录会话探测 → 401（与 Rust 中间件一致）
+    // 未登录会话探测 → 401（与 Node Host 中间件一致）
     const session = await request(host.baseUrl, "/api/session");
     assert.equal(session.status, 401);
   });
@@ -848,7 +848,7 @@ describe("OIDC 模式", () => {
       body: "{}",
     });
     assert.equal(command.status, 200);
-    // Bearer 通过中间件后 /api/session 因无 Cookie 身份返回 401「会话无效」（与 Rust 一致）。
+    // Bearer 通过中间件后 /api/session 因无 Cookie 身份返回 401「会话无效」（与 Node Host 一致）。
     const session = await request(fallbackHost.baseUrl, "/api/session", {
       headers: { authorization: `Bearer ${ADMIN_TOKEN}` },
     });
@@ -1059,7 +1059,7 @@ describe("AdminAuthConfig 启动校验", () => {
     const httpsAlways = adminAuthConfigFromEnv(base({ FLOWLET_ADMIN_COOKIE_SECURE: "always" }));
     assert.equal(httpsAlways.cookieSecure, true);
 
-    // 非法数值回落默认值（Rust parse::<u64>().ok().unwrap_or(30)）
+    // 非法数值回落默认值（Node Host parse::<u64>().ok().unwrap_or(30)）
     const invalid = adminAuthConfigFromEnv(
       base({ FLOWLET_ADMIN_SESSION_IDLE_MINUTES: "abc", FLOWLET_ADMIN_SESSION_TTL_HOURS: "-3" }),
     );

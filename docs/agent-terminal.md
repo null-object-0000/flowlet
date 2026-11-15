@@ -50,7 +50,7 @@ ChatGPT Desktop 是桌面应用，不属于 Agent 终端的 CLI 范围。Agent �
 - 用户输入任意可执行文件路径；
 - 启动任意 PowerShell、CMD、Bash 或自定义命令；
 - 拼接或执行用户提供的完整命令字符串；
-- 把 Tauri Shell 的 unrestricted spawn 权限直接暴露给前端；
+- 把 主进程的 unrestricted spawn 权限直接暴露给前端；
 - 将 Agent 终端扩展成服务器 SSH 客户端；
 - 默认保存完整终端输出或键盘输入。
 
@@ -117,7 +117,7 @@ Flowlet 内嵌 Agent 终端
 - 安装版本：只读；
 - 可执行文件：默认隐藏在高级信息中；
 - 工作目录：用户明确选择，记忆最近一次非敏感目录；
-- 模型：接入抽屉中显式选择的规范模型（当前协议下已开放）；未选择时由 Rust 按模型 id 字典序取第一个可用模型；
+- 模型：接入抽屉中显式选择的规范模型（当前协议下已开放）；未选择时由 Node Host 按模型 id 字典序取第一个可用模型；
 - 接入模式：固定通过 Flowlet，不在内嵌终端中混用 Agent 当前的外部网关配置。
 
 ### 4.5 生命周期交互
@@ -134,8 +134,8 @@ Flowlet 内嵌 Agent 终端
 ```text
 React Agent Terminal Page
   └─ xterm.js + fit addon
-       ↕ Tauri command / Channel
-Rust AgentTerminalManager
+       ↕ Host command / Channel
+Electron main AgentTerminalManager
   ├─ AgentRegistry
   ├─ TerminalSession registry
   ├─ PTY reader / writer / resize
@@ -155,9 +155,9 @@ Claude Code / OpenCode / Hermes
 - 展示 starting、running、exited、failed 状态；
 - 代理启动、配置缺失、关闭确认和错误提示；
 - 跳转到请求日志和 Agent Session；
-- 不直接拼写 Tauri command，通过 `src/domains/agent-terminal` 类型化边界调用。
+- 不直接拼写 Host command，通过 `src/domains/agent-terminal` 类型化边界调用。
 
-### 5.2 Rust 职责
+### 5.2 Electron 主进程职责
 
 - 根据 Agent Registry 校验 `agent_id` 和已发现的可执行文件；
 - 创建 PTY / ConPTY，并在该 PTY 内部创建 Agent 子进程；该子进程不是独立产品入口；
@@ -175,27 +175,11 @@ Claude Code / OpenCode / Hermes
 - `@xterm/addon-fit`：根据容器尺寸计算行列；
 - 暂不引入搜索、WebGL、链接识别等附加组件。
 
-### 5.4 Rust PTY 方案
+### 5.4 Electron PTY 方案
 
-首选候选：`portable-pty`。
-
-原因：
-
-- 支持 Windows ConPTY 和 Unix PTY；
-- API 包含 open、spawn、reader、writer、resize 和 child lifecycle；
-- 来自 WezTerm 生态，适合真实交互式终端场景。
-
-实现前必须做一个独立 spike，验证：
-
-- Windows 10/11 ConPTY；
-- 中文输入输出；
-- Claude Code 全屏刷新和 ANSI 控制；
-- 终端 resize；
-- Ctrl+C、Ctrl+D、方向键和粘贴；
-- Claude Code 启动的子进程能否随会话可靠退出；
-- 与 Tokio / Tauri runtime 的线程模型是否稳定。
-
-Tauri Shell 插件只适合受限命令执行或普通子进程，不作为交互式 Agent 终端的核心实现。
+PTY 管理器应由 Electron 主进程提供，通过受控的 preload/Host 通道传递输入、输出和窗口尺寸。
+具体 PTY 依赖应在实施前独立验证 Windows ConPTY 与 Unix PTY、中文输入、ANSI 控制、resize、
+Ctrl+C、粘贴以及会话退出时的子进程回收。不复用已经退役的 Rust/Tauri shell 或线程模型。
 
 ## 6. Agent Adapter
 
@@ -229,7 +213,7 @@ CLAUDE_CODE_SUBAGENT_MODEL=<所选快速模型，如 deepseek-v4-flash>
 
 不得把上游渠道 API Key 注入 Agent 进程。
 
-## 7. Tauri 接口草案
+## 7. Host 接口草案
 
 ### 7.1 类型
 
@@ -262,7 +246,7 @@ list_agent_terminals() -> AgentTerminalSession[]
 
 ### 7.3 输出流
 
-优先评估 Tauri Channel 传输：
+输出通过受控 Electron IPC / preload 通道传输：
 
 ```ts
 type AgentTerminalEvent =
@@ -272,7 +256,7 @@ type AgentTerminalEvent =
   | { type: "error"; sessionId: string; message: string };
 ```
 
-输出必须保持顺序。需要验证 UTF-8 跨 chunk 解码和大输出背压；不能为每个字节或字符发送一次 Tauri event。
+输出必须保持顺序。需要验证 UTF-8 跨 chunk 解码和大输出背压；不能为每个字节或字符发送一次 IPC event。
 
 ## 8. 安全与隐私
 
@@ -287,7 +271,7 @@ type AgentTerminalEvent =
 
 ### 8.2 凭据安全
 
-- Client Token 仅由 Rust 从当前 Flowlet 配置读取并注入子进程；
+- Client Token 仅由 Node Host 从当前 Flowlet 配置读取并注入子进程；
 - 前端启动参数不携带完整 Token；
 - 不在 tracing、错误、终端标题、Session 元数据中记录 Token；
 - 不把上游渠道 API Key 暴露给 Agent；
@@ -329,7 +313,7 @@ MVP 不新增 SQLite 表。
 
 ### 阶段 B：PTY 技术验证
 
-- 新增最小 Rust PTY 模块；
+- 新增最小 Electron PTY 模块；
 - 使用测试命令验证输入、输出、resize 和退出；
 - 在 Windows 上运行 Claude Code；
 - 前端只提供实验性单终端画布；
@@ -390,12 +374,12 @@ MVP 不新增 SQLite 表。
 - React StrictMode 不重复启动 Agent；
 - start / stop command 并发安全且 stop 幂等；
 - 终端高频输出不阻塞代理请求；
-- 前端刷新或页面切换不会意外杀死 Rust PTY 会话；
+- 前端刷新或页面切换不会意外杀死 Electron PTY 会话；
 - 单个终端失败不影响其他业务页面和本地代理。
 
 ## 12. 测试计划
 
-### Rust
+### Electron 主进程
 
 - Agent Registry 只允许已声明 Agent；
 - 路径 canonicalize 和 cwd 校验；
@@ -435,14 +419,12 @@ MVP 不新增 SQLite 表。
 | ConPTY 行为和 ANSI 兼容问题 | 终端错位或无法交互 | 先做 Windows spike，不直接进入正式 UI |
 | 高频输出压垮 IPC 或 React | 卡顿并影响代理体验 | 合并 chunk、背压、终端渲染节流 |
 | 子进程树无法完全退出 | 残留 Agent 或工具进程 | Job Object / process group + 退出测试 |
-| Token 泄漏到日志或 UI | 严重安全问题 | Rust 内部注入、禁止序列化、默认不保存终端输出 |
+| Token 泄漏到日志或 UI | 严重安全问题 | Host 内部注入、禁止序列化、默认不保存终端输出 |
 | 多 Agent 启动参数差异 | 条件分支失控 | Agent Registry + Adapter |
 | 抢占当前核心功能开发 | 延迟渠道和代理稳定性 | 配置闭环优先，终端按独立里程碑实施 |
 
 ## 14. 参考
 
-- [Tauri Shell](https://v2.tauri.app/plugin/shell/)
-- [portable-pty](https://docs.rs/portable-pty/)
 - [xterm.js](https://xtermjs.org/)
 - [Claude Code 环境变量](https://code.claude.com/docs/en/env-vars)
 - [Claude Code 配置](https://code.claude.com/docs/en/configuration)

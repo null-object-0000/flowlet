@@ -77,8 +77,8 @@ export interface ModelPriceCurrencyEntry {
   currency: string | null;
 }
 
-/** 单个输入长度价格档位，对齐 Rust `ModelPriceTier`
- *  （src-tauri/src/core/config.rs）。`up_to_input_tokens` 为总输入 Token 的
+/** 单个输入长度价格档位，对齐 既有 `ModelPriceTier`
+ *  （packages/flowlet-core/src/storage/prices.ts）。`up_to_input_tokens` 为总输入 Token 的
  *  闭区间上限，`null` 表示无上限兜底档；各价格为该档内每 unit 单价。 */
 export interface ModelPriceTierInfo {
   up_to_input_tokens: number | null;
@@ -89,8 +89,8 @@ export interface ModelPriceTierInfo {
 }
 
 /** One entry of `channels_config.model_prices` in config.json — the pricing
- *  fields the model-service detail panel displays. Mirrors Rust `ModelPrice`
- *  (src-tauri/src/core/config.rs) minus id/timestamps the UI never shows. */
+ *  fields the model-service detail panel displays. Mirrors 既有 `ModelPrice`
+ *  (packages/flowlet-core/src/storage/prices.ts) minus id/timestamps the UI never shows. */
 export interface ModelPriceInfo {
   channel_id: string;
   upstream_model: string;

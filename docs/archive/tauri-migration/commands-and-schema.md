@@ -1,7 +1,12 @@
 # Flowlet Tauri(Rust) → Electron(Node/TS) 迁移：命令面与 SQLite Schema 清点
 
+> 历史档案：本文记录迁移前的设计与验收，不是当前开发、部署或依赖指南。
+> 旧 Rust 桌面、服务端与 CLI 源码已移除；当前架构见 [架构说明](../../architecture.md)，
+> Android 保留范围见 [Android Rust 边界](../../android-rust-boundary.md)。
+
+
 > 历史迁移记录：2026-11-15 起旧 Rust 桌面、headless 与凭据 CLI 源码已移除。
-> 本文中的旧路径/构建命令仅描述当时基线，当前 Android 边界见 [Android Rust 裁剪](../android-rust-boundary.md)。
+> 本文中的旧路径/构建命令仅描述当时基线，当前 Android 边界见 [Android Rust 裁剪](../../android-rust-boundary.md)。
 
 > **性质**：只读勘察结论，作为重写排期与任务拆分的输入。
 > **基线**：仓库当前工作区（`src-tauri/src/lib.rs` 中 `invoke_handler` 注册表为命令权威来源）。
@@ -393,7 +398,7 @@ Rust 结构体的 serde 属性决定 IPC JSON 字段风格。核心配置类型�
 | 24 | `background_jobs` | 后台任务主表 | job_type、title、trigger_source、status、stage、progress_current/total、summary_json(JSON)、error_message、时间戳 | id TEXT PK |
 | 25 | `background_job_events` | 后台任务事件流 | job_id、sequence、level、stage、message、detail_json(JSON) | id TEXT PK |
 
-**Node Host 额外建的表（Rust 基线之外的第 26 张）**：`agent_session_metadata`（PK(agent_type, session_id)、title、project_path、source、updated_at）。它由 Node Host 的代理侧从模型请求体派生会话标题/项目路径后写入，供 Docker 会话管理展示（规则见 [docs/agent-session-metadata.md](../agent-session-metadata.md)）；桌面 Rust 不写该表、读到未知表忽略，回滚安全。该表只增不改，新建库与老库升级都由 `CREATE TABLE IF NOT EXISTS` 覆盖。
+**Node Host 额外建的表（Rust 基线之外的第 26 张）**：`agent_session_metadata`（PK(agent_type, session_id)、title、project_path、source、updated_at）。它由 Node Host 的代理侧从模型请求体派生会话标题/项目路径后写入，供 Docker 会话管理展示（规则见 [docs/agent-session-metadata.md](../../agent-session-metadata.md)）；桌面 Rust 不写该表、读到未知表忽略，回滚安全。该表只增不改，新建库与老库升级都由 `CREATE TABLE IF NOT EXISTS` 覆盖。
 
 **迁移中被删除的表（旧库升级时会遇到）**：`projects`、`project_tasks`、`recurring_tasks`、`recurring_task_runs`、`device_projects`（项目管理能力 2026-10 移除，`drop_project_management_schema` 先关外键再按子→父顺序 DROP）；`request_logs.stream_summary` 列被 `ALTER TABLE ... DROP COLUMN` 删除（要求 SQLite ≥ 3.35）。Node 侧若只建新库不需要处理，**但复用旧库时必须先跑同一套清理逻辑**，否则 UI 与查询会看到孤儿数据。
 

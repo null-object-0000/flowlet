@@ -1,5 +1,9 @@
 # Windows 待机恢复后请求失败
 
+> 历史档案：本文保留旧宿主设计和取证，不作为当前实施或构建指南。
+> 当前实现以 [Node/Electron 架构](../../architecture.md) 与 [Android 边界](../../android-rust-boundary.md) 为准。
+
+
 > 状态：根因已重新定位（2026-07-28 修正旧结论）；方向 1、3 已实现（2026-07-28），待 Windows 实测
 > 发现时间：2026-07-21
 > 触发环境：Windows 11（**S0 低电量待机 / Modern Standby**，无 S3），Flowlet 便携版运行在 `C:\Users\nicha\Downloads\Flowlet_0.1.0_x64_portable`

@@ -1,15 +1,15 @@
 // 千问平台 HTTP 通道（Node Host 版）：device-flow 登录 + BssOpenAPI / cs-data 直连查询。
 //
-// 权威实现：src-tauri/src/core/qwen_platform.rs（Rust 版已用真实账号验证）。本文件
+// 实现入口：packages/flowlet-core/src/web/qwen-platform.ts（历史版本已用真实账号验证）。本文件
 // 逐条等价移植：命令返回形状、错误文案、凭据落盘位置与权限、device flow 轮询状态
-// 映射、网关信封校验、免费额度单位归一、slot bundle 形状都必须与 Rust 一致，因为
+// 映射、网关信封校验、免费额度单位归一、slot bundle 形状都必须保持既有兼容行为，因为
 // 前端 `qwenFreetierDetails` / 余额快照表直接消费同一份 bundle。
 //
-// 与 Rust 的差异仅限运行时能力：
-// - 网络走全局 `fetch`（Node 26），超时用 `AbortSignal.timeout`；Rust 版按账号套用
+// 与 Node Host 的差异仅限运行时能力：
+// - 网络走全局 `fetch`（Node 26），超时用 `AbortSignal.timeout`；历史版本按账号套用
 //   上游代理，Web Host 的平台请求暂不经过 upstream proxy。
 // - 数据目录用 `ctx.catalogDir`（Docker 为 /data），即 `<catalogDir>/qwen-platform/`；
-//   Rust 用 SQLite 所在目录。两者都只写「数据卷」，不写 SQLite。
+//   Node Host 用 SQLite 所在目录。两者都只写「数据卷」，不写 SQLite。
 //
 // 令牌没有 refresh token：过期后只能重新走一次 device flow。凭据按**千问平台账号**
 // 共享，保存在 `qwen-platform/credentials.json`（0600）：同一个平台账号下多个 Flowlet
@@ -37,7 +37,7 @@ import type { JsonRow } from "../types.ts";
 import type { WebContext } from "./context.ts";
 
 export const QWEN_CHANNEL_ID = "qwen";
-/** 登录失效时返回给前端的固定文案（与 Rust 一致，前端据此提示重新登录）。 */
+/** 登录失效时返回给前端的固定文案（保持既有兼容行为，前端据此提示重新登录）。 */
 export const LOGIN_EXPIRED_MESSAGE = "千问平台登录已过期，请重新登录千问平台";
 const NOT_LOGGED_IN_MESSAGE = "尚未登录千问平台";
 /** 与前端 `isQwenPayAsYouGoAccount` 保持一致：缺省视为历史默认的按量付费。 */
@@ -71,7 +71,7 @@ export const CS_API_QUOTA_CONFIG = "zeldaHttp.apikeyMgr./tokenplan/personal/api/
 export const CS_API_USAGE = "zeldaHttp.apikeyMgr./tokenplan/personal/api/v2/usage";
 export const CS_API_RESET_CARDS = "zeldaHttp.apikeyMgr./tokenplan/personal/api/v2/reset-card/list";
 
-// ─── 对外返回结构（camelCase，与 Rust serde 输出一致） ──────────────────────
+// ─── 对外返回结构（camelCase，与 Node Host serde 输出一致） ──────────────────────
 
 export interface PlatformStatus {
   accountId: string;
@@ -171,7 +171,7 @@ function encodeQuery(value: string): string {
   return encodeURIComponent(value);
 }
 
-/** Rust `error_suffix`：空 body 不加后缀，否则附前 200 个字符。 */
+/** 既有 `error_suffix`：空 body 不加后缀，否则附前 200 个字符。 */
 function errorSuffix(body: string): string {
   const trimmed = body.trim();
   if (trimmed === "") return "";
@@ -655,7 +655,7 @@ interface PendingLogin {
   expiresAt: number;
 }
 
-/** 进程内 pending device flow（Rust 用 `Mutex<HashMap>`，语义相同）。 */
+/** 进程内 pending device flow（Node Host 用 `Mutex<HashMap>`，语义相同）。 */
 const pendingLogins = new Map<string, PendingLogin>();
 
 export interface DeviceCodeData {

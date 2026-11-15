@@ -190,7 +190,7 @@ export function useMobileSessionLanRefresh(session: {
 }
 
 /**
- * 监听 Rust 后台定时同步完成事件，触发本地 query 失效。
+ * 监听 Node Host 后台定时同步完成事件，触发本地 query 失效。
  * 同时在应用从后台恢复时立即失效一次，避免事件丢失导致数据陈旧。
  * 应在 MobileShell 中挂载一次，所有页面共享。
  */

@@ -32,7 +32,7 @@ export function computeAvailableModels(
     if (!route.enabled) continue;
     if (!routableAccountIds.has(route.account_id)) continue;
     const channel = channelsById.get(route.channel_id);
-    // Rust 渠道预设实际序列化 `enabled`；前端 ChannelPreset 类型尚未声明该字段，
+    // Host 渠道预设实际序列化 `enabled`；前端 ChannelPreset 类型尚未声明该字段，
     // 缺失时按启用处理，避免误判旧数据。
     const channelEnabled = (channel as (ChannelPreset & { enabled?: boolean }) | undefined)?.enabled !== false;
     if (!channel || !channelEnabled || !channel.supported_protocols.includes(route.client_protocol)) continue;

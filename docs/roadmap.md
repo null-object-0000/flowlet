@@ -2,6 +2,9 @@
 
 ## 当前判断
 
+当前桌面与 Web/Docker 使用 Node Host，Android 单独保留 Rust/Tauri。早期已完成列表中的
+Tauri 骨架属于历史里程碑，当前开发入口见 [架构说明](architecture.md)。
+
 Flowlet 已经完成桌面端和本地透明代理的基础雏形，但还不是稳定可用版本。当前阶段路线调整为 LongCat + DeepSeek first：先把 LongCat / DeepSeek OpenAI-compatible、Anthropic-compatible、Claude Code 接入、多账号管理、余额和账号级统计做完整。
 
 旧 Provider 模型已经通过 `refactor/channel-account-model` 重构并合入主线，正式采用 Channel / Account / Model。当前版本仍按 MVP 验证阶段对待，优先收敛主链路：渠道账号、多协议透明转发、账号优先级 fallback、Claude Code、日志与成本。
@@ -24,10 +27,10 @@ LongCat + DeepSeek first 阶段使用 Channel / Account / Model 三层概念，�
 - [x] 创建 `docs/roadmap.md`
 - [x] 创建 `docs/architecture.md`
 - [x] 初始化 React + TypeScript + Vite 前端骨架
-- [x] 初始化 Tauri 2 / Rust 后端骨架
+- [x] 初始化 Tauri 2 / Node Host骨架
 - [x] 增加 `src/`、`src-tauri/`、`docs/` 基础目录结构
 - [x] 增加基础开发脚本
-- [x] 实现代理状态、启动、停止 Tauri command
+- [x] 实现代理状态、启动、停止 Host command
 - [x] 实现 `127.0.0.1:18640/health`
 - [x] 实现 `/v1/*` OpenAI-compatible 透明转发雏形
 - [x] 接入 SQLite 配置存储
@@ -57,7 +60,7 @@ LongCat + DeepSeek first 阶段使用 Channel / Account / Model 三层概念，�
 - [x] Channel Capability registry 改为直接绑定各渠道类型化异步函数，移除中央策略枚举二次分发
 - [x] 将 DeepSeek / Kimi / OpenRouter 官方余额 DTO、解析和错误处理归档到对应 Channel Adapter
 - [x] 将 LongCat / Qwen 控制台响应分类、合并和完成条件归档到对应 Channel Adapter
-- [x] 将 `sync.rs` 中 Kimi / LongCat 的模型专属 DTO、发布时间校准与详情转换器归档到对应 Channel Adapter
+- [x] 将 `packages/flowlet-core/src/web/model-sync.ts` 中 Kimi / LongCat 的模型专属 DTO、发布时间校准与详情转换器归档到对应 Channel Adapter
 - [x] 用 DeepSeek Harness 完成新增 Agent 端到端接入演练：新增 `web` Surface，通过直接安全合并 DSH 官方配置文件接通一键写入/恢复，并接通环境、v0 会话与原生会话身份识别
 - [ ] 用新增 Channel 完成一次端到端接入演练，固化脚手架与验收清单
 
@@ -213,7 +216,7 @@ LongCat + DeepSeek first 阶段使用 Channel / Account / Model 三层概念，�
 
 ## Milestone 8：统一 AI 成本账本
 
-完整需求、数据模型、阶段范围和验收标准见 [`ai-cost-ledger.md`](./ai-cost-ledger.md)。本 Milestone 中未勾选项均为目标能力，不代表当前已实现。
+完整需求、数据模型、阶段范围和验收标准见 [`ai-cost-ledger.md`](ai-cost-ledger.md)。本 Milestone 中未勾选项均为目标能力，不代表当前已实现。
 
 ### Phase 0：语义与迁移设计
 
@@ -222,7 +225,7 @@ LongCat + DeepSeek first 阶段使用 Channel / Account / Model 三层概念，�
 - [x] 建立 Flowlet、Codex、Claude Code、OpenCode 只读数据源探针与统一 Observation / Evidence / ProbeReport 契约
 - [ ] 冻结金额精度、币种、时区、账期和摊销边界
 - [ ] 设计增量 migrations、唯一键、索引和幂等导入策略
-- [ ] 为按量、Token 包、订阅和未分配场景建立 Rust 验收夹具
+- [ ] 为按量、Token 包、订阅和未分配场景建立 Node Host 验收 fixture
 
 ### Phase 1：网关账本 MVP
 
@@ -253,17 +256,17 @@ LongCat + DeepSeek first 阶段使用 Channel / Account / Model 三层概念，�
 
 - [x] 系统托盘（显示/隐藏窗口、启动/停止代理、退出）
 - [x] 关闭窗口时最小化到托盘而非退出
-- [ ] 开机自启动（tauri-plugin-autostart）实机回归
+- [ ] 开机自启动（Electron 平台桥）实机回归
 - [x] 托盘tooltip显示代理状态（运行中/已停止）
-- [ ] Agent 终端：在 Flowlet 内通过 PTY 承载受支持的 Agent CLI；不拉起外部终端或外部 Agent 进程，按 [`agent-terminal.md`](./agent-terminal.md) 分阶段实施
+- [ ] Agent 终端：在 Flowlet 内通过 PTY 承载受支持的 Agent CLI；不拉起外部终端或外部 Agent 进程，按 [`agent-terminal.md`](agent-terminal.md) 分阶段实施
 
 ## 后续阶段：Docker / Web Console
 
-- [ ] Core 支持 headless 运行（独立于 Tauri GUI）
-- [ ] Web Console
-- [ ] Docker Compose
-- [ ] Volume 持久化
-- [ ] 基础访问鉴权
+- [x] Node Host 支持独立 headless 运行
+- [x] Web Console
+- [x] Docker Compose
+- [x] Volume 持久化
+- [x] 管理凭据 / OIDC 访问鉴权
 
 ## 配置管理
 

@@ -1,9 +1,9 @@
 // Request-log / usage persistence plumbing for the proxy.
 //
-// 与 Rust 一致的关键语义：
+// 保持既有兼容行为的关键语义：
 // - 日志落库失败不得影响主链路（全部 try/catch + warn）；
 // - 唯一例外是流式首条日志：await 后再开始向客户端写响应；
-// - `request_logs` 的 body 列在 Rust 里恒为 NULL（body 只进 .flcap）。Node MVP 尚未实现
+// - `request_logs` 的 body 列在 Node Host 里恒为 NULL（body 只进 .flcap）。Node MVP 尚未实现
 //   .flcap，因此这里把捕获到的 body 作为可选字段交给 storage，由 storage 决定落库方式。
 import { existsSync, readFileSync } from "node:fs";
 import { prepareCapturedResBody, redactedHeaderKeys, sanitizeHeaders, truncateUtf8, type HeaderMapLike } from "./http.ts";
@@ -164,14 +164,14 @@ export function recordAgentSessionMetadata(storage: ProxyStorage, row: JsonRow):
   }
 }
 
-/** 流式首条日志：await 完成后再开始写响应（Rust `record_request_log_and_wait`）。 */
+/** 流式首条日志：await 完成后再开始写响应（既有 `record_request_log_and_wait`）。 */
 export async function recordRequestLogAndWait(storage: ProxyStorage, row: JsonRow): Promise<void> {
   try {
     storage.insertRequestLog?.(row);
   } catch (error) {
     warn("写入请求日志失败", error);
   }
-  // 同步方法：让出一次事件循环，保持与 Rust await 相同的"先落库再转发"顺序语义。
+  // 同步方法：让出一次事件循环，保持与 Node Host await 相同的"先落库再转发"顺序语义。
   await Promise.resolve();
 }
 

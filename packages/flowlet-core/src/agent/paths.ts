@@ -1,12 +1,12 @@
-// Agent 配置路径解析与展示。权威实现：`src-tauri/src/core/agent_*` 与
-// `src-tauri/src/core/codex_account.rs`、`antigravity_*`。
+// Agent 配置路径解析与展示。实现入口：`packages/flowlet-core/src/agent/` 与
+// `packages/flowlet-core/src/agent/codex-account.ts`、`antigravity_*`。
 //
-// 规则（与 Rust 一致）：
+// 规则（保持既有兼容行为）：
 // - 一律使用真实 home 目录（`dirs::home_dir()`）；便携版只决定 Flowlet 自己的数据目录，
 //   不搬移 Agent 的用户级配置。
 // - 支持各 Agent 的官方环境变量覆盖：CLAUDE_CONFIG_DIR / CODEX_HOME / DSH_HOME /
 //   HERMES_HOME；OpenCode/Pi 无环境变量覆盖。
-// - 已存在的路径要 canonicalize（Rust 侧用 `std::fs::canonicalize`）；不存在时保持原状。
+// - 已存在的路径要 canonicalize（Host 侧用 `std::fs::canonicalize`）；不存在时保持原状。
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -26,7 +26,7 @@ export function homeDir(): string {
   return homeOverride ?? homedir();
 }
 
-/** 读取非空环境变量；空串按未设置处理（Rust `var_os(...).filter(!is_empty)`）。 */
+/** 读取非空环境变量；空串按未设置处理（既有 `var_os(...).filter(!is_empty)`）。 */
 function envPath(name: string): string | null {
   const value = process.env[name];
   return value !== undefined && value !== "" ? value : null;
@@ -53,7 +53,7 @@ export function isFile(file: string): boolean {
   }
 }
 
-/** Rust `display_path`：去掉 Windows 的 `\\?\` 扩展前缀，其余原样。 */
+/** Node Host `display_path`：去掉 Windows 的 `\\?\` 扩展前缀，其余原样。 */
 export function displayPath(target: string): string {
   const value = target;
   if (value.startsWith("\\\\?\\UNC\\")) return `\\\\${value.slice("\\\\?\\UNC\\".length)}`;
@@ -61,7 +61,7 @@ export function displayPath(target: string): string {
   return value;
 }
 
-/** 不区分大小写比较（Windows）；路径先按 display 形式归一（Rust `paths_equal`）。 */
+/** 不区分大小写比较（Windows）；路径先按 display 形式归一（Node Host `paths_equal`）。 */
 export function pathsEqual(left: string, right: string): boolean {
   const leftValue = displayPath(left);
   const rightValue = displayPath(right);
@@ -70,7 +70,7 @@ export function pathsEqual(left: string, right: string): boolean {
     : leftValue === rightValue;
 }
 
-/** URL 归一：去空白、去尾部 `/`、转小写（Rust `normalize_url`）。 */
+/** URL 归一：去空白、去尾部 `/`、转小写（Node Host `normalize_url`）。 */
 export function normalizeUrl(value: string): string {
   const trimmed = value.trim().replace(/\/+$/u, "");
   return trimmed.toLowerCase();

@@ -8,8 +8,8 @@ import { queryKeys } from "../../shared/query-keys";
  *
  * - 用量窗口本身是 5 小时 / 周级粒度，5 分钟刷新一次足够新鲜，
  *   也避免高频调用官方用量接口与 Codex app-server 进程；
- * - 每轮同步由 Rust 记入任务日志（job_type = codex-account-sync）；
- * - 未发现任何 Codex 账号时 Rust 直接跳过，不创建任务、不发起网络请求。
+ * - 每轮同步由 Node Host 记入任务日志（job_type = codex-account-sync）；
+ * - 未发现任何 Codex 账号时 Node Host 直接跳过，不创建任务、不发起网络请求。
  *
  * CODEX_ACCOUNT_SYNC_INTERVAL_MS 同时用于账号卡片上“预计下次刷新”的悬浮提示。
  */

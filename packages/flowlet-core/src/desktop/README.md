@@ -64,6 +64,8 @@ Electron 主进程（`packages/flowlet-desktop/`）实现下列 channel；命令
 
 ## 数据目录
 
-桌面版必须打开与 Rust/Tauri 版本**同一个**数据库路径（便携版在 exe 旁 `data/`，安装版在系统数据目录），
-否则用户升级后会丢失账号/日志。解析规则见 `src-tauri/src/core/portable.rs` 与 `src-tauri/src/lib.rs`，
-Electron 主进程负责解析并通过 `DesktopRuntime.dataDir` 传入。
+Electron 主进程在 `packages/flowlet-desktop/src/paths.ts` 解析路径，
+便携版（exe 旁 `portable.tag`）的数据目录为 exe 同级，WebView 数据位于 `data/webview`；
+安装版优先沿用 exe 同级数据，不可写时使用稳定的平台本地数据目录。
+解析结果经 `DesktopRuntime.dataDir` 传入命令层；随包资源由 `scripts/build-desktop-host.mjs`
+生成。迁移时保持既有 SQLite 和凭据数据兼容，不依赖已退役的 Rust 桌面源码。

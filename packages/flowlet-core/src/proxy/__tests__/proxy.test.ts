@@ -1,4 +1,4 @@
-// P0 acceptance tests for the Node model proxy (docs/migration/proxy-core.md 附录 A).
+// P0 acceptance tests for the Node model proxy (docs/archive/tauri-migration/proxy-core.md 附录 A).
 //
 // 全部使用本地 node:http mock 上游；不访问任何真实上游、不使用数据副本里的真实 Key。
 // 运行：node --test packages/flowlet-core/src/proxy/__tests__/proxy.test.ts
@@ -1010,7 +1010,7 @@ test("P0-12b: 流式空闲超时 → stream_timeout 并中止下游", async () =
     headers: { "content-type": "application/json" },
     body: baseChatBody(),
   }).catch(() => null);
-  // 超时会异常终止连接（Rust 同样让客户端看到断连）。
+  // 超时会异常终止连接（Node Host 同样让客户端看到断连）。
   assert.equal(response, null);
 
   await waitFor(() => proxy.storage.updates.length > 0);

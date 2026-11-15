@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// Rust `flowlet-cred` (legacy) ↔ Node `@flowlet/cred` 兼容性验收。
+// 既有 `flowlet-cred` (legacy) ↔ Node `@flowlet/cred` 兼容性验收。
 //
 // 用法：node packages/flowlet-cred/scripts/compat.mjs
 //   FLOWLET_RUST_CRED=<历史二进制> 必填；当前 Android crate 不再构建 Rust CLI。
 //
-// 做法：同一命令序列分别在两个**独立临时目录**跑 Rust 与 Node CLI（同一 mock GitLab /
+// 做法：同一命令序列分别在两个**独立临时目录**跑 Node Host 与 Node CLI（同一 mock GitLab /
 // mock Flowlet Web），逐条比较 exit/stdout/stderr 与 credentials.env / credentials.json
 // （路径与 RFC3339 时间戳归一化）；再做交叉读取验证。绝不打印真实 token：差异行在输出前脱敏。
 import { spawn, spawnSync } from "node:child_process";

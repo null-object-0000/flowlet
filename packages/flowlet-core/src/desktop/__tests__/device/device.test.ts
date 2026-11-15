@@ -598,7 +598,7 @@ describe("S3 连接测试与设备同步", () => {
       etag: '"remote-1"',
     });
     const pull = (await invoke(ctx, "refresh_shared_device_usage_s3")) as Record<string, unknown>;
-    // Rust pull_device_usage 不排除本机对象：本机快照也会被重新导入一次。
+    // Node Host pull_device_usage 不排除本机对象：本机快照也会被重新导入一次。
     assert.equal(pull.remoteDevices, 2);
     assert.equal(pull.importedDevices, 2);
     assert.equal(pull.importedDays, 1);

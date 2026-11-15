@@ -1,6 +1,6 @@
 # 自定义渠道资源用量抓取：文件夹发现机制（设计文档）
 
-> 状态：已实现（`core/custom_scrape.rs` 注册表 + `commands/scrape.rs` 接入）；
+> 状态：已实现（`packages/flowlet-core/src/scrape/custom-registry.ts` 注册表 + `packages/flowlet-core/src/desktop/scrape.ts` 接入）；
 > 2026-09 补充 4.6.1「账号凭据指纹」第二个实参。
 > 决策记录：Friday 这类定制渠道，以 `custom` 渠道下的一个账号承载；
 > 「资源用量抓取」的实现通过本机文件夹里的声明式描述符被发现，不进 `config.json`、
@@ -11,8 +11,8 @@
 ## 1. 背景与目标
 
 Flowlet 内置渠道（LongCat / Qwen / Z.AI）支持「后台 webview 登录控制台 → 拦截业务
-API → 解析资源用量」，整条链路见 `src-tauri/src/core/scrape_console.rs` 与
-`src-tauri/src/commands/scrape.rs`。
+API → 解析资源用量」，整条链路见 `packages/flowlet-desktop/src/scrape.ts` 与
+`packages/flowlet-core/src/desktop/scrape.ts`。
 
 这套链路中，配置是声明式的（`config.json → channels_config.scrape`），但有三类行为
 是编译进 Rust 的 per-channel adapter：
@@ -78,7 +78,7 @@ custom-scrape/
 ### 3.3 加载时机与热更新
 
 - **启动时**：`AppState` 初始化阶段扫描目录、逐个校验，构建进程内全局注册表
-  （`OnceLock`，与 `plugin_registry()` 一致，避免把状态穿透到所有捕获回调）。
+  （进程级缓存，与 `plugin_registry()` 一致，避免把状态穿透到所有捕获回调）。
 - **运行时重载**：新增 command `reload_custom_scrape_registry`，用户放入/修改描述符后
   可手动重载，无需重启。抓取模式在每次 `resolve_scrape_mode` 时按注册表解析，因此
   重载后下一次抓取即生效。
@@ -151,7 +151,7 @@ custom-scrape/
 | `url_substring` | `value` 子串匹配，`caseInsensitive` 默认 `true` |
 | `url_prefix` | `value` 前缀匹配 |
 | `url_exact` | 精确匹配（去掉查询串后比较，可选保留 `includeQuery`） |
-| `url_regex` | Rust `regex` 匹配；加载时校验，非法即跳过描述符 |
+| `url_regex` | Node Host 正则表达式匹配；加载时校验，非法即跳过描述符 |
 | `fallback` | 未命中其他槽位的兜底（单响应模式常用） |
 
 命中规则：除 `fallback` 外按 `slots` 声明顺序取首个命中；同 URL 只进一个槽位。
@@ -214,7 +214,7 @@ token_expire_at, token_packs(数组)
 - `aggregate == true`：extractor 签名 `function extract(bundle)`，`bundle` 为
   `{ slotKey: 已解析响应 JSON, ... }`（与 `build_aggregate_bundle` 一致）。
 - `aggregate == false`：extractor 签名 `function extract(raw)`，`raw` 为唯一目标槽位。
-- **`extractor.js` 必须是单个顶层函数声明**：Rust 以 `(extractor_js)(bundle, credential)`
+- **`extractor.js` 必须是单个顶层函数声明**：Electron 主进程以 `(extractor_js)(bundle, credential)`
   的形式求值，顶层再出现第二条语句（例如并列的 helper 函数）就是语法错误。helper 必须
   内联在该函数内部。这类语法错误会被 wry 吞成空字符串，代理侧统一报
   「extractor 未返回任何结果：脚本存在语法错误，或 extractor_js 不是单个函数声明」。
@@ -223,7 +223,7 @@ token_expire_at, token_packs(数组)
 
 控制台的一个 workspace 下可能有多把 key（Friday 的 `/api-keys` 同时返回
 `knowledge` / `public` / `resource-mark`，各自独立额度）。只按「当月消费最高」挑选
-会跟踪到与本账号实际发请求用的 key 不一致的那把，因此 Rust 侧在调用 extractor 时
+会跟踪到与本账号实际发请求用的 key 不一致的那把，因此 Node Host 侧在调用 extractor 时
 额外传入第二个实参 `credential`：
 
 ```js
@@ -232,7 +232,7 @@ function extract(bundle, credential) {
 }
 ```
 
-- 由账号 `api_key` 派生（`commands/scrape.rs` 的 `credential_key_context`）：
+- 由账号 `api_key` 派生（`packages/flowlet-core/src/desktop/scrape.ts` 的 `credential_key_context`）：
   `keyPrefix` 取前 8 位、`keyLastFour` 取末 4 位，与控制台 `/api-keys` 返回的
   `key_prefix` / `key_last_four` 同构；Key 过短时传 `null`。
 - **只传派生指纹，不传明文 Key**；参数在 IIFE 闭包内求值，不写入页面全局，
@@ -244,21 +244,19 @@ function extract(bundle, credential) {
 
 ---
 
-## 5. 运行时接入点（Rust）
+## 5. 运行时接入点（Node Host / Electron）
 
-| 文件 | 改动 |
-|------|------|
-| `core/custom_scrape.rs`（新增） | 描述符结构体、严格校验、目录扫描、`OnceLock` 全局注册表、`reload` 函数 |
-| `core/scrape_console.rs` | `resolve_scrape_mode` 增加账号名上下文，内置 adapter 无抓取时回退查注册表；`ScrapeModeRuntime` 携带 `slot_rules`（match/satisfies/merge）与 `summary` |
-| `core/channel_capability_adapter.rs` | 把 `classify/satisfies/merge` 的全局分派改为「内置 adapter + 自定义注册表」的通用分派（按 mode 携带的 slot 规则） |
-| `commands/scrape.rs` | `handle_intercepted_response` / `scrape_responses_complete` / `collect_scrape_slots` 改为按 `ScrapeModeRuntime` 的 slot 规则分派；`channel_resource_sync_method` 去掉 `longcat/qwen/zhipu` 硬编码，改为通用能力判定；新增 `reload_custom_scrape_registry` / `list_custom_scrape_channels` command |
-| `core/account_resource_sync.rs` | `has_automatic_resource_sync` 与 `channel_resource` 用描述符的 `summary` 映射替换硬编码 `parse_qwen_*` / `parse_zhipu_*`，泛化生成 `SyncedAccountResource` |
-| `lib.rs` | 启动时加载自定义注册表 |
+| 文件 | 职责 |
+| --- | --- |
+| `packages/flowlet-core/src/scrape/custom-registry.ts` | 描述符解析、目录扫描、严格校验与进程级注册表 |
+| `packages/flowlet-core/src/scrape/mode.ts` | 内置与自定义抓取模式解析 |
+| `packages/flowlet-core/src/scrape/slot-engine.ts` | 槽位匹配、完整性判断和跨响应合并 |
+| `packages/flowlet-core/src/desktop/scrape.ts` | 桌面抓取命令、响应收集与注册表查询 |
+| `packages/flowlet-desktop/src/scrape.ts` | Electron CDP 捕获、窗口 partition 与页面脚本求值 |
+| `packages/flowlet-core/src/device/bundle.ts` | 可同步账号资源摘要 |
 
-关键重构点：原生 WebView2 / WebKitGTK 捕获回调目前是无 channel 上下文的全局分派。
-改造后 `classify_response_url` 需要感知「当前抓取窗口的 mode」，实现上把 slot 规则挂到
-`ScrapeModeRuntime`，并在 `open_scrape_console` 建立 `account_id → mode` 的映射供捕获
-回调查询（该映射与现有 `scrape_pending` 同生命周期清理）。
+抓取模式、槽位和凭据指纹通过类型化 Host 调用传给 Electron；各桌面平台使用同一套
+CDP 捕获入口，不依赖 WebView2 / WebKitGTK 回调或旧 Tauri 运行时。
 
 ---
 
@@ -305,7 +303,7 @@ function extract(bundle, credential) {
 ## 9. 实施阶段（已全部落地）
 
 - **Phase 0**：确认 schema 与接入点。
-- **Phase 1（后端）**：`custom_scrape.rs` 发现 + 校验；`resolve_scrape_mode` 回退；
+- **Phase 1（后端）**：`packages/flowlet-core/src/scrape/custom-registry.ts` 发现 + 校验；`resolve_scrape_mode` 回退；
   `url_substring` / `url_prefix` / `url_exact` / `url_regex` / `fallback`；
   `json_valid` / `json_path` / `none`；`last_write_wins` / `merge_arrays`；
   `summary` 去敏映射；`channel_resource_sync_method` 与 `account_resource_sync` 泛化。
@@ -318,11 +316,11 @@ function extract(bundle, credential) {
 
 ## 10. 测试计划
 
-- `custom_scrape.rs` 单元测试：目录扫描、字段校验、`accountName` 匹配（精确/子串/大小写）、
+- `packages/flowlet-core/src/scrape/custom-registry.ts` 单元测试：目录扫描、字段校验、`accountName` 匹配（精确/子串/大小写）、
   `fallback` 约束、非法描述符跳过。
-- `scrape_console.rs` / `commands/scrape.rs`：自定义 slot 规则下的 classify/satisfies/
+- `packages/flowlet-desktop/src/scrape.ts` / `packages/flowlet-core/src/desktop/scrape.ts`：自定义 slot 规则下的 classify/satisfies/
   complete 判定；登录失效不误判抓全。
-- `account_resource_sync.rs`：`summary` 映射生成 `SyncedAccountResource`，确认不含
+- `packages/flowlet-core/src/device/bundle.ts`：`summary` 映射生成 `SyncedAccountResource`，确认不含
   `raw_scraped_json` 与脚本。
 - 前端：`accountSyncStatus` / 编辑器入口在 custom 账号 + 描述符存在时的展示。
 - 契约：确认 `DeviceUsageSnapshot` 序列化不新增描述符相关字段。

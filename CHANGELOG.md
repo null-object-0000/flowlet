@@ -1,5 +1,9 @@
 # 更新日志
 
+> 本文件按发布时点保留历史记录；旧 Rust/Tauri 桌面命令和源码引用不代表当前入口。
+> 当前开发与发布见 `docs/architecture.md`、`docs/release-builds.md`，迁移取证见 `docs/archive/`。
+
+
 本项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
 ## [Unreleased]

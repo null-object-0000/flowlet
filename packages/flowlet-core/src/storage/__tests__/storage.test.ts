@@ -1,8 +1,8 @@
 // SQLite 存储层契约测试（node:test）。
 //
-// 覆盖 docs/migration/node-host.md §5 的关键行为：
+// 覆盖 docs/archive/tauri-migration/node-host.md §5 的关键行为：
 // 1. 真实生产库副本可直接打开、迁移幂等、账号/路由/预设/模型形状正确；
-// 2. 请求日志分页/详情/筛选项与 Rust 输出字段命名一致；
+// 2. 请求日志分页/详情/筛选项与 Node Host 输出字段命名一致；
 // 3. usage_today_summary / usage_summary_range 聚合；
 // 4. app_meta 读写；
 // 5. 写账号/路由后快照一致；
@@ -524,7 +524,7 @@ test("已观测 Agent 会话：列表/父会话筛选/子会话/用量", () => {
   assert.equal(children.length, 1);
   assert.equal(children[0].sessionId, "session-child");
   assert.equal(children[0].parentSessionId, "session-parent");
-  // 搜索命中子会话时向上追溯根会话（Rust 语义）。
+  // 搜索命中子会话时向上追溯根会话（Node Host 语义）。
   const searched = storage.listObservedAgentSessionsPage({ page: 1, page_size: 20, search: "session-child" });
   assert.equal(searched.total, 1, "命中子会话时向上追溯，保留根会话");
   assert.equal((searched.rows as Array<Record<string, unknown>>)[0].sessionId, "session-parent");
@@ -718,7 +718,7 @@ test("权限时间范围：usage_summary_range 过滤与校验", () => {
   const rows = storage.usageSummaryRange(start.toISOString(), end.toISOString(), "day", "device-test");
   assert.equal(rows.length, 1);
   assert.equal(rows[0].request_count, 1);
-  // 时间倒置 / 单侧缺失 / 非法粒度必须报错（Rust 同）。
+  // 时间倒置 / 单侧缺失 / 非法粒度必须报错（Node Host 同）。
   assert.throws(() => storage.usageSummaryRange(end.toISOString(), start.toISOString(), "day", "d"));
   assert.throws(() => storage.usageSummaryRange(start.toISOString(), null, "day", "d"));
   assert.throws(() => storage.usageSummaryRange(null, null, "week", "d"));
@@ -728,7 +728,7 @@ test("权限时间范围：usage_summary_range 过滤与校验", () => {
 
 
 test("平台检测与收敛：与 Rust device_identity::resolve_platform 行为一致", () => {
-  // Rust 测试用例：迁移到另一 OS / 泛化 linux 升级 / 保留已有发行版 / 填空白。
+  // Node Host 测试用例：迁移到另一 OS / 泛化 linux 升级 / 保留已有发行版 / 填空白。
   assert.equal(resolvePlatform("windows", "ubuntu", "linux"), "ubuntu");
   assert.equal(resolvePlatform("linux", "windows", "windows"), "windows");
   assert.equal(resolvePlatform("linux", "ubuntu", "linux"), "ubuntu");

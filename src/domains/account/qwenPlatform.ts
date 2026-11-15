@@ -3,7 +3,7 @@ import { invokeCommand, toAppError } from "../../platform/tauri/client";
 /**
  * 千问平台 device-flow 登录 + 官方 HTTP 接口直连同步的类型化命令边界。
  *
- * Rust 侧命令契约（字段已 camelCase）：
+ * Host 侧命令契约（字段已 camelCase）：
  * - qwen_platform_status        → 当前账号的平台登录态
  * - qwen_platform_login_start   → 授权链接与轮询参数
  * - qwen_platform_login_poll    → 轮询结果
@@ -11,7 +11,7 @@ import { invokeCommand, toAppError } from "../../platform/tauri/client";
  * - qwen_platform_sync          → 余额 + 免费额度（rawScrapedJson 与控制台抓取的
  *                                  slot bundle 同构，可直接交给 parseQwenFreeTierDetails）
  *
- * 页面与组件只能经此模块调用，不得直接拼写 Tauri command 名称。
+ * 页面与组件只能经此模块调用，不得直接拼写 Host command 名称。
  */
 
 /** device-flow 轮询结果；`slow_down` 表示应按约定增大轮询间隔后继续。 */

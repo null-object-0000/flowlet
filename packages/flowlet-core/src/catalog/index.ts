@@ -1,10 +1,10 @@
 // Model identity catalog + models-cn/models-dev specs. Owner: node-storage.
 //
-// Rust 等价实现：core/model_catalog.rs、core/storage_tasks.rs（目录读取与归一）。
+// 相关实现：packages/flowlet-core/src/catalog/index.ts、packages/flowlet-core/src/host/scheduler.ts（目录读取与归一）。
 // 关键规则：别名/厂商前缀/大小写归一必须与 model-catalog.json 一致，入站模型名
-// 必须先 normalize 再匹配路由（docs/migration/commands-and-schema.md §6）。
+// 必须先 normalize 再匹配路由（docs/archive/tauri-migration/commands-and-schema.md §6）。
 //
-// `canonical_model_key` / `find` / `routing_model_id` 逐条对照 model_catalog.rs：
+// `canonical_model_key` / `find` / `routing_model_id` 对应 packages/flowlet-core/src/catalog/index.ts：
 // - 查表键 = trim → 取最后一个 '/' 之后 → 小写；
 // - 命中别名 → 规范模型 ID（小写，用于比较）；
 // - `find` 返回目录里的**原始** id（保留 LongCat-2.0 这类大小写）；
@@ -14,7 +14,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { JsonRow } from "../types.ts";
 
-/** model-catalog.json 的单个模型身份（camelCase，与 Rust serde 反序列化一致）。 */
+/** model-catalog.json 的单个模型身份（camelCase，与 Node Host serde 反序列化一致）。 */
 export interface ModelIdentity {
   id: string;
   ownerChannelId: string;
@@ -138,9 +138,9 @@ function readJson(file: string): JsonRow | null {
 }
 
 /**
- * 与 Rust `model_catalog()` 等价的加载入口。
+ * 与 Node Host `model_catalog()` 等价的加载入口。
  *
- * Rust 把 model-catalog.json 编译进二进制；Node host 从仓库根/MVP 镜像路径读取。
+ * Node Host 把 model-catalog.json 编译进二进制；Node host 从仓库根/MVP 镜像路径读取。
  * 目录存在时优先读 `catalogDir/model-catalog.json`，否则回退 `repoRoot/model-catalog.json`。
  */
 export function loadModelCatalog(catalogDir: string, repoRoot: string): ModelCatalog {
@@ -161,7 +161,7 @@ export function loadModelCatalog(catalogDir: string, repoRoot: string): ModelCat
   return catalog;
 }
 
-/** 进程级单例（与 Rust `model_catalog()` 语义一致），供 catalog 目录未知的模块使用。 */
+/** 进程级单例（与 Node Host `model_catalog()` 语义一致），供 catalog 目录未知的模块使用。 */
 let defaultCatalog: ModelCatalog | null = null;
 
 /** 本包所在仓库根（从 src/catalog 上溯四级），仅作为未显式传目录时的兜底。 */

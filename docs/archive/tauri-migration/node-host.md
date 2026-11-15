@@ -1,12 +1,17 @@
 # Flowlet Node Host（Docker 优先）实现契约
 
+> 历史档案：本文记录迁移前的设计与验收，不是当前开发、部署或依赖指南。
+> 旧 Rust 桌面、服务端与 CLI 源码已移除；当前架构见 [架构说明](../../architecture.md)，
+> Android 保留范围见 [Android Rust 边界](../../android-rust-boundary.md)。
+
+
 > 历史迁移记录：2026-11-15 起旧 Rust 桌面、headless 与凭据 CLI 源码已移除。
-> 本文中的旧路径/构建命令仅描述当时基线，当前 Android 边界见 [Android Rust 裁剪](../android-rust-boundary.md)。
+> 本文中的旧路径/构建命令仅描述当时基线，当前 Android 边界见 [Android Rust 裁剪](../../android-rust-boundary.md)。
 
 > 目标：用 Node/TS 重写 **headless / Docker Host**，作为 Rust `headless` 二进制的**行为等价替代**。
 > 桌面端（Electron）已在 2026-11-10 起基于同一 `flowlet-core` 开工：桌面独有命令注册在
 > `packages/flowlet-core/src/desktop/`（见该目录 README），Electron 宿主在
-> `packages/flowlet-desktop/`，施工状态见 `docs/electron-migration-plan.md` 与
+> `packages/flowlet-desktop/`，施工状态见 `docs/archive/tauri-migration/electron-migration-plan.md` 与
 > `docs/desktop-electron.md`。
 > 工作分支：`migrate/electron`；工作树：`.worktrees/electron`。
 
@@ -76,7 +81,7 @@ Node 专有（Rust headless 未实现，不参与对拍，由 Node 侧单测覆�
 
 ## 3. 代理契约（模型入口）
 
-权威实现与逐段拆解：`docs/migration/proxy-core.md`（1227 行）。
+权威实现与逐段拆解：`docs/archive/tauri-migration/proxy-core.md`（1227 行）。
 - 入站：`/v1/chat/completions`、`/anthropic/v1/messages`（含 `/v1/messages`）、`/v1/responses`、`/v1/models`、Anthropic Files API。
 - 模型名按 `model-catalog.json` 归一到规范 ID 再匹配路由；候选过滤：协议、图片输入模态、anthropic-beta files-api pin。
 - 响应 **零改写**（受控例外：Anthropic thinking/tool_use 补字段、DeepSeek reasoning_content / anthropic thinking 回填，见 AGENTS.md §5）。
@@ -151,7 +156,7 @@ accountRoutingScores() / usageSummaryRange(startAt,endAt,groupBy,currentDeviceId
 
 **仅 Node Host 写入的表**：`agent_session_metadata`（`agent_type`, `session_id`, `title`,
 `project_path`, `source`, `updated_at`，复合主键）由代理侧从请求体派生会话标题/项目路径
-（[docs/agent-session-metadata.md](../agent-session-metadata.md)），用于 Docker 会话管理展示。
+（[docs/agent-session-metadata.md](../../agent-session-metadata.md)），用于 Docker 会话管理展示。
 它只增不改，旧 Rust 镜像读到未知表会忽略；回滚安全。桌面 Rust Host 不写该表——桌面端仍以本机
 原生会话的标题/cwd 为准（`merge_agent_session_catalog` 原生值优先）。
 

@@ -5,7 +5,7 @@ import type { UsageSummaryRow } from "../../domains/usage/types";
 import { canonicalModelId } from "../../domains/channel/types";
 import { queryKeys } from "../../shared/query-keys";
 
-/** 本地价格目录解析不到时的兜底币种，与 Rust `get_models_cn_currencies` 默认一致。 */
+/** 本地价格目录解析不到时的兜底币种，与 既有 `get_models_cn_currencies` 默认一致。 */
 const DEFAULT_CURRENCY = "CNY";
 
 /**
@@ -13,7 +13,7 @@ const DEFAULT_CURRENCY = "CNY";
  * from the local models-cn catalog.
  *
  * models-cn 目录中的模型全局唯一（同一模型不会跨渠道重复出现），因此直接以
- * **模型名**索引货币，不做「渠道-模型」二维匹配。Rust 返回的 key 虽带渠道前缀
+ * **模型名**索引货币，不做「渠道-模型」二维匹配。Node Host 返回的 key 虽带渠道前缀
  * （`channel_id:upstream_model`），这里解析后仅按模型名建表；用量行的
  * `upstream_model` 是上游原名（可能是别名变体，如 deepseek-v4-flash-0731），
  * 查询时依次尝试原样名与 `canonicalModelId` 规范化后的规范名。
@@ -23,12 +23,12 @@ const DEFAULT_CURRENCY = "CNY";
  * 同时写入原样名与其规范名两个键，原始名优先（命中原始名的行永远用目录给的币种，
  * 规范名键只补别名缺口）。
  *
- * 代理行的 `estimated_cost_currency` 在 Rust 聚合层为 NULL，币种完全依赖本地
+ * 代理行的 `estimated_cost_currency` 在 Host 聚合层为 NULL，币种完全依赖本地
  * 价格目录解析；目录缺失（如便携版首次启动未同步 models-cn）或模型不在目录时
  * 回退到默认人民币，保证「预估费用」列始终带货币符号，而不是显示无币种裸数值。
  * 两个函数保持稳定身份，避免下游 memo 无谓重算。
  */
-/** 由 Rust `get_models_cn_currencies` 返回的 `channel_id:upstream_model → currency`
+/** 由 既有 `get_models_cn_currencies` 返回的 `channel_id:upstream_model → currency`
  *  对构建货币查询。模型全局唯一，因此只按模型名索引（渠道前缀仅用于渠道级兜底表）。 */
 export function buildModelPriceCurrencyLookup(data: Array<[string, string]>) {
   const byModel = new Map<string, string>();

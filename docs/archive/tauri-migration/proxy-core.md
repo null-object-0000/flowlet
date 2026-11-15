@@ -1,7 +1,12 @@
 # Flowlet 代理核心迁移勘察：行为契约、Node 等价实现设计与 Spike 定义
 
+> 历史档案：本文记录迁移前的设计与验收，不是当前开发、部署或依赖指南。
+> 旧 Rust 桌面、服务端与 CLI 源码已移除；当前架构见 [架构说明](../../architecture.md)，
+> Android 保留范围见 [Android Rust 边界](../../android-rust-boundary.md)。
+
+
 > 历史迁移记录：2026-11-15 起旧 Rust 桌面、headless 与凭据 CLI 源码已移除。
-> 本文中的旧路径/构建命令仅描述当时基线，当前 Android 边界见 [Android Rust 裁剪](../android-rust-boundary.md)。
+> 本文中的旧路径/构建命令仅描述当时基线，当前 Android 边界见 [Android Rust 裁剪](../../android-rust-boundary.md)。
 
 > **性质**：只读勘察结论 + 重写技术设计，是 `task-5` 的唯一产物。
 > **基线**：`main` @ `26fed4c`（2026-11-09，`feat: support LongCat-2.5`）。
@@ -189,7 +194,7 @@
 ### 3.7 客户端身份、会话与限流（`proxy.rs:839-917`）
 
 - `extract_agent_session(headers)`（`proxy.rs:122-124` → `agent_session_identity::from_http_headers`）：按 `AgentIdentityAdapter` registry 顺序尝试；标记头 `x-flowlet-client` 门控特定 adapter；产出 `{agent_type, session_id, parent_session_id}`。
-- **Node Host 新增的旁路观测（Rust 无对应实现，非等价项）**：识别出 `(agent_type, session_id)` 后，Node Host 还会从已经读入内存的请求体派生会话标题/项目路径（`proxy/session-derive.ts`）并 upsert 到 SQLite `agent_session_metadata`，供 Docker 会话管理展示；写入失败只 warn，不影响转发。规则与存储契约见 [docs/agent-session-metadata.md](../agent-session-metadata.md)。它不解析/剥离任何新 header，也不改变转发报文与请求日志字段。
+- **Node Host 新增的旁路观测（Rust 无对应实现，非等价项）**：识别出 `(agent_type, session_id)` 后，Node Host 还会从已经读入内存的请求体派生会话标题/项目路径（`proxy/session-derive.ts`）并 upsert 到 SQLite `agent_session_metadata`，供 Docker 会话管理展示；写入失败只 warn，不影响转发。规则与存储契约见 [docs/agent-session-metadata.md](../../agent-session-metadata.md)。它不解析/剥离任何新 header，也不改变转发报文与请求日志字段。
 - **token 身份**（`proxy.rs:891-892`）：`identify_client` 命中即 `token_client_id="default"`；只用于限流 key 与高级规则 `match_client_id`，**不写日志/用量**。
 - **客户端身份**（`proxy.rs:894-899`）：`load_ua_rules(config_path)`（每次请求热读 `config.json`；`proxy_http.rs:891-910`：用户规则优先，按 id 补齐内置规则）→ `identify_client_agent`（`agent_identity_adapter.rs:44-63`）：`x-flowlet-client` 优先（值小写为 id，展示名取 plugin registry），否则 UA 子串匹配；不命中 → `(None, Some("未知"))`。
 - **限流**（`proxy.rs:901-917`）：只有识别到 token 时才消费；失败 429 + `Retry-After`，body `{"error":"rate limit exceeded"}`。`RateLimiter`（`rate_limiter.rs`）：每 client 一个桶，容量 = rpm，补充速率 = rpm/60 每秒（整秒粒度），`retry_after` = `ceil(1/refill)`。
@@ -582,7 +587,7 @@ pipeline(upstreamBody, tap, res, (err) => {
 | fastify/express 做模型面 | 需要绕开框架的 body/响应生命周期，SSE 与字节透传无收益 |
 | 全代理放 worker/utilityProcess（默认方案） | 增加配置同步/日志 IPC 成本；先在主线程 + DB worker 验证，压测后再拆 |
 | 主线程直接 better-sqlite3/node:sqlite 同步写 | 阻塞事件循环，SSE 卡顿（Rust 用 spawn_blocking） |
-| 在 Node 侧重新发明 SQLite schema | 必须逐列兼容用户旧库（见 `docs/migration/commands-and-schema.md`） |
+| 在 Node 侧重新发明 SQLite schema | 必须逐列兼容用户旧库（见 `docs/archive/tauri-migration/commands-and-schema.md`） |
 | 用 Electron `resolveProxy` 替代系统代理探测 | 会引入 PAC 行为差异，需产品决策 |
 
 ### 5.15 建议目录与模块边界
@@ -627,7 +632,7 @@ packages/proxy-core/            # 纯 Node，无 Electron 依赖，桌面/headle
 | R14 | 优雅停止语义 | Rust 会等 in-flight 结束（长 SSE 会卡 stop）；Node `server.close()` 同理但 keep-alive 空闲连接需 `closeIdleConnections` | 现状差异小 | 与 Rust 一致：不强制杀流；给 stop 加超时兜底需产品确认（会改变行为） |
 | R15 | 客户端鉴权/CORS 现状缺陷 | Host 模式下浏览器跨域预检被 401；照抄会保留缺陷 | `proxy.rs:433-451` | 照抄并在文档标注；修正需产品决策 |
 | R16 | 179 个测试移植成本 | 夹具有大量时序/HTTP 细节，容易"移植走样" | 138 个 e2e 依赖 Rust axum mock 上游语义 | 先做共享夹具格式（§5.13），P0 20 个手工对拍，再批量生成 |
-| R17 | 电源抑制/挂起恢复 | Windows S0 下长流仍可能被杀 | `power.rs` + `docs/windows-suspend-resume-network-resilience.md` | Electron `powerSaveBlocker`；平台任务负责，代理侧只需 permit 生命周期正确 |
+| R17 | 电源抑制/挂起恢复 | Windows S0 下长流仍可能被杀 | `power.rs` + `docs/archive/tauri-migration/windows-suspend-resume-network-resilience.md` | Electron `powerSaveBlocker`；平台任务负责，代理侧只需 permit 生命周期正确 |
 
 **需要产品/架构拍板的清单**：
 1. 模型请求体是否继续无上限（R2）。
@@ -765,7 +770,7 @@ Files API 作为 P2：若时间够，实现 upload/list/delete 的"绑定账号 
 | P6 集成/切换 | 与 Electron 壳、headless Host、前端命令、存储迁移联调；双跑灰度/回滚 | 5–8 | 真实用户库只读演练 + 开关切换 |
 | **合计** | | **33–50（含 buffer）** | 3 人并行约 3–4 周 |
 
-> 与 `docs/migration/platform-gap-matrix.md` 的结论一致：代理本身**没有硬缺口**（Node/Electron 都能实现），风险在"等价度"与"回归资产移植"，因此**先 spike 再排期**是正确顺序。
+> 与 `docs/archive/tauri-migration/platform-gap-matrix.md` 的结论一致：代理本身**没有硬缺口**（Node/Electron 都能实现），风险在"等价度"与"回归资产移植"，因此**先 spike 再排期**是正确顺序。
 
 ---
 
@@ -1241,4 +1246,4 @@ rate_limiter_separate_clients
 1. **代理核心没有"不可实现"的硬缺口**，全部行为都能在 Node/Electron 复现；真正风险是**等价度**和**回归资产（179 个测试）的移植质量**。
 2. 建议排期：**先 1 天 spike（§7）→ 用实测修正 → 再开 P0 对拍基建与 P1/P2 并行**；不要先写业务再补测试，否则 138 个 e2e 断言会失效。
 3. 需要在开工前拍板的 6 项见 §6 末尾；其中 **SQLite 选型**与 **系统代理等价**两项会直接影响 P1/P3 的估时。
-4. 与平台迁移（`docs/migration/platform-gap-matrix.md`）的接口：`powerSaveBlocker`、窗口/生命周期、单实例、打包；代理只依赖"能拿到系统代理配置"和"能抑制待机"两个平台 port。
+4. 与平台迁移（`docs/archive/tauri-migration/platform-gap-matrix.md`）的接口：`powerSaveBlocker`、窗口/生命周期、单实例、打包；代理只依赖"能拿到系统代理配置"和"能抑制待机"两个平台 port。

@@ -1,17 +1,17 @@
 // Dockhand API 客户端（公司内部 fnsys/dockhand Docker 管理面板）。Owner: node-web.
 //
-// 权威实现：src-tauri/src/core/dockhand.rs 逐行为等价：
+// 实现入口：packages/flowlet-core/src/web/dockhand.ts 保持既有行为：
 // - 认证只用 `Authorization: Bearer <API Token>`；
 // - 校验 token 只能看 `GET /api/environments`（`/api/health` 匿名可访问，不能证明 token 有效）；
 // - 除 `/environments`、`/health` 外的资源接口都要 `?env=<id>`；
 // - 允许子路径部署（https://host/dockhand），也接受用户粘贴 /api 后缀；
-// - 20s 超时；insecure 时跳过 TLS 校验；错误文案对齐 Rust Display。
+// - 20s 超时；insecure 时跳过 TLS 校验；错误文案对齐 Node Host Display。
 import { Agent, request } from "undici";
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 const USER_AGENT = "flowlet/0.2.0";
 
-/** 与 Rust `DockhandEnvironment` 同形：字段缺失时 host/port/protocol 为 null。 */
+/** 与 既有 `DockhandEnvironment` 同形：字段缺失时 host/port/protocol 为 null。 */
 export interface DockhandEnvironment {
   id: number;
   name: string;
@@ -20,7 +20,7 @@ export interface DockhandEnvironment {
   protocol: string | null;
 }
 
-/** 与 Rust `DockhandError` 同形：Display = `Dockhand API {status}: {message}` / `Dockhand API: {message}`。 */
+/** 与 既有 `DockhandError` 同形：Display = `Dockhand API {status}: {message}` / `Dockhand API: {message}`。 */
 export class DockhandError extends Error {
   status: number | null;
 
@@ -38,7 +38,7 @@ export class DockhandError extends Error {
 }
 
 /**
- * 规范化面板地址：与 Rust `normalize_base_url` 一致。
+ * 规范化面板地址：与 Node Host `normalize_base_url` 一致。
  * - 必须 http/https；拒绝 query / fragment；
  * - 去末尾 `/`；粘贴到 `/api` 时自动剥掉；
  * - 保留子路径部署（如 https://host/dockhand）。
@@ -69,7 +69,7 @@ export function normalizeBaseUrl(raw: string): string {
 }
 
 function urlParseErrorDetail(raw: string): string {
-  // url crate 的常见错误文本（用于保持错误信息可读且接近 Rust）。
+  // url crate 的常见错误文本（用于保持错误信息可读且接近 Node Host）。
   if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(raw)) return "relative URL without a base";
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/$/.test(raw)) return "empty host";
   return "invalid URL";
@@ -93,7 +93,7 @@ export function resolveApiPath(base: string, rawPath: string): string {
 }
 
 export interface DockhandClientOptions {
-  /** 内网自签证书：跳过 TLS 校验（对应 Rust `danger_accept_invalid_certs`）。 */
+  /** 内网自签证书：跳过 TLS 校验（对应 Node Host `danger_accept_invalid_certs`）。 */
   insecure?: boolean;
 }
 
@@ -228,7 +228,7 @@ export function parseEnvironments(value: unknown): DockhandEnvironment[] {
   return environments;
 }
 
-/** 把 Dockhand 错误体转成可执行提示（与 Rust `describe_error` 文案一致）。 */
+/** 把 Dockhand 错误体转成可执行提示（与 Node Host `describe_error` 文案一致）。 */
 export function describeError(status: number, value: unknown): string {
   let detail = "";
   if (value !== null && typeof value === "object" && !Array.isArray(value)) {

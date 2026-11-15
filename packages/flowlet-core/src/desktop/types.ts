@@ -17,9 +17,9 @@ export interface DesktopHostBridge {
 /** 桌面宿主注入的运行时信息与能力。 */
 export interface DesktopRuntime {
   host: DesktopHostBridge;
-  /** 应用版本（与 package.json 一致，替代 Rust `get_app_version`）。 */
+  /** 应用版本（与 package.json 一致，替代 既有 `get_app_version`）。 */
   appVersion: string;
-  /** 应用数据目录。必须与 Rust/Tauri 版本解析结果一致，旧数据库才能原地打开。 */
+  /** 应用数据目录。必须与 Node Host/Tauri 版本解析结果一致，旧数据库才能原地打开。 */
   dataDir: string;
   /** 是否便携版（数据目录在 exe 旁）。 */
   portable: boolean;

@@ -4,7 +4,7 @@
 
 Flowlet 管理 Claude Code 用户级全局配置，使用户从任意系统终端、IDE 或工作目录启动 Claude Code 时，都可以通过 Flowlet 的 Anthropic-compatible 本地入口访问开放模型。
 
-本能力不负责打开系统终端或启动外部 Claude Code 进程。Flowlet 内嵌 Agent 终端是后续独立能力，见 [`agent-terminal.md`](./agent-terminal.md)。
+本能力不负责打开系统终端或启动外部 Claude Code 进程。Flowlet 内嵌 Agent 终端是后续独立能力，见 [`agent-terminal.md`](agent-terminal.md)。
 
 ## 2. 配置位置
 
@@ -133,11 +133,11 @@ AgentAccessSideSheet
   -> useClaudeCodeGlobalConfig
   -> src/domains/agent/commands.ts
   -> inspect/apply/restore_agent_global_config
-  -> src-tauri/src/core/agent_global_config.rs
+  -> packages/flowlet-core/src/agent/adapters/index.ts
   -> ~/.claude/settings.json
 ```
 
-前端负责状态展示、操作编排和用户反馈；Rust 负责路径解析、JSON 校验、受管字段合并、备份、恢复、原子写入和凭据隔离。
+前端负责状态展示、操作编排和用户反馈；Node Host 负责路径解析、JSON 校验、受管字段合并、备份、恢复、原子写入和凭据隔离。
 
 ## 8. 生效方式
 

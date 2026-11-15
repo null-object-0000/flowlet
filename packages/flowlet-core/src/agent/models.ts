@@ -1,9 +1,9 @@
 // Agent 接入的模型解析与 Codex 动态模型目录。
 //
-// 权威实现：
-// - `src-tauri/src/commands/agent.rs`（可用模型 / 默认模型 / 快速模型解析）
-// - `src-tauri/src/core/agent_global_config.rs`（canonical_known_model）
-// - `src-tauri/src/core/codex_model_catalog.rs`（model-catalog.flowlet.json 生成）
+// 实现入口：
+// - `packages/flowlet-core/src/desktop/agent.ts`（可用模型 / 默认模型 / 快速模型解析）
+// - `packages/flowlet-core/src/agent/adapters/index.ts`（canonical_known_model）
+// - `packages/flowlet-core/src/agent/models.ts`（model-catalog.flowlet.json 生成）
 import { modelCatalog } from "../catalog/index.ts";
 import { ACCOUNT_CREDENTIAL_HEALTHY } from "../proxy/routing.ts";
 import type { JsonRow } from "../types.ts";
@@ -18,7 +18,7 @@ export function agentProtocols(adapterId: string): AgentProtocol[] {
   return ["openai"];
 }
 
-/** 未注册 Agent 的固定错误（Rust `agent_endpoint_suffix`）。 */
+/** 未注册 Agent 的固定错误（既有 `agent_endpoint_suffix`）。 */
 export function agentEndpointSuffix(agentId: string): string {
   const agent = agentDescriptor(agentId);
   if (agent === undefined) throw new Error(`未注册的 Agent 插件：${agentId}`);
@@ -65,7 +65,7 @@ export function resolveModelChoices(options: AgentGlobalConfigOptions | null | u
   return { primaryModel, fastModel };
 }
 
-/** 一键写入的可选参数（camelCase，与 Rust `AgentGlobalConfigOptions` 一致）。 */
+/** 一键写入的可选参数（camelCase，与 Node Host `AgentGlobalConfigOptions` 一致）。 */
 export interface AgentGlobalConfigOptions {
   sessionExtension?: boolean;
   primaryModel?: string;
@@ -85,7 +85,7 @@ export interface McpServerSpecInput {
   headers?: Record<string, string>;
 }
 
-/** 当前 Agent 协议下可用的规范模型 ID，按字典序返回（Rust `available_agent_models`）。 */
+/** 当前 Agent 协议下可用的规范模型 ID，按字典序返回（Node Host `available_agent_models`）。 */
 export function availableAgentModels(snapshot: JsonRow, protocols: ReadonlyArray<AgentProtocol>): string[] {
   const routes = asRowArray(snapshot.routes);
   const accounts = asRowArray(snapshot.accounts);
@@ -252,7 +252,7 @@ function reasoningDescription(effort: string): string {
   }
 }
 
-/** 生成按所选模型动态生成的单条目 Codex 模型目录（Rust `catalog_for_model`）。 */
+/** 生成按所选模型动态生成的单条目 Codex 模型目录（Node Host `catalog_for_model`）。 */
 export function catalogForModel(modelsCn: JsonRow | null, model: string): JsonRow {
   const spec = modelsCnSpec(modelsCn, model);
   const contextWindow = spec?.contextTokens ?? FALLBACK_CONTEXT_WINDOW;

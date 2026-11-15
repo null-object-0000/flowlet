@@ -1,9 +1,7 @@
-// 编译期 Agent 注册表（Node 侧）。
-//
-// 权威声明：仓库根目录 `plugin-registry.json`（Rust `core/plugin_registry.rs` 校验）
-// 与 `core/agent_plugin_bundle.rs` 的 `BUNDLES` 顺序。Node Host 打包后无法保证
-// 能读到仓库根文件，因此把「已编译实现」的 Agent 元数据内嵌在这里；新增 Agent 时
-// 必须同时更新 plugin-registry.json、Rust Bundle 与本文件（测试会校验一致性）。
+// Node Host Agent descriptors, aligned with the product declarations in plugin-registry.json.
+// Global config dispatch lives in adapters/index.ts, environment detection in environment.ts,
+// sessions in sessions/, and request identity in proxy/identity.ts.
+// New Agents must update the declaration, descriptor, implementations and contract tests.
 import type { JsonRow } from "../types.ts";
 
 export interface AgentSessionTypeDescriptor {
@@ -32,7 +30,7 @@ export interface AgentDescriptor {
   configCapabilities: AgentConfigCapabilityDescriptor[];
 }
 
-/** 与 `core/agent_plugin_bundle.rs::bundles()` 相同的顺序。 */
+/** 与 `packages/flowlet-core/src/agent/registry.ts()` 相同的顺序。 */
 export const AGENTS: ReadonlyArray<AgentDescriptor> = [
   {
     id: "claude-code",
@@ -142,7 +140,7 @@ export function agentDescriptor(agentId: string): AgentDescriptor | undefined {
   return AGENTS.find((agent) => agent.id === agentId);
 }
 
-/** `list_agent_capabilities` 的返回（camelCase，与 Rust `AgentCapabilitiesReport` 一致）。 */
+/** `list_agent_capabilities` 的返回（camelCase，与 既有 `AgentCapabilitiesReport` 一致）。 */
 export function capabilitiesReport(): JsonRow {
   return {
     agents: AGENTS.map((agent) => ({

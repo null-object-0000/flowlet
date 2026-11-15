@@ -1,10 +1,6 @@
-// Runtime configuration + channel presets. Owner: node-storage.
-//
-// Rust 等价实现：core/config.rs、core/channels_config.rs、core/presets.rs、
-// core/runtime_config.rs、core/services.rs（FlowletServices::open / load_runtime_snapshot）。
-//
-// 规则：外部 config.json 优先；缺失/解析失败时回退内置默认；首次启动把内置默认写到磁盘。
-// 渠道预设写入 SQLite（幂等），账号/路由/模型快照供 web 与 proxy 共用。
+// Node Host 配置、内置预设与运行时快照。
+// 外部 config.json 优先，缺失/解析失败时回退随包默认值，首次启动补齐文件。
+// 预设幂等写入 SQLite；账号、路由和模型快照由 web 与 proxy 共用。
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { modelCatalog } from "../catalog/index.ts";
@@ -13,7 +9,7 @@ import type { JsonRow } from "../types.ts";
 /** 内置默认配置路径（镜像内 /app/config.json，开发时仓库根 config.json）。 */
 export const DEFAULT_BUILTIN_CONFIG = fileURLToPath(new URL("../../../../config.json", import.meta.url));
 
-/** 上游代理配置在 app_meta 中的键（与 Rust `UPSTREAM_PROXY_META_KEY` 一致）。 */
+/** 上游代理配置在 app_meta 中的键（与 既有 `UPSTREAM_PROXY_META_KEY` 一致）。 */
 export const UPSTREAM_PROXY_META_KEY = "upstream_proxy_config";
 
 export function readJsonFile(file: string): JsonRow | null {
@@ -36,10 +32,10 @@ export function loadOrCreateConfig(configPath: string, builtinPath = DEFAULT_BUI
   return JSON.parse(readFileSync(builtinPath, "utf8")) as JsonRow;
 }
 
-// ─── Channel presets（Rust ChannelsConfig::from_config_json） ─────────────────
+// ─── Channel presets（Node Host ChannelsConfig::from_config_json） ─────────────────
 
 export interface ChannelsConfig {
-  /** ChannelPreset[]（snake_case，与 Rust serde 输出一致）。 */
+  /** ChannelPreset[]（snake_case，与 Node Host serde 输出一致）。 */
   presets: JsonRow[];
   prices: JsonRow[];
   default_exposed_models: Record<string, string[]>;
@@ -64,7 +60,7 @@ function parseAuthStrategy(raw: unknown): string {
   return raw === "x_api_key" ? "x_api_key" : "bearer";
 }
 
-/** 把 config.json 的 `channels_config` 解析成 Rust ChannelsConfig 的等价视图。 */
+/** 把 config.json 的 `channels_config` 解析成 Node Host ChannelsConfig 的等价视图。 */
 export function parseChannelsConfig(configJson: JsonRow): ChannelsConfig {
   const section = configJson?.channels_config as JsonRow | undefined;
   if (!section) throw new Error("config.json 中缺少 channels_config 字段");
@@ -168,7 +164,7 @@ export function mergeBuiltinConfig(external: ChannelsConfig, builtin: ChannelsCo
 /**
  * 把合并后的 `ChannelsConfig` 还原成 config.json 的 `channels_config` 结构。
  *
- * Web 命令层（`createWebHost`）与 Rust 一样必须使用「已合并内置模板」的渠道配置：
+ * Web 命令层（`createWebHost`）与 Node Host 一样必须使用「已合并内置模板」的渠道配置：
  * 数据卷里的 `/data/config.json` 通常是旧版本写入的，缺少后续版本新增的渠道，
  * 直接用它会导致 `fetch_channel_models` 报「缺少运行时模板」、`query_balance`
  * 拼出空 Base URL（`Invalid URL`）。见 `web/index.ts` 的 `WebHostOptions.channelsConfig`。
@@ -183,7 +179,7 @@ export function channelsConfigToJson(config: ChannelsConfig): JsonRow {
 }
 
 /**
- * 加载渠道配置：外部 config.json 解析失败时回退内置默认（与 Rust
+ * 加载渠道配置：外部 config.json 解析失败时回退内置默认（与 Node Host
  * `load_channels_config_from` + `merge_builtin_config` 一致）。
  */
 export function loadChannelsConfig(configJson: JsonRow, builtinJson?: JsonRow): ChannelsConfig {
@@ -204,7 +200,7 @@ export function loadChannelsConfig(configJson: JsonRow, builtinJson?: JsonRow): 
   }
 }
 
-// ─── merge_default_routes（Rust ChannelsConfig::merge_default_routes） ────────
+// ─── merge_default_routes（Node Host ChannelsConfig::merge_default_routes） ────────
 
 function effectiveOpenaiBaseUrl(account: JsonRow): string {
   for (const value of [account.base_url_override, account.workspace_default_base_url]) {
@@ -327,13 +323,13 @@ export function mergeDefaultRoutes(
   return merged;
 }
 
-// ─── RuntimeConfig（Rust RuntimeConfigStore） ────────────────────────────────
+// ─── RuntimeConfig（Node Host RuntimeConfigStore） ────────────────────────────────
 
 /**
  * 代理与管理面共享的运行时快照。
  *
- * 形状对齐 Rust `RuntimeConfigSnapshot`：`{ channels, accounts, routes, rules,
- * virtual_models }`；`revision` 参与对象但非 Rust serde 输出字段（仅进程内使用）。
+ * 快照包含：`{ channels, accounts, routes, rules,
+ * virtual_models }`；`revision` 仅在进程内维护，不作为命令返回字段。
  */
 export class RuntimeConfig {
   #snapshot: JsonRow;
@@ -389,7 +385,7 @@ export class RuntimeConfig {
     return this.#revision;
   }
 
-  /** 先持久化，成功后才发布下一版快照（Rust update_after）。 */
+  /** 先持久化，成功后才发布下一版快照（Node Host update_after）。 */
   updateAfter<T>(operation: () => T, mutate: (draft: JsonRow, value: T) => void): T {
     const value = operation();
     this.update((draft) => mutate(draft, value));
@@ -422,7 +418,7 @@ export interface PresetStorage {
   ensurePresetFilesApi(presets: JsonRow[]): void;
 }
 
-/** Rust services.rs::initialize_channel_presets 的等价步骤（幂等）。 */
+/** 渠道预设初始化（幂等）。 */
 export function initializeChannelPresets(
   storage: PresetStorage,
   channelsConfig: ChannelsConfig,
@@ -456,7 +452,7 @@ function readBuiltinPresets(): JsonRow[] {
 const CHANNELS_USING_UPSTREAM_PROXY_FOR_MODELS = new Set(["openai-api"]);
 
 /**
- * Rust services.rs::load_runtime_snapshot 的等价步骤：读四类集合、清理无效行、
+ * 构建运行时配置快照：读四类集合、清理无效行、
  * 补齐默认路由并回写 SQLite，返回进程级 RuntimeConfig。
  */
 export function loadRuntimeSnapshot(
@@ -464,7 +460,7 @@ export function loadRuntimeSnapshot(
   channelsConfig: ChannelsConfig,
   options: { upstreamProxyActive?: boolean } = {},
 ): RuntimeConfig {
-  // 与 Rust FlowletServices::open 顺序一致：先幂等初始化渠道预设，再读取快照。
+  // 初始化顺序保持稳定：先幂等初始化渠道预设，再读取快照。
   initializeChannelPresets(storage, channelsConfig);
   storage.setPrices?.(channelsConfig.prices);
   let channels = storage.listChannelPresets();
@@ -522,7 +518,7 @@ export function loadRuntimeSnapshot(
 
 // ─── 进程级配置读取（log_capture / upstream_proxy / bind） ────────────────────
 
-/** 默认 LogCaptureConfig（Rust LogCaptureConfig::default，config.json 无 log_capture 段时）。 */
+/** 默认 LogCaptureConfig（Node Host LogCaptureConfig::default，config.json 无 log_capture 段时）。 */
 export function defaultLogCaptureConfig(): JsonRow {
   return {
     capture_req_headers: true,
@@ -538,9 +534,9 @@ export function defaultLogCaptureConfig(): JsonRow {
 }
 
 /**
- * Rust proxy_http.rs::extract_log_capture 的等价实现。
+ * Node Host packages/flowlet-core/src/proxy/http.ts::extract_log_capture 的等价实现。
  *
- * 注意：`log_capture` 段存在但字段缺失时，Rust 回退值是 retention=3 / max=512（不是
+ * 注意：`log_capture` 段存在但字段缺失时，Node Host 回退值是 retention=3 / max=512（不是
  * `LogCaptureConfig::default` 的 7 / 1024），必须逐字段保持。
  */
 export function extractLogCapture(configJson: JsonRow): JsonRow {
@@ -565,7 +561,7 @@ export function extractLogCapture(configJson: JsonRow): JsonRow {
 
 /**
  * 进程级日志捕获配置：app_meta.log_capture_config 优先，缺失时回退 config.json 的
- * `log_capture`（Rust FlowletServices::open 语义）。每次调用都直读 SQLite，不缓存。
+ * `log_capture`（运行时读取规则）。每次调用都直读 SQLite，不缓存。
  */
 export function loadLogCaptureConfig(storage: Pick<PresetStorage, "getAppMeta">, configJson: JsonRow): JsonRow {
   const stored = storage.getAppMeta("log_capture_config");
@@ -631,7 +627,7 @@ export function loadUpstreamProxyConfig(
   return normalizeUpstreamProxyConfig(section ?? {});
 }
 
-/** config.json 的 `bind` 段（Rust services.rs::parse_bind_config）。 */
+/** config.json 的 `bind` 段（Node Host packages/flowlet-core/src/index.ts::parse_bind_config）。 */
 export function parseBindConfig(configJson: JsonRow): JsonRow {
   const bind = configJson?.bind;
   if (!bind || typeof bind !== "object") return {};

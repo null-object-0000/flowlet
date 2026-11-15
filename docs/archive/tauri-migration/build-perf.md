@@ -1,7 +1,12 @@
 # 过渡期 Rust 构建提速（实测报告）
 
+> 历史档案：本文记录迁移前的设计与验收，不是当前开发、部署或依赖指南。
+> 旧 Rust 桌面、服务端与 CLI 源码已移除；当前架构见 [架构说明](../../architecture.md)，
+> Android 保留范围见 [Android Rust 边界](../../android-rust-boundary.md)。
+
+
 > 历史迁移记录：2026-11-15 起旧 Rust 桌面、headless 与凭据 CLI 源码已移除。
-> 本文中的旧路径/构建命令仅描述当时基线，当前 Android 边界见 [Android Rust 裁剪](../android-rust-boundary.md)。
+> 本文中的旧路径/构建命令仅描述当时基线，当前 Android 边界见 [Android Rust 裁剪](../../android-rust-boundary.md)。
 
 > 适用阶段：Flowlet 迁移到 Electron + Node 的过渡期。目标是在不改变产物语义、平台支持
 > （Android 仍需 `staticlib`/`cdylib`）的前提下，降低日常 Rust 重编译的 CPU、IO、

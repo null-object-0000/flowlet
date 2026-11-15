@@ -36,7 +36,7 @@ export interface WebContext {
   logCapture: LogCaptureConfig;
   /** 进程内 upstream proxy 状态；set_upstream_proxy_config 成功后更新。 */
   upstreamProxy: UpstreamProxyConfig;
-  /** 自定义抓取描述符缓存（Rust 侧 OnceLock 语义）。 */
+  /** 自定义抓取描述符缓存（Host 侧 OnceLock 语义）。 */
   customScrapeChannels?: JsonRow[] | null;
   /** 三方服务凭据的静态加密（index.ts 传入 SecretBox，数据卷 secret.key）。 */
   secrets: SecretBoxLike;

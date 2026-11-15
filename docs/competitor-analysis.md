@@ -63,7 +63,7 @@ Flowlet 能力以当前工作区的 `AGENTS.md`、`docs/architecture.md`、`docs
 
 | 维度 | 当前事实 |
 |---|---|
-| 产品形态 | Tauri + Rust + React 19 的本地桌面控制台 |
+| 产品形态 | Electron + Node Host + React 19 的本地桌面控制台（Android 保留 Rust/Tauri） |
 | 数据模型 | Channel → Account → Exposed Model / Route Candidate |
 | 模型开放 | `/models` 实际返回 ∩ 全局白名单 ∩ 用户显式选择 |
 | 协议 | OpenAI-compatible 与 Anthropic-compatible 原生入口；不做跨协议转换 |

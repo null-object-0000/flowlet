@@ -1,7 +1,7 @@
 // Flowlet 桌面 Electron 主进程。
 //
 // 职责：
-// 1. app ready 前解析与 Rust/Tauri 一致的数据目录，并重定向 Electron userData；
+// 1. app ready 前解析与 Node Host/Tauri 一致的数据目录，并重定向 Electron userData；
 // 2. 单实例锁；第二次启动聚焦已有窗口；
 // 3. 生成随机管理 token，进程内启动 flowlet-core `startHost()`（Node Host +
 //    本机 HTTP 命令通道 + dist-desktop 静态资源）；
@@ -185,7 +185,7 @@ async function run(): Promise<void> {
   process.env.FLOWLET_APP_VERSION = appVersion;
   if (!app.isPackaged && process.env.FLOWLET_DISABLE_BACKGROUND_TASKS === undefined) {
     // 开发/冒烟默认关闭后台余额同步等任务，避免用本地真实凭据打上游；
-    // 安装版保持与 Rust 一致（默认开启）。
+    // 安装版保持保持既有兼容行为（默认开启）。
     process.env.FLOWLET_DISABLE_BACKGROUND_TASKS = "1";
   }
   // core bundle 内的 import.meta.url 由构建插件替换为 runtime 根下的虚拟路径。
@@ -383,7 +383,7 @@ async function run(): Promise<void> {
       catalogDir: paths.catalogDir,
       staticDir: paths.staticDir,
       adminToken,
-      // 模型入口沿用 Rust 默认端口；被占用时 Host 会给出明确错误。
+      // 模型入口沿用 Node Host 默认端口；被占用时 Host 会给出明确错误。
       bindAddr: process.env.FLOWLET_BIND_ADDR ?? "127.0.0.1:18640",
       webAddr: "127.0.0.1:0",
     });
@@ -650,7 +650,7 @@ async function runHostSelfTest(bridge: DesktopHostBridgeImpl, logger: DesktopLog
 /**
  * Windows 便携版 toast 的 AppUserModelID 注册（HG-3 的部分缓解）。
  *
- * 与 Rust `core/notification_registry.rs` 幂等对齐：写
+ * 与 Node Host `packages/flowlet-desktop/src/main.ts` 幂等对齐：写
  * `HKCU\Software\Classes\AppUserModelId\<aumid>` 的 DisplayName / IconUri，
  * 否则没有开始菜单快捷方式的便携版通知会被系统静默丢弃。非 Windows 或失败只告警。
  */
@@ -706,7 +706,7 @@ function createMainWindow(paths: DesktopPaths, webUrl: string, cli: CliOptions):
   });
   win.setMinimumSize(MIN_CONTENT_WIDTH, MIN_CONTENT_HEIGHT);
   win.webContents.setWindowOpenHandler(({ url }) => {
-    // 与 Rust open_external_url 语义一致：外部链接交给系统浏览器，不开新窗口。
+    // 与 Node Host open_external_url 语义一致：外部链接交给系统浏览器，不开新窗口。
     if (url.startsWith("http://") || url.startsWith("https://")) {
       void import("electron").then(({ shell }) => shell.openExternal(url));
     }

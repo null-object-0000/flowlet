@@ -1,9 +1,6 @@
-// Agent client / session identity extraction (proxy stage).
-//
-// 权威实现：`src-tauri/src/core/agent_identity_adapter*/adapters/*.rs` 与
-// `agent_session_identity.rs`。代理只做识别并落日志；转发上游前由 http.ts
-// 的 applyRequestHeaders 剥离 `x-flowlet-client` / `x-flowlet-session`，
-// `x-deepseek-harness-session-id` 必须原样透传。
+// Node Host client/session identity shared by live capture and historical repair.
+// http.ts strips Flowlet-only headers before forwarding; the native
+// x-deepseek-harness-session-id header must remain unchanged.
 import { existsSync, readFileSync } from "node:fs";
 import { getAllHeader, getHeader, type HeaderMapLike } from "./http.ts";
 import { isRecord, asArray, str, type JsonRow } from "./util.ts";
@@ -141,7 +138,7 @@ function codexTurnMetadataSessionId(headers: HeaderMapLike): string | undefined 
   }
 }
 
-/** 从 config.json 读取 UA 规则；缺失/损坏时返回内置规则（Rust `load_config_ua_rules`）。 */
+/** 从 config.json 读取 UA 规则；缺失/损坏时返回内置规则（既有 `load_config_ua_rules`）。 */
 export function loadUaRules(configPath: string | undefined): UaClientRule[] {
   let rules: UaClientRule[] = [];
   if (configPath !== undefined && existsSync(configPath)) {
@@ -172,7 +169,7 @@ export function loadUaRules(configPath: string | undefined): UaClientRule[] {
   return rules;
 }
 
-/** 客户端归属：`x-flowlet-client` 优先，再按 UA 子串规则（Rust `identify_client_agent`）。 */
+/** 客户端归属：`x-flowlet-client` 优先，再按 UA 子串规则（既有 `identify_client_agent`）。 */
 export function identifyClientAgent(
   headers: HeaderMapLike,
   rules: UaClientRule[],

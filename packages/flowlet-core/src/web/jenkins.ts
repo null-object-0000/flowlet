@@ -1,6 +1,6 @@
 // Jenkins API 客户端（面向 Jenkins LTS 的 `/me/api/json` 身份端点）。Owner: node-web.
 //
-// 权威实现：src-tauri/src/core/jenkins.rs 逐行为等价：
+// 实现入口：packages/flowlet-core/src/web/jenkins.ts 保持既有行为：
 // - 认证只用 HTTP Basic：`Authorization: Basic base64("{username}:{token}")`；
 //   Jenkins API Token 必须与用户名一起认证，单独 token 无法确认身份；
 // - 校验端点固定为 `/me/api/json`：只有登录用户自己能访问，能同时确认用户名与 token 有效；
@@ -8,7 +8,7 @@
 // - 版本取响应的 `X-Jenkins` 头（Jenkins 没有 GitLab 那样的 `/version` 端点）；
 // - Jenkins 使用上下文路径部署（`https://host/ci`）时 `/me/api/json` 直接拼在上下文路径后，
 //   因此地址归一保留子路径，**不**自动剥 `/api`、`/me`、`/api/json`；
-// - 20s 超时；insecure 时跳过 TLS 校验；错误文案对齐 Rust Display。
+// - 20s 超时；insecure 时跳过 TLS 校验；错误文案对齐 Node Host Display。
 import { Agent, request } from "undici";
 
 const DEFAULT_TIMEOUT_MS = 20_000;
@@ -20,7 +20,7 @@ export interface JenkinsIdentity {
   version: string | null;
 }
 
-/** 与 Rust `JenkinsError` 同形：Display = `Jenkins API {status}: {message}` / `Jenkins API: {message}`。 */
+/** 与 既有 `JenkinsError` 同形：Display = `Jenkins API {status}: {message}` / `Jenkins API: {message}`。 */
 export class JenkinsError extends Error {
   status: number | null;
 
@@ -38,7 +38,7 @@ export class JenkinsError extends Error {
 }
 
 /**
- * 规范化实例地址：口径与 Rust `normalize_base_url` 一致。
+ * 规范化实例地址：口径与 Node Host `normalize_base_url` 一致。
  * - 必须 http/https；
  * - 去掉末尾所有 `/`；
  * - 保留子路径部署（`https://host/ci`）；
@@ -70,7 +70,7 @@ export function normalizeBaseUrl(raw: string): string {
 }
 
 function urlParseErrorDetail(raw: string): string {
-  // url crate 的常见错误文本（用于保持错误信息可读且接近 Rust）。
+  // url crate 的常见错误文本（用于保持错误信息可读且接近 Node Host）。
   if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(raw)) return "relative URL without a base";
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/$/.test(raw)) return "empty host";
   return "invalid URL";
@@ -112,7 +112,7 @@ export function parseVersion(header: string | undefined | null): string | null {
 }
 
 export interface JenkinsClientOptions {
-  /** 内网自签证书：跳过 TLS 校验（对应 Rust `danger_accept_invalid_certs`）。 */
+  /** 内网自签证书：跳过 TLS 校验（对应 Node Host `danger_accept_invalid_certs`）。 */
   insecure?: boolean;
 }
 
@@ -225,14 +225,14 @@ function parseBody(text: string): unknown {
 /**
  * 把 Jenkins 的错误转成可执行提示。Jenkins 的反向代理/登录页经常返回 HTML 错误页，
  * 原始 HTML 一律不拼进 message；只有 JSON 体的 `message` / `error` 可以拼在提示前。
- * 文案与 Rust `describe_error` 逐字一致。
+ * 文案与 Node Host `describe_error` 逐字一致。
  */
 export function describeError(status: number, value: unknown): string {
   let detail = "";
   if (value !== null && typeof value === "object" && !Array.isArray(value)) {
     const row = value as Record<string, unknown>;
-    // 与 Rust `Value::get("message").or_else(get("error"))` 一致：键存在即采用，
-    // 即使值是 null（Rust 会把它渲染成 "null"），不能按 nullish 回退。
+    // 与 Node Host `Value::get("message").or_else(get("error"))` 一致：键存在即采用，
+    // 即使值是 null（Node Host 会把它渲染成 "null"），不能按 nullish 回退。
     const item = Object.prototype.hasOwnProperty.call(row, "message") ? row.message : row.error;
     if (item !== undefined) {
       detail = typeof item === "string" ? item : JSON.stringify(item);

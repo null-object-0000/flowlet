@@ -1,7 +1,7 @@
 // 出口 HTTP 请求（Web 管理命令中的网络能力）。Owner: node-web.
 //
-// 迁移说明：Rust 命令用 reqwest；Node 侧统一走 undici。上游代理语义
-// （docs/migration/proxy-core.md R6 / AGENTS.md §5）：账号显式 use_upstream_proxy
+// 迁移说明：Node Host 命令用 reqwest；Node 侧统一走 undici。上游代理语义
+// （docs/archive/tauri-migration/proxy-core.md R6 / AGENTS.md §5）：账号显式 use_upstream_proxy
 // 优先，未声明时仅 openai-api 这类 Adapter 声明代理转发的渠道沿用全局代理。
 import { ProxyAgent, request, type Dispatcher } from "undici";
 

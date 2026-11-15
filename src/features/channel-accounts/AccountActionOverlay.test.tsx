@@ -821,7 +821,7 @@ it("sends a complete snapshot payload (raw_scraped_json) when saving a manual ba
   expect(onSaveBalanceSnapshot).toHaveBeenCalledWith(expect.objectContaining({
     balance: 12.5,
     source: "manual",
-    // Rust `AccountBalanceSnapshot` 无 serde default：手动快照必须显式带 null，
+    // Node Host `AccountBalanceSnapshot` 无 默认值：手动快照必须显式带 null，
     // 否则 Web Host 会报 `missing field raw_scraped_json`。
     raw_scraped_json: null,
   }));

@@ -1,21 +1,12 @@
-// 控制台抓取（CDP）。
-//
-// Rust 在 Windows 用 WebView2 原生响应捕获、Linux 用 WebKitGTK resource API，
-// macOS 只有页面注入 fallback；Electron 统一为 `webContents.debugger`（CDP），
-// 三平台同一实现。
-//
-// 登录态：每个账号一个 `persist:scrape-<accountId>` partition（Electron 的隔离
-// 单位不是 Rust 的 per-account user-data-dir，但 cookie/localStorage/IndexedDB/
-// cache 同样按账号隔离）。主窗口用独立 `persist:main-webview`。
-//
-// 安全边界：抓取窗口加载任意第三方页面，必须 contextIsolation + sandbox +
-// nodeIntegration:false，并拒绝权限请求与新窗口。
+// Electron 控制台抓取：各桌面平台统一通过 webContents.debugger（CDP）捕获响应。
+// 每个账号使用 persist:scrape-<accountId> partition；主窗口使用独立 partition。
+// 抓取窗口必须 contextIsolation + sandbox + nodeIntegration:false，拒绝权限请求与新窗口。
 import { BrowserWindow, type Session } from "electron";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { DesktopLogger } from "./logger.ts";
 
-/** 与 Rust `scrape_console.rs` 一致的桌面 Chrome UA（LongCat 设备检测需要）。 */
+/** 与 既有 `packages/flowlet-desktop/src/scrape.ts` 一致的桌面 Chrome UA（LongCat 设备检测需要）。 */
 export const SCRAPE_DESKTOP_CHROME_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
@@ -26,7 +17,7 @@ const MAX_BODY_BYTES = 8 * 1024 * 1024;
 const MAX_LIVE_WINDOWS = 3;
 
 /**
- * 最小可用抓取计划。与 Rust `ScrapeModeRuntime` 的对应关系：
+ * 最小可用抓取计划。与 既有 `ScrapeModeRuntime` 的对应关系：
  * - consoleUrl / secondary / tertiary → 1–3 阶段导航；
  * - interceptorJs → document-start 注入（builtin config 里会调用
  *   `__TAURI_INTERNALS__.invoke('handle_intercepted_response', ...)`，宿主提供兼容 shim）；
@@ -48,7 +39,7 @@ export interface ScrapePlan {
   readonly captureAllJson?: boolean;
   /**
    * 传给 extractor / scrape.evaluate 的第二个参数。命令层传对象
-   * `{ keyPrefix, keyLastFour }`（与 Rust credential_context 一致），宿主原样 JSON 序列化。
+   * `{ keyPrefix, keyLastFour }`（与 Node Host credential_context 一致），宿主原样 JSON 序列化。
    */
   readonly credential?: unknown;
   readonly timeoutMs?: number;
@@ -60,7 +51,7 @@ export interface ScrapeSlotRule {
   readonly urlRegex?: string;
   /**
    * 自定义抓取描述符的 `match:{kind:"fallback"}`：仅当没有显式规则命中时匹配任意 URL。
-   * 与 Rust `custom_scrape::SlotRule` 的 fallback 语义一致。
+   * 与 既有 `custom_scrape::SlotRule` 的 fallback 语义一致。
    */
   readonly fallback?: boolean;
 }
@@ -109,7 +100,7 @@ export class ScrapeManager {
 
   private configureSession(target: Session, channelId: string | undefined): void {
     if (channelId === "longcat") {
-      // Rust 只对 longcat 固定桌面 UA：千问控制台走阿里云 SSO，对 UA 变化敏感。
+      // Node Host 只对 longcat 固定桌面 UA：千问控制台走阿里云 SSO，对 UA 变化敏感。
       target.setUserAgent(SCRAPE_DESKTOP_CHROME_UA);
     }
     target.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
@@ -123,12 +114,12 @@ export class ScrapeManager {
       return existing;
     }
     if (this.sessions.size >= MAX_LIVE_WINDOWS) {
-      // 与 Rust SCRAPE_WEBVIEW_MAX_LIVE 一致：超限时回收最旧窗口（登录态在 partition 里）。
+      // 与 Node Host SCRAPE_WEBVIEW_MAX_LIVE 一致：超限时回收最旧窗口（登录态在 partition 里）。
       const oldest = this.sessions.keys().next().value;
       if (oldest !== undefined) this.closeConsole(oldest);
     }
     const partition = this.partitionFor(payload.accountId, payload.partition);
-    // 目录与 Rust 的 `scrape-webview-<account_id>` 对齐（失败只告警，partition 仍工作）。
+    // 目录与 Node Host 的 `scrape-webview-<account_id>` 对齐（失败只告警，partition 仍工作）。
     try {
       mkdirSync(join(this.webviewRoot, `scrape-webview-${payload.accountId}`), { recursive: true });
     } catch (error) {
@@ -178,7 +169,7 @@ export class ScrapeManager {
       // about:blank 已加载时导航；确保监听在导航前挂好（runPlan 走自己的 attach 流程）。
       if (entry.win.webContents.getURL() !== payload.url) await entry.win.loadURL(payload.url);
     } else {
-      // Rust `build_scrape_webview` 初始加载 about:blank；没有文档时
+      // Node Host `build_scrape_webview` 初始加载 about:blank；没有文档时
       // executeJavaScript 会挂起。隐藏窗口的 about:blank 在部分环境不会触发
       // loadURL 的 promise 解决，因此不能无限等待：最多等 3s 后继续。
       await this.ensureBlankDocument(entry);
@@ -204,7 +195,7 @@ export class ScrapeManager {
     return null;
   }
 
-  /** 登录/需人工处理时把隐藏窗口显示出来（与 Rust `surface_scrape_webview` 一致）。 */
+  /** 登录/需人工处理时把隐藏窗口显示出来（与 Node Host `surface_scrape_webview` 一致）。 */
   private surface(entry: ScrapeSession): void {
     if (entry.win.isDestroyed()) return;
     entry.win.setBounds({ x: 100, y: 100, width: SCRAPE_WINDOW_WIDTH, height: SCRAPE_WINDOW_HEIGHT });
@@ -250,7 +241,7 @@ export class ScrapeManager {
   /**
    * 在**已存在的**抓取窗口里直接执行 extractor，不导航、不等待网络。
    *
-   * Rust `scrape_balance` 复用 probe 阶段捕获的同一批响应（`eval_with_callback`），
+   * Node Host `scrape_balance` 复用 probe 阶段捕获的同一批响应（`eval_with_callback`），
    * 不能为了提取再导航一次；`runPlan` 是“导航+捕获+提取”的一次性流程，无法满足该场景。
    */
   async evaluate(payload: {
@@ -357,7 +348,7 @@ export class ScrapeManager {
     await wc.debugger.sendCommand("Page.enable");
     if (typeof plan.interceptorJs === "string" && plan.interceptorJs.trim() !== "") {
       // 内置 config 的 interceptor 调用 `__TAURI_INTERNALS__.invoke`；提供兼容 shim，
-      // 让沿用 Rust 配置的抓取脚本零改写运行。ACK 由宿主在 loading 事件后忽略。
+      // 让沿用 Node Host 配置的抓取脚本零改写运行。ACK 由宿主在 loading 事件后忽略。
       const shim = [
         "globalThis.__TAURI_INTERNALS__ = globalThis.__TAURI_INTERNALS__ || {",
         "  invoke: () => Promise.resolve(null),",
@@ -468,7 +459,7 @@ export class ScrapeManager {
   }
 }
 
-/** 与 Rust `eval_with_callback` 的 10s 超时对齐；可用 payload.timeoutMs 覆盖。 */
+/** 与 Node Host `eval_with_callback` 的 10s 超时对齐；可用 payload.timeoutMs 覆盖。 */
 const EVALUATE_TIMEOUT_MS = 10_000;
 
 function safeJson(value: unknown): string {

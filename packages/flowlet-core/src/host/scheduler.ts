@@ -1,15 +1,15 @@
 // Host 无关的周期维护任务：存储清理、模型目录同步、官方余额同步。
 // Owner: lead（迁移集成阶段补齐）。
 //
-// 与 Rust 的对应关系：
-// - 周期与地址：core/host_scheduler.rs（STORAGE_CLEANUP / CATALOG_SYNC / MODELS_*_URL）
-// - 余额同步编排：core/account_balance.rs::sync_official_balances
-// - 目录同步：core/storage_tasks.rs::sync_models_cn_catalog / sync_models_dev_catalog
+// 与 Node Host 的对应关系：
+// - 周期与地址：packages/flowlet-core/src/host/scheduler.ts（STORAGE_CLEANUP / CATALOG_SYNC / MODELS_*_URL）
+// - 余额同步编排：packages/flowlet-core/src/web/balance.ts
+// - 目录同步：packages/flowlet-core/src/host/scheduler.ts / sync_models_dev_catalog
 //
-// MVP 差异（已在 docs/migration/docker-node.md 标注）：
-// - 不写 background_jobs 后台任务日志（Rust 会写）；只输出结构化 console 行，便于容器日志检索。
+// MVP 差异（已在 docs/archive/tauri-migration/docker-node.md 标注）：
+// - 不写 background_jobs 后台任务日志（Node Host 会写）；只输出结构化 console 行，便于容器日志检索。
 // - 目录同步只负责抓取并原子写入 catalogDir，不重建价格表（Node 价格仍来自 config.json）。
-// - 控制台抓取类渠道（需桌面 WebView）不在自动余额同步范围（与 Rust headless 一致）；
+// - 控制台抓取类渠道（需桌面 WebView）不在自动余额同步范围（与 Node Host headless 一致）；
 //   例外是千问：登录千问平台后走官方 HTTP 接口，Node Host 直接参与周期同步。
 import { renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -31,11 +31,11 @@ export const CATALOG_SYNC_INTERVAL_MS = 60 * 60_000;
 export const BALANCE_SYNC_FIRST_DELAY_MS = 30_000;
 export const BALANCE_SYNC_INTERVAL_MS = 5 * 60_000;
 
-/** 与 Rust host_scheduler.rs 一致。 */
+/** 与 Node Host packages/flowlet-core/src/host/scheduler.ts 一致。 */
 export const MODELS_CN_URL = "https://null-object-0000.github.io/models-cn/api.json";
 export const MODELS_DEV_URL = "https://models.dev/api.json";
 
-/** 提供官方余额接口、可在无桌面环境自动同步的渠道（Rust supports_official_balance）。 */
+/** 提供官方余额接口、可在无桌面环境自动同步的渠道（Node Host supports_official_balance）。 */
 const OFFICIAL_BALANCE_CHANNELS = new Set(["deepseek", "kimi", "openrouter", "vibetoken"]);
 /** 千问账号通过千问平台 HTTP 接口自动同步（余额 + 免费额度 + Token Plan 订阅）。 */
 const QWEN_PLATFORM_CHANNEL = "qwen";
@@ -45,7 +45,7 @@ interface UsageRetentionConfig {
   balanceSnapshotMaxPerAccount: number;
 }
 
-/** 对齐 Rust config::UsageRetentionConfig::from_config_json（默认 30 天 / 200 条）。 */
+/** 对齐 Node Host config::UsageRetentionConfig::from_config_json（默认 30 天 / 200 条）。 */
 export function parseUsageRetentionConfig(configJson: JsonRow): UsageRetentionConfig {
   const section = (configJson?.usage_retention ?? {}) as JsonRow;
   const days = Number(section.balance_snapshot_retention_days ?? 30);
@@ -186,7 +186,7 @@ export function createHostScheduler(options: HostSchedulerOptions): HostSchedule
   }
 
   async function runCatalogSyncOnce(): Promise<void> {
-    // 与 Rust 一致：两个目录相互独立，单个失败不影响另一个。
+    // 与 Node Host 一致：两个目录相互独立，单个失败不影响另一个。
     const targets: Array<[string, string]> = [
       ["models-cn.json", MODELS_CN_URL],
       ["models-dev.json", MODELS_DEV_URL],
@@ -198,7 +198,7 @@ export function createHostScheduler(options: HostSchedulerOptions): HostSchedule
         const temporary = `${target}.tmp-${process.pid}`;
         writeFileSync(temporary, text, { mode: 0o644 });
         renameSync(temporary, target);
-        // 与 Rust sync_catalog_file 一致：目录更新后重建价格表（两个来源独立重建无害）。
+        // 与 Node Host sync_catalog_file 一致：目录更新后重建价格表（两个来源独立重建无害）。
         const priceCount = context.storage.rebuildPriceTable(context.catalogDir, context.config);
         log({ task: "catalog-sync", file, bytes: text.length, prices: priceCount });
       } catch (error) {
@@ -219,7 +219,7 @@ export function createHostScheduler(options: HostSchedulerOptions): HostSchedule
       const channelId = String(account.channel_id ?? "");
       if (!OFFICIAL_BALANCE_CHANNELS.has(channelId)) return false;
       if (!presetSupportsBalance(snapshot, channelId)) return false;
-      // 账号级自定义端点不保证官方余额语义（Rust 同口径）。
+      // 账号级自定义端点不保证官方余额语义（Node Host 同口径）。
       const openaiOverride = String(account.base_url_override ?? "").trim();
       const workspaceDefault = String(account.workspace_default_base_url ?? "").trim();
       return openaiOverride === "" && workspaceDefault === "";

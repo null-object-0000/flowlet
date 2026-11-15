@@ -1,5 +1,5 @@
 /* Stable error code catalog shared across domain adapters and UI layers.
-   Codes are NOT derived from parsing user-visible strings. Rust side returns
+   Codes are NOT derived from parsing user-visible strings. Host returns
    free-form Err(String); we map known situations where possible and fall back
    to generic codes otherwise. Keep this list small and intentional. */
 

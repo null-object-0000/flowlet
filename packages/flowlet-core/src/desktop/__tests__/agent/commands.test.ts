@@ -4,7 +4,7 @@
 // - 17 条命令全部注册，且 `list_agent_capabilities` 输出与 plugin-registry.json 一致（camelCase）；
 // - inspect → apply（显式模型/默认模型）→ 重复 apply → restore 经由命令层走通，Home 指向临时目录；
 // - 未选择模型时按可用模型字典序补齐、非法模型写文件前拒绝；
-// - detect_agent_environment 对未知 Agent 报 Rust 对齐错误；
+// - detect_agent_environment 对未知 Agent 报 Node Host 对齐错误；
 // - start/stop_agent_runtime 走 host channel 并拒绝接管外部进程；
 // - check_agent_latest_versions 缓存与单 Agent 失败隔离；
 // - Codex 缓存/删除/同步（后台任务写库）与 Antigravity 删除；

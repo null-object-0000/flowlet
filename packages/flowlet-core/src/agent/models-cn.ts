@@ -1,6 +1,6 @@
 // models-cn.json 读取（Codex 动态模型目录的能力事实来源）。
 //
-// 权威实现：`src-tauri/src/core/model_input_capabilities::read_models_cn_source`。
+// 实现入口：已同步的模型目录文件。
 // Web/桌面 Host 的目录文件位于 `ctx.catalogDir/models-cn.json`；不存在或不可解析时
 // 返回 null（Codex 目录退化为保守条目，不阻断写入）。
 import { readFileSync } from "node:fs";

@@ -1,11 +1,11 @@
 // OpenCode 权限桥接 / 控制服务。Owner: desktop-device。
 //
-// 权威实现：src-tauri/src/core/opencode_control.rs。跨设备同步只需要其中三条入口：
+// 实现入口：packages/flowlet-core/src/agent/opencode-control.ts。跨设备同步只需要其中三条入口：
 // - `pendingSessionIds`：快照里把 OpenCode 待确认会话标成 waiting_user；
 // - `listSessionPermissions`：LAN `/opencode/permissions/{sessionId}`；
 // - `replyPermission`：LAN `/opencode/permissions/{permissionId}/reply`。
 //
-// 桥接协议（本机文件）与 Rust 一致：桌面端 OpenCode 插件把权限请求写到
+// 桥接协议（本机文件）保持既有兼容行为：桌面端 OpenCode 插件把权限请求写到
 // `~/.flowlet/opencode-control/state-*.json`，Flowlet 把决策写到 `reply-{permissionId}.json`；
 // 新鲜窗口 5 秒。桥接不可用时回退到 OpenCode 控制服务 `http://127.0.0.1:4096`。
 import { createHash } from "node:crypto";
@@ -210,7 +210,7 @@ interface ControlResponse {
   body: Buffer;
 }
 
-/** Rust `control_client`：connect 800ms / total 2s，本机控制服务。 */
+/** Node Host `control_client`：connect 800ms / total 2s，本机控制服务。 */
 function controlRequest(
   baseUrl: string,
   method: string,
@@ -335,7 +335,7 @@ async function replyPermissionAt(
   }
 }
 
-/** Rust `list_session_permissions`。 */
+/** Node Host `list_session_permissions`。 */
 export async function listSessionPermissions(
   sessionId: string,
 ): Promise<OpenCodePermissionReport> {
@@ -344,7 +344,7 @@ export async function listSessionPermissions(
   return listPermissionsFrom(LEGACY_CONTROL_URL, sessionId);
 }
 
-/** Rust `pending_session_ids`：控制服务不可用时返回空集合。 */
+/** Node Host `pending_session_ids`：控制服务不可用时返回空集合。 */
 export async function pendingSessionIds(): Promise<Set<string>> {
   const report = await listPermissions();
   if (!report.available) return new Set();
@@ -357,7 +357,7 @@ export async function listPermissions(): Promise<OpenCodePermissionReport> {
   return listPermissionsFrom(LEGACY_CONTROL_URL, null);
 }
 
-/** Rust `reply_permission`。 */
+/** Node Host `reply_permission`。 */
 export async function replyPermission(
   permissionId: string,
   decision: "allow_once" | "reject",

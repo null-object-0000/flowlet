@@ -1,11 +1,11 @@
 // 数据完整性检查：捕获体重新解析 / 未知用量占位 / 费用重算。
 //
-// 权威实现：`src-tauri/src/core/storage_usage.rs` 的 `reanalyze_captured_usage` /
+// 实现入口：`packages/flowlet-core/src/storage/usage.ts` 的 `reanalyze_captured_usage` /
 // `analyze_unknown_usage` / `recalculate_usage_costs`；捕获体解析语义见
-// `src-tauri/src/core/usage.rs`（`extract_captured_stream_usage` / `extract_response_usage`）。
+// `packages/flowlet-core/src/proxy/usage.ts`（`extract_captured_stream_usage` / `extract_response_usage`）。
 //
-// Node 侧只有一条连接、没有 Rust 的连接锁，但保持同一顺序意图：逐行读取捕获帧、base64
-// 解码、SSE/JSON 解析全部在事务外完成（Rust 注释：避免长时间持锁阻塞请求写入端，且
+// Node 侧只有一条连接、没有 Node Host 的连接锁，但保持同一顺序意图：逐行读取捕获帧、base64
+// 解码、SSE/JSON 解析全部在事务外完成（Node Host 注释：避免长时间持锁阻塞请求写入端，且
 // insert_request_log 是先取捕获写锁再取连接锁，反向持锁会死锁）；只有最终落库放进单个
 // 事务批量提交，避免逐行自动提交引发大量 fsync 导致前端卡顿。
 import type { DatabaseSync } from "node:sqlite";
@@ -19,7 +19,7 @@ import { readCaptureRecord } from "./maintenance.ts";
 import type { ModelPrice } from "./prices.ts";
 import { estimateCostAt } from "./usage.ts";
 
-/** Rust `repair_time_clause`：窗口过滤 SQL 片段（`today` 按本地自然日，其余按 UTC 相对时长）。 */
+/** 既有 `repair_time_clause`：窗口过滤 SQL 片段（`today` 按本地自然日，其余按 UTC 相对时长）。 */
 function repairTimeClause(column: string, timeRange: string): string {
   switch (timeRange) {
     case "1h":
@@ -38,8 +38,8 @@ function repairTimeClause(column: string, timeRange: string): string {
 const RFC3339_PREFIX = /^\d{4}-\d{2}-\d{2}T/;
 
 /**
- * Rust `parse_cost_timestamp`：先按 RFC3339 解析，再按 SQLite `YYYY-MM-DD HH:MM:SS`（UTC）。
- * 解析失败返回 undefined（调用方省略 `atMs`，由 `estimateCostAt` 回退到当前时刻，与 Rust
+ * Node Host `parse_cost_timestamp`：先按 RFC3339 解析，再按 SQLite `YYYY-MM-DD HH:MM:SS`（UTC）。
+ * 解析失败返回 undefined（调用方省略 `atMs`，由 `estimateCostAt` 回退到当前时刻，与 Node Host
  * `unwrap_or_else(Utc::now)` 一致）。
  */
 function costTimestampMs(value: unknown): number | undefined {
@@ -56,7 +56,7 @@ function costTimestampMs(value: unknown): number | undefined {
 function decodeCapturedBody(bodyB64: string): Buffer | null {
   try {
     const decoded = Buffer.from(bodyB64, "base64");
-    // Buffer.from 对非法 base64 是宽松的：非空输入解出空 buffer 视为解码失败（Rust 会 continue）。
+    // Buffer.from 对非法 base64 是宽松的：非空输入解出空 buffer 视为解码失败（Node Host 会 continue）。
     return decoded.length === 0 && bodyB64.trim() !== "" ? null : decoded;
   } catch {
     return null;
@@ -64,7 +64,7 @@ function decodeCapturedBody(bodyB64: string): Buffer | null {
 }
 
 /**
- * Rust `extract_captured_stream_usage`：捕获体可能被历史大小上限截断，因此
+ * Node Host `extract_captured_stream_usage`：捕获体可能被历史大小上限截断，因此
  * 1. 先要求带终止标记（`[DONE]` / `message_stop`）的 SSE；
  * 2. 否则接受「有正 output_tokens」的宽松 SSE 解析（兼容不带终止标记的上游）；
  * 3. 最后回退按单条 JSON 响应解析（`text/event-stream` 但实际是单条 JSON）。
@@ -133,14 +133,14 @@ interface ParsedUsage {
 }
 
 /**
- * Rust `reanalyze_captured_usage`（命令名 `repair_captured_usage`）：重解析窗口内的响应体，
+ * Node Host `reanalyze_captured_usage`（命令名 `repair_captured_usage`）：重解析窗口内的响应体，
  * 回填/覆盖 usage_records。返回写入条数。
  *
  * - 只扫 `is_last_attempt = 1` 且（内联 `res_body_b64` 非空 或 捕获帧 `state='ready'` 且
  *   `res_body_bytes > 0`）的日志；排除 `count_tokens` 与 Files API（它们不是模型推理）。
- * - 日志列没有体内联副本时用 `captureStore` 读捕获帧（等价 Rust `read_request_capture`）。
+ * - 日志列没有体内联副本时用 `captureStore` 读捕获帧（等价 Node Host `read_request_capture`）。
  * - 已有 usage 行按 request_id UPDATE（金额/用量/元数据全部覆盖），没有则 INSERT；
- *   `created_at` 一律沿用请求日志的原始时间（Rust 明确要求，否则历史记录会落到修复当天）。
+ *   `created_at` 一律沿用请求日志的原始时间（Node Host 明确要求，否则历史记录会落到修复当天）。
  */
 export function repairCapturedUsage(
   db: DatabaseSync,
@@ -200,7 +200,7 @@ export function repairCapturedUsage(
     if (usage === null) continue;
 
     const atMs = costTimestampMs(row.created_at);
-    // 费用按请求原始时间解析分时价格（Rust `parse_cost_timestamp(created_at)`）。
+    // 费用按请求原始时间解析分时价格（Node Host `parse_cost_timestamp(created_at)`）。
     const cost =
       atMs === undefined
         ? estimateCostAt(
@@ -340,7 +340,7 @@ export function repairCapturedUsage(
 }
 
 /**
- * Rust `analyze_unknown_usage`（命令名 `repair_unknown_usage`）：
+ * Node Host `analyze_unknown_usage`（命令名 `repair_unknown_usage`）：
  * 1. 删除窗口内 `count_tokens` 路径的 usage 行（只算上下文长度，不产生用量；旧版维护流程
  *    曾为它建「未知用量」占位，原生会话回填也可能误配相邻模型事件）；
  * 2. 为窗口内仍无 usage 的最终 attempt 插入占位行（token 全 NULL、
@@ -421,11 +421,11 @@ interface RecalcRow {
 }
 
 /**
- * Rust `recalculate_usage_costs`（命令名 `repair_usage_costs`）：按当前价格表重算窗口内
+ * Node Host `recalculate_usage_costs`（命令名 `repair_usage_costs`）：按当前价格表重算窗口内
  * usage 的 `estimated_*` 五列，返回更新行数。
  *
- * 与 Rust 逐条一致：只取 JOIN 到最终 attempt 且 `total_tokens IS NOT NULL` 的记录
- * （Rust 的边界就是这一列，不额外过滤 `usage_status`）；价格按请求 `created_at` 时刻的分时
+ * 与 Node Host 逐条一致：只取 JOIN 到最终 attempt 且 `total_tokens IS NOT NULL` 的记录
+ * （Node Host 的边界就是这一列，不额外过滤 `usage_status`）；价格按请求 `created_at` 时刻的分时
  * 价格解析，无匹配价格时跳过该行（保留原值）。
  */
 export function repairUsageCosts(

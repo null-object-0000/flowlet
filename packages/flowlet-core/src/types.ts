@@ -1,14 +1,7 @@
-// Shared types for the Flowlet Node host.
-//
-// The Node host is a behavioural replacement for `src-tauri/src/bin/headless.rs`:
-// it must serve the exact same Web Host command contract (`core/web/commands.rs`)
-// and the same model proxy behaviour (`core/proxy*.rs`). Payload shapes are
-// therefore copied from the Rust serde output, NOT designed from scratch.
-//
-// 约定：Rust 侧返回结构体默认 serde snake_case；少数较新结构体显式 camelCase。
-// 迁移时逐字段对照 `src-tauri/src/core/**` 中对应的 `#[derive(Serialize)]`。
-
-/** 原样透传的 JSON 行（字段命名与 Rust 输出一致，禁止二次重命名）。 */
+// Shared types for the Flowlet Node Host.
+// Field names are the persisted Host command contract: preserve each field's
+// snake_case/camelCase spelling when moving data between SQLite, HTTP and UI.
+/** 原样透传的 JSON 行（字段命名与 Node Host 输出一致，禁止二次重命名）。 */
 export type JsonRow = Record<string, any>;
 
 export interface HostOptions {
@@ -50,7 +43,7 @@ export interface ProxyStatus {
   started_at: string | null;
 }
 
-/** 命令错误：与 Rust `core/web` 的 `(StatusCode, code, message)` 同形。 */
+/** 命令错误：与 既有 `core/web` 的 `(StatusCode, code, message)` 同形。 */
 export class CommandError extends Error {
   status: number;
   code: string;
@@ -70,11 +63,9 @@ export class CommandError extends Error {
 /**
  * Host 级设备身份，持久化在数据目录 `flowlet-device.json`（重启不变）。
  *
- * 文件格式必须与 Rust `core/device_identity.rs::DeviceIdentity` 一致；该结构体是
- * `#[serde(rename_all = "camelCase")]`，磁盘上写作
- * `{ schemaVersion, deviceId, createdAt, displayName, platform }`（进程内用 snake_case）。
- * Rust 侧没有 `deny_unknown_fields`，因此多余键（app_version）可安全共存；
- * 反过来 Rust 写的文件被 Node 读取时 app_version 缺失，由运行时补默认值。
+ * 磁盘格式由 device/identity.ts 维护，使用 camelCase：
+ * `{ schemaVersion, deviceId, createdAt, displayName, platform }`，进程内字段保持 snake_case。
+ * 读取时兼容历史文件中的额外字段与缺失的 app_version，由运行时补齐默认值。
  */
 export interface DeviceIdentity {
   schema_version: number;
@@ -82,11 +73,11 @@ export interface DeviceIdentity {
   created_at: string;
   display_name: string;
   platform: string;
-  /** 仅 Node 侧内存/展示用，不写回 Rust 语义字段。 */
+  /** 仅 Node 侧内存/展示用，不写回 Node Host 语义字段。 */
   app_version?: string;
 }
 
-/** 运行时配置快照：与 Rust RuntimeConfigStore 对齐，保存后必须刷新。 */
+/** 运行时配置快照：与 Node Host RuntimeConfigStore 对齐，保存后必须刷新。 */
 export interface RuntimeConfigStore {
   snapshot(): JsonRow;
   replace(snapshot: JsonRow): void;
@@ -98,7 +89,7 @@ export interface RuntimeConfigStore {
  * 模型入口控制器。
  *
  * 注意：bind config 变更（端口/调用密钥）持久化到 app_meta 后，下一次 `start()`
- * 或请求周期生效；Rust 版同样是「保存后下一次尝试生效」。
+ * 或请求周期生效；Node Host 版同样是「保存后下一次尝试生效」。
  */
 export interface ProxyController {
   start(): Promise<void>;

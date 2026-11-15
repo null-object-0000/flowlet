@@ -69,7 +69,7 @@ describe("jenkins normalizeBaseUrl", () => {
   it("拒绝空地址/非法 scheme/无法解析/query/fragment", () => {
     assert.throws(() => normalizeBaseUrl("   "), /Jenkins 地址不能为空/);
     assert.throws(() => normalizeBaseUrl("ftp://host:8080"), /Jenkins 地址必须是 http 或 https/);
-    // 不带 scheme 的 `host:port` 会被 URL 解析成 scheme，最终落到 scheme 校验（与 Rust 一致）。
+    // 不带 scheme 的 `host:port` 会被 URL 解析成 scheme，最终落到 scheme 校验（与 Node Host 一致）。
     assert.throws(() => normalizeBaseUrl("jenkins.example.com:8080"), /Jenkins 地址必须是 http 或 https/);
     assert.throws(() => normalizeBaseUrl("http://"), /Jenkins 地址无法解析/);
     assert.throws(() => normalizeBaseUrl("http://host:8080/?a=1"), /Jenkins 地址不能带查询参数或锚点/);

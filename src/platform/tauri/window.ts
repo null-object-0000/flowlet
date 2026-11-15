@@ -24,7 +24,7 @@ async function currentTauriWindow(): Promise<import("@tauri-apps/api/window").Wi
 /**
  * 桌面窗口命令的统一入口。
  *
- * - Tauri 桌面壳：原样走 `@tauri-apps/api/window`；
+ * - 原生命令兼容分支：原样走 `@tauri-apps/api/window`；
  * - Electron desktop 壳：走 preload 桥（`ipcRenderer.invoke` → 主进程
  *   `BrowserWindow` 方法）。拖动/双击最大化在 desktop 模式下由 CSS
  *   `-webkit-app-region: drag` 交给平台处理；`startDragging` /

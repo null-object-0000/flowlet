@@ -237,7 +237,7 @@ export class DesktopHostBridgeImpl implements DesktopHostBridge {
       throw new Error("当前系统不支持原生通知");
     }
     const notification = new Notification({ title, body });
-    // 与 Rust 预留的 toast 点击语义一致：点击通知回到主窗口（不改变代理运行状态）。
+    // 与 Node Host 预留的 toast 点击语义一致：点击通知回到主窗口（不改变代理运行状态）。
     notification.on("click", () => {
       try {
         this.deps.showWindow();
@@ -259,7 +259,7 @@ export class DesktopHostBridgeImpl implements DesktopHostBridge {
       if (this.suspendBlockerId !== null && powerSaveBlocker.isStarted(this.suspendBlockerId)) {
         return null;
       }
-      // 与 Rust ActivityTracker 语义一致：只阻止系统自动待机，不阻止熄屏。
+      // 与 Node Host ActivityTracker 语义一致：只阻止系统自动待机，不阻止熄屏。
       this.suspendBlockerId = powerSaveBlocker.start("prevent-app-suspension");
       this.deps.logger.info("已启用电源抑制", { id: this.suspendBlockerId });
       return null;

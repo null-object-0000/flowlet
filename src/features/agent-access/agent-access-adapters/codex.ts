@@ -13,7 +13,7 @@ const REASONING_DESCRIPTIONS: Record<string, string> = {
   xhigh: "Maximum reasoning depth for the hardest problems",
 };
 
-/** 与 Rust 端一致：在 models-cn 的官方 provider 内按规范模型 ID 双侧归一查找。 */
+/** 与 Host 端一致：在 models-cn 的官方 provider 内按规范模型 ID 双侧归一查找。 */
 function findCatalogModel(catalog: ModelsCnCatalog | null | undefined, modelId: string): ModelsCnModel | null {
   if (!catalog) return null;
   const providerId = modelsCnProviderIdForModel(modelId);
@@ -31,7 +31,7 @@ function inputModalities(model: ModelsCnModel | null): string[] {
 }
 
 /**
- * 按所选模型动态生成单条目 Codex 模型目录，规则与 Rust `codex_model_catalog` 对齐：
+ * 按所选模型动态生成单条目 Codex 模型目录，规则与 既有 `codex_model_catalog` 对齐：
  * context_window 取 models-cn 的 limits.contextTokens，input 取 capabilities.inputModalities，
  * 推理档位按 capabilities.thinking 给；查不到模型时使用保守条目。其余字段沿用原静态常量。
  */

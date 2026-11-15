@@ -1,17 +1,17 @@
-// SQLite schema + migrations, byte-compatible with src-tauri/src/core/storage.rs.
+// SQLite schema + migrations, byte-compatible with packages/flowlet-core/src/storage/schema.ts.
 //
-// Rust 没有 `PRAGMA user_version`：每次启动执行「CREATE TABLE IF NOT EXISTS +
+// Node Host 没有 `PRAGMA user_version`：每次启动执行「CREATE TABLE IF NOT EXISTS +
 // 幂等补列 + 重建表迁移 + 一次性数据归一」。这里逐条照搬，索引/列/默认值不改。
 //
 // 例外：`agent_session_metadata`（docs/agent-session-metadata.md §2）当前仅由 Node Host
-// 写入（服务端从请求体派生标题/项目路径）。表结构仍按同一契约维护、只增不改，桌面 Rust
-// 旧版本读到未知表会忽略；后续 Rust 侧补建时字段必须与本文件完全一致。
+// 写入（服务端从请求体派生标题/项目路径）。表结构仍按同一契约维护、只增不改，桌面 Node Host
+// 旧版本读到未知表会忽略；后续 Host 侧补建时字段必须与本文件完全一致。
 import type { DatabaseSync } from "node:sqlite";
 import { modelCatalog, type ModelIdentity } from "../catalog/index.ts";
 
 export const SCHEMA_VERSION = "2026.08.02";
 
-/** 建表 + 基础索引（Rust `migrate()` 的第一个 execute_batch）。 */
+/** 建表 + 基础索引（既有 `migrate()` 的第一个 execute_batch）。 */
 const BASE_SCHEMA = `
 CREATE TABLE IF NOT EXISTS channel_presets (
     id              TEXT PRIMARY KEY,
@@ -475,7 +475,7 @@ CREATE INDEX IF NOT EXISTS idx_background_job_events_job
     ON background_job_events(job_id, sequence);
 `;
 
-/** 幂等补列（Rust `add_column_if_missing` 调用，逐条照搬）。 */
+/** 幂等补列（既有 `add_column_if_missing` 调用，逐条照搬）。 */
 const ADDED_COLUMNS: ReadonlyArray<readonly [string, string, string]> = [
   ["device_usage_breakdowns", "estimated_cost_currency", "TEXT"],
   ["device_usage_breakdowns", "native_event_count", "INTEGER NOT NULL DEFAULT 0"],
@@ -603,7 +603,7 @@ const ADDED_COLUMNS: ReadonlyArray<readonly [string, string, string]> = [
   ["service_credentials", "username", "TEXT"],
 ];
 
-/** Rust 里 `for column in [...]` 循环补的 device_daily_usage 原生列。 */
+/** Node Host 里 `for column in [...]` 循环补的 device_daily_usage 原生列。 */
 const DEVICE_DAILY_NATIVE_COLUMNS = [
   "native_event_count",
   "native_input_tokens",
@@ -635,7 +635,7 @@ function nowRfc3339(): string {
   return new Date().toISOString();
 }
 
-/** Rust `normalize_legacy_virtual_model_routes_schema`（provider_name/provider_id 旧列重建）。 */
+/** Node Host `normalize_legacy_virtual_model_routes_schema`（provider_name/provider_id 旧列重建）。 */
 function normalizeLegacyVirtualModelRoutesSchema(db: DatabaseSync): void {
   if (
     !tableHasColumn(db, "virtual_model_routes", "provider_name") &&
@@ -724,7 +724,7 @@ function routeOrder(left: StoredRoute, right: StoredRoute): number {
   return byCreated !== 0 ? byCreated : left.id.localeCompare(right.id);
 }
 
-/** 旧聚合模型路由 → 直接模型路由（Rust `migrate_legacy_aggregate_routes`）。 */
+/** 旧聚合模型路由 → 直接模型路由（Node Host `migrate_legacy_aggregate_routes`）。 */
 function migrateLegacyAggregateRoutes(
   db: DatabaseSync,
   findModel: (name: string) => ModelIdentity | null,
@@ -836,14 +836,14 @@ function migrateLegacyAggregateRoutes(
   }
 }
 
-/** Rust `remove_legacy_aggregate_virtual_models`。 */
+/** Node Host `remove_legacy_aggregate_virtual_models`。 */
 function removeLegacyAggregateVirtualModels(db: DatabaseSync): void {
   db.prepare(
     "DELETE FROM virtual_models WHERE lower(trim(id)) IN (?1, ?2)",
   ).run("flowlet-pro", "flowlet-flash");
 }
 
-/** Rust `drop_project_management_schema`（先关外键再按子→父顺序删表）。 */
+/** Node Host `drop_project_management_schema`（先关外键再按子→父顺序删表）。 */
 function dropProjectManagementSchema(db: DatabaseSync): void {
   const foreignKeys = (db.prepare("PRAGMA foreign_keys").get() as { foreign_keys?: number } | undefined)
     ?.foreign_keys;
@@ -909,7 +909,7 @@ export function migrate(db: DatabaseSync, options: MigrateOptions = {}): void {
 
   normalizeLegacyVirtualModelRoutesSchema(db);
 
-  // 一次性迁移的判断必须发生在补列之前（Rust 先 table_has_column 再 add_column_if_missing）。
+  // 一次性迁移的判断必须发生在补列之前（Node Host 先 table_has_column 再 add_column_if_missing）。
   const needsAnthropicOverrideMigration = !tableHasColumn(
     db,
     "channel_accounts",

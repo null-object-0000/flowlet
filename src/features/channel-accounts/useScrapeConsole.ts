@@ -33,7 +33,7 @@ export function useScrapeConsole(runScrape?: (accountId: string) => Promise<Scra
   // 卸载时释放仍被占用的隐藏控制台 WebView。
   //
   // 进入 need-login / need-console-action 时窗口是**故意**保留的，用户若直接关掉抽屉
-  // 或切换渠道，就没有任何路径再关它：Rust 侧会把该账号标记为“等待人工处理”，后台
+  // 或切换渠道，就没有任何路径再关它：Host 侧会把该账号标记为“等待人工处理”，后台
   // 同步从此永久跳过它，窗口也会一直占着 WebKit 子进程与文件描述符。
   //
   // StrictMode 安全性：React 在开发模式下的“挂载 → 卸载 → 再挂载”发生在首次挂载后
@@ -54,7 +54,7 @@ export function useScrapeConsole(runScrape?: (accountId: string) => Promise<Scra
     setState("opening");
     try {
       setState("collecting");
-      // probe 会先在 Rust 侧声明人工刷新所有权，再创建后台 WebView。不能在这里
+      // probe 会先在 Host 侧声明人工刷新所有权，再创建后台 WebView。不能在这里
       // 提前 open，否则可能撞上尚未结束的后台同步，被其清理逻辑关闭窗口。
       // 只有明确进入登录页才断言需要登录；监听已就绪后的捕获超时则提示用户
       // 在已展示的控制台中处理登录、验证码或页面加载，再主动重试。

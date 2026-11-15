@@ -7,9 +7,9 @@
 // read_config / write_config / log_from_frontend / is_autostart_enabled /
 // enable_autostart / disable_autostart。
 //
-// 权威行为：src-tauri/src/commands/maintenance.rs、channels.rs、usage.rs 与
-// src-tauri/src/commands/scrape.rs（route rules / account_stats）。
-// 字段风格与 Rust 逐字段一致：这些命令返回的配置结构是 snake_case，
+// 实现入口：packages/flowlet-core/src/desktop/maintenance.ts、packages/flowlet-core/src/desktop/maintenance.ts、packages/flowlet-core/src/proxy/usage.ts 与
+// packages/flowlet-core/src/desktop/scrape.ts（route rules / account_stats）。
+// 字段风格与 Node Host 逐字段一致：这些命令返回的配置结构是 snake_case，
 // 存储统计结构（StorageUsageSummary / DatabaseCompactionResult）是 camelCase；
 // db_stats 是三元组数组；`()` 返回 null。
 import { readFileSync, statSync, writeFileSync } from "node:fs";
@@ -68,7 +68,7 @@ const ROUTE_RULE_REQUIRED = [
   "created_at",
   "updated_at",
 ];
-// ChannelAccount 的 Option / #[serde(default)] 字段允许缺省（与 Rust serde 一致）。
+// ChannelAccount 的 Option / #[serde(default)] 字段允许缺省（与 Node Host serde 一致）。
 const CHANNEL_ACCOUNT_REQUIRED = [
   "id",
   "channel_id",
@@ -243,12 +243,12 @@ function fileBytes(filePath: string): number {
   }
 }
 
-/** Rust `export_config` 的 `exported_at` 使用 chrono RFC3339（+00:00 偏移）。 */
+/** Node Host `export_config` 的 `exported_at` 使用 chrono RFC3339（+00:00 偏移）。 */
 function rfc3339Now(): string {
   return new Date().toISOString().replace(/\.\d{3}Z$/, "+00:00").replace("Z", "+00:00");
 }
 
-/** Rust `get_app_diagnostics` 的 `std::env::consts::{OS,ARCH}` 命名。 */
+/** Node Host `get_app_diagnostics` 的 `std::env::consts::{OS,ARCH}` 命名。 */
 function rustPlatform(): string {
   const os =
     process.platform === "darwin"
@@ -268,7 +268,7 @@ function rustPlatform(): string {
 }
 
 export const handlers: DesktopHandlerMap = {
-  // ─── 渠道 / 路由规则（channels.rs / scrape.rs） ────────────────────────────
+  // ─── 渠道 / 路由规则（packages/flowlet-core/src/desktop/maintenance.ts / packages/flowlet-core/src/desktop/scrape.ts） ────────────────────────────
 
   save_channel_presets: (ctx, rawArgs) => {
     const args = argsObject(rawArgs);
@@ -278,7 +278,7 @@ export const handlers: DesktopHandlerMap = {
     } catch (error) {
       throw badRequest(error);
     }
-    // Rust update_after：保存成功后才把入参发布进运行时快照（不重新读取）。
+    // Node Host update_after：保存成功后才把入参发布进运行时快照（不重新读取）。
     ctx.runtimeConfig.update((draft) => {
       draft.channels = presets;
     });
@@ -322,7 +322,7 @@ export const handlers: DesktopHandlerMap = {
     }
   },
 
-  // ─── 配置读写 / 导入导出（maintenance.rs） ─────────────────────────────────
+  // ─── 配置读写 / 导入导出（packages/flowlet-core/src/desktop/maintenance.ts） ─────────────────────────────────
 
   read_config: (ctx) => {
     try {
@@ -335,7 +335,7 @@ export const handlers: DesktopHandlerMap = {
   write_config: (ctx, rawArgs) => {
     const args = argsObject(rawArgs);
     const content = argString(args, "content");
-    // Rust core::proxy::write_config_raw：先 serde_json 解析，再要求顶层为对象/数组。
+    // Node Host core::proxy::write_config_raw：先 JSON 解析，再要求顶层为对象/数组。
     let parsed: unknown;
     try {
       parsed = JSON.parse(content);
@@ -359,7 +359,7 @@ export const handlers: DesktopHandlerMap = {
 
   export_config: (ctx) => {
     try {
-      // 字段顺序与 Rust ConfigBundle 一致；价格来自内存价格表（不落库）。
+      // 字段顺序与 Node Host ConfigBundle 一致；价格来自内存价格表（不落库）。
       const bundle = {
         version: "1",
         exported_at: rfc3339Now(),
@@ -383,7 +383,7 @@ export const handlers: DesktopHandlerMap = {
     try {
       parsed = JSON.parse(json);
     } catch (error) {
-      // Rust 返回 serde_json 原始错误文本，这里保留解析器消息以保留可诊断性。
+      // Node Host 返回 JSON 原始错误文本，这里保留解析器消息以保留可诊断性。
       throw CommandError.badRequest(error instanceof Error ? error.message : String(error));
     }
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -414,9 +414,9 @@ export const handlers: DesktopHandlerMap = {
       ctx.storage.saveRouteCandidates(routes);
       ctx.storage.saveRouteRules(rules);
       ctx.storage.saveVirtualModels(virtualModels);
-      // 价格不持久化到数据库；导入时直接更新内存价格副本（Rust set_prices）。
+      // 价格不持久化到数据库；导入时直接更新内存价格副本（Node Host set_prices）。
       ctx.storage.setPrices(prices);
-      // 导入后从数据库重新读取并整体替换运行时快照（Rust import_config）。
+      // 导入后从数据库重新读取并整体替换运行时快照（Node Host import_config）。
       ctx.runtimeConfig.replace({
         channels: ctx.storage.listChannelPresets(),
         accounts: ctx.storage.listChannelAccounts(),
@@ -442,7 +442,7 @@ export const handlers: DesktopHandlerMap = {
 
   storage_usage_summary: (ctx, rawArgs) => {
     const args = argsObject(rawArgs);
-    // Rust 命令体只读取 scanId 用于事件关联；Node 侧事件由宿主实现，这里仍校验参数。
+    // Node Host 命令体只读取 scanId 用于事件关联；Node 侧事件由宿主实现，这里仍校验参数。
     argString(args, "scanId");
     try {
       const dbPath = ctx.storage.dbPath();
@@ -462,7 +462,7 @@ export const handlers: DesktopHandlerMap = {
   },
 
   compact_database: (ctx) => {
-    // Rust：代理运行中禁止压缩（重写数据库期间会积压日志写入）。
+    // Node Host：代理运行中禁止压缩（重写数据库期间会积压日志写入）。
     if (ctx.proxy.status().running) {
       throw CommandError.badRequest("优化数据库前必须先暂停代理服务");
     }

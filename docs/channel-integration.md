@@ -3,8 +3,8 @@
 本文说明如何在 Flowlet 中接入一个新的上游模型渠道。实施前应先阅读：
 
 - [`AGENTS.md`](../AGENTS.md)
-- [`docs/config.md`](./config.md)
-- [`docs/architecture.md`](./architecture.md)
+- [`docs/config.md`](config.md)
+- [`docs/architecture.md`](architecture.md)
 
 接入目标不是“让渠道出现在下拉框里”，而是完整打通以下链路：
 
@@ -89,7 +89,7 @@ OpenRouter 支持两级资源查询（`supports_balance_query=true`）：普通�
 Management Key；配置后改走 `GET /api/v1/credits`，以 `total_credits - total_usage`
 展示真实账户 Credits 余额。Management Key 不参与模型请求、连接测试和路由，认证失败
 也不得把普通 API Key 标记为 `invalid_key`。实现仍由
-`sync.rs::query_openrouter_balance` + `commands::scrape.rs::query_balance` 分发，保存后
+`packages/flowlet-core/src/web/model-sync.ts` + `commands::packages/flowlet-core/src/desktop/scrape.ts` 分发，保存后
 前端 `refreshSavedAccounts` 自动触发同步，快照落库并在概览页展示。
 
 Qwen 是双资源模式渠道：默认 **API 按量付费**（通用 `sk-` 前缀 Key + 渠道级
@@ -109,7 +109,7 @@ Token Plan 模式时自动写入覆盖。两种资源模式均由官方控制台
   回退。历史快照仍是周口径，向后兼容不得移除；详见 `docs/config.md` 的 `scrape` 字段；
 - **API 按量付费**（scrape mode `freetier`，控制台 `/home/benefits` 福利页）抓
   免费额度与账单：`ListBailianFreetier`（freetier 模板清单）、
-  `DescribeFqInstance`（免费额度实例，页面按 40 个模板一批连发多批，Rust 侧按
+  `DescribeFqInstance`（免费额度实例，页面按 40 个模板一批连发多批，Node Host 侧按
   `Template.Code` 跨批合并并裁剪字段）、`GetBillingAccountAvailableAmount`
   （账户可用余额 → 快照 `balance`）、`ListSettleBillTotalSummary`（本月结算账单）
   与可选的 `queryCurrentCertInfo`（实名认证）、`tool/user/info.json`（会话信息）。
@@ -138,7 +138,7 @@ Flowlet 走千问官方 CLI（`@qianwenai/qianwen-cli`）使用的 device flow�
 - Web Host / Docker 没有 WebView，这条 HTTP 路径是它们获取余额与免费额度、订阅额度的
   唯一途径；Node Host 的周期余额同步（启动 30 秒后首轮、之后每 5 分钟）会把
   **已登录的 Qwen 账号**纳入同一轮任务，未登录账号直接跳过；`qwen_platform_status|login_start|login_poll|logout|sync` 已加入
-  `core/web/commands.rs` 的显式命令白名单，授权页由客户端浏览器打开；
+  `core/web/packages/flowlet-core/src/web/commands.ts` 的显式命令白名单，授权页由客户端浏览器打开；
 - 凭据按**千问平台账号**共享，存放在数据目录 `qwen-platform/credentials.json`
   （权限 0600，`platforms` 存令牌、`accounts` 存 Flowlet 账号 → 平台账号绑定）：
   同一个平台账号登录一次即可被同渠道的多个 Flowlet 账号复用（未绑定的账号会回退到
@@ -156,14 +156,14 @@ Flowlet 走千问官方 CLI（`@qianwenai/qianwen-cli`）使用的 device flow�
   跳过，不会把「未订阅」误报为同步失败；两套都取不到才报错；
 - 网关返回的免费额度实例带英文展示单位（`Thousand Tokens` / `TenThousand Word` /
   `Second` / `Piece`），且带 `InstanceName` / `Uid` / `StartTime`。写入 bundle 前
-  Rust 侧归一到基础单位（`tokens` / `字` / `秒` / `张`，`BaseValue` 语义不变），
+  Node Host 侧归一到基础单位（`tokens` / `字` / `秒` / `张`，`BaseValue` 语义不变），
   并丢弃账号身份字段，避免前端把 1000 千tokens 显示成 1,000 Tokens、也避免把
   账号 Uid 写进余额快照；`Template.Name` 由网关直接给出，缺失时才用
   model-mapping 反查；
 - 平台登录令牌**只用于余额/免费额度查询**，不参与模型调用、连接测试与路由；
   渠道 API Key 仍是唯一的模型调用凭据，也不写入 SQLite；
 - 这些网关接口来自千问官方 CLI 的公开行为（不是模型 API 的一部分），接口变化时
-  需对照 CLI 新版本更新 `core/qwen_platform.rs`；控制台抓取配置保留为兜底，
+  需对照 CLI 新版本更新 `packages/flowlet-core/src/web/qwen-platform.ts`；控制台抓取配置保留为兜底，
   `freetier` scrape mode 的槽位定义同时是前端解析口径的事实来源。
 
 **Token Plan 订阅**共用同一次「登录千问平台」，但接口不同（`sync_account` 按
@@ -261,17 +261,13 @@ ChatGPT API 的最终网络错误日志及重连告警记录底层原因链，�
 
 ### 3.2 同步代码默认值
 
-2026-11-15 起渠道能力仅由 Node Host 实现，Android 不编译渠道 Adapter。下文旧 Rust
-函数名用于说明兼容语义，当前 TypeScript 函数名和调用边界以标注文件中的实现为准。
+2026-11-15 起渠道能力仅由 Node Host 实现，Android 不编译渠道 Adapter。所有配置、模型同步、余额与路由变更均应在下述 TypeScript 实现中完成。
 
 以下位置必须与 `config.json` 一致：
 
-- `src/domains/channel/types.ts`
-  - `DEFAULT_EXPOSED_MODELS_BY_CHANNEL`
-- `packages/flowlet-core/src/config/index.ts`
-  - `ChannelPreset::<channel>()`
-- `packages/flowlet-core/src/config/index.ts`
-  - `builtin_channel_presets()`
+- `src/domains/channel/types.ts`：前端渠道类型与默认开放模型。
+- `packages/flowlet-core/src/config/index.ts`：内置预设加载、配置快照与路由补齐。
+- `packages/flowlet-core/src/storage/config.ts`：账号、预设和路由持久化。
 
 外部 `config.json` 可能来自旧版本。新增渠道时必须确认内置配置合并和 SQLite 迁移能够把新渠道带到已有安装，不能只验证全新数据库。
 
@@ -285,19 +281,9 @@ Flowlet 运行时的渠道预设会进入 SQLite。新增或修改渠道时至�
 4. 现有路由的优先级和 `enabled` 状态不被重置；
 5. 迁移是幂等的，多次启动结果一致。
 
-当前相关实现：
-
-- `packages/flowlet-core/src/storage/config.ts`
-  - `ensure_missing_presets`
-  - `sync_preset_maintained_config`
-  - 渠道能力字段的其他定向迁移
-- `packages/flowlet-desktop/src/main.ts`
-  - `build_app_state`
-  - `merge_builtin_config`
-- `packages/flowlet-core/src/storage/__tests__/`
-  - 新增渠道与旧预设升级测试
-
-修改字段时不能只扩展 `ensure_missing_presets`：该函数遇到已存在的渠道会跳过，已有用户仍会保留旧值。
+当前实现位于 `packages/flowlet-core/src/config/index.ts` 与 `storage/config.ts`，
+SQLite schema 演进位于 `storage/schema.ts`。回归覆盖见 `storage/__tests__/` 和
+`web/__tests__/channels-config.test.ts`。只补齐缺失预设不能替代已有账号/协议升级测试。
 
 ## 5. Node Host 渠道能力适配
 
@@ -314,7 +300,7 @@ Flowlet 运行时的渠道预设会进入 SQLite。新增或修改渠道时至�
 ### 5.2 模型同步
 
 在对应的 `packages/flowlet-core/src/web/model-sync.ts` 中提供模型同步入口；
-可复用 `sync.rs` 的通用 OpenAI-compatible HTTP 与响应映射，响应不兼容时把渠道专属最小反序列化
+可复用 `packages/flowlet-core/src/web/model-sync.ts` 的通用 OpenAI-compatible HTTP 与响应映射，响应不兼容时把渠道专属最小反序列化
 结构和转换留在该 Adapter 模块，最终统一返回 `ChannelModel`：
 
 - `channel_id`、`model`、`display_name` 正确；
@@ -326,7 +312,7 @@ Flowlet 运行时的渠道预设会进入 SQLite。新增或修改渠道时至�
 - 网络、HTTP 状态和 JSON 解析错误必须真实返回。
 
 LongCat 的模型详情请求、详情失败回退与模型转换均归档在 LongCat Adapter；Kimi 的专属列表
-DTO、发布时间校准与模型转换均归档在 Kimi Adapter。`sync.rs` 只保留标准 OpenAI-compatible
+DTO、发布时间校准与模型转换均归档在 Kimi Adapter。`packages/flowlet-core/src/web/model-sync.ts` 只保留标准 OpenAI-compatible
 同步和无渠道含义的共享 URL、排序工具。新渠道应选择最接近的实现参考，不要机械复制。
 
 ### 5.3 余额和资源能力
@@ -358,14 +344,14 @@ Token 资源包、配额、用量等能力同理。UI 应依赖渠道能力或�
    硬编码另一份 Base URL、鉴权规则或 API Key。
 
 预设工厂返回的 `ChannelPreset.id` 必须与 `plugin-registry.json` 的 `channelId` 相同；统一契约
-测试会遍历所有渠道贡献验证这一点。新增渠道不再修改 `presets.rs` 的分发分支。
+测试会遍历所有渠道贡献验证这一点。新增渠道不再修改 `config/index.ts` 的分发分支。
 
 需要控制台抓取时，Adapter 只负责把账号 `resource_mode` 映射为 `config.json` 中的 scrape mode key，
 识别明确登录页，并承载渠道专属业务响应 URL 分类、同槽位合并与完成条件；console URL、拦截器、
 页面 extractor 和必需响应槽位仍放在 `config.json`，WebView 生命周期和阶段等待留在公共抓取层。
 必须同时开启 `ChannelPreset.supports_scrape_balance`，避免声明与实现脱节。
 
-模型同步与余额 Tauri command 已通过统一入口分发，不再添加 `channel_id` 大分支。不支持的能力
+模型同步与余额 Host command 已通过统一入口分发，不再添加 `channel_id` 大分支。不支持的能力
 返回明确错误文案。
 
 command 只执行细粒度底层操作。账号保存后的余额、模型、路由刷新仍由 React 编排。
@@ -402,7 +388,7 @@ AccountEditorDrawer
 - 保存单账号不应无条件重写全部路由；
 - 自定义 Base URL 时，官方余额和模型同步是否应跳过必须明确。
 
-渠道模型生成直接路由后，还必须验证 `proxy_routing.rs` 和 `proxy_http.rs` 中的规范模型身份校验、协议、账号健康状态和 `/models` 过滤条件。
+渠道模型生成直接路由后，还必须验证 `packages/flowlet-core/src/proxy/routing.ts` 和 `packages/flowlet-core/src/proxy/http.ts` 中的规范模型身份校验、协议、账号健康状态和 `/models` 过滤条件。
 
 ## 7. 前端接入
 
@@ -442,9 +428,9 @@ AccountEditorDrawer
 
 每个新渠道至少覆盖适用的测试：
 
-### Rust
+### Node Host
 
-- `core::plugin_contract` 统一契约测试通过，确认注册表、预设、Capability Adapter、能力声明、
+- Node Host 的注册表、配置与能力契约测试通过，确认注册表、预设、Capability Adapter、能力声明、
   scrape mode、默认模型与模型目录互相一致；
 - `config.json` 能解析渠道、端点、价格、默认模型与模型目录；
 - 全新 SQLite 能追加渠道；

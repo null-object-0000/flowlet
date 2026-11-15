@@ -1,6 +1,6 @@
 // 局域网发现/探测状态的 app_meta 持久化。Owner: desktop-device。
 //
-// 权威实现：src-tauri/src/core/lan_sync.rs 的三个 app_meta 键：
+// 实现入口：packages/flowlet-core/src/device/lan.ts 的三个 app_meta 键：
 // - `device_lan_descriptor_v1`：本机对外发布的 LanPeerDescriptor；
 // - `device_lan_peers_v1`：已知 peer 的 LanPeerDescriptor 映射（deviceId → descriptor）；
 // - `mobile_lan_probe_cache_v1`：最近一次探测结果缓存（移动端读取）。
@@ -40,7 +40,7 @@ function readJson(db: DatabaseSync, key: string): unknown {
   }
 }
 
-/** Rust `current_descriptor` 的持久化半边：读取描述符。 */
+/** 既有 `current_descriptor` 的持久化半边：读取描述符。 */
 export function loadLanDescriptor(db: DatabaseSync): LanPeerDescriptor | null {
   const value = readJson(db, LAN_DESCRIPTOR_KEY);
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
@@ -51,7 +51,7 @@ export function saveLanDescriptor(db: DatabaseSync, descriptor: LanPeerDescripto
   setAppMeta(db, LAN_DESCRIPTOR_KEY, JSON.stringify(descriptor));
 }
 
-/** Rust `load_peer_registry`：app_meta 中直接存 deviceId → descriptor 的 JSON 对象。 */
+/** 既有 `load_peer_registry`：app_meta 中直接存 deviceId → descriptor 的 JSON 对象。 */
 export function loadPeerRegistry(db: DatabaseSync): Record<string, LanPeerDescriptor> {
   const value = readJson(db, LAN_PEERS_KEY);
   if (value === null || typeof value !== "object" || Array.isArray(value)) return {};
@@ -72,7 +72,7 @@ export function savePeerRegistry(
   setAppMeta(db, LAN_PEERS_KEY, JSON.stringify(registry));
 }
 
-/** Rust `remember_peer`：快照里若带 lanPeer，就写入 peer registry。 */
+/** 既有 `remember_peer`：快照里若带 lanPeer，就写入 peer registry。 */
 export function rememberPeer(
   db: DatabaseSync,
   deviceId: string,

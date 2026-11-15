@@ -12,7 +12,7 @@ export type ParsedSyncPackage =
 
 /**
  * 按格式嗅探解析接入包。账号工作区接入包内嵌完整 S3 连接配置，
- * 导入后由 Rust 端同时完成「配置 S3 同步 + 加入工作区」。
+ * 导入后由 Host 端同时完成「配置 S3 同步 + 加入工作区」。
  */
 export function parseSyncPackage(text: string): ParsedSyncPackage {
   const trimmed = text.trim();

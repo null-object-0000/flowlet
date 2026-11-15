@@ -2,7 +2,7 @@
  * Z.AI（智谱 BigModel）API 按量付费的资源包（额度包）解析。
  *
  * 资源包由官方控制台的资源包管理页 `GET /api/biz/tokenAccounts/list/my` 抓取，
- * Rust 侧 extractor 已把 `rows` 归一化为数组写入 `AccountBalanceSnapshot.token_packs`。
+ * Host 侧 extractor 已把 `rows` 归一化为数组写入 `AccountBalanceSnapshot.token_packs`。
  * 单个资源包字段：
  * - packageId / tokenNo：资源包标识
  * - packageName：资源包名称（如「【实名认证】500万GLM-4.7体验包」）

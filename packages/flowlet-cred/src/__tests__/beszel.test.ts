@@ -68,7 +68,7 @@ describe("beszel normalizeBaseUrl", () => {
   it("拒绝空地址/非法 scheme/query/fragment", () => {
     assert.throws(() => normalizeBaseUrl("   "), /Beszel 地址不能为空/);
     assert.throws(() => normalizeBaseUrl("ftp://host:8090"), /Beszel 地址必须是 http 或 https/);
-    // 不带 scheme 的 `host:port` 会被 URL 解析成 scheme，最终落到 scheme 校验（与 Rust 一致）。
+    // 不带 scheme 的 `host:port` 会被 URL 解析成 scheme，最终落到 scheme 校验（与 Node Host 一致）。
     assert.throws(() => normalizeBaseUrl("beszel.example.com:8090"), /Beszel 地址必须是 http 或 https/);
     assert.throws(() => normalizeBaseUrl("http://"), /Beszel 地址无法解析/);
     assert.throws(() => normalizeBaseUrl("http://host:8090/?a=1"), /Beszel 地址不能带查询参数或锚点/);

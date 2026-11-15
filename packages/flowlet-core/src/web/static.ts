@@ -1,8 +1,8 @@
 // 静态界面服务（含 SPA fallback）。Owner: node-web.
 //
-// 权威实现：src-tauri/src/core/web/mod.rs 的
+// 实现入口：packages/flowlet-core/src/web/index.ts 的
 // `ServeDir::new(static_dir).not_found_service(ServeFile::new(index.html))`。
-// 实测 Rust 行为（headless 二进制对拍得到）：
+// 实测 Node Host 行为（headless 二进制对拍得到）：
 // - 命中文件 → 200 + content-type（mime_guess，无 charset）+ accept-ranges: bytes + last-modified；
 // - 未命中 → 返回 index.html 内容但状态码是 **404**（not_found_service 保留 404）；
 // - 目录且带尾斜杠 → 404 fallback（目录内无 index.html）；
@@ -126,7 +126,7 @@ export async function serveStatic(
       /* 未命中 → SPA fallback */
     }
   }
-  // SPA fallback：内容来自 index.html，但状态码保持 404（与 Rust not_found_service 一致）。
+  // SPA fallback：内容来自 index.html，但状态码保持 404（与 Node Host not_found_service 一致）。
   const fallback = path.join(root, "index.html");
   const response = await fileResponse(fallback, range);
   return { status: 404, headers: response.headers, body: response.body };

@@ -204,7 +204,7 @@ describe("OpenCode 全局配置生命周期", () => {
     );
     assert.equal(restored.state, "not_configured");
     assert.equal(readFileSync(settingsPath, "utf8"), originalText);
-    // auth.json 由 Rust/Flowlet 统一 pretty 序列化，格式变化但内容必须完整还原。
+    // auth.json 由 Node Host/Flowlet 统一 pretty 序列化，格式变化但内容必须完整还原。
     assert.deepEqual(parseJsoncFile(authPath), JSON.parse(originalAuth));
     assert.equal(existsSync(pluginPath), false);
   });

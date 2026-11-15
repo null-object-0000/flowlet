@@ -1,10 +1,10 @@
 // 抓取模式的槽位引擎：URL → 槽位分类、槽位有效性校验、同槽位多批合并。
 //
-// 权威行为：src-tauri/src/core/scrape_console.rs 的 `ScrapeSlotEngine` +
-// core/channel_capability_adapter.rs（内置 adapter 分派）+
-// core/channel_capability_adapter/adapters/{longcat,qwen,zhipu}.rs。
+// 实现入口：packages/flowlet-desktop/src/scrape.ts 的 `ScrapeSlotEngine` +
+// 内置渠道槽位与登录策略+
+// core/packages/flowlet-core/src/web/balance.ts。
 //
-// 分派规则与 Rust 一致：内置渠道（`slotRules === null`）走编译期 adapter；
+// 分派规则保持既有兼容行为：内置渠道（`slotRules === null`）走编译期 adapter；
 // 自定义描述符（`slotRules !== null`）走声明式规则。命令层与宿主都只通过
 // 本模块判定「这个响应属于哪个槽位」「是否算抓全」，禁止各自复制一份。
 import type { JsonRow } from "../types.ts";
@@ -19,7 +19,7 @@ import {
 } from "./custom-registry.ts";
 import { hasLoginPath } from "./custom-registry.ts";
 
-/** 与 Rust `core::scrape_console::ScrapeModeRuntime` 等价的抓取模式。 */
+/** 与 既有 `core::scrape_console::ScrapeModeRuntime` 等价的抓取模式。 */
 export interface ScrapeMode {
   consoleUrl: string;
   consoleUrlSecondary: string | null;
@@ -36,7 +36,7 @@ export interface ScrapeMode {
   summaryPlan: string | null;
 }
 
-/** Rust `is_explicit_login_url_with_mode`。 */
+/** 既有 `is_explicit_login_url_with_mode`。 */
 export function isExplicitLoginUrl(
   mode: ScrapeMode,
   channelId: string,
@@ -55,7 +55,7 @@ export function isExplicitLoginUrl(
   return builtinLoginPageMatches(channelId, pageUrl);
 }
 
-/** Rust `is_explicit_login_url`（内置 adapter 的 LoginPageAdapter）。 */
+/** 既有 `is_explicit_login_url`（内置 adapter 的 LoginPageAdapter）。 */
 function builtinLoginPageMatches(channelId: string, pageUrl: string): boolean {
   const loginPage = BUILTIN_ADAPTERS[channelId]?.loginPage;
   if (loginPage === undefined || loginPage.kind === "none") return false;
@@ -66,7 +66,7 @@ function builtinLoginPageMatches(channelId: string, pageUrl: string): boolean {
 
 // ─── URL 分类 ───────────────────────────────────────────────────────────────
 
-/** Rust `ScrapeSlotEngine::classify`。 */
+/** 既有 `ScrapeSlotEngine::classify`。 */
 export function classifySlot(mode: ScrapeMode, url: string): string {
   if (mode.slotRules !== null) {
     for (const rule of mode.slotRules) {
@@ -80,7 +80,7 @@ export function classifySlot(mode: ScrapeMode, url: string): string {
   return classifyBuiltinResponseUrl(url);
 }
 
-/** Rust `classify_scrape_response_url`：首个给出非 None 结论的 adapter 生效。 */
+/** 既有 `classify_scrape_response_url`：首个给出非 None 结论的 adapter 生效。 */
 export function classifyBuiltinResponseUrl(url: string): string {
   for (const adapter of Object.values(BUILTIN_ADAPTERS)) {
     const kind = adapter.classify(url);
@@ -91,7 +91,7 @@ export function classifyBuiltinResponseUrl(url: string): string {
 
 // ─── 槽位有效性 ─────────────────────────────────────────────────────────────
 
-/** Rust `ScrapeSlotEngine::satisfies`。 */
+/** 既有 `ScrapeSlotEngine::satisfies`。 */
 export function slotSatisfied(mode: ScrapeMode, kind: string, body: string): boolean {
   if (mode.slotRules !== null) {
     const rule = mode.slotRules.find((item) => item.key === kind);
@@ -102,7 +102,7 @@ export function slotSatisfied(mode: ScrapeMode, kind: string, body: string): boo
 }
 
 /**
- * Rust `scrape_response_satisfies_slot`：任一 adapter 判定满足即满足；
+ * 既有 `scrape_response_satisfies_slot`：任一 adapter 判定满足即满足；
  * 所有处理该槽位的 adapter 都判定不满足才视为不满足；没有 adapter 处理该槽位时
  * 退回「合法 JSON 即视为到位」。
  */
@@ -119,7 +119,7 @@ export function builtinSlotSatisfied(kind: string, body: string): boolean {
 
 // ─── 同槽位合并 ─────────────────────────────────────────────────────────────
 
-/** Rust `ScrapeSlotEngine::merge`：返回 null 表示「同槽位最新覆盖旧」。 */
+/** 既有 `ScrapeSlotEngine::merge`：返回 null 表示「同槽位最新覆盖旧」。 */
 export function mergeSlot(
   mode: ScrapeMode,
   kind: string,
@@ -141,7 +141,7 @@ export function mergeSlot(
 }
 
 /**
- * Rust `record_captured_response`：把一条业务响应写入账号缓冲。
+ * 既有 `record_captured_response`：把一条业务响应写入账号缓冲。
  *
  * - 同槽位已存在：先尝试合并；否则默认「最新覆盖」，
  *   但若已有响应满足槽位而新响应不满足（残缺体），保留已有完整响应。
@@ -172,7 +172,7 @@ export function recordCapturedResponse(
   entry.push([url, body]);
 }
 
-/** Rust `collect_scrape_slots`：只保留满足校验的槽位。 */
+/** 既有 `collect_scrape_slots`：只保留满足校验的槽位。 */
 export function collectSlots(
   responses: Array<[string, string]>,
   mode: ScrapeMode,
@@ -187,7 +187,7 @@ export function collectSlots(
 
 // ─── 阶段/完成判定 ──────────────────────────────────────────────────────────
 
-/** Rust `required_slots_for_phase`。 */
+/** 既有 `required_slots_for_phase`。 */
 export function requiredSlotsForPhase(
   mode: ScrapeMode,
   phaseIndex: number,
@@ -200,12 +200,12 @@ export function requiredSlotsForPhase(
   return [];
 }
 
-/** Rust `missing_required_slots`。 */
+/** 既有 `missing_required_slots`。 */
 export function missingRequiredSlots(slots: Map<string, string>, required: string[]): string[] {
   return required.filter((slot) => !slots.has(slot));
 }
 
-/** Rust `aggregate_complete`。 */
+/** 既有 `aggregate_complete`。 */
 export function aggregateComplete(slots: Map<string, string>, mode: ScrapeMode): boolean {
   if (mode.aggregate) {
     if (mode.requiredSlots.length === 0) {
@@ -216,7 +216,7 @@ export function aggregateComplete(slots: Map<string, string>, mode: ScrapeMode):
   return slots.has("token_packs_summary") || slots.has("api_usage_summary");
 }
 
-/** Rust `build_aggregate_bundle`：把槽位原文解析成 JSON 对象供 extractor 使用。 */
+/** 既有 `build_aggregate_bundle`：把槽位原文解析成 JSON 对象供 extractor 使用。 */
 export function buildAggregateBundle(slots: Map<string, string>): JsonRow {
   const bundle: JsonRow = {};
   for (const [key, body] of slots) {
@@ -227,7 +227,7 @@ export function buildAggregateBundle(slots: Map<string, string>): JsonRow {
 }
 
 /**
- * 单响应模式下 extractor 的输入槽位（Rust `scrape_balance`）。
+ * 单响应模式下 extractor 的输入槽位（既有 `scrape_balance`）。
  * `tab=api` 的 LongCat 控制台对应按量余额槽，其余按资源包槽。
  */
 export function singleResponseTargetSlot(mode: ScrapeMode): "api_usage_summary" | "token_packs_summary" {
@@ -354,7 +354,7 @@ function stripTrailingSlash(value: string): string {
   return value.replace(/\/+$/, "");
 }
 
-// ─── 内置渠道 adapter（Rust channel_capability_adapter/adapters/*） ──────────
+// ─── 内置渠道 adapter（Node Host channel_capability_adapter/adapters/*） ──────────
 
 interface BuiltinAdapter {
   loginPage: { kind: "none" } | { kind: "generic" } | { kind: "generic_or_host"; host: string };
@@ -371,7 +371,7 @@ function normalizeUrl(url: string): string {
   return url.toLowerCase().replace(/%2f/g, "/");
 }
 
-/** LongCat（adapters/longcat.rs）。 */
+/** LongCat（资源包槽位）。 */
 const LONGCAT_ADAPTER: BuiltinAdapter = {
   loginPage: { kind: "generic" },
   classify(url) {
@@ -423,7 +423,7 @@ function tokenPackItemKey(item: unknown): string {
   return JSON.stringify(item) ?? "";
 }
 
-/** Rust `merge_token_pack_list`：按 resourceId/packageId 合并，计数取 max。 */
+/** 既有 `merge_token_pack_list`：按 resourceId/packageId 合并，计数取 max。 */
 function mergeLongcatTokenPackList(existing: string, incoming: string): string | null {
   const existingRoot = asObjectOrNull(parseJsonOrNull(existing));
   const incomingRoot = asObjectOrNull(parseJsonOrNull(incoming));
@@ -455,13 +455,13 @@ function mergeLongcatTokenPackList(existing: string, incoming: string): string |
     target[field] = value;
   }
   if (existingRoot["data"] === undefined) {
-    // 无信封的响应：合并结果直接写回根对象（Rust 用 `&mut existing_root` 同一语义）。
+    // 无信封的响应：合并结果直接写回根对象（Node Host 用 `&mut existing_root` 同一语义）。
     return JSON.stringify(target);
   }
   return JSON.stringify(existingRoot);
 }
 
-/** Qwen（adapters/qwen.rs）。 */
+/** Qwen（套餐与免费额度槽位）。 */
 const QWEN_ADAPTER: BuiltinAdapter = {
   loginPage: { kind: "generic_or_host", host: "account.aliyun.com" },
   classify(url) {
@@ -506,7 +506,7 @@ const QWEN_ADAPTER: BuiltinAdapter = {
   },
 };
 
-/** Token Plan 的额度窗口键（与 Rust `TOKEN_PLAN_QUOTA_WINDOWS` 一致）。 */
+/** Token Plan 的额度窗口键（与 既有 `TOKEN_PLAN_QUOTA_WINDOWS` 一致）。 */
 const TOKEN_PLAN_QUOTA_WINDOWS = ["five_hour", "weekly", "monthly"];
 
 function isUsagePercentageKey(key: string): boolean {
@@ -545,7 +545,7 @@ function tokenPlanPayloadSatisfied(kind: string, body: string): boolean | null {
   }
 }
 
-/** Rust `merge_fq_instance_responses`：按 `Template.Code` 去重并裁剪白名单字段。 */
+/** 既有 `merge_fq_instance_responses`：按 `Template.Code` 去重并裁剪白名单字段。 */
 function mergeFqInstanceResponses(existing: string, incoming: string): string | null {
   const existingRoot = asObjectOrNull(parseJsonOrNull(existing));
   const incomingRoot = asObjectOrNull(parseJsonOrNull(incoming));
@@ -590,7 +590,7 @@ function keepFqInstanceFields(value: unknown): unknown {
   return instance;
 }
 
-/** Z.AI / Zhipu（adapters/zhipu.rs）。 */
+/** Z.AI / Zhipu（余额与用量槽位）。 */
 const ZHIPU_ADAPTER: BuiltinAdapter = {
   loginPage: { kind: "generic" },
   classify(url) {
@@ -625,7 +625,7 @@ const BUILTIN_ADAPTERS: Record<string, BuiltinAdapter> = {
   zhipu: ZHIPU_ADAPTER,
 };
 
-/** Rust `ConsoleScrapeAdapter`：渠道 → 资源模式 → 抓取模式键。 */
+/** 既有 `ConsoleScrapeAdapter`：渠道 → 资源模式 → 抓取模式键。 */
 type ConsoleScrapeAdapter =
   | { kind: "none" }
   | { kind: "fixed"; modeKey: string }
@@ -643,7 +643,7 @@ const CONSOLE_SCRAPE_ADAPTERS: Record<string, ConsoleScrapeAdapter> = {
   zhipu: { kind: "resource_modes", modes: [["pay_as_you_go", "paygo"]] },
 };
 
-/** Rust `channel_capability_adapter::console_scrape_mode_key`。 */
+/** 既有 `channel_capability_adapter::console_scrape_mode_key`。 */
 export function consoleScrapeModeKey(channelId: string, resourceMode: string | null): string | null {
   const adapter = CONSOLE_SCRAPE_ADAPTERS[channelId];
   if (adapter === undefined) return null;
@@ -657,7 +657,7 @@ export function consoleScrapeModeKey(channelId: string, resourceMode: string | n
   }
 }
 
-/** Rust `scrape_console::default_resource_mode`。 */
+/** 既有 `scrape_console::default_resource_mode`。 */
 export function defaultResourceMode(channelId: string): string {
   switch (channelId) {
     case "longcat":

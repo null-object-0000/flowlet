@@ -15,7 +15,7 @@ import { isProxyAutoStartSuspended } from "./proxyAutoStartSuspension";
  *   - Must be idempotent under React StrictMode (effects fire twice).
  *   - No accounts / no models / no routes must NOT block the start.
  *
- * The Rust `start_proxy` itself is idempotent; this hook only guards the
+ * The 既有 `start_proxy` itself is idempotent; this hook only guards the
  * "one attempt per app mount" contract on the UI side.
  */
 export function useProxyAutoStart(opts: { enabled: boolean }) {

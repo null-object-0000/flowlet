@@ -1,11 +1,11 @@
 // Dockhand API 客户端（公司内部 Docker 管理面板 fnsys/dockhand 1.0.57 实测）。Owner: node-web.
 //
-// 权威实现：src-tauri/src/core/dockhand.rs 逐行为等价：
+// 实现入口：packages/flowlet-core/src/web/dockhand.ts 保持既有行为：
 // - 认证只用 `Authorization: Bearer <API Token>` 请求头；
 // - 所有资源接口都在 `{base}/api` 下，资源接口（system/stacks）必须带 `?env=<id>`；
 // - `/health` 匿名可访问，不能用于校验 token，token 校验走 `/environments`；
 // - 允许子路径部署，也接受用户粘贴 `/api` 后缀；
-// - 20s 超时；insecure 时跳过 TLS 校验；错误文案对齐 Rust Display。
+// - 20s 超时；insecure 时跳过 TLS 校验；错误文案对齐 Node Host Display。
 import { Agent, request } from "undici";
 
 const DEFAULT_TIMEOUT_MS = 20_000;
@@ -19,7 +19,7 @@ export interface DockhandEnvironment {
   protocol: string | null;
 }
 
-/** 与 Rust `DockhandError` 同形：Display = `Dockhand API {status}: {message}` / `Dockhand API: {message}`。 */
+/** 与 既有 `DockhandError` 同形：Display = `Dockhand API {status}: {message}` / `Dockhand API: {message}`。 */
 export class DockhandError extends Error {
   status: number | null;
 
@@ -37,7 +37,7 @@ export class DockhandError extends Error {
 }
 
 /**
- * 规范化面板地址：口径与 Rust `normalize_base_url` 一致。
+ * 规范化面板地址：口径与 Node Host `normalize_base_url` 一致。
  * - 必须 http/https；
  * - 去末尾 `/`；粘贴到 `/api` 时自动剥掉（Dockhand 没有 API 版本前缀）；
  * - 保留子路径部署；拒绝 query / fragment。
@@ -69,7 +69,7 @@ export function normalizeBaseUrl(raw: string): string {
 }
 
 function urlParseErrorDetail(raw: string): string {
-  // url crate 的常见错误文本（用于保持错误信息可读且接近 Rust）。
+  // url crate 的常见错误文本（用于保持错误信息可读且接近 Node Host）。
   if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(raw)) return "relative URL without a base";
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/$/.test(raw)) return "empty host";
   return "invalid URL";
@@ -87,14 +87,14 @@ export function resolveApiPath(base: string, rawPath: string): string {
     throw new Error("API 路径必须是相对路径（如 /environments），不接受绝对 URL");
   }
   // 允许 `dockhand api /api/environments` 与 `dockhand api /environments` 两种写法；
-  // 与 Rust `resolve_api_path` 一致，只剥一层前缀。
+  // 与 Node Host `resolve_api_path` 一致，只剥一层前缀。
   if (path.startsWith("/api")) path = path.slice("/api".length);
   if (!path.startsWith("/")) path = `/${path}`;
   return `${apiBase(base)}${path}`;
 }
 
 export interface DockhandClientOptions {
-  /** 内网自签证书：跳过 TLS 校验（对应 Rust `danger_accept_invalid_certs`）。 */
+  /** 内网自签证书：跳过 TLS 校验（对应 Node Host `danger_accept_invalid_certs`）。 */
   insecure?: boolean;
 }
 
@@ -212,9 +212,9 @@ export class DockhandClient {
 }
 
 /**
- * 解析环境列表：Rust `parse_environments` 的容错口径。
+ * 解析环境列表：Node Host `parse_environments` 的容错口径。
  * - 非数组 → 错误 `expected a sequence`；
- * - 单行不是对象、或 id 缺失/非整数 → 跳过该行（与 Rust 侧约定一致）；
+ * - 单行不是对象、或 id 缺失/非整数 → 跳过该行（与 Node Host 侧约定一致）；
  * - name 缺失 → `""`，host/port/protocol 缺失 → null。
  */
 export function parseEnvironments(value: unknown): DockhandEnvironment[] {
@@ -237,7 +237,7 @@ export function parseEnvironments(value: unknown): DockhandEnvironment[] {
   return environments;
 }
 
-/** 把 Dockhand 错误体转成可执行提示（与 Rust `describe_error` 文案一致）。 */
+/** 把 Dockhand 错误体转成可执行提示（与 Node Host `describe_error` 文案一致）。 */
 export function describeError(status: number, value: unknown): string {
   let detail = "";
   if (value !== null && typeof value === "object" && !Array.isArray(value)) {

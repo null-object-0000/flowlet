@@ -13,11 +13,11 @@
 
 | 能力 | 位置 | 说明 |
 |---|---|---|
-| 入站路径通配 | [proxy.rs:364](../src-tauri/src/core/proxy.rs#L364) | `/v1/{*path}`、`/openai/v1/{*path}` 为 catch-all，`/v1/images/generations` 不会 404，会进入 OpenAI 协议转发链路 |
-| 上游 URL 透传拼接 | [proxy_http.rs:653](../src-tauri/src/core/proxy_http.rs#L653) | `build_upstream_url` 按路径拼接，可得到 `{openai_base_url}/v1/images/generations` |
-| 鉴权与保留头处理 | [proxy_http.rs:711](../src-tauri/src/core/proxy_http.rs#L711) | `apply_request_headers` 与协议无关，可复用；已剥离 `Content-Length` 交给 reqwest 重算，对 multipart 同样正确 |
-| body 内 `model` 改写 | [proxy_http.rs:1398](../src-tauri/src/core/proxy_http.rs#L1398) | JSON 字段级替换，生图请求体同样含 `model` |
-| 响应原样透传 | `proxy.rs` 转发段 | 不强制 SSE 解析，`url` / `b64_json` 两种返回都能过 |
+| 入站路径通配 | [index.ts](../packages/flowlet-core/src/proxy/index.ts) | `/v1/{*path}`、`/openai/v1/{*path}` 为 catch-all，`/v1/images/generations` 不会 404，会进入 OpenAI 协议转发链路 |
+| 上游 URL 透传拼接 | [http.ts](../packages/flowlet-core/src/proxy/http.ts) | `build_upstream_url` 按路径拼接，可得到 `{openai_base_url}/v1/images/generations` |
+| 鉴权与保留头处理 | [http.ts](../packages/flowlet-core/src/proxy/http.ts) | `apply_request_headers` 与协议无关，可复用；已剥离 `Content-Length` 交给 reqwest 重算，对 multipart 同样正确 |
+| body 内 `model` 改写 | [http.ts](../packages/flowlet-core/src/proxy/http.ts) | JSON 字段级替换，生图请求体同样含 `model` |
+| 响应原样透传 | `packages/flowlet-core/src/proxy/index.ts` 转发段 | 不强制 SSE 解析，`url` / `b64_json` 两种返回都能过 |
 
 **结论：转发不是瓶颈，"被识别为一个可开放模型"才是。**
 
@@ -25,10 +25,10 @@
 
 | # | 阻断点 | 位置 | 后果 |
 |---|---|---|---|
-| 1 | 全局白名单是硬门禁，23 个模型全为 chat LLM，前端与 Rust 同源 `model-catalog.json` | [identity.ts:28](../src/domains/modelCatalog/identity.ts#L28)、[channels_config.rs:387](../src-tauri/src/core/channels_config.rs#L387) | 账号编辑器对白名单外模型只展示、禁用勾选（[AccountEditorDrawer.tsx:270](../src/features/channel-accounts/AccountEditorDrawer.tsx#L270)、[:745](../src/features/channel-accounts/AccountEditorDrawer.tsx#L745)）→ `exposed_models` 不可能含生图模型 → 不生成路由 → 404 `model_not_exposed`（[proxy.rs:741](../src-tauri/src/core/proxy.rs#L741)） |
-| 2 | 无「模型类型 / 端点族」维度，协议枚举仅 `openai / anthropic / responses` | [config.rs:189](../src-tauri/src/core/config.rs#L189) | 仅把生图模型塞进白名单，会以 `client_protocol = openai` 生成路由；`match_candidates` 只按 `virtual_model_id + protocol` 匹配（[proxy_routing.rs:71](../src-tauri/src/core/proxy_routing.rs#L71)，入站模型名已先在 `proxy.rs` 按目录归一到规范 ID）→ `/v1/chat/completions` 也会命中生图模型，且会出现在 `/v1/models` 被 Agent 选中 |
-| 3 | 计量与成本全为 token 语义 | [usage.rs:244](../src-tauri/src/core/usage.rs#L244)、`models-cn.json` 价格单位 `1M_tokens` | 按张计费的模型无法计量（见 §2 实测：8 个模型里 5 个是按张计费） |
-| 4 | 模型目录无生图规格 | `models-cn.json` 36 条 `outputModalities` 全为 `["text"]`；[model_input_capabilities.rs:13](../src-tauri/src/core/model_input_capabilities.rs#L13) 只认 text/image **输入**模态 | 模型服务页显示「暂无可用模型规格」。注：展示层的输出模态概念**已存在**（`ModelCapabilities.outputModalities` 与 `MODEL_MODALITY_LABELS.image = "图像"`，[ModelServicesPage.tsx:835](../src/pages/models/ModelServicesPage.tsx#L835)），缺的是**目录数据与路由/kind 门控** |
+| 1 | 全局白名单是硬门禁，23 个模型全为 chat LLM，前端与 Rust 同源 `model-catalog.json` | [identity.ts:28](../src/domains/modelCatalog/identity.ts#L28)、[index.ts](../packages/flowlet-core/src/config/index.ts) | 账号编辑器对白名单外模型只展示、禁用勾选（[AccountEditorDrawer.tsx:270](../src/features/channel-accounts/AccountEditorDrawer.tsx#L270)、[:745](../src/features/channel-accounts/AccountEditorDrawer.tsx#L745)）→ `exposed_models` 不可能含生图模型 → 不生成路由 → 404 `model_not_exposed`（[index.ts](../packages/flowlet-core/src/proxy/index.ts)） |
+| 2 | 无「模型类型 / 端点族」维度，协议枚举仅 `openai / anthropic / responses` | [index.ts](../packages/flowlet-core/src/config/index.ts) | 仅把生图模型塞进白名单，会以 `client_protocol = openai` 生成路由；`match_candidates` 只按 `virtual_model_id + protocol` 匹配（[routing.ts](../packages/flowlet-core/src/proxy/routing.ts)，入站模型名已先在 `packages/flowlet-core/src/proxy/index.ts` 按目录归一到规范 ID）→ `/v1/chat/completions` 也会命中生图模型，且会出现在 `/v1/models` 被 Agent 选中 |
+| 3 | 计量与成本全为 token 语义 | [usage.ts](../packages/flowlet-core/src/proxy/usage.ts)、`models-cn.json` 价格单位 `1M_tokens` | 按张计费的模型无法计量（见 §2 实测：8 个模型里 5 个是按张计费） |
+| 4 | 模型目录无生图规格 | `models-cn.json` 36 条 `outputModalities` 全为 `["text"]`；[catalog.ts](../packages/flowlet-core/src/proxy/catalog.ts) 只认 text/image **输入**模态 | 模型服务页显示「暂无可用模型规格」。注：展示层的输出模态概念**已存在**（`ModelCapabilities.outputModalities` 与 `MODEL_MODALITY_LABELS.image = "图像"`，[ModelServicesPage.tsx:835](../src/pages/models/ModelServicesPage.tsx#L835)），缺的是**目录数据与路由/kind 门控** |
 | 5 | 响应体捕获默认上限 1MB | `config.json` → `log_capture.max_body_bytes` | `b64_json` 会被截断；multipart 编辑请求的图片二进制会被 base64 放大落库 |
 | 6 | 上游 `/models` 不带模态/形态元数据 | 见 §2.2 结论 1 | `kind` 与请求形态**无法从上游推断**，只能由我们的目录做唯一事实源 |
 
@@ -88,14 +88,14 @@
 
 - `/v1/images/edits` 为 `multipart/form-data`，`model` 是**表单字段**（gpt-image 系列 + dall-e）；支持 `mask`（透明区域=编辑范围）、`input_fidelity` 等；
 - 技能用它做图生图、多图合成、局部重绘 —— **这是生图能力的一半，A 档不应简单 501 掉**；
-- `extract_model`（[proxy_http.rs:975](../src-tauri/src/core/proxy_http.rs#L975)）只解析 JSON，multipart 会得到 `public_model = None` → 误导性 404。需要从 multipart 表单字段提取 `model`；
+- `extract_model`（[http.ts](../packages/flowlet-core/src/proxy/http.ts)）只解析 JSON，multipart 会得到 `public_model = None` → 误导性 404。需要从 multipart 表单字段提取 `model`；
 - 附带风险：body 捕获会把整个 multipart（含图片二进制）base64 落库，**存储放大明显**，必须纳入捕获策略。
 
 #### 结论 4：计费两模式，B 档设计已可确定
 
 - **token 模式**：GPT Image 系列（网关返回 usage）；
 - **按张模式 + 像素阶梯**：Seedream / Qwen-Image / Z-Image（如 `maxPixels: 2360000` 以下 ¥0.3，以上 ¥0.6）；
-- 现有 `models-cn.json` 只有 `1M_tokens` 一种单位，且运行时价格结构 `ModelPrice`（[config.rs:776](../src-tauri/src/core/config.rs#L776)）是按 token 的字段（`input_uncached_price` / `output_price` + 按**输入长度**分档的 `tiers`），`unit` 只是元数据字符串 → **B 档必须扩展结构，不能只加数据条目**；
+- 现有 `models-cn.json` 只有 `1M_tokens` 一种单位，且运行时价格结构 `ModelPrice`（[index.ts](../packages/flowlet-core/src/config/index.ts)）是按 token 的字段（`input_uncached_price` / `output_price` + 按**输入长度**分档的 `tiers`），`unit` 只是元数据字符串 → **B 档必须扩展结构，不能只加数据条目**；
 - A 档因此**不得**给生图模型填任何价格条目：结构填不对会算出 0 或错值，属于「无真实数据支撑的指标」。留空 → `estimate_cost_at` 返回 `None` → 界面显示「无价格」，才是正确行为。
 
 #### 结论 5：网关是「一个渠道、多协议面」
@@ -142,41 +142,41 @@ Flowlet 的 `custom` 渠道天然对应其中的 OpenAI + Anthropic 两面；**G
 #### ① 模型目录 `model-catalog.json`
 
 - 每个模型新增**可选**字段 `kind: "chat" | "image"`（缺省 `chat`）与 `requestShape`（仅 `kind = image` 需要）；
-- 建议 `schemaVersion` **保持 1**（字段可选、向后兼容）。理由：[identity.ts:23](../src/domains/modelCatalog/identity.ts#L23) 与 [model_catalog.rs:42](../src-tauri/src/core/model_catalog.rs#L42) 都硬断言 `schemaVersion === 1`，升级版本号需同步改两处校验与既有测试；
+- 建议 `schemaVersion` **保持 1**（字段可选、向后兼容）。理由：[identity.ts:23](../src/domains/modelCatalog/identity.ts#L23) 与 [index.ts](../packages/flowlet-core/src/catalog/index.ts) 都硬断言 `schemaVersion === 1`，升级版本号需同步改两处校验与既有测试；
 - 按 §2.1 新增 8 个生图模型条目，`aliases` 登记上游变体，遵守 AGENTS.md §6「模型身份由规范化模型 ID 决定」；`ownerChannelId` 的处理见 §3.4；
 - 生图模型**不同时进入 chat 模型的候选池**；
 - ⚠️ **两处硬断言必须同步改**，否则测试直接失败：
-  - [model_catalog.rs:155](../src-tauri/src/core/model_catalog.rs#L155) `assert_eq!(catalog.supported_models().len(), 23)` —— 模型总数写死在测试里；
-  - [model_catalog.rs:219](../src-tauri/src/core/model_catalog.rs#L219) `embedded_channel_defaults_match_catalog_ownership` 要求**每个 `ownerChannelId` 都是 `config.json` → `channels_config.default_exposed_models` 的 key**，且该数组包含该模型 id，最后还断言 `configured_count == models.len()`。
+  - [index.ts](../packages/flowlet-core/src/catalog/index.ts) `assert_eq!(catalog.supported_models().len(), 23)` —— 模型总数写死在测试里；
+  - [index.ts](../packages/flowlet-core/src/catalog/index.ts) `embedded_channel_defaults_match_catalog_ownership` 要求**每个 `ownerChannelId` 都是 `config.json` → `channels_config.default_exposed_models` 的 key**，且该数组包含该模型 id，最后还断言 `configured_count == models.len()`。
 
-#### ② Rust 模型目录 `src-tauri/src/core/model_catalog.rs`
+#### ② Rust 模型目录 `packages/flowlet-core/src/catalog/index.ts`
 
 - `ModelIdentity` 增加 `kind`（serde `default` = chat）与 `request_shape`（可选）；
 - 新增 `ModelKind` / `ImageRequestShape` 枚举与 `allowed_protocols()`，作为路由生成的唯一门控来源。
 
-#### ③ 协议枚举 `src-tauri/src/core/config.rs`
+#### ③ 协议枚举 `packages/flowlet-core/src/config/index.ts`
 
 - `ProtocolType` 增加 `#[serde(rename = "images")] Images`；
 - `from_path`：在 `v1/` 分支之前判断 `v1/images/` 与 `openai/v1/images/` → `Images`；
 - `is_responses_path` 不受影响；
-- `base_url_for`（[:490](../src-tauri/src/core/config.rs#L490)）与 `auth_strategy_for`（[:499](../src-tauri/src/core/config.rs#L499)）：`Images` 并入 OpenAI 分支；
+- `base_url_for`（[:490](../packages/flowlet-core/src/config/index.ts#L490)）与 `auth_strategy_for`（[:499](../packages/flowlet-core/src/config/index.ts#L499)）：`Images` 并入 OpenAI 分支；
 - `classify_request`：建议新增 `RequestType::Image`（`as_str = "image"`），否则生图请求在日志中显示 `unknown`；需同步前端 `request_type` 展示与相关测试；
-- `parse_protocols`（[channels_config.rs:594](../src-tauri/src/core/channels_config.rs#L594)）：增加 `"images"` 分支。**当前默认分支 `_ => ProtocolType::OpenAi` 会把拼错的协议名静默降级为 openai**，建议改为显式白名单 + 未知值忽略并记录日志。
+- `parse_protocols`（[index.ts](../packages/flowlet-core/src/config/index.ts)）：增加 `"images"` 分支。**当前默认分支 `_ => ProtocolType::OpenAi` 会把拼错的协议名静默降级为 openai**，建议改为显式白名单 + 未知值忽略并记录日志。
 
 #### ④ 路由生成（三处必须一致，否则前后端对账会互相删路由）
 
-- Rust [channels_config.rs:402](../src-tauri/src/core/channels_config.rs#L402) `merge_default_routes`：`preset.supported_protocols` 需与模型 `allowed_protocols()` 取交集。注意当前循环顺序是 protocol 在外、model 在内，**kind 判断需下移到模型循环内**；
+- Rust [index.ts](../packages/flowlet-core/src/config/index.ts) `merge_default_routes`：`preset.supported_protocols` 需与模型 `allowed_protocols()` 取交集。注意当前循环顺序是 protocol 在外、model 在内，**kind 判断需下移到模型循环内**；
 - 前端 [commands.ts:125](../src/domains/model/commands.ts#L125) `mergeDefaultRoutes` / `buildDefaultRoutes`：同样加 kind 门控；
 - 前端 [commands.ts:167](../src/domains/model/commands.ts#L167) `reconcileAccountRoutes` 的 custom 渠道 `hasEndpoint` 判断：把 `images` 归入 OpenAI 分支，否则 custom 渠道生图路由会被保存时误删；
-- Rust `protocol_has_endpoint`（[channels_config.rs:439](../src-tauri/src/core/channels_config.rs#L439)）：同样把 `Images` 并入 OpenAI 分支。
+- Rust `protocol_has_endpoint`（[index.ts](../packages/flowlet-core/src/config/index.ts)）：同样把 `Images` 并入 OpenAI 分支。
 
-#### ⑤ 转发层 `proxy.rs` / `proxy_http.rs`
+#### ⑤ 转发层 `packages/flowlet-core/src/proxy/index.ts` / `packages/flowlet-core/src/proxy/http.ts`
 
 - 路由注册：catch-all 已覆盖，**无需新增 route**（可选：显式声明以提升可读性）；
 - `build_upstream_url`：`Images` 并入 `OpenAi | Responses` 分支；
-- [proxy.rs:851](../src-tauri/src/core/proxy.rs#L851) 的 `openai_path_strips_v1` 分支：把 `Images` 加入 `matches!`，否则智谱生图会拼成 `/api/paas/v4/v1/images/generations`；
-- `ensure_reasoning_content_passback`（[proxy_http.rs:1449](../src-tauri/src/core/proxy_http.rs#L1449)）：gate 为 `*protocol != ProtocolType::OpenAi`，新增变体后自动不作用于 `Images`；**必须补回归测试**，防止未来改成 `matches!` 时误伤；
-- `request_uses_image`（[model_input_capabilities.rs:164](../src-tauri/src/core/model_input_capabilities.rs#L164)）：match 补 `Images => false`（生图请求体没有 chat 语义的 `image_url` 输入；multipart 也解析不了 JSON）；
+- [index.ts](../packages/flowlet-core/src/proxy/index.ts) 的 `openai_path_strips_v1` 分支：把 `Images` 加入 `matches!`，否则智谱生图会拼成 `/api/paas/v4/v1/images/generations`；
+- `ensure_reasoning_content_passback`（[http.ts](../packages/flowlet-core/src/proxy/http.ts)）：gate 为 `*protocol != ProtocolType::OpenAi`，新增变体后自动不作用于 `Images`；**必须补回归测试**，防止未来改成 `matches!` 时误伤；
+- `request_uses_image`（[catalog.ts](../packages/flowlet-core/src/proxy/catalog.ts)）：match 补 `Images => false`（生图请求体没有 chat 语义的 `image_url` 输入；multipart 也解析不了 JSON）；
 - **新增形态预校验**（见 §2.2 结论 2）：按目标模型的 `requestShape` 校验 body 形态，不匹配则本地返回 `image_request_shape_mismatch`，不打上游；
 - `is_model_list_request`：不变。
 
@@ -194,7 +194,7 @@ Flowlet 的 `custom` 渠道天然对应其中的 OpenAI + Anthropic 两面；**G
 
 #### ⑧ 计量与成本：A 档**不造假**
 
-- `estimate_cost_at`（[storage_usage.rs:406](../src-tauri/src/core/storage_usage.rs#L406)）在找不到价格条目时返回 `None` —— 生图模型自然显示「无价格」，**这符合 AGENTS.md 禁止无真实数据支撑的指标**，A 档无需新增 `per_image` 价格；
+- `estimate_cost_at`（[usage.ts](../packages/flowlet-core/src/storage/usage.ts)）在找不到价格条目时返回 `None` —— 生图模型自然显示「无价格」，**这符合 AGENTS.md 禁止无真实数据支撑的指标**，A 档无需新增 `per_image` 价格；
 - 明确边界：A 档只记请求数、状态、延迟、上游报文；今日 Token 不含生图；用量页对 `images` 协议显示「未计量（不支持按 token 计费）」而不是 `0`，避免用户误以为免费。
 
 #### ⑨ 前端 UI
@@ -208,15 +208,15 @@ Flowlet 的 `custom` 渠道天然对应其中的 OpenAI + Anthropic 两面；**G
 #### ⑩ 渠道与注册表
 
 - `config.json` → `channels_config.channels[].supported_protocols` 为支持生图的渠道加 `"images"`（`custom` 建议默认加，中转站最可能承载生图）；
-- `plugin-registry.json` 渠道贡献声明与 [plugin_contract.rs:47](../src-tauri/src/core/plugin_contract.rs#L47) 校验需允许 `"images"`；校验中 `if channel_id != "custom"` 分支需确认不会把 `images` 误判为缺少 Base URL；
+- `plugin-registry.json` 渠道贡献声明与 [modules.test.ts](../packages/flowlet-core/src/desktop/__tests__/agent/modules.test.ts) 校验需允许 `"images"`；校验中 `if channel_id != "custom"` 分支需确认不会把 `images` 误判为缺少 Base URL；
 - 若 8 个生图模型的 `ownerChannelId` 涉及新渠道身份（doubao / z-image 等），需按 `docs/channel-integration.md` 走完整渠道接入流程；
 - 同步 `docs/config.md` 第 7/8/9 节、`AGENTS.md` §5 协议列表与 §6 模型白名单、`docs/architecture.md`。
 
 ### 3.4 ⚠️ 归属身份（`ownerChannelId`）需要决策
 
 `ownerChannelId` 不是装饰字段，它决定官方品牌、规格与基准价格的解析（AGENTS.md §6），并被
-`official_channel_id_for_model`（[model_catalog.rs:144](../src-tauri/src/core/model_catalog.rs#L144)）用于价格回退
-（[storage_usage.rs:433](../src-tauri/src/core/storage_usage.rs#L433)）。
+`official_channel_id_for_model`（[index.ts](../packages/flowlet-core/src/catalog/index.ts)）用于价格回退
+（[usage.ts](../packages/flowlet-core/src/storage/usage.ts)）。
 
 现有 `default_exposed_models` 只有 6 个 key：`longcat` / `deepseek` / `kimi` / `qwen` / `zhipu` / `openrouter`（`custom` 不在其中）。
 8 个目标模型的官方归属如下：
@@ -251,7 +251,7 @@ Flowlet 的 `custom` 渠道天然对应其中的 OpenAI + Anthropic 两面；**G
 - **形态校验**：`dashscope-image` 模型收到扁平 body → 本地 `image_request_shape_mismatch`，且**未发起上游请求**（断言假上游零调用）；
 - `build_upstream_url`：`/v1/images/generations` → `{base}/v1/images/generations`，含智谱无 `/v1` 分支；
 - multipart：`/v1/images/edits` 能从表单字段提取 `model` 并完成路由与上游模型名改写；
-- e2e（沿用 [proxy_tests.rs](../src-tauri/src/core/proxy_tests.rs) 假上游 harness）：三种形态各一条透传用例 + 日志 `client_protocol = "images"`；
+- e2e（沿用 [proxy_tests.rs](../packages/flowlet-core/src/proxy/__tests__) 假上游 harness）：三种形态各一条透传用例 + 日志 `client_protocol = "images"`；
 - 回归：`ensure_reasoning_content_passback` 对 `Images` 不改写 body；
 - **目录契约**：更新 `supported_models().len()` 断言；`embedded_channel_defaults_match_catalog_ownership` 通过（每个 `ownerChannelId` 都在 `default_exposed_models` 中且条目齐平）。
 

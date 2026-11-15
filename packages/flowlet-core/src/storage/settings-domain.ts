@@ -1,8 +1,8 @@
 // 设置 / 存储维护领域的 SQL 纯函数（桌面命令批次 2）。Owner: desktop-maintenance。
 //
-// 逐条对照 Rust `src-tauri/src/core/storage.rs::db_stats`、
-// `core/storage_maintenance.rs`（DatabaseMaintenanceStats / compact_database）与
-// `core/storage_stats.rs`（StorageUsageSummary）。SQL 与返回字段保持一致：
+// 对应 既有 `packages/flowlet-core/src/storage/schema.ts`、
+// `packages/flowlet-core/src/storage/maintenance.ts`（DatabaseMaintenanceStats / compact_database）与
+// `packages/flowlet-core/src/storage/settings-domain.ts`（StorageUsageSummary）。SQL 与返回字段保持一致：
 // `db_stats` 返回元组数组，其余两个结构体是 `#[serde(rename_all = "camelCase")]`。
 //
 // 这些函数只接收 `DatabaseSync`，由命令层通过 `ctx.storage.withDatabase(...)` 调用，
@@ -11,7 +11,7 @@ import type { DatabaseSync } from "node:sqlite";
 
 import type { JsonRow } from "../types.ts";
 
-/** Rust `db_stats`：返回 (日志数, 用量行数, 数据库字节)，JSON 为三元组数组。 */
+/** 既有 `db_stats`：返回 (日志数, 用量行数, 数据库字节)，JSON 为三元组数组。 */
 export function dbStats(db: DatabaseSync): [number, number, number] {
   const logs = db.prepare("SELECT COUNT(*) AS count FROM request_logs").get() as
     | { count: number }
@@ -25,7 +25,7 @@ export function dbStats(db: DatabaseSync): [number, number, number] {
   return [Number(logs?.count ?? 0), Number(usage?.count ?? 0), Number(fileSize?.bytes ?? 0)];
 }
 
-/** Rust `DatabaseMaintenanceStats`（camelCase）。 */
+/** 既有 `DatabaseMaintenanceStats`（camelCase）。 */
 export interface DatabaseMaintenanceStats {
   databaseBytes: number;
   pageSize: number;
@@ -35,7 +35,7 @@ export interface DatabaseMaintenanceStats {
   autoVacuumMode: number;
 }
 
-/** Rust `DatabaseCompactionResult`（camelCase）。 */
+/** 既有 `DatabaseCompactionResult`（camelCase）。 */
 export interface DatabaseCompactionResult {
   before: DatabaseMaintenanceStats;
   after: DatabaseMaintenanceStats;
@@ -68,7 +68,7 @@ function readMaintenanceStats(db: DatabaseSync): DatabaseMaintenanceStats {
 }
 
 /**
- * Rust `Storage::compact_database`：完整 VACUUM 并切到增量 auto-vacuum。
+ * 既有 `Storage::compact_database`：完整 VACUUM 并切到增量 auto-vacuum。
  * SQLite 的 VACUUM 自身具备失败原子性；调用方必须先暂停代理。
  */
 export function compactDatabase(db: DatabaseSync): DatabaseCompactionResult {
@@ -87,14 +87,14 @@ export function compactDatabase(db: DatabaseSync): DatabaseCompactionResult {
   };
 }
 
-/** Rust `StorageUsageCategory`（camelCase）。 */
+/** 既有 `StorageUsageCategory`（camelCase）。 */
 export interface StorageUsageCategory {
   key: string;
   rowCount: number;
   allocatedBytes: number;
 }
 
-/** Rust `StorageUsageSummary`（camelCase）。 */
+/** 既有 `StorageUsageSummary`（camelCase）。 */
 export interface StorageUsageSummary {
   totalBytes: number;
   databaseBytes: number;
@@ -165,9 +165,9 @@ function pragmaInt(db: DatabaseSync, statement: string, column: string): number 
 }
 
 /**
- * Rust `Storage::storage_usage_summary`（文件数据库路径）。
+ * 既有 `Storage::storage_usage_summary`（文件数据库路径）。
  *
- * 分类表清单与 Rust 一致；`configuration` 分类额外计入 config.json 文件大小。
+ * 分类表清单保持既有兼容行为；`configuration` 分类额外计入 config.json 文件大小。
  */
 export function storageUsageSummary(
   db: DatabaseSync,

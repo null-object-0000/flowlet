@@ -1,6 +1,6 @@
 // Uptime Kuma 只读客户端（Prometheus `/metrics`）。Owner: node-web.
 //
-// 权威实现：src-tauri/src/core/uptime_kuma.rs 逐行为等价：
+// 实现入口：packages/flowlet-core/src/web/uptime-kuma.ts 保持既有行为：
 // - 2.x 没有监控管理 REST API；API Key 只用于 `/metrics` 鉴权，
 //   Basic 认证用户名为空、密码为 API Key（即 `Basic base64(":" + key)`）；
 // - `disableAuth=true` 的实例可能匿名 200，此时无法从响应判断 Key 真伪；
@@ -25,7 +25,7 @@ export interface KumaMetrics {
   version: string | null;
 }
 
-/** 与 Rust `UptimeKumaError` 同形：Display = `Uptime Kuma API {status}: {message}` / `Uptime Kuma API: {message}`。 */
+/** 与 既有 `UptimeKumaError` 同形：Display = `Uptime Kuma API {status}: {message}` / `Uptime Kuma API: {message}`。 */
 export class UptimeKumaError extends Error {
   status: number | null;
 
@@ -43,7 +43,7 @@ export class UptimeKumaError extends Error {
 }
 
 /**
- * 规范化实例地址：与 Rust `normalize_base_url` 一致。
+ * 规范化实例地址：与 Node Host `normalize_base_url` 一致。
  * - 必须 http/https；
  * - 丢弃 fragment（前端路由 `#/settings/api-keys` 不是服务端路径）；
  * - 拒绝 query 与账号密码；
@@ -76,7 +76,7 @@ export function normalizeBaseUrl(raw: string): string {
 }
 
 function urlParseErrorDetail(raw: string): string {
-  // url crate 的常见错误文本（用于保持错误信息可读且接近 Rust）。
+  // url crate 的常见错误文本（用于保持错误信息可读且接近 Node Host）。
   if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(raw)) return "relative URL without a base";
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/$/.test(raw)) return "empty host";
   return "invalid URL";
@@ -92,7 +92,7 @@ export function authorizationHeader(token: string): string {
 }
 
 export interface UptimeKumaClientOptions {
-  /** 内网自签证书：跳过 TLS 校验（对应 Rust `danger_accept_invalid_certs`）。 */
+  /** 内网自签证书：跳过 TLS 校验（对应 既有 `danger_accept_invalid_certs`）。 */
   insecure?: boolean;
 }
 

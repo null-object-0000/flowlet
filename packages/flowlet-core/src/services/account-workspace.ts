@@ -1,11 +1,11 @@
 // 桌面账号工作区（S3 工作区同步）领域服务。
 //
-// 权威实现：`src-tauri/src/core/account_workspace_sync.rs` 与 `src-tauri/src/core/device_sync.rs`
+// 实现入口：`packages/flowlet-core/src/services/account-workspace.ts` 与 `packages/flowlet-core/src/services/s3.ts`
 // 的 S3 配置/密钥部分。命令层在 `desktop/account-workspace.ts`，本模块只做纯逻辑：
 // ChaCha20-Poly1305 密文包、HMAC 凭据指纹、目录比对合并，以及通过注入的宿主桥读写
 // 系统凭据库（`keyring.*`）与 S3 对象。
 //
-// 关键契约（不允许变化，否则与 Rust 版互不兼容）：
+// 关键契约（不允许变化，否则与 历史版本互不兼容）：
 // - 密钥：32 字节，base64 存在 OS 凭据库，service `Flowlet Account Workspace`，
 //   username = S3 配置的 `credential_username`；
 // - 密文信封：`{ format: "flowlet-account-workspace", version: 1, nonce: base64(12B),
@@ -55,7 +55,7 @@ export interface AccountWorkspaceContext {
   host: KeyringHost;
 }
 
-/** Rust `WorkspaceChannelAccount`（camelCase）。 */
+/** 既有 `WorkspaceChannelAccount`（camelCase）。 */
 export interface WorkspaceChannelAccount {
   id: string;
   channelId: string;
@@ -70,7 +70,7 @@ export interface WorkspaceChannelAccount {
   updatedAt: string;
 }
 
-/** Rust `AccountWorkspaceCatalog`（camelCase）。 */
+/** 既有 `AccountWorkspaceCatalog`（camelCase）。 */
 export interface AccountWorkspaceCatalog {
   version: number;
   revision: number;
@@ -78,7 +78,7 @@ export interface AccountWorkspaceCatalog {
   accounts: WorkspaceChannelAccount[];
 }
 
-/** Rust `AccountWorkspaceSyncResult`（camelCase）。 */
+/** 既有 `AccountWorkspaceSyncResult`（camelCase）。 */
 export interface AccountWorkspaceSyncResult {
   revision: number;
   accountCount: number;
@@ -87,13 +87,13 @@ export interface AccountWorkspaceSyncResult {
   uploaded: boolean;
 }
 
-/** Rust `AccountWorkspaceStatus`（camelCase）。 */
+/** 既有 `AccountWorkspaceStatus`（camelCase）。 */
 export interface AccountWorkspaceStatus {
   enabled: boolean;
   linkedAccounts: number;
 }
 
-/** Rust `DesktopAccountWorkspacePackage`（camelCase）。 */
+/** 既有 `DesktopAccountWorkspacePackage`（camelCase）。 */
 export interface DesktopAccountWorkspacePackage {
   format: string;
   version: number;
@@ -172,7 +172,7 @@ function parseStoredS3Config(raw: string): S3SyncConfig {
   };
 }
 
-/** Rust `device_sync::load_config`：未配置返回 null，格式损坏报错。 */
+/** 既有 `device_sync::load_config`：未配置返回 null，格式损坏报错。 */
 export function loadS3Config(storage: AccountWorkspaceStorage): S3SyncConfig | null {
   const raw = storage.getAppMeta(DEVICE_SYNC_CONFIG_META_KEY);
   if (raw === null) return null;
@@ -190,7 +190,7 @@ async function readS3Secret(
   return secret;
 }
 
-/** Rust `device_sync::export_connection_config`（含 Secret，camelCase）。 */
+/** 既有 `device_sync::export_connection_config`（含 Secret，camelCase）。 */
 export async function exportS3ConnectionConfig(
   ctx: AccountWorkspaceContext,
   config: S3SyncConfig,
@@ -206,7 +206,7 @@ export async function exportS3ConnectionConfig(
   };
 }
 
-/** Rust `device_sync::save_config`：Secret 先写凭据库，再落 app_meta；旧身份凭据删除。 */
+/** 既有 `device_sync::save_config`：Secret 先写凭据库，再落 app_meta；旧身份凭据删除。 */
 export async function saveS3Config(
   ctx: AccountWorkspaceContext,
   input: S3SyncConfigInput,
@@ -242,7 +242,7 @@ function workspaceEntryContext(config: S3SyncConfig): { service: string; usernam
   return { service: WORKSPACE_KEYRING_SERVICE, username: s3CredentialUsername(config) };
 }
 
-/** Rust `save_workspace_key`：base64(32B) 写 OS 凭据库。 */
+/** 既有 `save_workspace_key`：base64(32B) 写 OS 凭据库。 */
 export async function saveWorkspaceKey(
   ctx: AccountWorkspaceContext,
   config: S3SyncConfig,
@@ -251,7 +251,7 @@ export async function saveWorkspaceKey(
   await keyringSet(ctx, WORKSPACE_KEYRING_SERVICE, workspaceEntryContext(config).username, key.toString("base64"));
 }
 
-/** Rust `read_workspace_key`：缺失/格式错误/长度错误的文案逐条对齐。 */
+/** 既有 `read_workspace_key`：缺失/格式错误/长度错误的文案逐条对齐。 */
 export async function readWorkspaceKey(
   ctx: AccountWorkspaceContext,
   config: S3SyncConfig,
@@ -261,7 +261,7 @@ export async function readWorkspaceKey(
     throw new Error("缺少账号工作区密钥，请导入桌面端工作区接入包");
   }
   const bytes = Buffer.from(encoded, "base64");
-  // Buffer.from 对非法 base64 宽容，先做一次严格校验（与 Rust BASE64.decode 对齐）。
+  // Buffer.from 对非法 base64 宽容，先做一次严格校验（与 Node Host BASE64.decode 对齐）。
   if (!/^[A-Za-z0-9+/]*={0,2}$/.test(encoded.replace(/\s+/g, "")) || bytes.length === 0) {
     throw new Error("账号工作区密钥格式无效");
   }
@@ -284,7 +284,7 @@ export async function isEnabled(
   }
 }
 
-/** Rust `generate_workspace_key`：两个 UUID v4 的字节拼成 32 字节。 */
+/** 既有 `generate_workspace_key`：两个 UUID v4 的字节拼成 32 字节。 */
 export function generateWorkspaceKey(): Buffer {
   const first = Buffer.from(randomUUID().replace(/-/g, ""), "hex");
   const second = Buffer.from(randomUUID().replace(/-/g, ""), "hex");
@@ -293,7 +293,7 @@ export function generateWorkspaceKey(): Buffer {
 
 // ─── 加密 / 指纹 ─────────────────────────────────────────────────────────────
 
-/** Rust `credential_fingerprint`：HMAC-SHA256(key, channel_id \0 api_key) hex。 */
+/** 既有 `credential_fingerprint`：HMAC-SHA256(key, channel_id \0 api_key) hex。 */
 export function credentialFingerprint(key: Buffer, channelId: string, apiKey: string): string {
   return createHmac("sha256", key)
     .update(channelId.trim(), "utf8")
@@ -302,7 +302,7 @@ export function credentialFingerprint(key: Buffer, channelId: string, apiKey: st
     .digest("hex");
 }
 
-/** Rust `encrypt_catalog`：ChaCha20-Poly1305，12B nonce，AAD 固定，密文后接 tag。 */
+/** 既有 `encrypt_catalog`：ChaCha20-Poly1305，12B nonce，AAD 固定，密文后接 tag。 */
 export function encryptCatalog(catalog: AccountWorkspaceCatalog, key: Buffer): Uint8Array {
   const nonce = Buffer.from(randomUUID().replace(/-/g, ""), "hex").subarray(0, 12);
   const plaintext = Buffer.from(JSON.stringify(catalog), "utf8");
@@ -319,7 +319,7 @@ export function encryptCatalog(catalog: AccountWorkspaceCatalog, key: Buffer): U
   return Buffer.from(JSON.stringify(envelope), "utf8");
 }
 
-/** Rust `decrypt_catalog`。 */
+/** 既有 `decrypt_catalog`。 */
 export function decryptCatalog(bytes: Uint8Array, key: Buffer): AccountWorkspaceCatalog {
   let envelope: EncryptedCatalogEnvelope;
   try {
@@ -401,7 +401,7 @@ function optionalString(value: unknown): string | null {
 }
 
 /**
- * Rust `apply_catalog`：把远端目录合并回本机账号表。
+ * 既有 `apply_catalog`：把远端目录合并回本机账号表。
  * 返回 [linked, created, catalogChanged]。
  */
 export function applyCatalog(
@@ -500,7 +500,7 @@ export function applyCatalog(
 
 // ─── 对外流程 ────────────────────────────────────────────────────────────────
 
-/** Rust `status`：enabled = 已配置 S3 且可读取工作区密钥。 */
+/** Node Host `status`：enabled = 已配置 S3 且可读取工作区密钥。 */
 export async function status(ctx: AccountWorkspaceContext): Promise<AccountWorkspaceStatus> {
   const config = loadS3Config(ctx.storage);
   const linkedAccounts = ctx.storage
@@ -509,7 +509,7 @@ export async function status(ctx: AccountWorkspaceContext): Promise<AccountWorks
   return { enabled: await isEnabled(ctx, config), linkedAccounts };
 }
 
-/** Rust `export_desktop_package`。 */
+/** Node Host `export_desktop_package`。 */
 export async function exportDesktopPackage(
   ctx: AccountWorkspaceContext,
 ): Promise<DesktopAccountWorkspacePackage> {
@@ -534,7 +534,7 @@ async function openStore(
   return { config, store: new S3Store(config, secret), key };
 }
 
-/** Rust `initialize`（去掉 background job 记录）：首次创建工作区目录并上传。 */
+/** Node Host `initialize`（去掉 background job 记录）：首次创建工作区目录并上传。 */
 export async function initialize(
   ctx: AccountWorkspaceContext,
 ): Promise<AccountWorkspaceSyncResult> {
@@ -586,7 +586,7 @@ export async function initialize(
   };
 }
 
-/** Rust `sync`（去掉 background job 记录）。 */
+/** Node Host `sync`（去掉 background job 记录）。 */
 export async function sync(ctx: AccountWorkspaceContext): Promise<AccountWorkspaceSyncResult> {
   const { config, store, key } = await openStore(ctx);
   const objectKey = workspaceAccountsKey(config);
@@ -615,7 +615,7 @@ export async function sync(ctx: AccountWorkspaceContext): Promise<AccountWorkspa
   };
 }
 
-/** Rust `import_desktop_package`：校验接入包、验证远端密文、写入配置与密钥。 */
+/** Node Host `import_desktop_package`：校验接入包、验证远端密文、写入配置与密钥。 */
 export async function importDesktopPackage(
   ctx: AccountWorkspaceContext,
   pkg: DesktopAccountWorkspacePackage,

@@ -1,6 +1,6 @@
 // JSON / JSONC 解析与注释保留编辑（Claude Code、OpenCode、Pi 的全局配置）。
 //
-// 权威实现：Rust 侧对 Claude/Pi 使用 serde_json（不保注释），对 OpenCode 使用
+// 实现入口：Host 侧对 Claude/Pi 使用 JSON（不保注释），对 OpenCode 使用
 // `jsonc_parser` 的 CST。桌面迁移的硬要求是「配置外科手术必须保注释与格式」，
 // 因此统一使用 `jsonc-parser` 的 `modify` + `applyEdits`（CST 级编辑）：
 // - 只改动目标属性，未触及的行、缩进、注释与尾逗号原样保留；
@@ -56,8 +56,8 @@ export function parseJsoncObject(
 }
 
 /**
- * 读取并校验 JSON/JSONC Agent 设置文件（Rust `read_settings` 的 Node 等价）。
- * 解析错误与顶层/`env` 校验的错误文案与 Rust 对齐。
+ * 读取并校验 JSON/JSONC Agent 设置文件（Node Host `read_settings` 的 Node 等价）。
+ * 解析错误与顶层/`env` 校验的错误文案与 Node Host 对齐。
  */
 export function readJsoncSettings(
   file: string,
@@ -80,7 +80,7 @@ export function isJsonObject(value: unknown): value is JsonRow {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-/** 读取可选 JSON 对象：文件不存在返回 `{}`（Rust `read_optional_json_object`）。 */
+/** 读取可选 JSON 对象：文件不存在返回 `{}`（Node Host `read_optional_json_object`）。 */
 export function readOptionalJsonObject(file: string): JsonRow {
   if (!fileExists(file)) return {};
   return readJsoncSettings(file);
@@ -91,7 +91,7 @@ export function hasJsonProperty(value: JsonRow, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
 
-/** 按 JSON Pointer 读取嵌套属性（支持 `/a/b`，与 Rust `Value::pointer` 语义近似）。 */
+/** 按 JSON Pointer 读取嵌套属性（支持 `/a/b`，与 Node Host `Value::pointer` 语义近似）。 */
 export function jsonPointer(root: JsonRow, pointer: string): unknown {
   if (pointer === "") return root;
   const segments = pointer
@@ -209,7 +209,7 @@ function lineCommentStart(text: string, from: number, to: number): number {
   return -1;
 }
 
-/** 设置或删除：`value === undefined` 时删除（Rust `set/restore_cst_property`）。 */
+/** 设置或删除：`value === undefined` 时删除（既有 `set/restore_cst_property`）。 */
 export function jsoncSetOrDelete(
   text: string,
   targetPath: ReadonlyArray<string>,

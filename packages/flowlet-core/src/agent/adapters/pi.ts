@@ -1,6 +1,6 @@
 // Pi 全局配置 Adapter。
 //
-// 权威实现：`src-tauri/src/core/agent_global_config/adapters/pi.rs`。
+// 实现入口：`packages/flowlet-core/src/agent/adapters/pi.ts`。
 // 文件位置：`~/.pi/agent/{settings.json,models.json,auth.json}` 与可选的会话扩展
 // `~/.pi/agent/extensions/flowlet.ts`。`models.json` 承载 Flowlet Provider
 // （`baseUrl` + `x-flowlet-client: pi` 标记头），`settings.json` 决定默认 Provider/模型。

@@ -1,6 +1,6 @@
 // `/models` 列表与 `/v1/models/{id}` 详情响应。
 //
-// 权威实现：`src-tauri/src/core/proxy_http.rs`（build_model_list_response /
+// 实现入口：`packages/flowlet-core/src/proxy/http.ts`（build_model_list_response /
 // build_model_detail_response / collect_model_entries / 价格选择）。
 import type { ModelIdentityIndex } from "./catalog.ts";
 import type { AccountRow, ChannelRow, RouteRow } from "./routing.ts";

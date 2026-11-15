@@ -1,10 +1,10 @@
 // YAML 解析与注释保留编辑（DeepSeek Harness settings.yaml / credentials、
-// Hermes config.yaml）。权威实现：`agent_global_config/adapters/deepseek_harness.rs`
-// 的 `patch_yaml_entry` 与 `hermes.rs` 的 YAML 辅助函数。
+// Hermes config.yaml）。实现入口：`agent_global_config/adapters/packages/flowlet-core/src/agent/adapters/deepseek-harness.ts`
+// 的 `patch_yaml_entry` 与 `packages/flowlet-core/src/agent/adapters/hermes.ts` 的 YAML 辅助函数。
 //
-// Rust 侧是「行级补丁 + serde_yaml 语义校验」，迁移改为 `yaml` 的 Document API：
+// Host 侧是「行级补丁 + serde_yaml 语义校验」，迁移改为 `yaml` 的 Document API：
 // Document 保留原文件的注释、键顺序与缩进风格，只重写被管理的键；语义校验
-// （根必须是映射、父键必须是映射、值不可安全改写时报错）与 Rust 保持一致。
+// （根必须是映射、父键必须是映射、值不可安全改写时报错）与 Node Host 保持一致。
 import { parseDocument, isMap } from "yaml";
 
 import type { JsonRow } from "../types.ts";
@@ -15,13 +15,13 @@ export function isYamlMapping(value: unknown): value is JsonRow {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-/** 读取 YAML 文本；文件不存在返回空串（Rust `read_yaml_text`）。 */
+/** 读取 YAML 文本；文件不存在返回空串（既有 `read_yaml_text`）。 */
 export function readYamlText(file: string): string {
   if (readTextOrNull(file) === null) return "";
   return readText(file);
 }
 
-/** 读取 YAML 映射；空文件视为空映射，根节点必须是对象（Rust `read_yaml_value`）。 */
+/** 读取 YAML 映射；空文件视为空映射，根节点必须是对象（既有 `read_yaml_value`）。 */
 export function readYamlValue(file: string): JsonRow {
   const text = readYamlText(file);
   if (text.trim() === "") return {};
@@ -53,7 +53,7 @@ export function parseYamlDocument(text: string, label: string) {
   return doc;
 }
 
-/** 读取嵌套属性（Rust `yaml_at`：先映射键，再尝试序列索引）。 */
+/** 读取嵌套属性（Node Host `yaml_at`：先映射键，再尝试序列索引）。 */
 export function yamlAt(root: unknown, path: ReadonlyArray<string>): unknown {
   let current: unknown = root;
   for (const segment of path) {
@@ -78,7 +78,7 @@ export interface YamlEntryPatch {
 }
 
 /**
- * 设置/删除一个 YAML 键（Rust `patch_yaml_entry` 的 Document API 等价）。
+ * 设置/删除一个 YAML 键（Node Host `patch_yaml_entry` 的 Document API 等价）。
  *
  * - 父级不存在时自动创建为普通缩进映射；
  * - 父级存在但不是映射时报错（避免把用户的行内/复杂写法覆盖掉）；
@@ -127,7 +127,7 @@ export function patchYamlEntries(
   return output;
 }
 
-/** YAML 渲染的纯量安全判定（Rust `yaml_plain_safe`；DSH MCP 块生成使用）。 */
+/** YAML 渲染的纯量安全判定（Node Host `yaml_plain_safe`；DSH MCP 块生成使用）。 */
 export function yamlPlainSafe(value: string): boolean {
   if (value === "" || value.trim() !== value) return false;
   const first = value.charCodeAt(0);

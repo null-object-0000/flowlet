@@ -4,12 +4,12 @@
 // sync_account_workspace / export_desktop_account_workspace /
 // import_desktop_account_workspace。
 //
-// 权威行为：src-tauri/src/commands/account_workspace.rs 与 core/account_workspace_sync.rs。
+// 实现入口：packages/flowlet-core/src/desktop/account-workspace.ts 与 packages/flowlet-core/src/services/account-workspace.ts。
 // 工作区密钥走宿主凭据库（channel `keyring.*`）的 service `Flowlet Account Workspace`；
 // S3 访问经 `services/account-workspace.ts` + `services/s3.ts`（SigV4）。
 // ChaCha20-Poly1305 的密钥长度、nonce、AAD 与信封格式不得变化。
 //
-// 与 Rust 的已知差异（非静默）：Rust 会为每次初始化/同步写 background_jobs 任务记录，
+// 费用口径（非静默）：Node Host 会为每次初始化/同步写 background_jobs 任务记录，
 // Node 批次的 background job 存储由 observability 领域负责，这里暂不创建任务行，
 // 但命令返回形状与业务结果一致。
 import { CommandError } from "../types.ts";
@@ -26,7 +26,7 @@ import {
   type DesktopAccountWorkspacePackage,
 } from "../services/account-workspace.ts";
 
-/** Rust `ACCOUNT_WORKSPACE_SYNC_GUARD`：进程内串行化初始化/同步/导入。 */
+/** 既有 `ACCOUNT_WORKSPACE_SYNC_GUARD`：进程内串行化初始化/同步/导入。 */
 let queue: Promise<unknown> = Promise.resolve();
 
 function serialized<T>(task: () => Promise<T>): Promise<T> {
@@ -39,7 +39,7 @@ function workspaceContext(ctx: DesktopContext): AccountWorkspaceContext {
   return { storage: ctx.storage, host: ctx.desktop.host };
 }
 
-/** Rust `refresh_accounts`：把数据库里的账号重新发布到运行时快照。 */
+/** 既有 `refresh_accounts`：把数据库里的账号重新发布到运行时快照。 */
 function refreshAccounts(ctx: DesktopContext): void {
   const accounts = ctx.storage.listChannelAccounts();
   ctx.runtimeConfig.update((draft) => {
@@ -142,7 +142,7 @@ export const handlers: DesktopHandlerMap = {
     const args = argsObject(rawArgs);
     const pkg = parseDesktopPackage(args);
     try {
-      // Rust：import_desktop_package 成功后立即执行一次 sync，再刷新账号快照。
+      // Node Host：import_desktop_package 成功后立即执行一次 sync，再刷新账号快照。
       const result = await serialized(async () => {
         await importDesktopPackage(workspaceContext(ctx), pkg);
         return sync(workspaceContext(ctx));

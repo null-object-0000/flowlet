@@ -1,5 +1,5 @@
 // Usage extraction for buffered and streaming upstream responses.
-// 逐段对照 `src-tauri/src/core/usage.rs`（不含测试）。
+// 对应 `packages/flowlet-core/src/proxy/usage.ts`（不含测试）。
 import { isRecord, parseJson, type JsonRow } from "./util.ts";
 
 export interface ResponseUsage {

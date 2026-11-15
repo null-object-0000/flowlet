@@ -1,7 +1,12 @@
 # Docker 镜像迁移到 Node Host
 
+> 历史档案：本文记录迁移前的设计与验收，不是当前开发、部署或依赖指南。
+> 旧 Rust 桌面、服务端与 CLI 源码已移除；当前架构见 [架构说明](../../architecture.md)，
+> Android 保留范围见 [Android Rust 边界](../../android-rust-boundary.md)。
+
+
 > 历史迁移记录：2026-11-15 起旧 Rust 桌面、headless 与凭据 CLI 源码已移除。
-> 本文中的旧路径/构建命令仅描述当时基线，当前 Android 边界见 [Android Rust 裁剪](../android-rust-boundary.md)。
+> 本文中的旧路径/构建命令仅描述当时基线，当前 Android 边界见 [Android Rust 裁剪](../../android-rust-boundary.md)。
 
 > 状态：**Node Host 已与当前线上版本（含 GitLab OIDC SSO）对齐**：严格对拍 0/0
 > （命令 58 步 + HTTP 检查，Rust oracle = 线上容器二进制 + 生产库快照），镜像已在远端构建并
@@ -214,7 +219,7 @@ node scripts/e2e-node-host.mjs            # 端到端冒烟（含 mock 上游流
   （见 `docs/credential-cli.md` §11）。
 - CLI 浏览器授权（`flowlet login`，Node Host 专有）：OIDC-only 实例不再需要把管理凭据交给
   Agent 机器，`flowlet pull` 自动使用本机 `auth.json` 授权；授权/撤销见
-  `docs/credential-cli.md` §4 与 `docs/migration/node-host.md` §2.1。Rust Host 未实现该能力，
+  `docs/credential-cli.md` §4 与 `docs/archive/tauri-migration/node-host.md` §2.1。Rust Host 未实现该能力，
   且不参与对拍。
 - `cleanupOldLogs` 删行后不额外 GC 已 `cleared` 的 orphan compacted 段（Rust 同样不回收）。
 - 与 Rust 保持一致、未额外实现：仅 RS256、`client_secret_basic`、无 `REQUIRE_EMAIL_VERIFIED`/`CA_FILE`/
@@ -224,7 +229,7 @@ node scripts/e2e-node-host.mjs            # 端到端冒烟（含 mock 上游流
 
 | 项 | 值 |
 | --- | --- |
-| 内容 | Web Host「会话管理」的会话标题与项目目录由代理侧从请求体派生（`proxy/session-derive.ts` → `agent_session_metadata` 表 → 会话聚合 `LEFT JOIN`），规则见 [agent-session-metadata.md](../agent-session-metadata.md)；前端搜索框与 Web 说明同步 |
+| 内容 | Web Host「会话管理」的会话标题与项目目录由代理侧从请求体派生（`proxy/session-derive.ts` → `agent_session_metadata` 表 → 会话聚合 `LEFT JOIN`），规则见 [agent-session-metadata.md](../../agent-session-metadata.md)；前端搜索框与 Web 说明同步 |
 | 代码 | 提交 `582117d`（同一提交含此前未提交、但已上线的 webchannels/服务凭据/CLI 工作树状态） |
 | 构建 | Docker Engine API `POST /build`（197s）→ `flowlet:node-20261110-sessionmeta`（`sha256:9c1374a8…`，260 MB） |
 | 部署 | 13:30:34 经 Dockhand 仅替换 `services.flowlet.image`（`forceRecreate`），05:31:06Z healthy；新容器冒烟（临时容器 + 空卷）通过 |
@@ -349,6 +354,6 @@ node scripts/e2e-node-host.mjs            # 端到端冒烟（含 mock 上游流
 | 回滚 | `flowlet_deploy.py deploy --tag flowlet:node-20261110-multiorigin` |
 | 生产验证 | 容器 `flowlet:node-20261110-inputstatus2` healthy；`/health` 200；`/api/auth/config` 仍 oidc；`/v1/models` 200；流式回归 3/3 读到 `[DONE]`；**重构的真实失败请求体（69 个 `status: null`）→ 200**（部署前稳定 400），干净 Responses 请求 200 |
 | 单测 | Rust `cargo test --lib core::proxy::` 184 passed（含新增 `normalize_responses_input_items_*` 2 条）；Node `node --test packages/flowlet-core/src/proxy/__tests__/proxy.test.ts` 36 passed（含新增 2 条）；`tsc -p packages/flowlet-core/tsconfig.json` 通过 |
-| 契约文档 | `AGENTS.md` §5、`docs/deepseek-harness-integration.md`、`docs/migration/proxy-core.md`（§3.11 / §4.1 第 11 行 / 附录 A）、`CHANGELOG.md` Unreleased 已同步；代码提交 `1fe1976` |
+| 契约文档 | `AGENTS.md` §5、`docs/deepseek-harness-integration.md`、`docs/archive/tauri-migration/proxy-core.md`（§3.11 / §4.1 第 11 行 / 附录 A）、`CHANGELOG.md` Unreleased 已同步；代码提交 `1fe1976` |
 | 并发说明 | 部署前 17:56–17:58 并行会话刚发布 `flowlet:node-20261110-multiorigin`，本镜像基于它构建、未回退其改动。若并行会话之后用早于本镜像的候选镜像再发布，会覆盖本兼容层；代码已在 git（`1fe1976`），按本记录 `build --paths proxy/http.ts,proxy/forward.ts` 即可重建 |
 | 遗留 | canary 容器仍为 `flowlet:node-20261110-multiorigin`，下次 canary 升级会自动跟进 |

@@ -1,6 +1,6 @@
-// `.flcap` 外置请求捕获帧：与 Rust `src-tauri/src/core/request_capture.rs` 逐字节对齐。
+// `.flcap` 外置请求捕获帧：兼容既有磁盘帧格式。
 //
-// 帧布局（60 字节头 + zstd 压缩的 serde_json 记录）：
+// 帧布局（60 字节头 + zstd 压缩的 JSON 记录）：
 //   [0..8)   magic `FLCAP001`
 //   [8..10)  format_version u16 LE（当前 1）
 //   [10..12) flags u16 LE（当前恒 0）
@@ -14,7 +14,7 @@
 //   unassigned/<YYYY-MM-DD>/<sha256(request_id)[:2]>/<NNNNNN>.flcap
 // 单段上限 32 MiB；写满后新建递增段；整理时写 `compacted-<uuid>.flcap` 后由调用方删旧段。
 //
-// 记录的 JSON 字段顺序必须与 Rust `RequestCaptureRecord` 的声明顺序一致（serde
+// 记录的 JSON 字段顺序必须与 既有 `RequestCaptureRecord` 的声明顺序一致（serde
 // 按声明顺序序列化），否则无法与 Rust 产出的 raw 字节/checksum 对齐。
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -57,7 +57,7 @@ export class CaptureError extends Error {
   }
 }
 
-/** Rust `RequestCaptureRecord`（字段顺序即 serde JSON 序列化顺序）。 */
+/** 既有 `RequestCaptureRecord`（字段顺序即 serde JSON 序列化顺序）。 */
 export interface RequestCaptureRecord {
   format_version: number;
   request_log_id: string;
@@ -103,7 +103,7 @@ export interface RequestCapturePointer {
   res_body_bytes: number;
 }
 
-/** Rust `RequestCaptureRecord::from_log`（RequestLogInput → 记录）。 */
+/** 既有 `RequestCaptureRecord::from_log`（RequestLogInput → 记录）。 */
 export function captureRecordFromLog(requestLogId: string, log: JsonRow): RequestCaptureRecord {
   const isStream = Boolean(log.is_stream);
   const durationMs = log.duration_ms === null || log.duration_ms === undefined ? null : Number(log.duration_ms);
@@ -151,7 +151,7 @@ export function recordResBodyBytes(record: RequestCaptureRecord): number {
   return record.res_body_b64 === null ? 0 : Buffer.byteLength(record.res_body_b64, "utf8");
 }
 
-/** 严格按 Rust 结构体声明顺序序列化（serde 逐字段、紧凑 JSON）。 */
+/** 严格按 Node Host 结构体声明顺序序列化（serde 逐字段、紧凑 JSON）。 */
 export function serializeCaptureRecord(record: RequestCaptureRecord): Buffer {
   const ordered: Record<string, unknown> = {
     format_version: record.format_version,
@@ -210,7 +210,7 @@ function toCaptureError(error: unknown, fallbackKind: CaptureErrorKind = "io"): 
   return new CaptureError(fallbackKind, message);
 }
 
-/** Rust `safe_path_component`：仅保留 ASCII 字母数字与 `-_.`，其余替换为 `-`。 */
+/** 既有 `safe_path_component`：仅保留 ASCII 字母数字与 `-_.`，其余替换为 `-`。 */
 export function safePathComponent(value: string): string {
   let filtered = "";
   for (const character of value) {
@@ -219,7 +219,7 @@ export function safePathComponent(value: string): string {
   return filtered === "" ? "unknown" : filtered;
 }
 
-/** Rust `path_to_storage_key`：只保留正常路径分量并用 `/` 拼接。 */
+/** 既有 `path_to_storage_key`：只保留正常路径分量并用 `/` 拼接。 */
 function pathToStorageKey(relative: string): string {
   return relative
     .split(/[\\/]+/)
@@ -227,7 +227,7 @@ function pathToStorageKey(relative: string): string {
     .join("/");
 }
 
-/** Rust `select_segment`：扫描目录已存在的 `NNNNNN.flcap`，按 32MiB 上限选择写入段。 */
+/** 既有 `select_segment`：扫描目录已存在的 `NNNNNN.flcap`，按 32MiB 上限选择写入段。 */
 function selectSegment(directory: string, maxBytes: number, incomingBytes: number): string {
   let highest = 0;
   if (existsSync(directory)) {
@@ -300,12 +300,12 @@ export class RequestCaptureStore {
   }
 
   /**
-   * Rust `RequestCaptureStore::for_database`：root = `<数据库目录>/request-captures`。
-   * `:memory:`（测试）没有数据目录，使用系统临时目录下的独立子目录（Rust 测试同理）。
+   * Node Host `RequestCaptureStore::for_database`：root = `<数据库目录>/request-captures`。
+   * `:memory:`（测试）没有数据目录，使用系统临时目录下的独立子目录（Node Host 测试同理）。
    */
   static forDatabase(databasePath: string, options: { tempRoot?: string } = {}): RequestCaptureStore {
     if (databasePath === ":memory:") {
-      // 与 Rust `std::env::temp_dir()` 一致：读平台临时目录变量（Windows TEMP/TMP，
+      // 与 Node Host `std::env::temp_dir()` 一致：读平台临时目录变量（Windows TEMP/TMP，
       // POSIX TMPDIR），只写死 "/tmp" 会让 Windows 上的临时目录变成根盘下的 /tmp，
       // 测试里 `TMPDIR` 重定向也会失效。
       const tempRoot = options.tempRoot
@@ -331,7 +331,7 @@ export class RequestCaptureStore {
     return this.#segmentBytes;
   }
 
-  /** Rust `resolve_storage_key`：拒绝空 key、绝对路径与 `..` 越界分量。 */
+  /** Node Host `resolve_storage_key`：拒绝空 key、绝对路径与 `..` 越界分量。 */
   resolveStorageKey(storageKey: string): string {
     if (!storageKey || storageKey.includes("\0")) {
       throw new CaptureError("invalid_path", `非法捕获文件路径: ${storageKey}`);
@@ -348,7 +348,7 @@ export class RequestCaptureStore {
     return resolved;
   }
 
-  /** Rust `relative_directory`：按会话/请求分组生成分目录。 */
+  /** Node Host `relative_directory`：按会话/请求分组生成分目录。 */
   #relativeDirectory(record: RequestCaptureRecord): string {
     const now = new Date();
     const year = now.getUTCFullYear();
@@ -372,7 +372,7 @@ export class RequestCaptureStore {
     return path.posix.join("unassigned", iso.slice(0, 10), requestHash);
   }
 
-  /** Rust `append_locked`：压缩记录并追加到当前段，返回指针。 */
+  /** Node Host `append_locked`：压缩记录并追加到当前段，返回指针。 */
   append(record: RequestCaptureRecord): RequestCapturePointer {
     try {
       const frame = buildFrameBytes(record);
@@ -405,7 +405,7 @@ export class RequestCaptureStore {
   }
 
   /**
-   * Rust `rewrite_segment_locked`：把同一段内所有存活记录写到新段
+   * Node Host `rewrite_segment_locked`：把同一段内所有存活记录写到新段
    * `compacted-<uuid>.flcap`，返回新指针；旧段由调用方在 refs 提交后删除。
    */
   rewriteSegment(storageKey: string, records: Iterable<RequestCaptureRecord>): RequestCapturePointer[] {
@@ -453,7 +453,7 @@ export class RequestCaptureStore {
     }
   }
 
-  /** Rust `remove_segment_locked`：删除段文件（不存在视为成功）。 */
+  /** Node Host `remove_segment_locked`：删除段文件（不存在视为成功）。 */
   removeSegment(storageKey: string): void {
     try {
       unlinkSync(this.resolveStorageKey(storageKey));
@@ -505,7 +505,7 @@ export class RequestCaptureStore {
     }
   }
 
-  /** Rust `disk_usage`：递归统计 .flcap 段数量与总字节。 */
+  /** Node Host `disk_usage`：递归统计 .flcap 段数量与总字节。 */
   diskUsage(): { segments: number; bytes: number } {
     let segments = 0;
     let bytes = 0;

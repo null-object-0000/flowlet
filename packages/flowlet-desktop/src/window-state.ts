@@ -1,8 +1,5 @@
-// 主窗口尺寸/位置/最大化记忆。
-//
-// Rust 使用 tauri-plugin-window-state（只恢复 SIZE | POSITION | MAXIMIZED，不恢复
-// VISIBLE）。这里等价实现为数据目录下的 JSON；启动后按显示器 workArea 校正，
-// 避免上次关闭位置在多屏变化后落到屏幕外。
+// 主窗口尺寸、位置和最大化状态保存在数据目录 JSON 中，不恢复可见性。
+// 启动时按显示器 workArea 校正，避免多屏变化后窗口落到屏幕外。
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { BrowserWindow, Rectangle } from "electron";
@@ -61,7 +58,7 @@ export function saveWindowState(dataDir: string, win: BrowserWindow): void {
   }
 }
 
-/** 把窗口拉回可见显示器；等价 Rust `window_visibility::ensure_window_on_screen`。 */
+/** 把窗口拉回可见显示器；等价 Node Host `window_visibility::ensure_window_on_screen`。 */
 export function ensureWindowOnScreen(win: BrowserWindow, bounds: Rectangle): Rectangle {
   const displays = screen.getAllDisplays();
   const centerX = bounds.x + Math.floor(bounds.width / 2);

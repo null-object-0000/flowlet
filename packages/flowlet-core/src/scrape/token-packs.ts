@@ -1,4 +1,4 @@
-// 抓取到的资源包数组归一化（Rust `merge_longcat_token_packs` /
+// 抓取到的资源包数组归一化（既有 `merge_longcat_token_packs` /
 // `normalize_scrape_token_packs` / `longcat_list_item_as_pack` 等）。
 //
 // 背景：LongCat 的 summary（`token-packs/summary`）与 list（`token-packs/list`）
@@ -14,7 +14,7 @@ function asObject(value: unknown): JsonRow | null {
     : null;
 }
 
-/** Rust `longcat_list_item_as_pack`：把 list item 映射成 pack 形状。 */
+/** 既有 `longcat_list_item_as_pack`：把 list item 映射成 pack 形状。 */
 export function longcatListItemAsPack(item: unknown): JsonRow | null {
   const source = asObject(item);
   if (source === null) return null;
@@ -58,7 +58,7 @@ function jsonScalarString(value: unknown): string | null {
   return null;
 }
 
-/** Rust `longcat_pack_identity_keys`：跨接口关联用的身份键集合。 */
+/** 既有 `longcat_pack_identity_keys`：跨接口关联用的身份键集合。 */
 export function longcatPackIdentityKeys(pack: unknown): string[] {
   const row = asObject(pack);
   if (row === null) return [];
@@ -84,7 +84,7 @@ export function longcatPackIdentityKeys(pack: unknown): string[] {
   return keys;
 }
 
-/** Rust `merge_longcat_pack_details`：list 记录只补充字段，不覆盖 summary 的额度。 */
+/** Node Host `merge_longcat_pack_details`：list 记录只补充字段，不覆盖 summary 的额度。 */
 function mergeLongcatPackDetails(target: JsonRow, incoming: JsonRow): void {
   const targetFromList = target["_fromList"] === true;
   const incomingFromList = incoming["_fromList"] === true;
@@ -123,7 +123,7 @@ function enrichLongcatPackFromList(target: JsonRow, listPack: JsonRow): void {
 }
 
 /**
- * Rust `merge_longcat_token_packs`：summary 优先（额度权威），list 补展示字段，
+ * Node Host `merge_longcat_token_packs`：summary 优先（额度权威），list 补展示字段，
  * 最后按内部身份去重。返回 JSON 字符串；没有任何包时返回 null。
  */
 export function mergeLongcatTokenPacks(
@@ -201,7 +201,7 @@ export function mergeLongcatTokenPacks(
 }
 
 /**
- * Rust `normalize_scrape_token_packs`：
+ * Node Host `normalize_scrape_token_packs`：
  * - Z.AI：extractor 已归一化为数组，直接透传；
  * - 其他渠道：extractor 产出了数组则透传，否则回退 LongCat 合并逻辑。
  */

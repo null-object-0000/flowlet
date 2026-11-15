@@ -1,13 +1,13 @@
 // 命令参数解析 / 错误形状。Owner: node-web.
 //
-// 权威实现：src-tauri/src/core/web/commands.rs 的 `arg<T>()` + serde_json 错误文本。
-// Rust 对缺失/类型错误的返回固定为 (400, "command_failed",
-// `参数 {name}: {serde 错误}`)。这里复刻 serde_json 的常见错误措辞，保证
-// Web 端错误信息与 Rust 版一致（也是迁移验收项）。
+// 实现入口：packages/flowlet-core/src/web/commands.ts 的 `arg<T>()` + JSON 错误文本。
+// Node Host 对缺失/类型错误的返回固定为 (400, "command_failed",
+// `参数 {name}: {serde 错误}`)。这里复刻 JSON 的常见错误措辞，保证
+// Web 端错误信息与 历史版本一致（也是迁移验收项）。
 import { CommandError } from "../types.ts";
 import type { JsonRow } from "../types.ts";
 
-/** serde_json::Value 的运行时类型描述（用于 "invalid type: ..., expected ..."）。 */
+/** JSON::Value 的运行时类型描述（用于 "invalid type: ..., expected ..."）。 */
 export function serdeTypeName(value: unknown): string {
   if (value === null || value === undefined) return "null";
   if (Array.isArray(value)) return "sequence";
@@ -25,17 +25,17 @@ export function serdeTypeName(value: unknown): string {
   }
 }
 
-/** 构造 `参数 {name}: {detail}` 错误（与 Rust arg() 的错误前缀一致）。 */
+/** 构造 `参数 {name}: {detail}` 错误（与 Node Host arg() 的错误前缀一致）。 */
 export function argError(name: string, detail: string): CommandError {
   return CommandError.badRequest(`参数 ${name}: ${detail}`);
 }
 
-/** Rust `arg()` 的类型错误。 */
+/** Node Host `arg()` 的类型错误。 */
 export function invalidType(value: unknown, expected: string, name: string): CommandError {
   return argError(name, `invalid type: ${serdeTypeName(value)}, expected ${expected}`);
 }
 
-/** 把参数对象规整为普通对象（非对象时 Rust `Value::get` 返回 None，等价于缺参）。 */
+/** 把参数对象规整为普通对象（非对象时 Node Host `Value::get` 返回 None，等价于缺参）。 */
 export function argsObject(args: unknown): JsonRow {
   return args !== null && typeof args === "object" && !Array.isArray(args)
     ? (args as JsonRow)

@@ -1,11 +1,11 @@
 // GitLab API v4 客户端（面向 GitLab CE 10.8.7 实测）。Owner: node-web.
 //
-// 权威实现：src-tauri/src/core/gitlab.rs（444 行）逐行为等价：
+// 实现入口：packages/flowlet-core/src/web/gitlab.ts（444 行）保持既有行为：
 // - 认证只用 `PRIVATE-TOKEN` 请求头（10.8 时代 Bearer PAT 尚不可用）；
 // - 只用 10.8 已有端点（/user、/projects、/version(仅管理员)）；
 // - 分页读 `X-Page` / `X-Next-Page` / `X-Total` 响应头；
 // - 允许子路径部署（https://host/gitlab），也接受用户粘贴 /api/v4；
-// - 20s 超时；insecure 时跳过 TLS 校验；错误文案对齐 Rust Display。
+// - 20s 超时；insecure 时跳过 TLS 校验；错误文案对齐 Node Host Display。
 import { Agent, request } from "undici";
 
 const DEFAULT_TIMEOUT_MS = 20_000;
@@ -26,7 +26,7 @@ export interface Pagination {
   total: number | null;
 }
 
-/** 与 Rust `GitlabError` 同形：Display = `GitLab API {status}: {message}` / `GitLab API: {message}`。 */
+/** 与 既有 `GitlabError` 同形：Display = `GitLab API {status}: {message}` / `GitLab API: {message}`。 */
 export class GitlabError extends Error {
   status: number | null;
 
@@ -42,7 +42,7 @@ export class GitlabError extends Error {
 }
 
 /**
- * 规范化实例地址：比口径与 Rust `normalize_base_url` 一致。
+ * 规范化实例地址：比口径与 Node Host `normalize_base_url` 一致。
  * - 必须 http/https；
  * - 去末尾 `/`；粘贴到 `/api/v4` 时自动剥掉；
  * - 保留子路径部署；拒绝 query / fragment。
@@ -73,7 +73,7 @@ export function normalizeBaseUrl(raw: string): string {
 }
 
 function urlParseErrorDetail(raw: string): string {
-  // url crate 的常见错误文本（用于保持错误信息可读且接近 Rust）。
+  // url crate 的常见错误文本（用于保持错误信息可读且接近 Node Host）。
   if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(raw)) return "relative URL without a base";
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/$/.test(raw)) return "empty host";
   return "invalid URL";
@@ -96,7 +96,7 @@ export function resolveApiPath(base: string, rawPath: string): string {
 }
 
 export interface GitlabClientOptions {
-  /** 内网自签证书：跳过 TLS 校验（对应 Rust `danger_accept_invalid_certs`）。 */
+  /** 内网自签证书：跳过 TLS 校验（对应 Node Host `danger_accept_invalid_certs`）。 */
   insecure?: boolean;
 }
 
@@ -283,7 +283,7 @@ function paginationFromHeaders(headers: Record<string, string | string[] | undef
   };
 }
 
-/** 把 GitLab 错误体转成可执行提示（与 Rust `describe_error` 文案一致）。 */
+/** 把 GitLab 错误体转成可执行提示（与 Node Host `describe_error` 文案一致）。 */
 export function describeError(status: number, value: unknown): string {
   let detail = "";
   if (value !== null && typeof value === "object" && !Array.isArray(value)) {
@@ -309,7 +309,7 @@ export function describeError(status: number, value: unknown): string {
   return detail === "" ? hint : `${detail}（${hint}）`;
 }
 
-/** Rust `urlencode`：保留 unreserved，空格 %20，其余 UTF-8 逐字节 %XX。 */
+/** Node Host `urlencode`：保留 unreserved，空格 %20，其余 UTF-8 逐字节 %XX。 */
 function urlencode(value: string): string {
   let out = "";
   for (const byte of Buffer.from(value, "utf8")) {

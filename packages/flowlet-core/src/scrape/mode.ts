@@ -1,6 +1,6 @@
 // 抓取模式的解析：config.json 的 `channels_config.scrape` + 自定义描述符。
 //
-// 权威行为：src-tauri/src/core/scrape_console.rs 的 `resolve_scrape_mode` /
+// 实现入口：packages/flowlet-desktop/src/scrape.ts 的 `resolve_scrape_mode` /
 // `resolve_builtin_scrape_mode`。命令层只负责「按账号解析出抓取描述」，
 // 渠道差异全部来自 config.json 与自定义描述符，不对渠道硬编码。
 import type { DesktopContext } from "../desktop/types.ts";
@@ -14,7 +14,7 @@ export function channelsConfigSection(ctx: DesktopContext): JsonRow {
   return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
 }
 
-/** Rust `ChannelsConfig::scrape_config`：先取 `channels[]` 的 id，再取该渠道的 mode。 */
+/** 既有 `ChannelsConfig::scrape_config`：先取 `channels[]` 的 id，再取该渠道的 mode。 */
 export function builtinScrapeModeConfig(
   ctx: DesktopContext,
   channelId: string,
@@ -39,12 +39,12 @@ export function channelPreset(ctx: DesktopContext, channelId: string): JsonRow |
   return preset === undefined ? null : preset;
 }
 
-/** Rust `ChannelPreset::supports_scrape_balance`。 */
+/** 既有 `ChannelPreset::supports_scrape_balance`。 */
 export function presetSupportsScrape(ctx: DesktopContext, channelId: string): boolean {
   return channelPreset(ctx, channelId)?.supports_scrape_balance === true;
 }
 
-/** Rust `ChannelPreset::supports_balance_query`。 */
+/** 既有 `ChannelPreset::supports_balance_query`。 */
 export function presetSupportsBalanceQuery(ctx: DesktopContext, channelId: string): boolean {
   return channelPreset(ctx, channelId)?.supports_balance_query === true;
 }
@@ -63,7 +63,7 @@ function stringArray(value: unknown): string[] {
 }
 
 /**
- * Rust `resolve_scrape_mode`：先查内置渠道抓取配置，再回退到自定义描述符。
+ * 既有 `resolve_scrape_mode`：先查内置渠道抓取配置，再回退到自定义描述符。
  *
  * `resourceMode` 为空或无法映射时回退到渠道默认资源模式（与前端
  * `defaultResourceMode` 一致），避免把合法账号误判为「不支持控制台抓取」。

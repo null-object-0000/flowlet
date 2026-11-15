@@ -6,7 +6,7 @@ declare const __FLOWLET_APP_VERSION__: string;
 
 /**
  * Flowlet 运行目标由 `vite --mode` 决定：
- * - 未指定 / Tauri desktop：默认分支；
+ * - 未指定：默认前端开发分支；
  * - `web`：Docker / Web Host（`isWebHost`）；
  * - `mobile`：移动端；
  * - `demo`：官网 Demo；

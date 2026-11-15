@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Contract test: verify the account adapter forwards each concern to the
-// correct Tauri command name / argument shape without duplicating the raw
+// correct Host command name / argument shape without duplicating the raw
 // command strings anywhere else in the UI.
 
 const invokeMock = vi.fn(

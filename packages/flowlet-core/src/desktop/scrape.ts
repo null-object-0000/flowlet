@@ -5,14 +5,14 @@
 // sync_scrape_balances / open_external_url / reload_custom_scrape_registry /
 // list_balance_snapshots。
 //
-// 权威行为：src-tauri/src/commands/scrape.rs 与 core/scrape_console.rs。
+// 实现入口：packages/flowlet-core/src/desktop/scrape.ts 与 packages/flowlet-desktop/src/scrape.ts。
 // Electron 侧改为统一 CDP（channel `scrape.*`，见 desktop/README.md 的 channel 契约）；
 // 登录态目录 per-account 隔离，既有 WebView 登录态无法迁移，需引导用户重新登录。
 //
 // 分工（与宿主 `packages/flowlet-desktop/src/scrape.ts` 的边界）：
 // - 宿主负责「窗口 + CDP 抓包 + 页面执行」：导航、Network.* 捕获、在页面里跑 extractor；
 // - 命令层负责「模式解析 + 槽位语义 + 完成判定 + 会话状态机 + 落库 + 错误映射」：
-//   config.json / 自定义描述符驱动 ScrapePlan，逐阶段收槽位并按 Rust 语义合并/校验；
+//   config.json / 自定义描述符驱动 ScrapePlan，逐阶段收槽位并按 Node Host 语义合并/校验；
 // - 页面注入的 `__TAURI_INTERNALS__.invoke('handle_intercepted_response' ...)` 在
 //   Electron 侧是 resolve-null shim（CDP 为准），两条 handle_* 命令仍保留为同一语义的
 //   页面回调入口：宿主若转发 IPC（需补 accountId）即可写入同一份会话缓冲。
@@ -77,7 +77,7 @@ import {
   type CustomScrapeChannelInfo,
 } from "../scrape/custom-registry.ts";
 
-/** Rust `ScrapeBalanceResult`（snake_case）。 */
+/** 既有 `ScrapeBalanceResult`（snake_case）。 */
 export interface ScrapeBalanceResult {
   balance: number | null;
   currency: string | null;
@@ -92,7 +92,7 @@ export interface ScrapeBalanceResult {
   synced_at: string;
 }
 
-/** Rust `ScrapeLoginStatus`（snake_case）。 */
+/** 既有 `ScrapeLoginStatus`（snake_case）。 */
 export interface ScrapeLoginStatus {
   is_logged_in: boolean;
   channel_id: string;
@@ -101,7 +101,7 @@ export interface ScrapeLoginStatus {
   message: string | null;
 }
 
-/** Rust `ScrapeBalanceSyncResult`（camelCase）。 */
+/** 既有 `ScrapeBalanceSyncResult`（camelCase）。 */
 export interface ScrapeBalanceSyncResult {
   started: boolean;
   jobId: string | null;
@@ -130,7 +130,7 @@ const DEFAULT_PLAN_TIMEOUT_MS = 30_000;
 const EXTRACTOR_TIMEOUT_MS = 10_000;
 const PROBE_PHASE_TIMEOUT_MS = 15_000;
 /**
- * 写入主进程日志（`platform.logFromFrontend`，与 Rust `tracing::warn!` 语义对应）。
+ * 写入主进程日志（`platform.logFromFrontend`，与 既有 `tracing::warn!` 语义对应）。
  * 纯诊断，宿主不可用/未实现时静默忽略，绝不影响抓取结果。
  */
 function logFromFrontend(
@@ -160,7 +160,7 @@ function isPlainObject(value: unknown): value is JsonRow {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-/** Rust 账号查找：`runtime_config.snapshot().accounts`。 */
+/** Node Host 账号查找：`runtime_config.snapshot().accounts`。 */
 function findAccount(ctx: DesktopContext, accountId: string): JsonRow {
   const snapshot = ctx.runtimeConfig.snapshot();
   const accounts = Array.isArray(snapshot.accounts) ? (snapshot.accounts as JsonRow[]) : [];
@@ -249,7 +249,7 @@ async function runPlan(
 }
 
 /**
- * 逐阶段执行抓取计划，并按 Rust `record_captured_response` 的语义把各阶段槽位
+ * 逐阶段执行抓取计划，并按 Node Host `record_captured_response` 的语义把各阶段槽位
  * 合并进会话缓冲。返回首个失败阶段的错误（若全部失败）与是否至少成功一个阶段。
  */
 async function capturePhases(
@@ -278,7 +278,7 @@ async function capturePhases(
   return { anyPhaseOk, lastError };
 }
 
-/** 把宿主返回的槽位结果合并进会话（合并规则与 Rust 槽位引擎一致）。 */
+/** 把宿主返回的槽位结果合并进会话（合并规则与 Node Host 槽位引擎一致）。 */
 function absorbSlots(mode: ScrapeMode, session: ScrapeSession, slots: JsonRow): void {
   for (const [slot, value] of Object.entries(slots)) {
     const body = typeof value === "string" ? value : JSON.stringify(value);
@@ -300,17 +300,17 @@ async function hostCloseConsole(ctx: DesktopContext, accountId: string): Promise
   try {
     await ctx.desktop.host.invoke("scrape.closeConsole", { accountId });
   } catch {
-    // 窗口已销毁/宿主未打开过该账号：关闭是幂等的，Rust 同样忽略失败。
+    // 窗口已销毁/宿主未打开过该账号：关闭是幂等的，Node Host 同样忽略失败。
   }
 }
 
-/** Rust `destroy_scrape_webview` + 数据目录语义：关闭窗口并清空全部 per-account 状态。 */
+/** Node Host `destroy_scrape_webview` + 数据目录语义：关闭窗口并清空全部 per-account 状态。 */
 async function destroyConsole(ctx: DesktopContext, accountId: string): Promise<void> {
   scrapeSessions.close(accountId);
   await hostCloseConsole(ctx, accountId);
 }
 
-/** Rust `reclaim_stale_scrape_webviews`：回收不属于人工刷新、且不是本次账号的会话。 */
+/** Node Host `reclaim_stale_scrape_webviews`：回收不属于人工刷新、且不是本次账号的会话。 */
 async function reclaimStaleSessions(ctx: DesktopContext, keepAccountId: string): Promise<number> {
   let reclaimed = 0;
   for (const session of scrapeSessions.list()) {
@@ -338,7 +338,7 @@ async function openConsoleWindow(
   }
 }
 
-/** Rust `surface_scrape_webview`：把隐藏窗口显示出来供用户登录/处理。 */
+/** Node Host `surface_scrape_webview`：把隐藏窗口显示出来供用户登录/处理。 */
 async function surfaceConsole(ctx: DesktopContext, accountId: string): Promise<void> {
   try {
     await ctx.desktop.host.invoke("scrape.openConsole", { accountId, interactive: true });
@@ -347,7 +347,7 @@ async function surfaceConsole(ctx: DesktopContext, accountId: string): Promise<v
   }
 }
 
-/** Rust `current_scrape_page_url`：通过宿主 probeLogin 取当前页面 URL。 */
+/** Node Host `current_scrape_page_url`：通过宿主 probeLogin 取当前页面 URL。 */
 async function currentPageUrl(ctx: DesktopContext, accountId: string): Promise<string | null> {
   try {
     const response = await ctx.desktop.host.invoke<{ url?: unknown }>("scrape.probeLogin", {
@@ -360,7 +360,7 @@ async function currentPageUrl(ctx: DesktopContext, accountId: string): Promise<s
   }
 }
 
-// ─── 登录态探测（Rust probe_scrape_login） ──────────────────────────────────
+// ─── 登录态探测（Node Host probe_scrape_login） ──────────────────────────────────
 
 interface ProbeContext {
   channelId: string;
@@ -388,7 +388,7 @@ async function probeLoginStatus(
     };
   }
 
-  // Rust probe 的语义是「清缓冲 → 重新导航 → 等待业务响应」：ensure_scrape_console
+  // Node Host probe 的语义是「清缓冲 → 重新导航 → 等待业务响应」：ensure_scrape_console
   // 只建窗口（navigate_on_create=false），各阶段由 `window.navigate(phase_url)` 强制刷新。
   // Electron 宿主为保护 SSO 会在「首次阶段 URL 与当前页面相同」时跳过导航，那样
   // CDP 会错过已经发过的请求。命中这个分支时重建窗口（登录态在 partition 里，不丢），
@@ -399,7 +399,7 @@ async function probeLoginStatus(
     if (current === firstPhaseUrl) await destroyConsole(ctx, accountId);
   }
 
-  // 窗口存在但未导航（Rust ensure_scrape_console(navigate_on_create=false)）。
+  // 窗口存在但未导航（Node Host ensure_scrape_console(navigate_on_create=false)）。
   await openConsoleWindow(ctx, accountId, channelId);
   const session = scrapeSessions.open(accountId, channelId, mode);
   scrapeSessions.resetCapture(accountId);
@@ -417,7 +417,7 @@ async function probeLoginStatus(
   session.pageUrl = pageUrl === "" ? null : pageUrl;
   const slots = sessionSlots(session, mode);
   const captured = aggregateComplete(slots, mode);
-  // «监听已就绪» 与 Rust 同义：拦截器 ACK、宿主 CDP 监听生效、或已收到任意槽位，
+  // «监听已就绪» 与 Node Host 同义：拦截器 ACK、宿主 CDP 监听生效、或已收到任意槽位，
   // 三者任一成立都不能再判定为「监听初始化失败」。未捕获目标响应 ≠ 未登录。
   const ready =
     scrapeSessions.get(accountId)?.ready !== null ||
@@ -441,7 +441,7 @@ async function probeLoginStatus(
     lastError !== null &&
     (probeState === "console_action_required" || probeState === "capture_timeout")
   ) {
-    // 诊断字段只进日志，不改写 Rust 的判定文案（前端依赖文案区分三种状态）。
+    // 诊断字段只进日志，不改写 Node Host 的判定文案（前端依赖文案区分三种状态）。
     logFromFrontend(ctx, "warn", `控制台抓取阶段失败：${lastError}`, { accountId });
   }
 
@@ -489,7 +489,7 @@ function sessionSlots(session: ScrapeSession, mode: ScrapeMode): Map<string, str
   return slots;
 }
 
-/** Rust `missing_hint` 的 raw_summary 部分：把缓冲里已捕获响应的槽位+URL 拼出来。 */
+/** Node Host `missing_hint` 的 raw_summary 部分：把缓冲里已捕获响应的槽位+URL 拼出来。 */
 function rawResponseSummary(session: ScrapeSession, mode: ScrapeMode): string {
   const parts = session.pending.map(
     ([url]) => `${classifySlot(mode, url)}@${url}`,
@@ -561,7 +561,7 @@ async function evaluateExtractor(
 
 // ─── scrape_balance 主流程 ──────────────────────────────────────────────────
 
-/** Rust `core::qwen_platform::auto_sync_account`：已登录千问平台时优先走 HTTP 同步。 */
+/** Node Host `core::qwen_platform::auto_sync_account`：已登录千问平台时优先走 HTTP 同步。 */
 async function tryQwenPlatformSync(
   ctx: DesktopContext,
   account: JsonRow,
@@ -588,7 +588,7 @@ async function tryQwenPlatformSync(
       synced_at: outcome.syncedAt,
     };
   } catch (error) {
-    // 平台 HTTP 失败静默回退控制台抓取（与 Rust 一致）。
+    // 平台 HTTP 失败静默回退控制台抓取（与 Node Host 一致）。
     void error;
     return null;
   }
@@ -712,7 +712,7 @@ async function scrapeBalanceImpl(
   };
 }
 
-// ─── sync_scrape_balances 编排（Rust channel_resource_sync_method） ──────────
+// ─── sync_scrape_balances 编排（Node Host channel_resource_sync_method） ──────────
 
 type ChannelResourceSyncMethod = "official_api" | "console_scrape";
 
@@ -723,14 +723,14 @@ const OFFICIAL_BALANCE_CHANNELS: ReadonlySet<string> = new Set([
   "vibetoken",
 ]);
 
-/** Rust `channel_resource_sync_method`（官方余额 API / 控制台抓取 / 不参与）。 */
+/** Node Host `channel_resource_sync_method`（官方余额 API / 控制台抓取 / 不参与）。 */
 function channelResourceSyncMethod(
   ctx: DesktopContext,
   account: JsonRow,
 ): ChannelResourceSyncMethod | null {
   if (account.enabled !== true) return null;
   const channelId = accountFieldString(account, "channel_id");
-  // Rust `channel_resource_sync_method` 读的是 ChannelsConfig::presets（即
+  // Node Host `channel_resource_sync_method` 读的是 ChannelsConfig::presets（即
   // config.json 的 channels[]），不是 SQLite 里的运行时预设快照。
   const supportsOfficialBalance =
     presetSupportsBalanceQuery(ctx, channelId) &&
@@ -751,12 +751,12 @@ function syncMethodLabel(method: ChannelResourceSyncMethod): string {
   return method === "official_api" ? "官方余额 API" : "官方控制台";
 }
 
-/** Rust `channel_resource_sync_completion_status`。 */
+/** Node Host `channel_resource_sync_completion_status`。 */
 function completionStatus(failed: number, skipped: number): string {
   return failed > 0 || skipped > 0 ? "succeeded_with_warnings" : "succeeded";
 }
 
-/** 进程内互斥（Rust `JobRuntime::try_acquire_definition` 的 channel-resource-sync）。 */
+/** 进程内互斥（Node Host `JobRuntime::try_acquire_definition` 的 channel-resource-sync）。 */
 let channelResourceSyncRunning = false;
 
 /** 测试用：重置互斥标记。 */
@@ -869,7 +869,7 @@ async function syncScrapeBalancesImpl(
           syncError = error instanceof CommandError ? error.message : errorText(error);
         }
         // 后台轮次逐账号串行：无论成功/登录失效/超时都在切换账号前关闭窗口，
-        // 人工接管中的账号除外（Rust scrape_interactive_session_active）。
+        // 人工接管中的账号除外（Node Host scrape_interactive_session_active）。
         if (!scrapeSessions.isInteractiveSessionActive(accountId)) {
           await destroyConsole(ctx, accountId);
         }
@@ -943,7 +943,7 @@ function addJobEventSafely(
       addJobEvent(db, { ...input, eventId: randomUUID() });
     });
   } catch {
-    // 任务日志是诊断信息，写入失败不能中断同步（与 Rust `let _ =` 语义一致）。
+    // 任务日志是诊断信息，写入失败不能中断同步（与 Node Host `let _ =` 语义一致）。
   }
 }
 
@@ -965,7 +965,7 @@ function updateProgressSafely(
 /**
  * 解析页面回调归属的账号。
  *
- * Rust 从 webview label（`scrape-<accountId>`）推导，页面无法伪造。Electron 的
+ * Node Host 从 webview label（`scrape-<accountId>`）推导，页面无法伪造。Electron 的
  * CDP 路径不回传 IPC，因此这里按顺序：
  * 1. 显式 `accountId`（宿主若转发页面 IPC，必须把它补进 payload）；
  * 2. 当前唯一活跃抓取会话（单窗口下等价）；
@@ -1004,12 +1004,12 @@ export const handlers: DesktopHandlerMap = {
     const account = findAccount(ctx, accountId);
     const { channelId, mode } = requireMode(ctx, account);
 
-    // 已存在且窗口仍注册时复用（Rust 会校验 Tauri 中的窗口仍存活）。
+    // 已存在且窗口仍注册时复用（Node Host 会校验 Tauri 中的窗口仍存活）。
     // 人工接管标记只由 probe_scrape_login 设置：单纯打开控制台不代表该账号
     // 等待人工处理，否则后台同步会永久跳过它。
     if (scrapeSessions.get(accountId) !== undefined) return null;
 
-    // 创建前护栏顺序与 Rust 一致：先回收遗留窗口，再判断上限。
+    // 创建前护栏顺序与 Node Host 一致：先回收遗留窗口，再判断上限。
     await reclaimStaleSessions(ctx, accountId);
     const live = scrapeSessions.size();
     if (live >= SCRAPE_WEBVIEW_MAX_LIVE) {
@@ -1107,7 +1107,7 @@ export const handlers: DesktopHandlerMap = {
     const args = argsObject(rawArgs);
     const url = argString(args, "url");
     const trimmed = url.trim();
-    // Rust commands/qwen_platform.rs：只允许 http(s)，错误文案逐字一致。
+    // Node Host commands/packages/flowlet-core/src/web/qwen-platform.ts：只允许 http(s)，错误文案逐字一致。
     if (!(trimmed.startsWith("https://") || trimmed.startsWith("http://"))) {
       throw badRequest("只允许打开 http(s) 地址");
     }
@@ -1122,7 +1122,7 @@ export const handlers: DesktopHandlerMap = {
   reload_custom_scrape_registry: (ctx) => {
     const registry = reloadCustomScrapeRegistry();
     // Web 侧 `list_custom_scrape_channels` 用 ctx.customScrapeChannels 做进程内缓存；
-    // 重载后必须替换缓存，否则前端能力查询仍看到旧描述符（Rust 同样是全局注册表替换）。
+    // 重载后必须替换缓存，否则前端能力查询仍看到旧描述符（Node Host 同样是全局注册表替换）。
     const infos: CustomScrapeChannelInfo[] = listCustomScrapeChannelInfos(registry);
     ctx.customScrapeChannels = infos as unknown as JsonRow[];
     return infos;

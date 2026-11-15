@@ -47,7 +47,7 @@ export function manualModelValue(
   return selectedModelValue(options, current) || MODEL_PLACEHOLDER;
 }
 
-/** 组装显式模型选择参数；空值不写入，把缺省行为留给 Rust command。 */
+/** 组装显式模型选择参数；空值不写入，把缺省行为留给 Host command。 */
 export function modelSelectionOptions(
   primaryModel: string,
   fastModel?: string,

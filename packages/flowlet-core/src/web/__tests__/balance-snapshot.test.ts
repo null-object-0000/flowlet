@@ -3,7 +3,7 @@
 // 回归：手动维护余额的前端 `createSnapshotDraft` 曾漏传 `raw_scraped_json`，Web Host 的
 // `BALANCE_SNAPSHOT_REQUIRED` 把它当必填，导致「保存渠道账号」报
 // `参数 snapshot: missing field raw_scraped_json`（前端此前还把错误对象显示成 [object Object]）。
-// Rust 侧已给该字段加 serde(default)，Node 侧 required 列表同步放开。
+// Host 侧已给该字段加 serde(default)，Node 侧 required 列表同步放开。
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 

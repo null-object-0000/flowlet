@@ -1,13 +1,13 @@
-// Agent 原生会话目录（Rust core/agent_session_metadata.rs 的桌面读路径）。
+// Agent 原生会话目录（Node Host packages/flowlet-core/src/agent/sessions/native.ts 的桌面读路径）。
 //
 // Owner: desktop-observability。职责：
 // - 扫描本机 Claude Code / Codex(CLI+Desktop) / Pi / OpenCode / Hermes Agent 原生会话；
 // - 用 agent_session_snapshots 补齐 nativeSummary / nativeSyncedAt，并追加已归档会话；
-// - 与 request_logs 观测会话合并（Rust merge_agent_session_catalog）；
+// - 与 request_logs 观测会话合并（Node Host merge_agent_session_catalog）；
 // - 根会话运行态聚合、OpenCode 待确认优先、未关联 Flowlet 请求标记；
-// - 列表筛选 / 搜索 / 项目路径追溯 / 分页（Rust agent_sessions_page）。
+// - 列表筛选 / 搜索 / 项目路径追溯 / 分页（Node Host agent_sessions_page）。
 //
-// 字段命名严格用 Rust `AgentSessionRow` 的 camelCase serde 输出。DeepSeek Harness
+// 字段命名严格用 既有 `AgentSessionRow` 的 camelCase serde 输出。DeepSeek Harness
 // 的原生目录由 `./deepseek-harness.ts` 提供（v4/v3 已支持，缺代际返回明确错误）。
 import { closeSync, openSync, readSync, statSync } from "node:fs";
 import path from "node:path";
@@ -127,7 +127,7 @@ function laterSessionTime(left: string, right: string): string {
   return sessionTimeMillis(right) > sessionTimeMillis(left) ? right : left;
 }
 
-// ─── 行构造（Rust native_row） ───────────────────────────────────────────────
+// ─── 行构造（Node Host native_row） ───────────────────────────────────────────────
 
 export interface NativeSessionRowInput {
   agentType: string;
@@ -143,7 +143,7 @@ export interface NativeSessionRowInput {
   nativeProfile?: string | null;
 }
 
-/** 构造与 Rust `AgentSessionRow`（camelCase）同形的原生会话行。 */
+/** 构造与 既有 `AgentSessionRow`（camelCase）同形的原生会话行。 */
 export function nativeSessionRow(input: NativeSessionRowInput): JsonRow {
   const activityAt = input.nativeUpdatedAt ?? input.nativeStartedAt ?? EMPTY_SESSION_TIME;
   const row: JsonRow = {
@@ -180,7 +180,7 @@ export function nativeSessionRow(input: NativeSessionRowInput): JsonRow {
     nativeSyncedAt: null,
     hasFlowletRequests: false,
   };
-  // Rust 侧 native_source / native_profile / native_session_dir 是
+  // Host 侧 native_source / native_profile / native_session_dir 是
   // `skip_serializing_if = "Option::is_none"`，缺失时不输出。
   if (input.nativeSource !== undefined && input.nativeSource !== null) {
     row.nativeSource = input.nativeSource;
@@ -257,7 +257,7 @@ function claudeRawRuntimeStatus(filePath: string): string {
   return status;
 }
 
-/** Claude 运行态新鲜度（Rust `apply_claude_runtime_freshness`）。 */
+/** Claude 运行态新鲜度（既有 `apply_claude_runtime_freshness`）。 */
 function applyClaudeFreshness(status: string, modified: number | null): string {
   const maxAgeMs =
     status === "running"
@@ -282,7 +282,7 @@ interface CachedClaudeSession {
   rawRuntimeStatus: string;
 }
 
-/** 与 Rust `CLAUDE_SESSION_CACHE` 一致：文件长度/mtime 未变时复用头部解析结果。 */
+/** 与 既有 `CLAUDE_SESSION_CACHE` 一致：文件长度/mtime 未变时复用头部解析结果。 */
 const claudeSessionCache = new Map<string, CachedClaudeSession>();
 
 function cachedClaudeSession(filePath: string): CachedClaudeSession | null {
@@ -440,7 +440,7 @@ function codexRuntimeStatus(filePath: string): string {
   return applyCodexFreshness(status, modifiedMs(filePath));
 }
 
-/** Codex 运行态新鲜度（Rust `apply_codex_runtime_freshness`）。 */
+/** Codex 运行态新鲜度（Node Host `apply_codex_runtime_freshness`）。 */
 function applyCodexFreshness(status: string, modified: number | null): string {
   const maxAgeMs =
     status === "running"
@@ -830,7 +830,7 @@ function hermesSessions(): JsonRow[] {
 
 // ─── 原生目录 ───────────────────────────────────────────────────────────────
 
-/** Rust `list_native_agent_sessions`：全部适配器结果按 (agent_type, session_id) 去重。 */
+/** Node Host `list_native_agent_sessions`：全部适配器结果按 (agent_type, session_id) 去重。 */
 export function listNativeAgentSessions(): JsonRow[] {
   const rows = new Map<string, JsonRow>();
   for (const row of [
@@ -847,7 +847,7 @@ export function listNativeAgentSessions(): JsonRow[] {
   return [...rows.values()];
 }
 
-/** 本机存在原生来源的 agent_type（Rust `available_native_agent_types`）。 */
+/** 本机存在原生来源的 agent_type（Node Host `available_native_agent_types`）。 */
 export function availableNativeAgentTypes(): Set<string> {
   const types = new Set<string>();
   const home = homeDir();
@@ -866,11 +866,11 @@ export function availableNativeAgentTypes(): Set<string> {
   return types;
 }
 
-// ─── 快照补齐（Rust enrich_native_agent_sessions） ──────────────────────────
+// ─── 快照补齐（Node Host enrich_native_agent_sessions） ──────────────────────────
 
 /**
  * 用 `agent_session_snapshots` 补齐原生会话的 nativeSummary/nativeSyncedAt，
- * 并把「源文件已删除」的归档快照追加回目录（Rust enrich_native_agent_sessions）。
+ * 并把「源文件已删除」的归档快照追加回目录（Node Host enrich_native_agent_sessions）。
  */
 export function enrichNativeAgentSessions(
   rows: JsonRow[],
@@ -947,7 +947,7 @@ export function sessionKey(row: JsonRow): string {
   return `${String(row.agentType)}\0${String(row.sessionId)}`;
 }
 
-/** Rust `merge_agent_session_catalog`。 */
+/** Node Host `merge_agent_session_catalog`。 */
 export function mergeAgentSessionCatalog(observed: JsonRow[], native: JsonRow[]): JsonRow[] {
   const merged = new Map<string, JsonRow>();
   for (const row of native) merged.set(sessionKey(row), row);
@@ -999,7 +999,7 @@ function runtimeStatusPriority(status: string): number {
   return 0;
 }
 
-/** Rust `aggregate_descendant_runtime_status`：子会话活跃状态覆盖祖先。 */
+/** Node Host `aggregate_descendant_runtime_status`：子会话活跃状态覆盖祖先。 */
 export function aggregateDescendantRuntimeStatus(catalog: JsonRow[]): void {
   const indexByKey = new Map<string, number>();
   catalog.forEach((row, index) => indexByKey.set(sessionKey(row), index));
@@ -1037,7 +1037,7 @@ export function aggregateDescendantRuntimeStatus(catalog: JsonRow[]): void {
   }
 }
 
-/** Rust `apply_opencode_pending_sessions`。 */
+/** Node Host `apply_opencode_pending_sessions`。 */
 export function applyOpencodePendingSessions(
   catalog: JsonRow[],
   pendingSessions: Set<string>,
@@ -1051,7 +1051,7 @@ export function applyOpencodePendingSessions(
   aggregateDescendantRuntimeStatus(catalog);
 }
 
-/** Rust `mark_unassociated_flowlet_requests`。 */
+/** Node Host `mark_unassociated_flowlet_requests`。 */
 export function markUnassociatedFlowletRequests(catalog: JsonRow[], clients: Set<string>): void {
   for (const row of catalog) {
     if (!row.flowletObserved && clients.has(String(row.agentType))) {
@@ -1060,7 +1060,7 @@ export function markUnassociatedFlowletRequests(catalog: JsonRow[], clients: Set
   }
 }
 
-/** 有未关联会话标识的客户端集合（Rust mark_unassociated_flowlet_requests 的 SQL）。 */
+/** 有未关联会话标识的客户端集合（Node Host mark_unassociated_flowlet_requests 的 SQL）。 */
 export function unassociatedFlowletClients(db: DatabaseSync): Set<string> {
   const rows = db
     .prepare(
@@ -1074,7 +1074,7 @@ export function unassociatedFlowletClients(db: DatabaseSync): Set<string> {
   return new Set(rows.map((row) => String(row.client_id)));
 }
 
-// ─── 列表筛选 / 分页（Rust agent_sessions_page） ────────────────────────────
+// ─── 列表筛选 / 分页（Node Host agent_sessions_page） ────────────────────────────
 
 export interface AgentSessionsFilter {
   page: number;
@@ -1138,7 +1138,7 @@ export function sortByActivity(catalog: JsonRow[]): JsonRow[] {
     const byActivity =
       sessionTimeMillis(String(right.activityAt)) - sessionTimeMillis(String(left.activityAt));
     if (byActivity !== 0) return byActivity;
-    // Rust `String::cmp` 是 UTF-8 字节序；用码点比较而不是 localeCompare。
+    // Node Host `String::cmp` 是 UTF-8 字节序；用码点比较而不是 localeCompare。
     const leftId = String(right.sessionId);
     const rightId = String(left.sessionId);
     return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;

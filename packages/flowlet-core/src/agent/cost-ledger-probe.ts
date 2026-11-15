@@ -1,4 +1,4 @@
-// 成本账本数据源探测（Rust core/cost_ledger_source_probe.rs 的 TS 等价实现）。
+// 成本账本数据源探测（Node Host packages/flowlet-core/src/agent/cost-ledger-probe.ts 的 TS 等价实现）。
 //
 // Owner: desktop-observability。返回结构与前端 `src/domains/cost-ledger/types.ts`
 // 逐字段一致（camelCase）。
@@ -6,7 +6,7 @@
 // 数据源：
 // - Flowlet 网关：request_logs + usage_records（真实 SQL 采样，最多 5 条）；
 // - 原生会话：Codex / Claude Code / OpenCode 的已同步快照
-//   （`agent_session_snapshots`）。Rust 会实时解析本机原生会话并采样逐轮用量；
+//   （`agent_session_snapshots`）。Node Host 会实时解析本机原生会话并采样逐轮用量；
 //   这里只读后台同步写入的快照，因此「逐轮用量」只有会话级 rollup，且未同步的会话
 //   不会出现——这个差异在交付汇报中标注，不伪造逐轮观测。
 import type { JsonRow } from "../types.ts";
@@ -276,7 +276,7 @@ function nativeUsageObservation(
   };
 }
 
-/** Rust `probe_cost_ledger_sources`。 */
+/** Node Host `probe_cost_ledger_sources`。 */
 export function probeCostLedgerSources(storage: SqliteStorage): CostLedgerSourceProbeResult {
   const generatedAt = new Date().toISOString();
   const reports: CostLedgerSourceProbeReport[] = [];

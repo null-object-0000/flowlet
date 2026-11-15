@@ -11,7 +11,7 @@ import { errorMessage } from "../../shared/errors/AppError";
 
 /**
  * Account mutations. After writes, refresh only the affected queries and use
- * the normalized (credential-reset) account list returned by Rust as
+ * the normalized (credential-reset) account list returned by Node Host as
  * the source of truth. API keys may only be rendered inside the account editor;
  * overview and management list rows never display them.
  */
@@ -39,7 +39,7 @@ export function useAccountActions(presets: ChannelPreset[]) {
       if (routesUpdated) {
         void qc.refetchQueries({ queryKey: queryKeys.model.candidates(), exact: true });
       }
-      // 请求日志/用量里的账号名是请求时刻的快照，展示与搜索由 Rust 查询连表
+      // 请求日志/用量里的账号名是请求时刻的快照，展示与搜索由 Node Host 查询连表
       // channel_accounts 解析当前名。改名保存后失效相关查询，使打开中的日志/
       // 用量页立即按新名重新连表展示。
       void qc.invalidateQueries({ queryKey: queryKeys.requestLog.all });
@@ -95,7 +95,7 @@ export type AccountAutoRefreshResult = {
 };
 
 /**
- * Keep post-save network work outside the Rust persistence command: saving is
+ * Keep post-save network work outside the Node Host persistence command: saving is
  * authoritative even when an upstream balance endpoint is temporarily
  * unavailable. Model exposure is NOT synced here — the user pulls /models and
  * selects exposed models explicitly in the account editor; on save we only

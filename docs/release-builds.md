@@ -2,7 +2,7 @@
 
 桌面端使用 `.github/workflows/desktop-electron.yml`（Electron + Node Host），
 Android 使用 `.github/workflows/build-installers.yml`（Tauri/Rust）。Tauri 桌面构建、
-发布与便携版脚本已退役；保留 Android 工程和 Rust 核心。
+发布与便携版脚本已退役；保留 Android 工程和 Node Host 核心。
 
 `src-tauri/` 已进一步裁剪为 Android 同步查看器，不再包含旧桌面、headless 或 Rust CLI。
 Cargo 默认 feature 为 `mobile`；Android CI 先运行核心 Rust 测试再构建 APK。

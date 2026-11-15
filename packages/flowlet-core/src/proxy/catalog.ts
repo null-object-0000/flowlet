@@ -1,7 +1,7 @@
 // Model identity / capability index for the proxy.
 //
-// 权威实现：`src-tauri/src/core/model_catalog.rs`（别名与厂商前缀归一）、
-// `model_input_capabilities.rs`（图片输入模态），两者都只读 model-catalog.json /
+// 实现入口：`packages/flowlet-core/src/catalog/index.ts`（别名与厂商前缀归一）、
+// `packages/flowlet-core/src/proxy/catalog.ts`（图片输入模态），两者都只读 model-catalog.json /
 // models-cn.json / models-dev.json。这里在 proxy 内自行构建索引，不依赖 catalog
 // 模块的 `routingModelId` 实现细节（契约只保证 raw/modelsCn/modelsDev 返回原始文档）。
 import type { ModelCatalog } from "../catalog/index.ts";
@@ -58,7 +58,7 @@ export class ModelIdentityIndex {
     this.#mergeModelsDev(catalog.modelsDev());
   }
 
-  /** Rust `canonical_model_key`：去厂商前缀 + lower + 别名表。 */
+  /** 既有 `canonical_model_key`：去厂商前缀 + lower + 别名表。 */
   canonicalKey(modelId: string): string {
     const raw = modelId.trim();
     const slash = raw.lastIndexOf("/");
@@ -72,7 +72,7 @@ export class ModelIdentityIndex {
     return index === undefined ? undefined : this.#models[index];
   }
 
-  /** 入站模型名 → 规范模型 ID；未登记原样返回（Rust `routing_model_id`）。 */
+  /** 入站模型名 → 规范模型 ID；未登记原样返回（既有 `routing_model_id`）。 */
   routingModelId(name: string): string {
     const identity = this.find(name);
     return identity ? identity.id : name;

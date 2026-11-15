@@ -1,12 +1,12 @@
 // SQLite storage layer. Owner: node-storage.
 //
-// Contract: docs/migration/node-host.md §5. All SQL stays byte-compatible with
-// src-tauri/src/core/storage*.rs (same tables, columns, indexes, PRAGMAs, and
+// Contract: docs/archive/tauri-migration/node-host.md §5. All SQL stays byte-compatible with
+// packages/flowlet-core/src/storage/ (same tables, columns, indexes, PRAGMAs, and
 // JSON-encoded TEXT columns). The user's existing database must open as-is.
 //
 // 实现分模块：schema.ts（建表/迁移）、config.ts（渠道/账号/路由/模型/余额/app_meta）、
 // logs.ts（请求日志）、usage.ts（用量聚合/费用）、devices.ts（设备）、sessions.ts（会话）。
-// 本文件只做连接生命周期 + 方法门面，签名与 Rust `Storage` 对齐。
+// 本文件只做连接生命周期 + 方法门面，签名与 既有 `Storage` 对齐。
 import { existsSync, rmSync, statSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import type { JsonRow } from "../types.ts";
@@ -115,7 +115,7 @@ export class SqliteStorage {
   #dbPath: string;
   #prices: ModelPrice[] = [];
   #captureStore: RequestCaptureStore;
-  /** `:memory:` 的临时捕获目录（close 时清理，Rust 测试同样用临时目录）。 */
+  /** `:memory:` 的临时捕获目录（close 时清理，Node Host 测试同样用临时目录）。 */
   #temporaryCaptureRoot: boolean;
 
   constructor(dbPath: string) {
@@ -123,12 +123,12 @@ export class SqliteStorage {
     const isNewDatabase = !existsSync(dbPath) || statSync(dbPath).size === 0;
     this.#db = new DatabaseSync(dbPath);
     if (isNewDatabase) {
-      // auto_vacuum 必须在建表前启用（Rust open 同）。
+      // auto_vacuum 必须在建表前启用（Node Host open 同）。
       this.#db.exec("PRAGMA auto_vacuum = INCREMENTAL;");
     }
     this.#db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
     migrate(this.#db);
-    // Rust RequestCaptureStore::for_database：<db 目录>/request-captures。
+    // Node Host RequestCaptureStore::for_database：<db 目录>/request-captures。
     this.#captureStore = RequestCaptureStore.forDatabase(dbPath);
     this.#temporaryCaptureRoot = dbPath === ":memory:";
   }
@@ -158,14 +158,14 @@ export class SqliteStorage {
     }
   }
 
-  // ─── 价格表（Rust Storage::set_prices；来自 config.json / 模型目录） ─────────
+  // ─── 价格表（Node Host Storage::set_prices；来自 config.json / 模型目录） ─────────
 
   setPrices(prices: ModelPrice[]): void {
     this.#prices = prices;
   }
 
   /**
-   * Rust `storage_tasks::rebuild_price_table`：models-cn + models.dev + config.json
+   * 既有 `storage_tasks::rebuild_price_table`：models-cn + models.dev + config.json
    * `model_prices` 合并成完整价格表并写入内存（供成本估算）。
    * 返回价格条数（调用方可用于日志）。
    */
@@ -189,24 +189,24 @@ export class SqliteStorage {
     setAppMeta(this.#db, key, value);
   }
 
-  // ─── service credentials（Rust storage_credentials.rs） ---------------------
+  // ─── service credentials（Node Host packages/flowlet-core/src/storage/credentials.ts） ---------------------
 
-  /** Rust `list_service_credentials`：ORDER BY created_at ASC, name ASC。 */
+  /** 既有 `list_service_credentials`：ORDER BY created_at ASC, name ASC。 */
   listServiceCredentials(): JsonRow[] {
     return listServiceCredentials(this.#db);
   }
 
-  /** Rust `get_service_credential`。 */
+  /** 既有 `get_service_credential`。 */
   getServiceCredential(id: string): JsonRow | null {
     return getServiceCredential(this.#db, id);
   }
 
-  /** Rust `upsert_service_credential`（ON CONFLICT(id) DO UPDATE，不覆盖 created_at）。 */
+  /** 既有 `upsert_service_credential`（ON CONFLICT(id) DO UPDATE，不覆盖 created_at）。 */
   upsertServiceCredential(row: JsonRow): void {
     upsertServiceCredential(this.#db, row);
   }
 
-  /** Rust `update_service_credential_verification`。 */
+  /** 既有 `update_service_credential_verification`。 */
   updateServiceCredentialVerification(
     id: string,
     verifiedAt: string | null,
@@ -215,7 +215,7 @@ export class SqliteStorage {
     updateServiceCredentialVerification(this.#db, id, verifiedAt, lastError);
   }
 
-  /** Rust `delete_service_credential`：返回是否删除成功。 */
+  /** 既有 `delete_service_credential`：返回是否删除成功。 */
   deleteServiceCredential(id: string): boolean {
     return deleteServiceCredential(this.#db, id);
   }
@@ -288,7 +288,7 @@ export class SqliteStorage {
     ensurePresetFilesApi(this.#db, presets);
   }
 
-  /** 返回规范化后的账号列表（Rust save_channel_accounts 之后由 web 回读）。 */
+  /** 返回规范化后的账号列表（Node Host save_channel_accounts 之后由 web 回读）。 */
   saveChannelAccounts(accounts: JsonRow[]): JsonRow[] {
     saveChannelAccounts(this.#db, accounts);
     return this.listChannelAccounts();
@@ -386,18 +386,18 @@ export class SqliteStorage {
     return listRequestLogModels(this.#db);
   }
 
-  /** Rust `list_request_log_channel_accounts`：渠道 + 渠道账号筛选项（camelCase）。 */
+  /** 既有 `list_request_log_channel_accounts`：渠道 + 渠道账号筛选项（camelCase）。 */
   listRequestLogChannelAccounts(): JsonRow {
     return listRequestLogChannelAccounts(this.#db);
   }
 
-  /** Rust cleanup_old_logs：返回 [日志行数, 用量行数]。 */
+  /** Node Host cleanup_old_logs：返回 [日志行数, 用量行数]。 */
   cleanupOldLogs(keepDays: number): [number, number] {
     return cleanupOldLogs(this.#db, this.#captureStore, keepDays);
   }
 
   /**
-   * 请求/响应 Body 保留策略（Rust cleanup_expired_body_data）。
+   * 请求/响应 Body 保留策略（Node Host cleanup_expired_body_data）。
    * 仅清理已有完整 Token 统计的记录；返回清理行数。
    */
   cleanupExpiredBodyData(retentionDays: number): number {
@@ -409,17 +409,17 @@ export class SqliteStorage {
     return pruneOldestBodyData(this.#db, this.#captureStore, targetBytes, pruneRatio);
   }
 
-  /** 捕获帧磁盘占用（段数与字节数，Rust `disk_usage`）。 */
+  /** 捕获帧磁盘占用（段数与字节数，既有 `disk_usage`）。 */
   captureDiskUsage(): { segments: number; bytes: number } {
     return this.#captureStore.diskUsage();
   }
 
-  /** 当前 Body 数据总占用字节数（Rust get_total_body_size_bytes）。 */
+  /** 当前 Body 数据总占用字节数（Node Host get_total_body_size_bytes）。 */
   getTotalBodySizeBytes(): number {
     return getTotalBodySizeBytes(this.#db);
   }
 
-  /** 按体积上限清理最老 Body（Rust prune_oldest_body_data_to_goal）。 */
+  /** 按体积上限清理最老 Body（Node Host prune_oldest_body_data_to_goal）。 */
   pruneOldestBodyDataToGoal(targetBytes: number, pruneRatio: number, maxRounds = 50): number {
     return pruneOldestBodyDataToGoal(
       this.#db,
@@ -430,7 +430,7 @@ export class SqliteStorage {
     );
   }
 
-  /** 余额/资源快照保留（Rust prune_balance_snapshots），返回 [expired, overLimit]。 */
+  /** 余额/资源快照保留（Node Host prune_balance_snapshots），返回 [expired, overLimit]。 */
   pruneBalanceSnapshots(retentionDays: number, maxPerAccount: number): [number, number] {
     return pruneBalanceSnapshots(this.#db, retentionDays, maxPerAccount);
   }
@@ -440,7 +440,7 @@ export class SqliteStorage {
     return insertRequestLog(this.#db, this.#captureStore, row);
   }
 
-  /** 语义 = Rust update_request_log_timing（最近一条 last_attempt + stream）。 */
+  /** 语义 = Node Host update_request_log_timing（最近一条 last_attempt + stream）。 */
   updateRequestLogTiming(requestId: string, patch: JsonRow): void {
     updateRequestLogTiming(this.#db, this.#captureStore, requestId, patch);
   }
@@ -452,7 +452,7 @@ export class SqliteStorage {
   // ─── devices ----------------------------------------------------------------
 
   /**
-   * Rust device_usage::known_devices：传 identity 时当前设备首位 isCurrent:true；
+   * Node Host device_usage::known_devices：传 identity 时当前设备首位 isCurrent:true；
    * 不传只返回已同步设备（web 可自行补当前设备）。
    */
   listKnownDevices(identity?: DeviceIdentityLike): JsonRow[] {
@@ -520,15 +520,15 @@ export class SqliteStorage {
     return usageTodaySummary(this.#db);
   }
 
-  // ─── 数据完整性检查（Rust repair_* commands） --------------------------------
+  // ─── 数据完整性检查（Node Host repair_* commands） --------------------------------
 
-  /** Rust `repair_agent_sessions`：按已存 Header 与最新 UA 规则修复会话/客户端归属。 */
+  /** 既有 `repair_agent_sessions`：按已存 Header 与最新 UA 规则修复会话/客户端归属。 */
   repairAgentSessions(timeRange: string, uaRules: UaClientRule[]): AgentSessionRepairResult {
     return repairAgentSessions(this.#db, timeRange, uaRules);
   }
 
   /**
-   * Rust `repair_captured_usage` 的 Node 等价实现：从响应捕获帧重解析 usage 并回填。
+   * 既有 `repair_captured_usage` 的 Node 等价实现：从响应捕获帧重解析 usage 并回填。
    * Node Host 没有 Agent 原生 transcript 适配器，因此不含 `repair_usage_from_native_sessions`
    * 回退；只含 message_start 前缀的截断捕获会留给 unknown 占位行。
    */
@@ -536,12 +536,12 @@ export class SqliteStorage {
     return repairCapturedUsage(this.#db, this.#prices, this.#captureStore, timeRange);
   }
 
-  /** Rust `analyze_unknown_usage`：为仍无 usage 的请求建立 unknown 占位行。 */
+  /** 既有 `analyze_unknown_usage`：为仍无 usage 的请求建立 unknown 占位行。 */
   repairUnknownUsage(timeRange: string): number {
     return repairUnknownUsage(this.#db, timeRange);
   }
 
-  /** Rust `recalculate_usage_costs`：按当前价格表重算 estimated_* 五列。 */
+  /** 既有 `recalculate_usage_costs`：按当前价格表重算 estimated_* 五列。 */
   repairUsageCosts(timeRange: string): number {
     return repairUsageCosts(this.#db, this.#prices, timeRange);
   }
@@ -554,7 +554,7 @@ export class SqliteStorage {
    *
    * 桌面命令层的新查询不要继续往本类堆方法（多领域并行开发会互相冲突），
    * 而是在自己的领域模块里导出 `(db: DatabaseSync, ...) => ...` 的纯函数，
-   * 通过这里执行。连接仍是单连接串行语义，与 Rust 版一致。
+   * 通过这里执行。连接仍是单连接串行语义，与 历史版本一致。
    */
   withDatabase<T>(fn: (db: DatabaseSync) => T): T {
     return fn(this.#db);

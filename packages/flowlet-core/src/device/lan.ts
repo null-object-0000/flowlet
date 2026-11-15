@@ -1,6 +1,6 @@
 // 局域网（LAN）直连同步。Owner: desktop-device。
 //
-// 权威实现：src-tauri/src/core/lan_sync.rs。必须逐字节兼容的协议细节：
+// 实现入口：packages/flowlet-core/src/device/lan.ts。必须逐字节兼容的协议细节：
 // - 端口：0（OS 分配）发布到 descriptor；客户端支持多端点回退；
 // - 路径：/flowlet/v1/ping、/flowlet/v1/snapshot、/flowlet/v1/session/read、
 //   /flowlet/v1/opencode/permissions/{sessionId}、.../permissions/{permissionId}/reply；
@@ -114,7 +114,7 @@ function parseIpv4(address: string): number[] | null {
   return values;
 }
 
-/** Rust `Ipv4Addr::is_private`：10/8、172.16/12、192.168/16。 */
+/** 既有 `Ipv4Addr::is_private`：10/8、172.16/12、192.168/16。 */
 function isPrivateIpv4(address: string): boolean {
   const parts = parseIpv4(address);
   if (parts === null) return false;
@@ -124,7 +124,7 @@ function isPrivateIpv4(address: string): boolean {
   return false;
 }
 
-/** Rust `Ipv6Addr::is_unique_local`：fc00::/7。 */
+/** 既有 `Ipv6Addr::is_unique_local`：fc00::/7。 */
 function isUniqueLocalIpv6(address: string): boolean {
   const lower = address.toLowerCase();
   const firstGroup = lower.split(":")[0];
@@ -141,7 +141,7 @@ export function isPrivateAddress(address: string): boolean {
 
 /**
  * 显式端口：Node 的 URL 会把显式默认端口（http :80 / https :443）归一化成空串，
- * 而 Rust `Url::port()` 仍返回 Some(80)，因此不能用 `parsed.port` 判断是否带端口。
+ * 而 既有 `Url::port()` 仍返回 Some(80)，因此不能用 `parsed.port` 判断是否带端口。
  */
 export function explicitEndpointPort(endpoint: string): number | null {
   const match = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/([^/?#]*)/.exec(endpoint);
@@ -166,7 +166,7 @@ export function explicitEndpointPort(endpoint: string): number | null {
   return port >= 0 && port <= 65_535 ? port : null;
 }
 
-/** Rust `validate_endpoint`。错误文案逐句对齐。 */
+/** 既有 `validate_endpoint`。错误文案逐句对齐。 */
 export function validateLanEndpoint(endpoint: string): void {
   let parsed: URL;
   try {
@@ -205,7 +205,7 @@ export function endpointPort(endpoint: string): number | null {
   return explicitEndpointPort(endpoint);
 }
 
-/** Rust `descriptor_is_fresh`：未过期、协议版本一致、密钥与至少一个端点有效。 */
+/** 既有 `descriptor_is_fresh`：未过期、协议版本一致、密钥与至少一个端点有效。 */
 export function descriptorIsFresh(descriptor: LanPeerDescriptor | null | undefined): boolean {
   if (descriptor === null || descriptor === undefined) return false;
   const expires = Date.parse(descriptor.expiresAt);
@@ -248,14 +248,14 @@ export function randomAuthKey(): Buffer {
 // ─── 本机 LAN 地址发现 ──────────────────────────────────────────────────────
 
 /**
- * Rust `format!("http://{address}:{port}")`：IPv6 地址不加方括号，因此 ULA IPv6 候选
- * 会因 URL 无效被 `validate_endpoint` 过滤掉（与 Rust 行为一致）。
+ * 既有 `format!("http://{address}:{port}")`：IPv6 地址不加方括号，因此 ULA IPv6 候选
+ * 会因 URL 无效被 `validate_endpoint` 过滤掉（与 Node Host 行为一致）。
  */
 function formatEndpointHost(address: string): string {
   return address;
 }
 
-/** Rust `candidate_lan_addresses`（UDP routing 启发式 → 网卡枚举）。 */
+/** 既有 `candidate_lan_addresses`（UDP routing 启发式 → 网卡枚举）。 */
 export async function candidateLanAddresses(): Promise<string[]> {
   const candidates: string[] = [];
   for (const addresses of Object.values(networkInterfaces())) {
@@ -553,7 +553,7 @@ async function requestFrom<T>(
   return decryptLanPayload<T>(response.key, Buffer.from(response.nonce, "utf8"), payload);
 }
 
-/** Rust `fetch_snapshot`：遍历端点，任一成功即可。 */
+/** Node Host `fetch_snapshot`：遍历端点，任一成功即可。 */
 export async function fetchLanSnapshot(
   descriptor: LanPeerDescriptor,
 ): Promise<DeviceUsageBundle> {
@@ -574,7 +574,7 @@ export async function fetchLanSnapshot(
   invalid(lastError);
 }
 
-/** Rust `probe_peer`。 */
+/** Node Host `probe_peer`。 */
 export async function probeLanPeer(
   descriptor: LanPeerDescriptor,
   expectedDeviceId: string,
@@ -655,7 +655,7 @@ export async function probeLanPeer(
   return probe;
 }
 
-/** Rust `list_remote_permissions`。 */
+/** Node Host `list_remote_permissions`。 */
 export async function fetchRemotePermissions<T>(
   descriptor: LanPeerDescriptor,
   sessionId: string,
@@ -672,7 +672,7 @@ export async function fetchRemotePermissions<T>(
   return invalid(lastError);
 }
 
-/** Rust `reply_remote_permission`：operationId 在端点循环外生成一次，保持幂等。 */
+/** Node Host `reply_remote_permission`：operationId 在端点循环外生成一次，保持幂等。 */
 export async function replyRemotePermission(
   descriptor: LanPeerDescriptor,
   permissionId: string,
@@ -1003,7 +1003,7 @@ async function handleRequest(
 }
 
 /**
- * 启动 LAN 服务（幂等）。Rust 在桌面应用启动时调用 `start_server`；Node 桌面宿主没有
+ * 启动 LAN 服务（幂等）。Node Host 在桌面应用启动时调用 `start_server`；Node 桌面宿主没有
  * 对应的启动 channel，因此命令层在第一次需要 LAN 描述符时惰性调用本函数，
  * 行为等价（descriptor 在生成快照时刷新）。
  */
@@ -1097,7 +1097,7 @@ export async function shutdownLanServerForTests(): Promise<void> {
   });
 }
 
-/** 桌面端启动失败时记录原因（Rust `record_start_failure`）。 */
+/** 桌面端启动失败时记录原因（既有 `record_start_failure`）。 */
 export function recordLanStartFailure(error: string): void {
   if (runtime !== null) {
     setServerStatus({ running: false, error });

@@ -1,7 +1,7 @@
 // 渠道预设 / 账号 / 路由 / 模型 / 余额快照 / app_meta 的 SQL 层。
 //
-// 逐条对照 src-tauri/src/core/storage_config.rs 与 storage_usage.rs（余额快照、app_meta）：
-// 同一表名、同一列名、同一 JSON 列编码（serde_json 字符串）、同一排序与默认值。
+// 对应 packages/flowlet-core/src/storage/config.ts 与 packages/flowlet-core/src/storage/usage.ts（余额快照、app_meta）：
+// 同一表名、同一列名、同一 JSON 列编码（JSON 字符串）、同一排序与默认值。
 import type { DatabaseSync } from "node:sqlite";
 import type { JsonRow } from "../types.ts";
 
@@ -102,7 +102,7 @@ function presetProtocolsJson(preset: JsonRow): string {
   );
 }
 
-/** Rust save_channel_presets：全量替换（注意 Rust INSERT 未包含 supports_scrape_balance）。 */
+/** Node Host save_channel_presets：全量替换（注意 Node Host INSERT 未包含 supports_scrape_balance）。 */
 export function saveChannelPresets(db: DatabaseSync, presets: JsonRow[]): void {
   db.exec("BEGIN");
   try {
@@ -148,7 +148,7 @@ export function saveChannelPresets(db: DatabaseSync, presets: JsonRow[]): void {
   }
 }
 
-/** Rust ensure_preset_platform_urls：仅补齐 NULL 的 platform_url。 */
+/** Node Host ensure_preset_platform_urls：仅补齐 NULL 的 platform_url。 */
 export function ensurePresetPlatformUrls(db: DatabaseSync, presets: JsonRow[]): void {
   const update = db.prepare(
     "UPDATE channel_presets SET platform_url = ?1 WHERE id = ?2 AND platform_url IS NULL",
@@ -160,7 +160,7 @@ export function ensurePresetPlatformUrls(db: DatabaseSync, presets: JsonRow[]): 
   }
 }
 
-/** Rust ensure_missing_presets：追加 SQLite 中缺失的渠道模板。 */
+/** Node Host ensure_missing_presets：追加 SQLite 中缺失的渠道模板。 */
 export function ensureMissingPresets(db: DatabaseSync, presets: JsonRow[]): void {
   const exists = db.prepare("SELECT COUNT(*) > 0 AS present FROM channel_presets WHERE id = ?1");
   const insert = db.prepare(
@@ -200,7 +200,7 @@ export function ensureMissingPresets(db: DatabaseSync, presets: JsonRow[]): void
   }
 }
 
-/** Rust sync_preset_maintained_config：同步由 Flowlet 维护的渠道字段。 */
+/** Node Host sync_preset_maintained_config：同步由 Flowlet 维护的渠道字段。 */
 export function syncPresetMaintainedConfig(db: DatabaseSync, presets: JsonRow[]): void {
   const update = db.prepare(
     `UPDATE channel_presets
@@ -295,7 +295,7 @@ const ACCOUNT_CREDENTIAL_HEALTHY = "healthy";
 const ACCOUNT_CREDENTIAL_INVALID_KEY = "invalid_key";
 
 /**
- * Rust save_channel_accounts：全量替换；同一账号未改 key 且原状态 invalid_key 时保留
+ * Node Host save_channel_accounts：全量替换；同一账号未改 key 且原状态 invalid_key 时保留
  * invalid_key（否则重置 healthy 并清空 last_error），并同步 workspace 链接/defaults。
  */
 export function saveChannelAccounts(db: DatabaseSync, accounts: JsonRow[]): void {
@@ -763,7 +763,7 @@ export function latestBalanceSnapshots(db: DatabaseSync): JsonRow[] {
   return rows.map(balanceFromRow);
 }
 
-/** Rust cleanup_orphan_balance_snapshots：删除无主账号的余额快照。 */
+/** Node Host cleanup_orphan_balance_snapshots：删除无主账号的余额快照。 */
 export function cleanupOrphanBalanceSnapshots(db: DatabaseSync): number {
   const result = db.prepare(
     `DELETE FROM account_balance_snapshots

@@ -1,7 +1,7 @@
 // 模型目录文件 / 自定义抓取描述符读取。Owner: node-web.
 //
-// 权威实现：src-tauri/src/core/storage_tasks.rs（models-cn / models.dev 读取、
-// get_models_cn_currencies）与 core/custom_scrape.rs（list_channels）。
+// 实现入口：packages/flowlet-core/src/host/scheduler.ts（models-cn / models.dev 读取、
+// get_models_cn_currencies）与 packages/flowlet-core/src/scrape/custom-registry.ts（list_channels）。
 // Web 命令只读文件，不触发同步任务；目录路径来自 HostOptions.catalogDir。
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
@@ -37,11 +37,11 @@ export function readModelsDevProviderCatalog(catalogDir: string, providerId: str
   if (catalog === null || typeof catalog !== "object" || Array.isArray(catalog)) return null;
   const value = (catalog as JsonRow)[providerId];
   if (value === undefined) return null;
-  // Rust 侧 serde_json::Value 的对象键按 BTreeMap 排序；这里递归排序保持字符串等价。
+  // Host 侧 JSON::Value 的对象键按 BTreeMap 排序；这里递归排序保持字符串等价。
   return stableStringify({ [providerId]: value });
 }
 
-/** 与 serde_json 默认（无 preserve_order）一致的对象键排序序列化。 */
+/** 与 JSON 默认（无 preserve_order）一致的对象键排序序列化。 */
 export function stableStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(",")}]`;
   if (value !== null && typeof value === "object") {
@@ -84,7 +84,7 @@ function ownerChannelForModelsCnProvider(providerId: string): string | null {
   return null;
 }
 
-/** Rust `storage_tasks::get_models_cn_currencies`：[(channelId:modelId, currency)]。 */
+/** Node Host `storage_tasks::get_models_cn_currencies`：[(channelId:modelId, currency)]。 */
 export function readModelsCnCurrencies(catalogDir: string): [string, string][] {
   const raw = readModelsCnCatalog(catalogDir);
   if (raw === null) return [];
@@ -144,7 +144,7 @@ export interface CustomScrapeChannelInfo {
   accountName: string | null;
 }
 
-/** Rust `custom_scrape::discovery_roots`：exe 同级目录优先，其次 ~/.flowlet。 */
+/** Node Host `custom_scrape::discovery_roots`：exe 同级目录优先，其次 ~/.flowlet。 */
 function discoveryRoots(): string[] {
   const roots: string[] = [];
   const script = process.argv[1];
@@ -154,7 +154,7 @@ function discoveryRoots(): string[] {
   return roots;
 }
 
-/** Rust `custom_scrape::list_channels` 的最小等价：列出通过基础校验的描述符。 */
+/** Node Host `custom_scrape::list_channels` 的最小等价：列出通过基础校验的描述符。 */
 export function listCustomScrapeChannels(): CustomScrapeChannelInfo[] {
   const seen = new Set<string>();
   const result: CustomScrapeChannelInfo[] = [];

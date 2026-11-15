@@ -5,7 +5,7 @@
 // 代理与运行时快照都正常；但 `createWebHost` 直接用原始 `channels_config`，于是：
 //   - `fetch_channel_models` 报「渠道 openai-api 缺少运行时模板」；
 //   - 余额同步为 vibetoken 拼出空 Base URL（`Invalid URL`）。
-// Rust 侧 Web 命令复用同一份已合并的 `ChannelsConfig`，Node 侧必须对齐。
+// Host 侧 Web 命令复用同一份已合并的 `ChannelsConfig`，Node 侧必须对齐。
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

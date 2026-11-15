@@ -50,7 +50,7 @@ export const piAdapter: AgentAccessAdapter = {
           baseUrl: context.endpoint,
           api: "openai-completions",
           headers: { "x-flowlet-client": "pi" },
-          // 与 Rust 写入端一致：受管 Provider 只声明所选（主/快速）模型条目。
+          // 与 Host 写入端一致：受管 Provider 只声明所选（主/快速）模型条目。
           models: [{ id: primaryModel, name: primaryModel }],
         },
       },

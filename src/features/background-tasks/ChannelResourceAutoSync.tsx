@@ -7,7 +7,7 @@ export const CHANNEL_RESOURCE_SYNC_INTERVAL_MS = 5 * 60_000;
 const FIRST_SYNC_DELAY = 30_000;
 
 /**
- * 周期同步渠道资源信息。Rust 会按账号能力选择官方余额 API 或隐藏 WebView，
+ * 周期同步渠道资源信息。Node Host 会按账号能力选择官方余额 API 或隐藏 WebView，
  * 串行执行并写任务日志；后台 WebView 轮次不会弹出登录窗口。
  *
  * CHANNEL_RESOURCE_SYNC_INTERVAL_MS 同时用于概览页账号数据过期提示：
@@ -30,7 +30,7 @@ export function ChannelResourceAutoSync() {
           ]);
         }
       } catch {
-        // 自动同步失败不打断应用；详细失败由 Rust 任务日志记录，下一轮继续。
+        // 自动同步失败不打断应用；详细失败由 Node Host 任务日志记录，下一轮继续。
       }
       if (!stopped) schedule(CHANNEL_RESOURCE_SYNC_INTERVAL_MS);
     };

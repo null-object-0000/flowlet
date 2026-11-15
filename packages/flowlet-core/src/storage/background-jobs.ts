@@ -1,7 +1,7 @@
-// 后台任务存储层（Rust core/storage_tasks.rs 的 SQL 等价实现）。
+// 后台任务存储层（Node Host packages/flowlet-core/src/host/scheduler.ts 的 SQL 等价实现）。
 //
 // Owner: desktop-observability。只做 SQL 与行映射：
-// - 表名 / 列名 / 排序 / clamp 范围逐句对照 Rust，字段命名 camelCase（与 Rust
+// - 表名 / 列名 / 排序 / clamp 范围逐句对照 Node Host，字段命名 camelCase（与 Node Host
 //   `#[serde(rename_all = "camelCase")]` 输出一致）。
 // - 所有函数签名 `(db: DatabaseSync, ...) => ...`，由命令层通过
 //   `ctx.storage.withDatabase((db) => ...)` 调用，避免和其它领域争抢
@@ -9,7 +9,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { JsonRow } from "../types.ts";
 
-/** Rust `BackgroundJobRow`（camelCase）。 */
+/** 既有 `BackgroundJobRow`（camelCase）。 */
 export interface BackgroundJobRow {
   id: string;
   jobType: string;
@@ -28,7 +28,7 @@ export interface BackgroundJobRow {
   cancelRequested: boolean;
 }
 
-/** Rust `BackgroundJobEvent`（camelCase）。 */
+/** 既有 `BackgroundJobEvent`（camelCase）。 */
 export interface BackgroundJobEvent {
   id: string;
   jobId: string;
@@ -40,13 +40,13 @@ export interface BackgroundJobEvent {
   createdAt: string;
 }
 
-/** Rust `BackgroundJobDetail`（camelCase）。 */
+/** 既有 `BackgroundJobDetail`（camelCase）。 */
 export interface BackgroundJobDetail {
   job: BackgroundJobRow;
   events: BackgroundJobEvent[];
 }
 
-/** Rust `BackgroundJobsPage`（camelCase）。 */
+/** 既有 `BackgroundJobsPage`（camelCase）。 */
 export interface BackgroundJobsPage {
   rows: BackgroundJobRow[];
   total: number;
@@ -54,13 +54,13 @@ export interface BackgroundJobsPage {
   pageSize: number;
 }
 
-/** Rust `CleanupBackgroundJobsResult`（camelCase）。 */
+/** 既有 `CleanupBackgroundJobsResult`（camelCase）。 */
 export interface CleanupBackgroundJobsResult {
   deletedJobs: number;
   deletedEvents: number;
 }
 
-/** Rust `AgentSourceSyncState`（camelCase）。 */
+/** 既有 `AgentSourceSyncState`（camelCase）。 */
 export interface AgentSourceSyncState {
   agentType: string;
   lastCheckedAt: string | null;
@@ -72,15 +72,15 @@ export interface AgentSourceSyncState {
   failedCount: number;
 }
 
-/** Rust `AgentSyncStatusReport`（camelCase）。 */
+/** 既有 `AgentSyncStatusReport`（camelCase）。 */
 export interface AgentSyncStatusReport {
   running: boolean;
   sources: AgentSourceSyncState[];
 }
 
 /**
- * Rust `BackgroundJobsFilter`（入参 snake_case，serde 反序列化）。
- * page / page_size 为必填（Rust 无 `#[serde(default)]`），其余缺省空串。
+ * 既有 `BackgroundJobsFilter`（入参 snake_case，serde 反序列化）。
+ * page / page_size 为必填（Node Host 无 `#[serde(default)]`），其余缺省空串。
  */
 export interface BackgroundJobsFilter {
   page: number;
@@ -138,7 +138,7 @@ function mapEvent(row: JsonRow): BackgroundJobEvent {
   };
 }
 
-/** Rust `Storage::list_background_jobs`：page>=1、page_size clamp(1,50)、created_at DESC。 */
+/** 既有 `Storage::list_background_jobs`：page>=1、page_size clamp(1,50)、created_at DESC。 */
 export function listBackgroundJobs(
   db: DatabaseSync,
   filter: BackgroundJobsFilter,
@@ -173,7 +173,7 @@ export function listBackgroundJobs(
   return { rows, total, page, pageSize };
 }
 
-/** Rust `Storage::get_background_job_detail`：任务不存在返回 null。 */
+/** Node Host `Storage::get_background_job_detail`：任务不存在返回 null。 */
 export function getBackgroundJobDetail(
   db: DatabaseSync,
   id: string,
@@ -194,7 +194,7 @@ export function getBackgroundJobDetail(
 }
 
 /**
- * Rust `Storage::request_background_job_cancel`：
+ * Node Host `Storage::request_background_job_cancel`：
  * 只标记 queued / running，写入 stage='正在取消'，返回是否有行被更新。
  */
 export function requestBackgroundJobCancel(db: DatabaseSync, id: string): boolean {
@@ -207,7 +207,7 @@ export function requestBackgroundJobCancel(db: DatabaseSync, id: string): boolea
   return Number(result.changes ?? 0) > 0;
 }
 
-/** Rust `Storage::cleanup_background_jobs`：keep_days clamp(1,3650)，先事件后任务。 */
+/** Node Host `Storage::cleanup_background_jobs`：keep_days clamp(1,3650)，先事件后任务。 */
 export function cleanupBackgroundJobs(
   db: DatabaseSync,
   keepDaysInput: number,
@@ -233,7 +233,7 @@ export function cleanupBackgroundJobs(
   };
 }
 
-/** Rust `Storage::list_agent_source_sync_states`：ORDER BY agent_type。 */
+/** Node Host `Storage::list_agent_source_sync_states`：ORDER BY agent_type。 */
 export function listAgentSourceSyncStates(db: DatabaseSync): AgentSourceSyncState[] {
   const rows = db
     .prepare(
@@ -255,8 +255,8 @@ export function listAgentSourceSyncStates(db: DatabaseSync): AgentSourceSyncStat
 }
 
 /**
- * Rust `Storage::create_job`：插入 running 任务与首条事件（sequence=1）。
- * `createdAt` 允许注入固定时间（Rust 用 datetime('now')；测试/同步链路需要可断言）。
+ * Node Host `Storage::create_job`：插入 running 任务与首条事件（sequence=1）。
+ * `createdAt` 允许注入固定时间（Node Host 用 datetime('now')；测试/同步链路需要可断言）。
  */
 export function createJob(
   db: DatabaseSync,
@@ -283,7 +283,7 @@ export function createJob(
   ).run(input.eventId, input.id, input.stage, input.firstEventMessage);
 }
 
-/** Rust `Storage::add_job_event`：sequence = MAX(sequence)+1。 */
+/** Node Host `Storage::add_job_event`：sequence = MAX(sequence)+1。 */
 export function addJobEvent(
   db: DatabaseSync,
   input: { eventId: string; jobId: string; level: string; stage: string; message: string },
@@ -299,7 +299,7 @@ export function addJobEvent(
   ).run(input.eventId, input.jobId, seq, input.level, input.stage, input.message);
 }
 
-/** Rust `Storage::update_job_progress`。 */
+/** Node Host `Storage::update_job_progress`。 */
 export function updateJobProgress(
   db: DatabaseSync,
   id: string,
@@ -312,7 +312,7 @@ export function updateJobProgress(
   ).run(id, current, total);
 }
 
-/** Rust `Storage::is_job_cancel_requested`。 */
+/** Node Host `Storage::is_job_cancel_requested`。 */
 export function isJobCancelRequested(db: DatabaseSync, id: string): boolean {
   const row = db
     .prepare("SELECT cancel_requested FROM background_jobs WHERE id=?1")
@@ -320,7 +320,7 @@ export function isJobCancelRequested(db: DatabaseSync, id: string): boolean {
   return Number(row?.cancel_requested ?? 0) !== 0;
 }
 
-/** Rust `Storage::finish_job`：status 决定 stage 与事件级别。 */
+/** Node Host `Storage::finish_job`：status 决定 stage 与事件级别。 */
 export function finishJob(
   db: DatabaseSync,
   input: {
@@ -348,7 +348,7 @@ export function finishJob(
   });
 }
 
-/** Rust `Storage::fail_job`。 */
+/** Node Host `Storage::fail_job`。 */
 export function failJob(
   db: DatabaseSync,
   input: { jobId: string; error: string; eventId: string },
@@ -368,7 +368,7 @@ export function failJob(
 }
 
 /**
- * Rust `Storage::request_background_job_cancel` 的进程内部分（`JobRuntime::request_cancel`）：
+ * Node Host `Storage::request_background_job_cancel` 的进程内部分（`JobRuntime::request_cancel`）：
  * 只认当前进程持有的活动任务，不碰 SQLite。
  */
 export function activeJobIds(db: DatabaseSync): Array<{ id: string; status: string }> {

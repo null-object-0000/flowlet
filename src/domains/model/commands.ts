@@ -101,7 +101,7 @@ export function buildDefaultRoutes(
  *  selected `/models` entry). Legacy canonical selections still fall back to
  *  the first matching alias when the exact canonical ID is absent.
  *  `exposed_models = null` (not yet configured) or empty → no models exposed.
- *  Mirrors the Rust-side selection in channels_config.merge_default_routes. */
+ *  Mirrors the Node Host-side selection in channels_config.merge_default_routes. */
 function defaultModelsForAccount(
   _channelId: string,
   account: ChannelAccount,

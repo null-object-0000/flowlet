@@ -7,7 +7,7 @@
 // delete_codex_account / inspect_agent_global_config / apply_agent_global_config /
 // restore_agent_global_config / list_agent_capabilities。
 //
-// 权威行为：src-tauri/src/commands/agent.rs 与 src-tauri/src/core/agent_*.rs。
+// 实现入口：packages/flowlet-core/src/desktop/agent.ts 与 packages/flowlet-core/src/agent/。
 // 本机文件读写（Codex/Claude Code/OpenCode/Pi/DSH/Hermes 全局配置）保注释与格式，
 // 生命周期契约见 AGENTS.md §8（inspect → apply → reapply → disable → restore）。
 import path from "node:path";

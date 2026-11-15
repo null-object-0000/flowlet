@@ -29,7 +29,7 @@ import { buildExtractorSource } from "../../../scrape/extractor.ts";
 import { resolveCustomScrapeMode } from "../../../scrape/custom-registry.ts";
 import { createTestContext, sampleAccount, type TestContext } from "../support.ts";
 
-/** 仓库根 config.json（与 Rust `include_str!` 的内置默认是同一份文件）。 */
+/** 仓库根 config.json（与 既有 `include_str!` 的内置默认是同一份文件）。 */
 const REPO_CONFIG = DEFAULT_BUILTIN_CONFIG;
 
 let context: TestContext | null = null;
@@ -82,7 +82,7 @@ describe("真实 config.json 的内置抓取描述", () => {
     assert.equal(requiredSlotsForPhase(mode, 1, 3).length, 1);
     assert.deepEqual(requiredSlotsForPhase(mode, 2, 3), ["token_packs_list"]);
 
-    // 宿主槽位规则必须覆盖三个必需槽位，且 URL 分派与 Rust adapter 一致。
+    // 宿主槽位规则必须覆盖三个必需槽位，且 URL 分派与 Node Host adapter 一致。
     const rules = builtinSlotRules("longcat", mode.requiredSlots);
     assert.deepEqual(
       rules.map((rule) => rule.slot),
@@ -118,7 +118,7 @@ describe("真实 config.json 的内置抓取描述", () => {
     // summary / api_usage：合法 JSON 即到位。
     assert.equal(slotSatisfied(mode, "token_packs_summary", '{"code":0,"data":{}}'), true);
     // list：code!=0、items 非数组、或「historyCount=0 且 pageSize<=1」的活跃包探测响应
-    // 都不算完整的资源包列表（Rust 用这个条件避免筛选请求抢先把阶段判完成）。
+    // 都不算完整的资源包列表（Node Host 用这个条件避免筛选请求抢先把阶段判完成）。
     assert.equal(
       slotSatisfied(
         mode,
@@ -133,9 +133,9 @@ describe("真实 config.json 的内置抓取描述", () => {
       false,
     );
     assert.equal(slotSatisfied(mode, "token_packs_list", '{"code":0,"data":{}}'), false);
-    // LongCat 的 summary / api_usage 槽位只要求合法 JSON（Rust adapter 语义），
+    // LongCat 的 summary / api_usage 槽位只要求合法 JSON（Node Host adapter 语义），
     // 登录失效由「明确登录页 URL」判定；list 槽位才做业务信封校验。
-    // 注意 `aggregateComplete` 只检查槽位是否到齐（与 Rust 一致），是否「到位」由
+    // 注意 `aggregateComplete` 只检查槽位是否到齐（保持既有兼容行为），是否「到位」由
     // collectSlots 的 satisfies 过滤决定，因此这里走完整的 record → collect 链路。
     const buffered: Array<[string, string]> = [
       ["https://longcat.chat/api/pay/quota/metering/token-packs/summary", '{"code":"UNAUTHORIZED"}'],

@@ -37,14 +37,14 @@ export const CUSTOM_CHANNEL_ID = "custom";
  *  官方归属，不代表账号默认勾选；开放哪些模型仍由用户显式选择。 */
 export const OPENROUTER_CHANNEL_ID = "openrouter";
 
-/** ChatGPT (Codex) 伪装渠道 ID。Codex 账号由 Rust 端自动发现和同步，
+/** ChatGPT (Codex) 伪装渠道 ID。Codex 账号由 Host 端自动发现和同步，
  *  不需要用户手动创建。前端在概览页渠道账号卡片中作为只读伪账号行呈现
  *  （行点击打开只读详情抽屉），不参与路由，不在账号管理弹窗中出现。 */
 export const CHATGPT_CHANNEL_ID = "chatgpt";
 
 /** ChatGPT 伪渠道预设（仅前端新增账号抽屉用）。Codex 账号不是表单创建的，
  *  而是通过浏览器 OAuth 授权（authorize_codex_account）新增；该预设只提供
- *  「新增 ChatGPT」的入口与授权面板渲染，不进入 config.json / channels_config.rs，
+ *  「新增 ChatGPT」的入口与授权面板渲染，不进入 config.json / packages/flowlet-core/src/config/index.ts，
  *  不参与路由。 */
 export const CHATGPT_PSEUDO_PRESET: ChannelPreset = {
   id: CHATGPT_CHANNEL_ID,
@@ -117,14 +117,14 @@ export function isCustomChannel(channel: Pick<ChannelPreset, "id" | "vendor"> | 
   return channel?.id === CUSTOM_CHANNEL_ID || channel?.vendor === "custom";
 }
 
-/** 本机文件夹发现的自定义渠道抓取描述符（Rust `CustomScrapeChannelInfo` 对应）。 */
+/** 本机文件夹发现的自定义渠道抓取描述符（既有 `CustomScrapeChannelInfo` 对应）。 */
 export type CustomScrapeChannel = {
   channelId: string;
   accountName: string | null;
 };
 
 /** 判断某个账号名是否被自定义抓取描述符覆盖（channelId=custom + accountName 匹配，
- *  匹配口径与 Rust `custom_scrape::account_name_matches` 一致：trim、大小写不敏感、
+ *  匹配口径与 既有 `custom_scrape::account_name_matches` 一致：trim、大小写不敏感、
  *  先精确后子串）。 */
 export function isCustomScrapeAccount(
   accountName: string,
@@ -200,7 +200,7 @@ export function isQwenTokenPlanAccount(account: { channel_id: string; resource_m
 
 /** 判断账号是否为千问 API 按量付费模式（福利页免费额度抓取）。
  *  千问渠道默认资源模式为按量付费；历史账号 resource_mode 未写入(NULL)时按默认处理,
- *  与前端 defaultResourceMode 及 Rust default_resource_mode 兜底保持一致。 */
+ *  与前端 defaultResourceMode 及 Host defaultResourceMode 兜底保持一致。 */
 export function isQwenPayAsYouGoAccount(account: { channel_id: string; resource_mode: string | null }): boolean {
   return account.channel_id === QWEN_CHANNEL_ID &&
     (account.resource_mode === "pay_as_you_go" || account.resource_mode === null);
@@ -214,13 +214,13 @@ export function isQwenPayAsYouGoAccount(account: { channel_id: string; resource_
 export const ZHIPU_CHANNEL_ID = "zhipu";
 
 /** 判断账号是否为 Z.AI API 按量付费模式。历史账号 resource_mode 未写入(NULL)时
- *  按默认处理，与前端 defaultResourceMode 及 Rust default_resource_mode 兜底一致。 */
+ *  按默认处理，与前端 defaultResourceMode 及 Host defaultResourceMode 兜底一致。 */
 export function isZhipuPayAsYouGoAccount(account: { channel_id: string; resource_mode: string | null }): boolean {
   return account.channel_id === ZHIPU_CHANNEL_ID &&
     (account.resource_mode === "pay_as_you_go" || account.resource_mode === null);
 }
 
-/** 判断是否为 ChatGPT (Codex) 伪账号。Codex 账号由 Rust 端同步，
+/** 判断是否为 ChatGPT (Codex) 伪账号。Codex 账号由 Host 端同步，
  *  前端不可编辑、不参与路由，仅在概览页底部作为非交互展示项。 */
 export function isChatGptAccount(account: { channel_id: string; resource_mode: string | null }): boolean {
   return account.channel_id === CHATGPT_CHANNEL_ID && account.resource_mode === "codex";

@@ -1,13 +1,13 @@
 // 用量与费用聚合 SQL 层。
 //
-// 逐条对照 src-tauri/src/core/storage_usage.rs：
+// 对应 packages/flowlet-core/src/storage/usage.ts：
 // - usage_summary_range：本机 usage_records + 同步来的 device_usage_breakdowns
 //   UNION ALL 后按设备维度二次分组，再合并 Agent 原生事件（agent_usage_events）；
 // - usage_today_summary：今日单行聚合（本机 + 原生 + 设备日快照）；
 // - account_stats / account_routing_scores / upsert usage record。
 //
-// 与 Rust 的已知差异：native 行费用依赖 models-cn/models-dev 价格表；未调用 setPrices
-// 时按无价格处理（estimated_cost=0、currency=null），与 Rust 无价格表时一致。
+// 费用口径：native 行费用依赖 models-cn/models-dev 价格表；未调用 setPrices
+// 时按无价格处理（estimated_cost=0、currency=null），保持无价格表时的既有行为。
 import type { DatabaseSync } from "node:sqlite";
 import type { JsonRow } from "../types.ts";
 import { canonicalModelKey, officialChannelIdForModel } from "../catalog/index.ts";
@@ -32,7 +32,7 @@ export interface CostBreakdown {
   output: number;
 }
 
-/** 单次使用费用估算（Rust estimate_cost_at：按当前时刻解析分时价格，未命中返回 null）。 */
+/** 单次使用费用估算（Node Host estimate_cost_at：按当前时刻解析分时价格，未命中返回 null）。 */
 export function estimateCostAt(
   prices: ModelPrice[],
   channelId: string | null,
@@ -81,7 +81,7 @@ export function estimateCostAt(
   };
 }
 
-/** 原生事件的标准公开 API 等价费用（Rust estimate_native_public_cost）。 */
+/** 原生事件的标准公开 API 等价费用（Node Host estimate_native_public_cost）。 */
 function estimateNativePublicCost(
   prices: ModelPrice[],
   model: string,
@@ -127,7 +127,7 @@ function estimateNativePublicCost(
   return [amount, price.currency];
 }
 
-/** Rust is_legacy_aggregate_alias。 */
+/** Node Host is_legacy_aggregate_alias。 */
 function isLegacyAggregateAlias(model: string): boolean {
   const key = model.trim().toLowerCase();
   return key === "flowlet-pro" || key === "flowlet-flash";
@@ -175,7 +175,7 @@ function localDateOf(value: string): string | null {
 }
 
 function localBoundaryMs(date: Date): string {
-  // 与 Rust local_boundary 等价：当地 00:00:00 的 RFC3339（含偏移）。
+  // 与 Node Host local_boundary 等价：当地 00:00:00 的 RFC3339（含偏移）。
   const midnight = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
   const offsetMinutes = -midnight.getTimezoneOffset();
   const sign = offsetMinutes >= 0 ? "+" : "-";
@@ -189,7 +189,7 @@ function invalidRange(message: string): Error {
   return new Error(message);
 }
 
-/** Rust usage_period_bounds（period 仅由 usage_summary 内部使用）。 */
+/** Node Host usage_period_bounds（period 仅由 usage_summary 内部使用）。 */
 export function usagePeriodBounds(period: string): { startAt: string | null; endAt: string | null; groupBy: string } {
   const today = new Date();
   const startOfDay = (date: Date): Date => new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -283,7 +283,7 @@ function mapUsageSummaryRow(row: Record<string, unknown>): JsonRow {
   return result;
 }
 
-/** Rust usage_summary_range（不传 start/end 时为全量）。 */
+/** Node Host usage_summary_range（不传 start/end 时为全量）。 */
 export function usageSummaryRange(
   db: DatabaseSync,
   prices: ModelPrice[],
@@ -589,7 +589,7 @@ export function usageSummaryRange(
   return summary;
 }
 
-/** Rust usage_today_summary：今日单行聚合（本机 usage_records + 原生事件 + 设备日快照）。 */
+/** Node Host usage_today_summary：今日单行聚合（本机 usage_records + 原生事件 + 设备日快照）。 */
 export function usageTodaySummary(db: DatabaseSync): JsonRow {
   const row = db
     .prepare(
@@ -686,7 +686,7 @@ export function usageTodaySummary(db: DatabaseSync): JsonRow {
   };
 }
 
-/** Rust account_stats。 */
+/** Node Host account_stats。 */
 export function accountStats(db: DatabaseSync): JsonRow[] {
   const rows = db
     .prepare(
@@ -744,7 +744,7 @@ export function accountStats(db: DatabaseSync): JsonRow[] {
   }));
 }
 
-/** Rust account_routing_scores：返回 [account_id, channel_id, avg_latency, success_rate, cost_per_1k]。 */
+/** Node Host account_routing_scores：返回 [account_id, channel_id, avg_latency, success_rate, cost_per_1k]。 */
 export function accountRoutingScores(db: DatabaseSync): Array<[string, string, number, number, number]> {
   const rows = db
     .prepare(
@@ -772,7 +772,7 @@ export function accountRoutingScores(db: DatabaseSync): Array<[string, string, n
 }
 
 /**
- * Rust upsert_usage_record_with_metadata：先按 request_id UPDATE，未命中再 INSERT，
+ * Node Host upsert_usage_record_with_metadata：先按 request_id UPDATE，未命中再 INSERT，
  * 费用在写入时按内存价格表估算（无价格时留 NULL）。
  */
 export function insertUsageRecord(db: DatabaseSync, prices: ModelPrice[], usage: JsonRow): void {

@@ -1,7 +1,7 @@
 // 托管 Agent Web 运行时（当前仅 DeepSeek Harness / DSH）。
 //
-// Rust 权威实现：`src-tauri/src/core/agent_runtime.rs` +
-// `agent_environment/adapters/deepseek_harness.rs`：
+// 实现入口：`packages/flowlet-desktop/src/agent-runtime.ts` +
+// `agent_environment/adapters/packages/flowlet-core/src/agent/adapters/deepseek-harness.ts`：
 // - DSH 安装方式为 npx 时启动 `npx @deepseek-ai/dsh web --no-open`，
 //   否则 `dsh web --no-open`；
 // - 就绪判定是 TCP 连接 127.0.0.1:3080（20s 超时）；
@@ -148,7 +148,7 @@ export class AgentRuntimeManager {
   }
 
   private resolveLaunch(): { command: string; args: string[]; display: string } {
-    // 与 Rust 一致：PATH 中有 dsh 就用 dsh，否则用 npx 跑官方包。
+    // 与 Node Host 一致：PATH 中有 dsh 就用 dsh，否则用 npx 跑官方包。
     const override = process.env.FLOWLET_DSH_COMMAND;
     if (override !== undefined && override !== "") {
       return { command: override, args: ["web", "--no-open"], display: `${override} web --no-open` };

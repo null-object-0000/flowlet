@@ -1,6 +1,6 @@
 // Agent 全局配置 Adapter 注册表与高层入口。
 //
-// 权威实现：`src-tauri/src/core/agent_global_config/adapters.rs`。
+// 实现入口：`packages/flowlet-core/src/agent/adapters/index.ts`。
 // 每个 Agent 的 Adapter 独立成文件；这里只做「adapterId → 实现 + 路径解析 + 模型选择」
 // 的组合，不承载任何具体配置格式知识。
 import type { JsonRow } from "../../types.ts";
@@ -104,7 +104,7 @@ export interface ApplyGlobalConfigInput {
 export function applyAgentGlobalConfig(input: ApplyGlobalConfigInput): AgentGlobalConfigReport {
   const { adapterId, expectedBaseUrl, clientToken, options, modelsCn } = input;
   requireAdapter(adapterId);
-  // 与 Rust Adapter 一致：写入前统一解析（主模型，快速模型）；非法模型在写文件前拒绝。
+  // 与 Node Host Adapter 一致：写入前统一解析（主模型，快速模型）；非法模型在写文件前拒绝。
   const choices = resolveModelChoices(options);
   const mcpServers: ReadonlyArray<McpServerSpecInput> | null =
     options !== null && options.mcpServers !== undefined ? options.mcpServers : null;

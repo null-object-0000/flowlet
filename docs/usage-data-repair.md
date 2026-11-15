@@ -197,7 +197,7 @@ Anthropic `/messages/count_tokens` 是上下文长度计算接口，不执行模
 ## 9. 实现入口
 
 - 前端编排：`src/features/settings/useDataRepair.ts`
-- Tauri command：`src-tauri/src/commands/usage.rs`
+- Host command：`packages/flowlet-core/src/desktop/observability.ts`
 - 捕获响应重解析：`Storage::reanalyze_captured_usage`
 - Agent 原生会话唯一匹配回填：`Storage::repair_usage_from_native_sessions`
 - 未知用量补齐：`Storage::analyze_unknown_usage`

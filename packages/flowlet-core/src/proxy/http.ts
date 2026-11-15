@@ -1,7 +1,7 @@
 // HTTP surface helpers: CORS, path detection, upstream URL building, header
 // rewriting, model-field rewriting and capture encoding.
 //
-// 逐段对照 `src-tauri/src/core/proxy_http.rs`。
+// 对应 `packages/flowlet-core/src/proxy/http.ts`。
 import zlib from "node:zlib";
 import {
   asArray,
@@ -128,7 +128,7 @@ export type FilesApiOp =
   | { kind: "retrieve"; id: string }
   | { kind: "delete"; id: string };
 
-/** 只认 Anthropic 入口的四个 Files API 操作（`proxy_http.rs::files_api_request`）。 */
+/** 只认 Anthropic 入口的四个 Files API 操作（`packages/flowlet-core/src/proxy/http.ts`）。 */
 export function filesApiRequest(method: string, rawPath: string): FilesApiOp | null {
   const path = pathWithoutQuery(rawPath);
   const withoutAnthropic = path.startsWith("/anthropic") ? path.slice("/anthropic".length) : null;
@@ -188,7 +188,7 @@ export function buildUpstreamUrl(baseUrl: string, rawUrl: string, protocol: Prot
   return stripDuplicateV1(base, stripped) + stripped;
 }
 
-/** 智谱 OpenAI 兼容端点无 `/v1`（`proxy_http.rs::build_upstream_url_without_openai_v1`）。 */
+/** 智谱 OpenAI 兼容端点无 `/v1`（`packages/flowlet-core/src/proxy/http.ts`）。 */
 export function buildUpstreamUrlWithoutOpenAiV1(baseUrl: string, rawUrl: string): string {
   const base = baseUrl.replace(/\/+$/, "");
   const path = rawUrl === "" ? "/" : rawUrl;
@@ -428,7 +428,7 @@ export function ensureAnthropicThinkingPassback(
  * 这是「客户端忠实回放、上游校验口径不一致」的兼容问题；候选池跨上游时 A 家吐出的
  * item 会被回放到 B 家，所以必须在网关归一。规则：只把 `input[*].status` 的非法值改成
  * `"completed"`、清掉 `encrypted_content: null`；合法 status、`input` 为字符串、非
- * Responses 协议一律原样透传，无修改时不重序列化。逐段对照 Rust
+ * Responses 协议一律原样透传，无修改时不重序列化。逐段对照 Node Host
  * `proxy_http::normalize_responses_input_items`。
  */
 export function normalizeResponsesInputItems(body: Buffer, protocol: Protocol): Buffer {
@@ -533,7 +533,7 @@ function hasToolUseContent(json: JsonRow): boolean {
   return false;
 }
 
-/** `config.rs::classify_request` 的等价实现。 */
+/** `packages/flowlet-core/src/storage/scrape.ts::classify_request` 的等价实现。 */
 export function classifyRequest(body: Buffer, _protocol: Protocol): RequestType {
   const parsed = parseJson(body);
   if (!isRecord(parsed)) return "unknown";

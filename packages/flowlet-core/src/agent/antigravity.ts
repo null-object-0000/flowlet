@@ -1,4 +1,4 @@
-// Antigravity 本机额度观测。权威实现：`src-tauri/src/core/antigravity_account.rs`。
+// Antigravity 本机额度观测。实现入口：`packages/flowlet-core/src/agent/antigravity.ts`。
 //
 // 只做只读观测：发现本机 Antigravity language server 进程（命令行含 antigravity +
 // language_server 且带 --csrf_token），探测其监听端口，调用本地 Connect RPC 读取额度。

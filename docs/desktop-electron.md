@@ -4,10 +4,10 @@
 > Android 保留 Rust/Tauri。Electron 的构建资源与必跑测试独立于 `src-tauri/`。
 > 共享资源位于 `resources/`，真实上游 fixture 位于 `tests/fixtures/`。
 >
-> 设计决策见 [`electron-migration-plan.md`](./electron-migration-plan.md)、
-> [`migration/platform-gap-matrix.md`](./migration/platform-gap-matrix.md)、
-> [`migration/node-host.md`](./migration/node-host.md)、
-> [`migration/commands-and-schema.md`](./migration/commands-and-schema.md)。
+> 设计决策见 [`electron-migration-plan.md`](archive/tauri-migration/electron-migration-plan.md)、
+> [`migration/platform-gap-matrix.md`](archive/tauri-migration/platform-gap-matrix.md)、
+> [`migration/node-host.md`](archive/tauri-migration/node-host.md)、
+> [`migration/commands-and-schema.md`](archive/tauri-migration/commands-and-schema.md)。
 
 ---
 
@@ -188,7 +188,7 @@ Rust 只把两类密钥放 OS 凭据库（账号 API Key 仍在 SQLite 明文，
   `setPermissionRequestHandler` 全拒、`setWindowOpenHandler` 拒绝弹窗。
 - UA：默认 Chromium UA；`channelId === "longcat"` 时固定
   `Mozilla/5.0 (Windows NT 10.0; Win64; x64) ... Chrome/126.0.0.0 Safari/537.36`
-  （沿用 Rust `scrape_console.rs` 策略；Qwen 走阿里云 SSO，不覆盖 UA）。
+  （沿用 Rust `packages/flowlet-desktop/src/scrape.ts` 策略；Qwen 走阿里云 SSO，不覆盖 UA）。
 - 响应捕获：`webContents.debugger.attach("1.3")` →
   `Network.enable`（maxResourceBufferSize 8MB）→ `Network.responseReceived` +
   `Network.loadingFinished` → `Network.getResponseBody`。

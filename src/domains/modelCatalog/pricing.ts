@@ -414,7 +414,7 @@ export function estimateCost(price: ResolvedPrice, input: CostEstimateInput): Co
  *  纯函数：接受已解析的 ModelsCnCatalog。
  *  models-cn 目录可能用**官方 API 名**作为模型 ID（如 deepseek 目录收录 `deepseek-flash`），
  *  与 Flowlet 白名单规范 ID（`deepseek-v4.1-flash`）不同。精确匹配失败后按规范 ID 双侧
- *  归一再匹配一次，与 Rust `find_models_cn_model` / 费用匹配保持同一语义。 */
+ *  归一再匹配一次，与 既有 `find_models_cn_model` / 费用匹配保持同一语义。 */
 export function findModelInCatalog(
   catalog: { providers: ModelsCnProvider[] },
   providerId: string,

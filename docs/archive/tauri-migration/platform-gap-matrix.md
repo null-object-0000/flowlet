@@ -1,7 +1,12 @@
 # Flowlet Tauri/Rust → Electron + Node/TS 平台能力缺口矩阵
 
+> 历史档案：本文记录迁移前的设计与验收，不是当前开发、部署或依赖指南。
+> 旧 Rust 桌面、服务端与 CLI 源码已移除；当前架构见 [架构说明](../../architecture.md)，
+> Android 保留范围见 [Android Rust 边界](../../android-rust-boundary.md)。
+
+
 > 历史迁移记录：2026-11-15 起旧 Rust 桌面、headless 与凭据 CLI 源码已移除。
-> 本文中的旧路径/构建命令仅描述当时基线，当前 Android 边界见 [Android Rust 裁剪](../android-rust-boundary.md)。
+> 本文中的旧路径/构建命令仅描述当时基线，当前 Android 边界见 [Android Rust 裁剪](../../android-rust-boundary.md)。
 
 > 状态：只读盘点结论（未运行任何 `cargo` / `npm` 构建，未修改 `src-tauri/` 与 `src/`）
 > 盘点基线：`main` @ `26fed4c`（2026-11-09）
@@ -183,7 +188,7 @@ Flowlet 的桌面平台能力面比「标准 Electron 应用」大得多：除�
 | # | 能力 | Rust 现状（实现位置与行为） | Electron 方案（具体 API） | 缺口或降级 | 工作量 | 风险 |
 | --- | --- | --- | --- | --- | --- | --- |
 | D1 | 有活动请求时抑制系统自动待机 | `core/power.rs`：`ActivityTracker.track()` 计数 0→1 调 `SetThreadExecutionState(ES_CONTINUOUS + ES_SYSTEM_REQUIRED)`，1→0 清除；**非 Windows 平台是空实现**（`power.rs:104-109`）；代理请求入口 `proxy.rs:1125` 持有 `ActivityPermit` | `powerSaveBlocker.start('prevent-app-suspension')` / `powerSaveBlocker.stop(id)`（跨平台；`prevent-display-sleep` 优先级更高，不需要）；在请求开始/结束处配对调用 | EQ（**净增强**：macOS/Linux 也生效）；注意不要用 `prevent-display-sleep`（会阻止熄屏，耗电） | S | 低 |
-| D2 | suspend/resume 事件 | 未订阅；`docs/windows-suspend-resume-network-resilience.md` 记录了 S0 Modern Standby 冻结进程导致流式请求失败的问题 | `powerMonitor.on('suspend' / 'resume')`；可选 `'lock-screen'/'unlock-screen'`（macOS/Windows） | EQ（**净增强**：可做恢复后连接池重建/重试提示） | S | 低 |
+| D2 | suspend/resume 事件 | 未订阅；`docs/archive/tauri-migration/windows-suspend-resume-network-resilience.md` 记录了 S0 Modern Standby 冻结进程导致流式请求失败的问题 | `powerMonitor.on('suspend' / 'resume')`；可选 `'lock-screen'/'unlock-screen'`（macOS/Windows） | EQ（**净增强**：可做恢复后连接池重建/重试提示） | S | 低 |
 | D3 | 待机恢复后的网络/连接池恢复 | 现状无显式恢复逻辑（仅日志分析文档）；reqwest 连接池在恢复后可能命中死连接 | `powerMonitor.on('resume')` 中重建 undici `Agent`/`ProxyAgent`；或 `session.clearHostResolverCache()`；对进行中 SSE 请求做超时/重试提示 | DG：Node 网络栈与 reqwest 行为不同，需要重新设计恢复策略 | M | 中 |
 
 ### 3.5 凭据与本地存储

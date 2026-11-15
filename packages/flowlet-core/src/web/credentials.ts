@@ -1,6 +1,6 @@
 // 三方服务凭据：类型、校验与业务编排。Owner: node-web.
 //
-// 权威实现：src-tauri/src/core/service_credentials.rs（349 行）。
+// 实现入口：packages/flowlet-core/src/web/credentials.ts（349 行）。
 // 明文只在保存/校验/导出时短暂出现在内存中；落库的是 SecretBox 密文 + 展示掩码。
 // 存储读写全部走 node-storage 的 5 个方fal（snake_case ServiceCredentialRow）；
 // 本模块不写 SQL。
@@ -117,7 +117,7 @@ export interface CredentialProvider {
   available: boolean;
 }
 
-/** node-storage 的凭据方法（与 Rust storage_credentials.rs 一一对应）。 */
+/** node-storage 的凭据方法（与 Node Host packages/flowlet-core/src/storage/credentials.ts 一一对应）。 */
 interface CredentialStorage {
   listServiceCredentials(): JsonRow[];
   getServiceCredential(id: string): JsonRow | null;
@@ -236,10 +236,10 @@ export function defaultEnvPrefix(provider: string): string {
 }
 
 /**
- * 环境前缀归一（phase2-spec §1.2，文案与 Rust `normalize_env_prefix` 一致）：
+ * 环境前缀归一（phase2-spec §1.2，文案与 既有 `normalize_env_prefix` 一致）：
  * - 空 → provider 默认前缀；
- * - 只做 ASCII 大写（对应 Rust `to_ascii_uppercase`，避免 `ß`→`SS` 这类 Unicode 上标）；
- * - 长度按 UTF-8 字节计（对应 Rust `String::len`）；
+ * - 只做 ASCII 大写（对应 既有 `to_ascii_uppercase`，避免 `ß`→`SS` 这类 Unicode 上标）；
+ * - 长度按 UTF-8 字节计（对应 既有 `String::len`）；
  * - 正则 `^[A-Z][A-Z0-9_]{0,23}$`。
  */
 export function normalizeEnvPrefix(raw: string | null | undefined, provider: string): string {
@@ -280,12 +280,12 @@ export function validateEnvPrefixConflict(
   return null;
 }
 
-/** RFC3339 秒级 UTC（与 Rust `to_rfc3339_opts(SecondsFormat::Secs, true)` 一致）。 */
+/** RFC3339 秒级 UTC（与 Node Host `to_rfc3339_opts(SecondsFormat::Secs, true)` 一致）。 */
 export function nowRfc3339(): string {
   return new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
-/** 展示掩码：按 Unicode code point 计长，保留最后 4 位（Rust char 语义）。 */
+/** 展示掩码：按 Unicode code point 计长，保留最后 4 位（Node Host char 语义）。 */
 export function maskSecret(secret: string): string {
   const chars = [...secret];
   if (chars.length <= 4) return "••••";
@@ -315,7 +315,7 @@ export function list(ctx: WebContext): ServiceCredentialView[] {
   return storageOf(ctx).listServiceCredentials().map(viewOf);
 }
 
-/** 校验一个 GitLab 凭据；返回结构化结果而不是抛错（与 Rust `check_gitlab` 一致）。 */
+/** 校验一个 GitLab 凭据；返回结构化结果而不是抛错（与 Node Host `check_gitlab` 一致）。 */
 export async function checkGitlab(
   baseUrl: string,
   token: string,
@@ -353,7 +353,7 @@ export async function checkGitlab(
 }
 
 /**
- * 校验一个 Dockhand 凭据；返回结构化结果而不是抛错（与 Rust `check_dockhand` 一致）。
+ * 校验一个 Dockhand 凭据；返回结构化结果而不是抛错（与 Node Host `check_dockhand` 一致）。
  * Dockhand 没有「当前 token 用户」接口，username/version 恒为 null；认证通过即返回环境数量。
  */
 export async function checkDockhand(
@@ -388,7 +388,7 @@ export async function checkDockhand(
 }
 
 /**
- * 校验一个 Jenkins 凭据；返回结构化结果而不是抛错（与 Rust `check_jenkins` 一致）。
+ * 校验一个 Jenkins 凭据；返回结构化结果而不是抛错（与 Node Host `check_jenkins` 一致）。
  * `/me/api/json` 同时确认用户名与 API Token：Jenkins 的 token 必须与用户名一起用
  * Basic 认证，单独校验 token 没有意义。版本取 `X-Jenkins` 响应头。
  */
@@ -425,7 +425,7 @@ export async function checkJenkins(
 }
 
 /**
- * 校验一个 Beszel 凭据；返回结构化结果而不是抛错（与 Rust `check_beszel` 一致）。
+ * 校验一个 Beszel 凭据；返回结构化结果而不是抛错（与 Node Host `check_beszel` 一致）。
  * Beszel 没有长期 token：先用邮箱 + 密码换 PocketBase 短期 token（auth 失败即失败），
  * `GET /api/beszel/info` 取 Hub 版本（失败不致命），`systems?perPage=1` 取 `totalItems`
  * 作为 detail。成功时 username 用服务端记录的邮箱（为空回退入参邮箱）。
@@ -472,7 +472,7 @@ export async function checkBeszel(
 }
 
 /**
- * 校验一个 Uptime Kuma 凭据；返回结构化结果而不是抛错（与 Rust `check_uptime_kuma` 一致）。
+ * 校验一个 Uptime Kuma 凭据；返回结构化结果而不是抛错（与 Node Host `check_uptime_kuma` 一致）。
  * 2.x 没有监控管理 REST API，`/metrics` 是唯一能确认 API Key 的端点；
  * `/metrics` 用 Basic 认证（用户名空、密码为 Key）。版本取内部构建版本
  * `app_version{version="0.0.28"}`，监控数量与 up/down 作为 detail。
@@ -559,7 +559,7 @@ function fail(text: string): never {
 }
 
 /**
- * 归一保存入参的 username（契约 §3.2 / §6，与 Rust `normalize_username` 一致）：
+ * 归一保存入参的 username（契约 §3.2 / §6，与 Node Host `normalize_username` 一致）：
  * - gitlab / dockhand / uptime-kuma：忽略入参，恒落库 null；
  * - jenkins：trim 后必须非空（编辑时传空表示保留原值）、不超过 64 个字符，
  *   且不能含冒号/空白/控制字符（Basic 认证用 `:` 分隔，含冒号会改变凭据含义）；
@@ -602,7 +602,7 @@ function normalizeUsername(
   return trimmed;
 }
 
-/** Beszel 邮箱：≤254 个字符（Rust `chars().count()`），trim 后恰好一个 `@` 且两侧非空。 */
+/** Beszel 邮箱：≤254 个字符（Node Host `chars().count()`），trim 后恰好一个 `@` 且两侧非空。 */
 function validateBeszelEmail(email: string): void {
   if ([...email].length > 254) fail("Beszel 邮箱不能超过 254 个字符");
   const at = email.indexOf("@");
@@ -847,7 +847,7 @@ export function exportCredentials(ctx: WebContext): ServiceCredentialExport[] {
   return exports;
 }
 
-/** 供 CLI 拉取时把服务凭据映射成 dotenv 键名（与 Rust `env_keys` 一致）。 */
+/** 供 CLI 拉取时把服务凭据映射成 dotenv 键名（与 Node Host `env_keys` 一致）。 */
 export function envKeys(item: ServiceCredentialExport): Array<[string, string, string]> {
   // 未登记的 provider pull 侧跳过；旧服务端的导出可能没有 envPrefix，回退 provider 默认。
   if (!isSupportedProvider(item.provider)) return [];

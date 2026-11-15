@@ -8,14 +8,14 @@
 // agent_native_usage_summary / preview_sync_channel_presets /
 // apply_sync_channel_presets / probe_cost_ledger_sources。
 //
-// 权威行为：src-tauri/src/commands/observability.rs + commands/usage.rs + commands/scrape.rs，
-// core/agent_session_timeline*.rs、core/opencode_control.rs、core/storage_tasks.rs、
-// core/storage_usage.rs、core/cost_ledger_source_probe.rs。
+// 实现入口：packages/flowlet-core/src/desktop/observability.ts + packages/flowlet-core/src/desktop/observability.ts + packages/flowlet-core/src/desktop/scrape.ts，
+// packages/flowlet-core/src/agent/sessions/timeline.ts、packages/flowlet-core/src/agent/opencode-control.ts、packages/flowlet-core/src/host/scheduler.ts、
+// packages/flowlet-core/src/storage/usage.ts、packages/flowlet-core/src/agent/cost-ledger-probe.ts。
 //
 // 契约要点：
-// - 参数名按 Tauri 规则 camelCase（Rust snake_case 形参 → JS camelCase）；
-// - 返回字段 snake_case / camelCase 混用，逐字段照 Rust serde 输出，不做「统一」；
-// - 错误用 `CommandError.badRequest`，文案对齐 Rust `Err(String)`。
+// - 参数名按 Tauri 规则 camelCase（Node Host snake_case 形参 → JS camelCase）；
+// - 返回字段 snake_case / camelCase 混用，逐字段照 Node Host serde 输出，不做「统一」；
+// - 错误用 `CommandError.badRequest`，文案对齐 既有 `Err(String)`。
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import type { JsonRow } from "../types.ts";
@@ -89,7 +89,7 @@ import {
 
 // ─── 参数辅助 ───────────────────────────────────────────────────────────────
 
-/** Rust `BackgroundJobsFilter` 必填字段（无 `#[serde(default)]`）。 */
+/** 既有 `BackgroundJobsFilter` 必填字段（无 `#[serde(default)]`）。 */
 const BACKGROUND_JOBS_FILTER_REQUIRED = ["page", "page_size"];
 
 function parseBackgroundJobsFilter(args: JsonRow): BackgroundJobsFilter {
@@ -104,11 +104,11 @@ function parseBackgroundJobsFilter(args: JsonRow): BackgroundJobsFilter {
   };
 }
 
-/** Rust `AgentSessionsFilter` 必填字段（page/page_size 无 serde default）。 */
+/** 既有 `AgentSessionsFilter` 必填字段（page/page_size 无 默认值）。 */
 const AGENT_SESSIONS_FILTER_REQUIRED = ["page", "page_size"];
 
 /**
- * 解析桌面 `list_agent_sessions` 的 filter。字段名沿用 Rust/前端发送的 snake_case
+ * 解析桌面 `list_agent_sessions` 的 filter。字段名沿用 Node Host/前端发送的 snake_case
  * （前端 `src/domains/agent-session/commands.ts` 直接传 page_size / agent_type）。
  */
 function parseAgentSessionsFilter(args: JsonRow): {
@@ -156,7 +156,7 @@ function optionalStringField(args: JsonRow, name: string): string | undefined {
   return value;
 }
 
-/** 读取并解析 config.json（与 Rust `std::fs::read_to_string` + serde_json 错误前缀一致）。 */
+/** 读取并解析 config.json（与 Node Host `std::fs::read_to_string` + JSON 错误前缀一致）。 */
 function readConfigJson(configPath: string): JsonRow {
   let raw: string;
   try {
@@ -175,7 +175,7 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Rust `presets::builtin_channel_presets()`：内置 config.json 的渠道模板。 */
+/** Node Host `presets::builtin_channel_presets()`：内置 config.json 的渠道模板。 */
 function builtinChannelPresets(): JsonRow[] {
   const builtin = readJsonFile(DEFAULT_BUILTIN_CONFIG);
   if (builtin === null) return [];
@@ -287,7 +287,7 @@ function diffPresets(newPresets: JsonRow[], existing: JsonRow[], builtin: JsonRo
 }
 
 /**
- * Rust `preview_new_exposed_models`：用与 `merge_default_routes` 相同的规则计算本次
+ * Node Host `preview_new_exposed_models`：用与 `merge_default_routes` 相同的规则计算本次
  * 同步会补齐的模型（保留原数组顺序，只取追加项）。
  */
 function previewNewExposedModels(
@@ -314,7 +314,7 @@ function previewNewExposedModels(
 }
 
 /**
- * Rust `migrate_channel_presets_from_config(storage, config_path, disable_newly_added)`：
+ * Node Host `migrate_channel_presets_from_config(storage, config_path, disable_newly_added)`：
  * 全量替换渠道预设；新增渠道默认禁用，已有渠道保留原启用状态。
  */
 function migrateChannelPresets(ctx: DesktopContext, disableNewlyAdded: boolean): JsonRow[] {

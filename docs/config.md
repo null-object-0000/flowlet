@@ -48,7 +48,7 @@ Electron 的 `scripts/build-desktop-host.mjs` 将根配置和共享模型目录�
 > 会登记到 `default_exposed_models.openrouter` / `DEFAULT_EXPOSED_MODELS_BY_CHANNEL.openrouter`
 > 作为目录归属，但仍不会自动勾选。
 
-新增渠道或修改模型支持范围时，务必同步更新对应位置；前端和 Rust 均从
+新增渠道或修改模型支持范围时，务必同步更新对应位置；前端和 Node Host 均从
 `model-catalog.json` 读取模型身份，不再维护两份白名单或别名表。
 
 ---
@@ -379,20 +379,20 @@ Electron 的 `scripts/build-desktop-host.mjs` 将根配置和共享模型目录�
 | `supports_scrape_balance` | `bool` | 否 | `false` | 是否支持通过后台 webview 登录控制台并拦截 API 抓取套餐余量 |
 | `supports_files_api` | `bool` | 否 | `false` | 是否支持 Anthropic Files API（`<anthropic_base_url>/v1/files` 的上传/列表/检索/删除）。开启后这些无 `model` 字段的请求按渠道绑定到单一账号转发；当前只有 DeepSeek 声明 |
 | `endpoints` | `object` | 否 | `{}` | 端点 URL 覆盖，key 如 `"models"` / `"model_detail"` / `"balance"`；OpenRouter 额外使用 `"credits"` |
-| `scrape` | `object` | 否 | `{}` | 控制台抓取配置。key 为渠道内的抓取模式（当前 LongCat 为 `"hybrid"`，Qwen 为 `"token_plan"` 与 `"freetier"`），value 可包含 `console_url`、可选的 `console_url_secondary`、可选的 `console_url_tertiary`（第三阶段导航 URL，用于 LongCat 加载 `/platform/fuel_pack` 补全已用尽/已过期的历史资源包）、`interceptor_js`、`extractor_js`、`aggregate` 与 `required_slots`。聚合模式按 `required_slots` 判断完整性；单页面模式等待全部必需槽位，多页面且槽位数与页面数一致时按顺序让每个页面等待对应槽位。`extractor_js` 返回统一汇总字段；LongCat 还返回完整 `token_packs` 数组（活跃包来自第一阶段 `token-packs/summary`，历史包来自第三阶段 `token-packs/list`，按 `lotId=resourceId` 去重合并，历史包以 `_fromList: true` 标记），原始接口 payload 单独写入 `raw_scraped_json`。Qwen `token_plan` 模式额外拦截 `/tokenplan/personal/api/v2/reset-card/list`（页面加载时自动请求的可选槽位：有重置卡时进入 `raw_scraped_json` bundle，无卡不阻断同步，不进入 `required_slots`）。**Qwen Token Plan 的额度窗口在 2026-10 控制台改版后由周额度（`weekly` + `per1WeekPercentage`）改为月额度（`monthly` + `per1MonthPercentage`），两种口径都必须兼容**：`extractor_js` 按 月额度 → 周额度 → 5 小时 的顺序取第一个「额度总量与用量百分比都在」的窗口，用量百分比大于 1 时按百分数归一（除以 100）；Rust 槽位校验（`channel_capability_adapter/adapters/qwen.rs::token_plan_payload_satisfies`）只要求 `data.DataV2.data.data` 信封存在、且任一档位含 `five_hour` / `weekly` / `monthly` 中任一数值型额度窗口、任一 `per*Percentage` 数值，不得再锁定 `weekly` / `per1WeekPercentage`，否则改版后的响应会被误判为「未抓全」并中断同步；账号资源同步（`account_resource_sync.rs::parse_qwen_details`）按 5 小时 → 7 天 → 每月 的顺序产出全部窗口，月额度排在最后，移动端取最后一个窗口作为主额度。桌面端账号编辑器与概览页按同一口径解析 `raw_scraped_json`（`src/features/channel-accounts/qwenTokenPlanDetails.ts`）：只渲染真正有数据的额度窗口（上游不再报 5 小时用量后，「5 小时 - / 总量 - / 额度重置时间 -」空占位整块不再渲染），主额度取周期最长且有数据的窗口。Qwen `freetier` 模式拦截福利页接口：`ListBailianFreetier`（槽位 `freetier_list`）、`DescribeFqInstance`（槽位 `fq_instance`，页面按 40 个模板一批连续发多批，Rust 侧按 `Template.Code` 跨批合并并裁剪字段，`required_slots` 只列一个槽位）、`GetBillingAccountAvailableAmount`（槽位 `billing_amount`，余额写入快照 `balance`）、`ListSettleBillTotalSummary`（槽位 `settle_bill`，可选），以及可选的 `queryCurrentCertInfo`（`cert_info`）与 `tool/user/info.json`（`session_info`，页面会话探针）。页面始终自行生成 Cookie、签名和 Header（`sec_token` 由 `tool/user/info.json` 下发，Flowlet 不伪造请求）；Windows/Linux 优先从原生 WebView 网络层读取精确匹配的目标响应，macOS 与原生监听失败时使用 document-start `interceptor_js` fallback。未捕获响应不会被判定为未登录；任务日志会记录渠道、账号标识及缺失槽位。`extractor_js` 由 Rust 以 `extractor(bundle, credential)` 调用：第二个实参是本账号 API Key 的派生指纹（`{ keyPrefix, keyLastFour }`，Key 过短时为 `null`），供需要按 key 对账的控制台使用；内置 extractor 声明单参即可，多传的实参会被忽略。`extractor_js` 必须是**单个顶层函数声明**（Rust 以 `(extractor_js)(...)` 形式求值，顶层并列的 helper 会变成语法错误，需内联到该函数内）。 |
+| `scrape` | `object` | 否 | `{}` | 控制台抓取配置。key 为渠道内的抓取模式（当前 LongCat 为 `"hybrid"`，Qwen 为 `"token_plan"` 与 `"freetier"`），value 可包含 `console_url`、可选的 `console_url_secondary`、可选的 `console_url_tertiary`（第三阶段导航 URL，用于 LongCat 加载 `/platform/fuel_pack` 补全已用尽/已过期的历史资源包）、`interceptor_js`、`extractor_js`、`aggregate` 与 `required_slots`。聚合模式按 `required_slots` 判断完整性；单页面模式等待全部必需槽位，多页面且槽位数与页面数一致时按顺序让每个页面等待对应槽位。`extractor_js` 返回统一汇总字段；LongCat 还返回完整 `token_packs` 数组（活跃包来自第一阶段 `token-packs/summary`，历史包来自第三阶段 `token-packs/list`，按 `lotId=resourceId` 去重合并，历史包以 `_fromList: true` 标记），原始接口 payload 单独写入 `raw_scraped_json`。Qwen `token_plan` 模式额外拦截 `/tokenplan/personal/api/v2/reset-card/list`（页面加载时自动请求的可选槽位：有重置卡时进入 `raw_scraped_json` bundle，无卡不阻断同步，不进入 `required_slots`）。**Qwen Token Plan 的额度窗口在 2026-10 控制台改版后由周额度（`weekly` + `per1WeekPercentage`）改为月额度（`monthly` + `per1MonthPercentage`），两种口径都必须兼容**：`extractor_js` 按 月额度 → 周额度 → 5 小时 的顺序取第一个「额度总量与用量百分比都在」的窗口，用量百分比大于 1 时按百分数归一（除以 100）；Node Host 抓取槽位校验（`packages/flowlet-core/src/scrape/slot-engine.ts`）只要求 `data.DataV2.data.data` 信封存在、且任一档位含 `five_hour` / `weekly` / `monthly` 中任一数值型额度窗口、任一 `per*Percentage` 数值，不得再锁定 `weekly` / `per1WeekPercentage`，否则改版后的响应会被误判为「未抓全」并中断同步；账号资源同步（`packages/flowlet-core/src/device/bundle.ts`）按 5 小时 → 7 天 → 每月 的顺序产出全部窗口，月额度排在最后，移动端取最后一个窗口作为主额度。桌面端账号编辑器与概览页按同一口径解析 `raw_scraped_json`（`src/features/channel-accounts/qwenTokenPlanDetails.ts`）：只渲染真正有数据的额度窗口（上游不再报 5 小时用量后，「5 小时 - / 总量 - / 额度重置时间 -」空占位整块不再渲染），主额度取周期最长且有数据的窗口。Qwen `freetier` 模式拦截福利页接口：`ListBailianFreetier`（槽位 `freetier_list`）、`DescribeFqInstance`（槽位 `fq_instance`，页面按 40 个模板一批连续发多批，Node Host 侧按 `Template.Code` 跨批合并并裁剪字段，`required_slots` 只列一个槽位）、`GetBillingAccountAvailableAmount`（槽位 `billing_amount`，余额写入快照 `balance`）、`ListSettleBillTotalSummary`（槽位 `settle_bill`，可选），以及可选的 `queryCurrentCertInfo`（`cert_info`）与 `tool/user/info.json`（`session_info`，页面会话探针）。页面始终自行生成 Cookie、签名和 Header（`sec_token` 由 `tool/user/info.json` 下发，Flowlet 不伪造请求）；Electron 在各桌面平台统一用 CDP 捕获目标响应，必要时使用 document-start `interceptor_js` 兼容脚本。未捕获响应不会被判定为未登录；任务日志会记录渠道、账号标识及缺失槽位。`extractor_js` 由 Node Host 以 `extractor(bundle, credential)` 调用：第二个实参是本账号 API Key 的派生指纹（`{ keyPrefix, keyLastFour }`，Key 过短时为 `null`），供需要按 key 对账的控制台使用；内置 extractor 声明单参即可，多传的实参会被忽略。`extractor_js` 必须是**单个顶层函数声明**（Rust 以 `(extractor_js)(...)` 形式求值，顶层并列的 helper 会变成语法错误，需内联到该函数内）。 |
 
 Qwen API 按量付费的 `freetier` 数据与 Token Plan 的 `token_plan` 数据都有**等价的 HTTP 通道**（`packages/flowlet-core/src/web/qwen-platform.ts`）：账号完成千问平台 device-flow 登录后（登录按平台账号共享，一个账号登录可复用到同渠道其它账号），Flowlet 在一次同步中同时调用 `BssOpenAPI-V3`（按量付费）与 cs-data（Token Plan），生成与本表 `freetier` / `token_plan` 槽位同构并合并的 slot bundle（未订阅时跳过 `token_plan` 槽位，不视为失败）。该路径优先执行，未登录或失败时才回退到本节描述的 WebView 抓取；因此这两个 scrape mode 的槽位定义仍是前端解析口径的事实来源。详见 `docs/channel-integration.md`。
 
 **`interceptor_js` 的页面暂存（`window.__flowlet_scrape_stash`）必须带上限**：
 
-拦截器把命中的响应体暂存到页面全局数组，供 Rust 侧 `drain_scrape_page_stash` 周期性
+拦截器把命中的响应体暂存到页面全局数组，供 Node Host 侧 `drain_scrape_page_stash` 周期性
 取走。该数组是 append-only 的，只在 probe 抓取循环运行期间被 drain；窗口被遗留在
 后台时控制台页面会持续写入，renderer 内存无界增长（2026-09-19 事故中进程 RSS 峰值
 3.8 G 的最可疑来源）。
 
 因此内置注入脚本统一通过 `window.__flowlet_scrape_push(obj)` 写入，该 helper 在超过
 8 条时丢弃最旧条目（`splice(0, s.length - 8)`）。**新增或修改任何 `interceptor_js`
-都必须走这个 helper，不得再直接对 stash 调用 `.push()`**；`channels_config.rs` 的
+都必须走这个 helper，不得再直接对 stash 调用 `.push()`**；`packages/flowlet-core/src/config/index.ts` 的
 `embedded_interceptors_cap_the_page_stash` 测试会校验内置配置。上限值写在脚本内的
 `var M=8`，需要调整时同步修改该常量与本文档。
 
@@ -452,7 +452,7 @@ Anthropic 兼容端点（Anthropic Skin）为 `https://openrouter.ai/api`，均�
 Key 一样包含在端到端加密的账号目录中。
 模型列表走标准 OpenAI `/models`（`/api/v1/models`，模板已用 `endpoints.models`
 显式覆盖）。OpenRouter `/models` 返回的模型 ID 带 `vendor/` 命名空间前缀（如
-`deepseek/deepseek-v4-flash`）：白名单判断和规范模型映射会先剥离该前缀（Rust
+`deepseek/deepseek-v4-flash`）：白名单判断和规范模型映射会先剥离该前缀（Node Host
 `canonical_model_key` / 前端 `canonicalModelKey`），路由 `upstream_model` 仍保留
 上游原始 ID 用于转发。由于 OpenRouter `/models` 返回全部主流模型，其账号天然
 **可以**勾选开放任意 Flowlet 白名单模型——未来白名单新增模型时，只要 `/models`
@@ -463,7 +463,7 @@ Key 一样包含在端到端加密的账号目录中。
 且不支持”排序；价格缺失或无法解析时不推测为免费。
 
 **入站模型名归一**：代理匹配路由前，会先用 `model-catalog.json` 把客户端请求体里的
-`model` 归一到规范模型 ID（Rust `model_catalog::routing_model_id`，复用 `find` 的
+`model` 归一到规范模型 ID（Node Host `catalog/index.ts::routingModelId`，复用 `find` 的
 别名 + `vendor/` 前缀 + 大小写查表，未登记的名字原样透传）。因此客户端可以直接用厂商
 官方 API 名或别名请求：`deepseek-flash` → `deepseek-v4.1-flash`（DSH 原生 DeepSeek
 Provider 固定发这个官方名），`deepseek-v4-flash-0731` → `deepseek-v4-flash`。
@@ -599,7 +599,7 @@ LongCat 同时登记 `LongCat-2.0` 与 `LongCat-2.5`，两者是独立模型身�
 **行为**：
 
 - 该字段是各渠道「默认提供哪些模型」的描述性列表，**不再直接作为开放模型的白名单**。
-  真正的白名单来自仓库根目录 `model-catalog.json`；Rust `supported_models()` 与前端
+  真正的白名单来自仓库根目录 `model-catalog.json`；Node Host 规范模型目录 与前端
   `FLOWLET_SUPPORTED_MODELS` 均读取该目录，不需要双写同步。
 - 白名单**不按渠道区分**：任意渠道账号只要底层 `/models` 返回了其中的模型，就可勾选开放。
   例如千问套餐端点也会返回 `deepseek-v4-pro`，该模型在全局白名单内，故可勾选。
@@ -608,7 +608,7 @@ LongCat 同时登记 `LongCat-2.0` 与 `LongCat-2.5`，两者是独立模型身�
   路由始终保留完整上游 ID；`default_exposed_models.openrouter` 只登记这些 OpenRouter 资源的
   目录归属，账号仍需用户显式勾选。
 - 一个账号开放哪些模型由**用户显式选择**：在账号编辑器里手动「拉取模型列表」
-  （底层 `/models`，Rust command `fetch_channel_models`），编辑器展示全量上游模型、
+  （底层 `/models`，Host command `fetch_channel_models`），编辑器展示全量上游模型、
   白名单之外的模型展示但禁用勾选，用户勾选后将上游返回的原始模型 ID 保存到
   `channel_accounts.exposed_models`；同一规范模型映射到多个独立上游资源时可分别勾选。
 - 实际为账号自动生成的直连路由 = 全局白名单 **∩ 最近一次 `/models` 返回的
@@ -665,20 +665,20 @@ LongCat 同时登记 `LongCat-2.0` 与 `LongCat-2.5`，两者是独立模型身�
 
 ### 前端读写
 
-Rust 暴露以下 Tauri command；当前正式前端没有通用配置编辑入口：
+Node Host 暴露以下类型化 Host command；当前正式前端没有通用配置编辑入口：
 
 - `read_config()` → 返回 `config.json` 原始字符串
 - `write_config(content)` → 写入完整 JSON 字符串
 
 **写入校验**：`write_config_raw` 仅校验顶层为 JSON 对象或数组，**不做字段级 schema 校验**。新增配置编辑入口时，前端必须自行完成字段级语义校验。
 
-> 前端不直接访问文件系统；渠道、账号和模型数据通过各自的 Tauri command（如 `list_channel_presets`）从 SQLite 获取。
+> 前端不直接访问文件系统；渠道、账号和模型数据通过各自的 Host command（如 `list_channel_presets`）从 SQLite 获取。
 
 ---
 
 ## 8. 新增渠道的完整步骤
 
-端到端实现必须先阅读 [`docs/channel-integration.md`](./channel-integration.md)。该文档包含
+端到端实现必须先阅读 [`docs/channel-integration.md`](channel-integration.md)。该文档包含
 LongCat、DeepSeek、Kimi 对照、SQLite 升级迁移、模型/余额同步、默认路由、前端与测试要求。
 
 要在 Flowlet 中添加一个新渠道（例如 `NewProvider`）：
@@ -693,12 +693,12 @@ LongCat、DeepSeek、Kimi 对照、SQLite 升级迁移、模型/余额同步、�
 
 3. **在 `default_exposed_models` 中声明默认开放的模型列表**。
 
-4. **按 `docs/channel-integration.md` 完成 Rust 适配、SQLite 迁移、前端、图标与测试**。
+4. **按 `docs/channel-integration.md` 完成 Node Host 适配、SQLite 迁移、前端、图标与测试**。
 
 5. **同步更新本文档**（第 6.1 节及示例）。
 
 6. **运行检查**：
-   - `cargo check`（Rust 编译）
+   - `npm run node:typecheck`（Node Host 类型检查）
    - `bun run build`（前端构建）
    - 启动应用验证渠道模板已加载
 
@@ -857,4 +857,4 @@ failed to parse model_catalog_json path `...` as JSON: missing field `shell_type
 拉取结果中选择，并按全局白名单筛选。模型同步支持顶层输出上限字段。
 新渠道需更新应用并重启，启动自动合并旧外部配置并迁移 SQLite 预设，不改变数据结构、账号与路由状态。
 端点覆盖继续沿用现有配置读写机制；账号级模型地址覆盖即时用于下一次拉取/请求，且禁用官方余额同步。
-协议边界与官方来源见 [渠道接入指南](./channel-integration.md#vibetoken-聚合渠道2026-11-05)。
+协议边界与官方来源见 [渠道接入指南](channel-integration.md#vibetoken-聚合渠道2026-11-05)。

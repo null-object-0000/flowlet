@@ -1,6 +1,6 @@
 // OCI 镜像仓库（Docker Registry HTTP API V2 / OCI Distribution）客户端。Owner: node-web.
 //
-// 权威实现：src-tauri/src/core/registry.rs 逐行为等价（契约 .dsh-scratch/registry-contract.md）：
+// 实现入口：packages/flowlet-core/src/web/registry.ts 保持既有行为（契约 .dsh-scratch/registry-contract.md）：
 // - 只做行业通用标准：`GET /v2/` 探测 + `WWW-Authenticate` 质询 + Bearer token 换发；
 //   Docker Hub / GHCR / Quay / ACR / Harbor 都走同一套，robot account 只是普通「用户名 + 密码/token」，
 //   不特判；
@@ -21,9 +21,9 @@ const AUTH_FAILED = "用户名或 token 无效（registry 认证失败）";
 const CHALLENGE_UNPARSABLE = "镜像仓库返回的认证质询无法解析";
 
 /**
- * 与 Rust `RegistryError` 同形：status 用于排查，`message` 是可直接展示的契约文案。
+ * 与 既有 `RegistryError` 同形：status 用于排查，`message` 是可直接展示的契约文案。
  * 与其它 provider 不同，`toString()` 不再拼 `Registry API {status}:` 前缀——契约 §4.2 的
- * 文案本身已是完整可执行提示，Rust / CLI 也直接输出同一文案，保证三层逐字一致。
+ * 文案本身已是完整可执行提示，Node Host / CLI 也直接输出同一文案，保证三层逐字一致。
  */
 export class RegistryError extends Error {
   status: number | null;
@@ -68,7 +68,7 @@ export function normalizeRegistryUrl(raw: string): string {
     parsed = new URL(candidate);
   } catch {
     const detail = urlParseErrorDetail(candidate);
-    // 与 Rust `Url::parse("https://")` 的 empty host 对齐：主机号缺失是独立文案。
+    // 与 既有 `Url::parse("https://")` 的 empty host 对齐：主机号缺失是独立文案。
     if (detail === "empty host") throw new Error("镜像仓库地址缺少主机名");
     throw new Error(`镜像仓库地址无法解析：${detail}`);
   }
@@ -89,7 +89,7 @@ export function normalizeRegistryUrl(raw: string): string {
 }
 
 function urlParseErrorDetail(raw: string): string {
-  // url crate 的常见错误文本（用于保持错误信息可读且接近 Rust）。
+  // url crate 的常见错误文本（用于保持错误信息可读且接近 Node Host）。
   if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(raw)) return "relative URL without a base";
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/$/.test(raw)) return "empty host";
   return "invalid URL";
@@ -115,7 +115,7 @@ export function registryHost(baseUrl: string): string {
 }
 
 /**
- * 用户名规则（契约 §3，与 Rust `normalize_username` 的 registry 分支一致）：
+ * 用户名规则（契约 §3，与 既有 `normalize_username` 的 registry 分支一致）：
  * - 必填（docker login 需要用户名 + 密码/token）；编辑时传空表示保留原值，原值也空同样报错；
  * - 长度 ≤ 255 个 Unicode 字符；
  * - 不能包含 `:`、空白或控制字符（Basic 认证用 `:` 分隔用户名与密码）；

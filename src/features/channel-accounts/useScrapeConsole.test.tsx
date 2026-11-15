@@ -105,7 +105,7 @@ describe("useScrapeConsole", () => {
     // 登录窗口是故意保留的，此时不能关。
     expect(commandMocks.closeScrapeConsole).not.toHaveBeenCalled();
 
-    // 用户放弃登录并关闭抽屉：必须释放窗口，否则 Rust 侧会把这个账号永久标记为
+    // 用户放弃登录并关闭抽屉：必须释放窗口，否则 Host 侧会把这个账号永久标记为
     // “等待人工处理”，后台同步从此每轮跳过它。
     unmount();
     await act(async () => {});

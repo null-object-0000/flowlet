@@ -294,7 +294,7 @@ export function SyncTab() {
     if (!parsed) return;
     try {
       if (parsed.kind === "workspace") {
-        // 工作区接入包内嵌 S3 连接配置，Rust 端导入时会一并写入并立即同步；
+        // 工作区接入包内嵌 S3 连接配置，Node Host 端导入时会一并写入并立即同步；
         // 拉取远端工作区对象本身就完成了凭据与连通性校验。
         const result = await accountWorkspace.importDesktopPackage.mutateAsync(parsed.package);
         await queryClient.invalidateQueries({ queryKey: queryKeys.deviceSync.s3Settings() });

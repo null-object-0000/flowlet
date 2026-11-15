@@ -1,6 +1,6 @@
 // 桌面宿主日志：写文件（数据目录 logs/），供 platform.diagnostics 读取尾部。
 //
-// Rust 侧使用 tracing-appender 写 exe/logs；这里保持同样位置。日志不写任何
+// Host 侧使用 tracing-appender 写 exe/logs；这里保持同样位置。日志不写任何
 // 凭据明文（管理 token / keyring secret 必须在调用处脱敏）。
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";

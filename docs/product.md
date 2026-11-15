@@ -14,7 +14,7 @@ Flowlet 不是 LiteLLM Desktop、New API Desktop，也不是 Helicone / Portkey 
 
 > 一个面向 AI Agent、本地运行、可解释的使用与成本控制台；透明代理是高精度数据入口，但不是统计前提。
 
-统一成本账本的完整产品语义、数据模型、阶段范围和验收标准见 [`ai-cost-ledger.md`](./ai-cost-ledger.md)。在该能力实现前，现有页面中的 `estimated_cost` 仍只代表按公开模型价格计算的估算费用，不代表实际支付或订阅分摊成本。
+统一成本账本的完整产品语义、数据模型、阶段范围和验收标准见 [`ai-cost-ledger.md`](ai-cost-ledger.md)。在该能力实现前，现有页面中的 `estimated_cost` 仍只代表按公开模型价格计算的估算费用，不代表实际支付或订阅分摊成本。
 
 ---
 
@@ -610,11 +610,11 @@ Docker / Web 不是第一阶段主形态，而是高级部署形态。
 
 ## 7. 技术架构
 
-总体结构、运行时端口、协议入口、请求链路、存储分层、Agent 会话观测和成本账本目标架构的完整说明统一维护在 [`architecture.md`](./architecture.md)，本节只保留产品视角的形态划分：
+总体结构、运行时端口、协议入口、请求链路、存储分层、Agent 会话观测和成本账本目标架构的完整说明统一维护在 [`architecture.md`](architecture.md)，本节只保留产品视角的形态划分：
 
 ```text
 AI Reverse Proxy Core     本地代理、渠道模板与账号、路由、日志落盘、离线分析
-Desktop Client（当前形态） Tauri 可视化客户端、系统托盘、开机自启、管理 Core 生命周期
+Desktop Client（当前形态） Electron 可视化客户端、系统托盘、开机自启、管理 Core 生命周期
 Docker / Web Console      后续高级部署形态（见 §6.2），复用 Core，浏览器访问
 ```
 
@@ -622,7 +622,7 @@ Docker / Web Console      后续高级部署形态（见 §6.2），复用 Core�
 
 ## 8. MVP 范围
 
-> 第一阶段 MVP 已完成，各里程碑的当前状态见 [`roadmap.md`](./roadmap.md)。
+> 第一阶段 MVP 已完成，各里程碑的当前状态见 [`roadmap.md`](roadmap.md)。
 
 第一阶段只做最核心能力：
 
@@ -844,7 +844,7 @@ Flowlet 再根据路由结果选择该规范模型的候选账号与上游变体
 ## 13. 数据模型
 
 当前阶段采用 Channel / Account / Model 三层结构。本节为字段参考，实际表结构以
-`src-tauri/src/core/storage.rs` 的迁移为准。
+`packages/flowlet-core/src/storage/schema.ts` 的迁移为准。
 
 ### 13.1 channel_presets
 
@@ -1070,7 +1070,7 @@ updated_at
 
 ## 14. 和其他项目的区别
 
-完整竞品功能对比、能力缺口与战略建议统一维护在 [`competitor-analysis.md`](./competitor-analysis.md)，本节只保留产品定位层面的一句话区别：
+完整竞品功能对比、能力缺口与战略建议统一维护在 [`competitor-analysis.md`](competitor-analysis.md)，本节只保留产品定位层面的一句话区别：
 
 - **vs LiteLLM / New API**：对方是服务端统一 Gateway，重协议适配与转换；Flowlet 是本地透明代理，不做协议转换、响应零改写、桌面客户端形态。
 - **vs Helicone / Portkey**：对方是云端 / 服务端 AI Gateway 与 Observability 平台；Flowlet 面向个人和小团队本地使用。
@@ -1110,7 +1110,7 @@ updated_at
 
 ## 16. 阶段路线
 
-阶段路线统一维护在 [`roadmap.md`](./roadmap.md)（Milestone 0–8 与当前优先级）；统一 AI 成本账本的阶段范围与验收标准见 [`ai-cost-ledger.md`](./ai-cost-ledger.md)。
+阶段路线统一维护在 [`roadmap.md`](roadmap.md)（Milestone 0–8 与当前优先级）；统一 AI 成本账本的阶段范围与验收标准见 [`ai-cost-ledger.md`](ai-cost-ledger.md)。
 
 本节原有的七阶段计划（Desktop MVP 稳定化 → 渠道模板 → Anthropic-compatible 与 Claude Code → 渠道能力与同步框架 → 统一成本账本 → 额度感知路由 → Docker / Web Console）已被上述两份文档取代，不再在此维护。
 

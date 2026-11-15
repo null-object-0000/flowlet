@@ -8,7 +8,7 @@
 //   - covered-web    ：已由 packages/flowlet-core/src/web/commands.ts 实现（Docker/Web Host 同一份）
 //   - covered-desktop：已由 packages/flowlet-core/src/desktop/*.ts 的 handlers 注册表实现
 //   - missing        ：尚未实现（桌面页面会报 501 unsupported_in_web）
-//   - node-only      ：Node 侧独有、Rust 没有的命令（如 CLI 授权、千问平台登录）
+//   - node-only      ：冻结兼容基线之外的 Node 命令（如 CLI 授权、千问平台登录）
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,7 +19,7 @@ const WEB = path.join(ROOT, "packages/flowlet-core/src/web/commands.ts");
 const DESKTOP_DIR = path.join(ROOT, "packages/flowlet-core/src/desktop");
 
 /** 已退役 Tauri 桌面命令的冻结契约；不依赖 Android/Rust 源码。 */
-function rustDesktopCommands() {
+function baselineCommands() {
   const { commands } = JSON.parse(readFileSync(CONTRACT, "utf8"));
   if (!Array.isArray(commands) || commands.length === 0
       || commands.some((name) => typeof name !== "string" || !/^[a-z][a-z0-9_]*$/.test(name))
@@ -112,18 +112,18 @@ function desktopCommands() {
   return [...names];
 }
 
-const rust = [...new Set(rustDesktopCommands())];
+const baseline = [...new Set(baselineCommands())];
 const web = new Set(webCommands());
 const desktop = new Set(desktopCommands());
 const known = new Set([...web, ...desktop]);
 
-const coveredWeb = rust.filter((name) => web.has(name));
-const coveredDesktop = rust.filter((name) => !web.has(name) && desktop.has(name));
-const missing = rust.filter((name) => !known.has(name));
-const nodeOnly = [...known].filter((name) => !rust.includes(name)).sort();
+const coveredWeb = baseline.filter((name) => web.has(name));
+const coveredDesktop = baseline.filter((name) => !web.has(name) && desktop.has(name));
+const missing = baseline.filter((name) => !known.has(name));
+const nodeOnly = [...known].filter((name) => !baseline.includes(name)).sort();
 
 const report = {
-  rustDesktopTotal: rust.length,
+  baselineTotal: baseline.length,
   coveredWeb: coveredWeb.length,
   coveredDesktop: coveredDesktop.length,
   missing: missing.length,
@@ -134,13 +134,13 @@ const report = {
 if (process.argv.includes("--json")) {
   console.log(JSON.stringify(report, null, 2));
 } else {
-  const pct = ((report.coveredWeb + report.coveredDesktop) / report.rustDesktopTotal) * 100;
-  console.log(`Rust 桌面命令：${report.rustDesktopTotal}`);
+  const pct = ((report.coveredWeb + report.coveredDesktop) / report.baselineTotal) * 100;
+  console.log(`桌面兼容命令基线：${report.baselineTotal}`);
   console.log(`  已覆盖（Web Host）：${report.coveredWeb}`);
   console.log(`  已覆盖（desktop 注册表）：${report.coveredDesktop}`);
   console.log(`  未覆盖：${report.missing}  => 覆盖度 ${pct.toFixed(1)}%`);
   if (missing.length > 0) console.log(`\n未实现：\n${missing.map((n) => `  - ${n}`).join("\n")}`);
-  if (nodeOnly.length > 0) console.log(`\nNode 独有（Rust 无）：${nodeOnly.join(", ")}`);
+  if (nodeOnly.length > 0) console.log(`\n兼容基线之外的 Node 命令：${nodeOnly.join(", ")}`);
 }
 
 // `--check`：CI 门禁用。存在未覆盖命令时以非 0 退出。

@@ -1,15 +1,15 @@
 // S3-compatible 存储客户端（SigV4，AWS Signature Version 4）。
 //
-// 权威实现：`src-tauri/src/core/device_sync.rs` 的 `S3SyncConfig` / `S3Store`
+// 实现入口：`packages/flowlet-core/src/services/s3.ts` 的 `S3SyncConfig` / `S3Store`
 // （rusty_s3 + reqwest）。桌面命令批次 2 的账号工作区同步需要同一套对象读写语义，
 // 因此在这里用 Node 内置 `fetch` 实现，不引入第三方 SDK。
 //
 // 契约要点：
-// - 配置字段 camelCase（与 Rust `#[serde(rename_all = "camelCase")]` 一致）；
-// - Endpoint / Bucket / Region / 前缀校验的错误文案与 Rust `from_input` 对齐；
+// - 配置字段 camelCase（与 既有 `#[serde(rename_all = "camelCase")]` 一致）；
+// - Endpoint / Bucket / Region / 前缀校验的错误文案与 既有 `from_input` 对齐；
 // - 阿里云 OSS 的 S3-compatible 端点不支持 PutObject 的 If-Match，`supportsConditionalPut`
-//   为 false 时省略条件写头（与 Rust 一致，调用方仍会先比较 ETag）；
-// - 对象读取上限 64 MB（Rust `MAX_REMOTE_BUNDLE_BYTES`）。
+//   为 false 时省略条件写头（保持既有兼容行为，调用方仍会先比较 ETag）；
+// - 对象读取上限 64 MB（既有 `MAX_REMOTE_BUNDLE_BYTES`）。
 //
 // 该模块由 `desktop-device` 的跨设备同步命令复用；新增能力时保持签名向后兼容。
 import { createHash, createHmac } from "node:crypto";
@@ -19,7 +19,7 @@ const REQUEST_TIMEOUT_MS = 30_000;
 const SIGNED_URL_TTL_SECONDS = 60;
 const EMPTY_PAYLOAD_SHA256 = createHash("sha256").update("").digest("hex");
 
-/** Rust `S3SyncConfig`（camelCase，持久化在 app_meta）。 */
+/** 既有 `S3SyncConfig`（camelCase，持久化在 app_meta）。 */
 export interface S3SyncConfig {
   endpoint: string;
   region: string;
@@ -29,7 +29,7 @@ export interface S3SyncConfig {
   pathStyle: boolean;
 }
 
-/** Rust `S3SyncConfigInput`（camelCase，含可写 Secret）。 */
+/** 既有 `S3SyncConfigInput`（camelCase，含可写 Secret）。 */
 export interface S3SyncConfigInput {
   endpoint: string;
   region: string;
@@ -50,7 +50,7 @@ function isHttpLocalhost(hostname: string): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
 }
 
-/** Rust `S3SyncConfig::from_input`：校验并归一化，错误文案逐条对齐。 */
+/** 既有 `S3SyncConfig::from_input`：校验并归一化，错误文案逐条对齐。 */
 export function parseS3ConfigInput(input: S3SyncConfigInput): S3SyncConfig {
   const endpoint = input.endpoint.trim().replace(/\/+$/, "");
   let endpointUrl: URL;
@@ -109,7 +109,7 @@ export function parseS3ConfigInput(input: S3SyncConfigInput): S3SyncConfig {
   return { endpoint, region, bucket, prefix, accessKeyId, pathStyle: input.pathStyle === true };
 }
 
-/** Rust `S3SyncConfig::credential_username`：sha256(endpoint \0 bucket \0 accessKeyId)。 */
+/** Node Host `S3SyncConfig::credential_username`：sha256(endpoint \0 bucket \0 accessKeyId)。 */
 export function s3CredentialUsername(config: S3SyncConfig): string {
   const digest = createHash("sha256");
   digest.update(config.endpoint);
@@ -127,14 +127,14 @@ export function deviceObjectPrefix(config: S3SyncConfig): string {
     : `${config.prefix}/flowlet/v1/devices/`;
 }
 
-/** 账号工作区目录对象 key（Rust `workspace_accounts_key`）。 */
+/** 账号工作区目录对象 key（Node Host `workspace_accounts_key`）。 */
 export function workspaceAccountsKey(config: S3SyncConfig): string {
   return config.prefix.length === 0
     ? "flowlet/v1/workspace/channel-accounts.enc"
     : `${config.prefix}/flowlet/v1/workspace/channel-accounts.enc`;
 }
 
-/** 账号工作区对象前缀（Rust `workspace_prefix`）。 */
+/** 账号工作区对象前缀（Node Host `workspace_prefix`）。 */
 export function workspacePrefix(config: S3SyncConfig): string {
   return config.prefix.length === 0
     ? "flowlet/v1/workspace/"
@@ -293,7 +293,7 @@ async function checkedResponse(response: Response, action: string): Promise<Resp
   throw new Error(`${action}失败（HTTP ${response.status}${s3ErrorDetail(body)}）`);
 }
 
-/** Rust `S3Store`：对象列举 / 读取 / 写入 / ETag 探测 / 删除。 */
+/** Node Host `S3Store`：对象列举 / 读取 / 写入 / ETag 探测 / 删除。 */
 export class S3Store {
   #config: S3SyncConfig;
   #secret: string;

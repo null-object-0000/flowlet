@@ -208,7 +208,7 @@ describe("registry 地址归一", () => {
       () => normalizeRegistryUrl("https://hub.example.com/api/v2.0"),
       /镜像仓库地址只能是主机（可带端口），不能包含路径/,
     );
-    // 空主机：与 Rust `Url::parse` 的 empty host 对齐成契约 §2 的「缺少主机名」。
+    // 空主机：与 Node Host `Url::parse` 的 empty host 对齐成契约 §2 的「缺少主机名」。
     assert.throws(() => normalizeRegistryUrl("https://"), /镜像仓库地址缺少主机名/);
     assert.throws(() => normalizeRegistryUrl("http://"), /镜像仓库地址缺少主机名/);
     assert.throws(

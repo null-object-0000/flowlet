@@ -5,7 +5,7 @@
 - 状态：已纳入产品规划；数据源只读探针 v1 已实现，账本持久化与成本引擎尚未实现
 - 目标版本：分阶段交付，第一阶段先完成可验证的最小闭环
 - 需求来源：2026-07-19 成本账本完整需求整理
-- 关联文档：[产品定义](./product.md)、[架构说明](./architecture.md)、[路线图](./roadmap.md)
+- 关联文档：[产品定义](product.md)、[架构说明](architecture.md)、[路线图](roadmap.md)
 
 本文是成本账本的产品与技术基线。实现时如调整成本语义、持久化模型、隐私边界或阶段范围，应同步更新本文、`docs/architecture.md` 和 `docs/roadmap.md`。
 
@@ -360,7 +360,7 @@ created_at, updated_at
 
 重算触发条件：新增/更新使用事件、Token 分析完成、成本来源或分配规则变化、任务/会话归属变化、导入官方用量、跨天、账期结束和资源包过期。
 
-后端负责确定性公式、事务、精度、版本和持久化；React 负责配置流程、状态、导航、解释展示和用户反馈。这符合 Flowlet 的前端优先原则，同时把数据一致性留在 Rust 边界内。
+后端负责确定性公式、事务、精度、版本和持久化；React 负责配置流程、状态、导航、解释展示和用户反馈。这符合 Flowlet 的前端优先原则，同时把数据一致性留在 Node Host 边界内。
 
 ---
 
@@ -428,7 +428,7 @@ created_at, updated_at
 - 冻结金额、账期、时区、币种、资源包消耗和可信度语义；
 - 设计 migrations、唯一键、索引、幂等导入和金额精度；
 - 将现有 `estimated_cost` 明确映射为 `list_price_cost`；
-- 为每种公式先补 Rust 单元测试和验收夹具。
+- 为每种公式先补 Node Host 单元测试和验收夹具。
 
 ### Phase 1：网关成本账本闭环
 
@@ -501,12 +501,12 @@ Adapter 失败不影响代理；未经授权不读取第三方数据；默认不
 实施前重点检查：
 
 ```text
-src-tauri/src/core/storage.rs
-src-tauri/src/core/storage_usage.rs
-src-tauri/src/core/usage.rs
-src-tauri/src/core/agent_session_metadata.rs
-src-tauri/src/core/cost_ledger_source_probe.rs
-src-tauri/src/commands.rs
+packages/flowlet-core/src/storage/schema.ts
+packages/flowlet-core/src/storage/usage.ts
+packages/flowlet-core/src/proxy/usage.ts
+packages/flowlet-core/src/agent/sessions/native.ts
+packages/flowlet-core/src/agent/cost-ledger-probe.ts
+packages/flowlet-core/src/desktop/commands.ts
 
 src/domains/cost-ledger/
 src/domains/usage/
@@ -517,7 +517,7 @@ src/pages/agent-sessions/
 src/features/request-logs/
 ```
 
-实施约束：保留请求日志和现有 `usage_records`；通过迁移新增账本表；网关请求幂等映射为使用事件；核心公式仅在 Rust 实现；前端不复制公式；每种分配方式必须有单元测试；日志保留策略与账本证据保留策略必须明确解耦。
+实施约束：保留请求日志和现有 `usage_records`；通过迁移新增账本表；网关请求幂等映射为使用事件；核心公式仅在 Node Host 实现；前端不复制公式；每种分配方式必须有单元测试；日志保留策略与账本证据保留策略必须明确解耦。
 
 ---
 

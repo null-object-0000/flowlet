@@ -1,6 +1,6 @@
 // Hermes Agent 全局配置 Adapter。
 //
-// 权威实现：`src-tauri/src/core/agent_global_config/adapters/hermes.rs`。
+// 实现入口：`packages/flowlet-core/src/agent/adapters/hermes.ts`。
 //
 // `~/.hermes/config.yaml` 的 `model:` 段使用 `provider: "custom"` + `base_url` +
 // `default`；API Key 按 Hermes 官方约定写成 `${HERMES_CUSTOM_<host>_API_KEY}` 引用，

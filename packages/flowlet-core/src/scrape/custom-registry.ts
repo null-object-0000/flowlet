@@ -1,15 +1,15 @@
 // 自定义渠道抓取描述符（文件夹发现机制）的 Node 等价实现。
 //
-// 权威行为：src-tauri/src/core/custom_scrape.rs（v1 schema，见
+// 实现入口：packages/flowlet-core/src/scrape/custom-registry.ts（v1 schema，见
 // docs/custom-scrape-discovery.md）。用途：
 // - `resolve_custom_scrape_mode`：为 custom 渠道账号解析抓取模式（多阶段 URL /
 //   interceptor / extractor / slot 规则 / 登录页规则）；
 // - `reload_custom_scrape_registry`：重扫发现目录并替换进程内注册表；
 // - `list_custom_scrape_channels`：Web 侧缓存与前端能力查询使用的去敏清单。
 //
-// 与 Rust 的差异（已知且有意）：
-// - Rust 的发现根是「exe 同级目录」；Node/Electron 里用「进程脚本目录」与
-//   「Electron 可执行文件目录」两者近似，另加 ~/.flowlet/custom-scrape（与 Rust 一致）。
+// 与 Node Host 的差异（已知且有意）：
+// - Node Host 的发现根是「exe 同级目录」；Node/Electron 里用「进程脚本目录」与
+//   「Electron 可执行文件目录」两者近似，另加 ~/.flowlet/custom-scrape（保持既有兼容行为）。
 // - 描述符只读本地目录，不进 SQLite、不进设备同步。
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
@@ -88,13 +88,13 @@ export interface CustomScrapeRegistry {
   errors: string[];
 }
 
-/** Rust `custom_scrape::CustomScrapeChannelInfo`（camelCase）。 */
+/** 既有 `custom_scrape::CustomScrapeChannelInfo`（camelCase）。 */
 export interface CustomScrapeChannelInfo {
   channelId: string;
   accountName: string | null;
 }
 
-/** Rust `custom_scrape::CustomScrapeResolved`。 */
+/** 既有 `custom_scrape::CustomScrapeResolved`。 */
 export interface CustomScrapeResolved {
   consoleUrl: string;
   consoleUrlSecondary: string | null;
@@ -111,10 +111,10 @@ export interface CustomScrapeResolved {
 // ─── 发现目录 ───────────────────────────────────────────────────────────────
 
 /**
- * Rust `custom_scrape::discovery_roots`：exe 同级目录优先，其次 ~/.flowlet。
+ * 既有 `custom_scrape::discovery_roots`：exe 同级目录优先，其次 ~/.flowlet。
  *
- * Node/Electron 适配（与 Rust 的差异，文档见 docs/custom-scrape-discovery.md）：
- * - Electron main 的 `process.execPath` 是 Flowlet 可执行文件，与 Rust 的 current_exe 同义；
+ * Node/Electron 适配（与 Node Host 的差异，文档见 docs/custom-scrape-discovery.md）：
+ * - Electron main 的 `process.execPath` 是 Flowlet 可执行文件，与 Node Host 的 current_exe 同义；
  * - Node Host 没有「exe 同级目录」，退化为进程脚本目录；
  * - `FLOWLET_CUSTOM_SCRAPE_DIRS`（path.delimiter 分隔）可显式追加/前置发现目录，
  *   用于单测与自定义部署；设置后完全替换默认根，避免测试误读用户本机描述符。
@@ -141,7 +141,7 @@ export function discoveryRoots(): string[] {
   return roots;
 }
 
-// ─── 加载与校验（Rust load_registry / scan_root / load_descriptor） ──────────
+// ─── 加载与校验（Node Host load_registry / scan_root / load_descriptor） ──────────
 
 function readTextOrNull(file: string): string | null {
   try {
@@ -180,7 +180,7 @@ function scanRoot(root: string, registry: CustomScrapeRegistry, seen: Set<string
   let names: string[];
   try {
     if (!isDir(root)) {
-      // Rust：NotFound 静默返回；其它读取错误记 error。
+      // Node Host：NotFound 静默返回；其它读取错误记 error。
       if (existsSync(root)) registry.errors.push(`读取自定义抓取目录 ${root} 失败: 不是目录`);
       return;
     }
@@ -487,17 +487,17 @@ function validateMerge(
   return { ok: false, error: `未知的 merge.kind：${kind}` };
 }
 
-// ─── 进程内注册表（Rust OnceLock + RwLock 语义） ────────────────────────────
+// ─── 进程内注册表（Node Host OnceLock + RwLock 语义） ────────────────────────────
 
 let cachedRegistry: CustomScrapeRegistry | null = null;
 
-/** Rust `custom_scrape::snapshot`：首次调用时扫描目录，之后读缓存。 */
+/** Node Host `custom_scrape::snapshot`：首次调用时扫描目录，之后读缓存。 */
 export function customScrapeRegistry(): CustomScrapeRegistry {
   if (cachedRegistry === null) cachedRegistry = loadCustomScrapeRegistry();
   return cachedRegistry;
 }
 
-/** Rust `custom_scrape::reload`：重新扫描并替换注册表。 */
+/** Node Host `custom_scrape::reload`：重新扫描并替换注册表。 */
 export function reloadCustomScrapeRegistry(): CustomScrapeRegistry {
   cachedRegistry = loadCustomScrapeRegistry();
   return cachedRegistry;
@@ -517,9 +517,9 @@ export function listCustomScrapeChannelInfos(
   }));
 }
 
-// ─── 解析与匹配（Rust resolve / account_name_matches / url_matches ...） ─────
+// ─── 解析与匹配（Node Host resolve / account_name_matches / url_matches ...） ─────
 
-/** Rust `custom_scrape::resolve`：把账号解析到自定义抓取模式。 */
+/** Node Host `custom_scrape::resolve`：把账号解析到自定义抓取模式。 */
 export function resolveCustomScrapeMode(
   channelId: string,
   accountName: string | null,
@@ -559,7 +559,7 @@ export function resolveCustomScrapeMode(
   return null;
 }
 
-/** Rust `custom_scrape::account_name_matches`：trim + 小写后先精确后子串。 */
+/** Node Host `custom_scrape::account_name_matches`：trim + 小写后先精确后子串。 */
 export function accountNameMatches(expected: string, actual: string): boolean {
   const left = expected.trim().toLowerCase();
   const right = actual.trim().toLowerCase();
@@ -567,7 +567,7 @@ export function accountNameMatches(expected: string, actual: string): boolean {
   return left === right || right.includes(left) || left.includes(right);
 }
 
-/** Rust `custom_scrape::url_matches`。 */
+/** Node Host `custom_scrape::url_matches`。 */
 export function urlMatches(matcher: UrlMatcher, url: string): boolean {
   switch (matcher.kind) {
     case "substring":
@@ -591,7 +591,7 @@ function stripTrailingSlash(value: string): string {
   return value.replace(/\/+$/, "");
 }
 
-/** Rust `custom_scrape::slot_satisfies`。 */
+/** Node Host `custom_scrape::slot_satisfies`。 */
 export function slotSatisfies(satisfies: SlotSatisfies, body: string): boolean {
   switch (satisfies.kind) {
     case "none":
@@ -630,7 +630,7 @@ function expectMatches(expect: JsonExpect, value: unknown): boolean {
   }
 }
 
-/** Rust `custom_scrape::merge_arrays`：按 dedupBy 去重（后到覆盖先到）并裁剪字段。 */
+/** Node Host `custom_scrape::merge_arrays`：按 dedupBy 去重（后到覆盖先到）并裁剪字段。 */
 export function mergeArrays(
   path: string,
   dedupBy: string[],
@@ -694,7 +694,7 @@ function keepDeclaredFields(item: unknown, keepFields: string[]): unknown {
   return target;
 }
 
-/** Rust `custom_scrape::login_matches`。 */
+/** Node Host `custom_scrape::login_matches`。 */
 export function loginMatches(login: LoginKind, pageUrl: string): boolean {
   switch (login.kind) {
     case "none":
@@ -719,7 +719,7 @@ export function hasLoginPath(pageUrl: string): boolean {
 
 // ─── JSON Pointer 小工具 ────────────────────────────────────────────────────
 
-/** Rust `custom_scrape::json_pointer`：`$.a.b[0]` 或 `/a/b/0` → `/a/b/0`。 */
+/** Node Host `custom_scrape::json_pointer`：`$.a.b[0]` 或 `/a/b/0` → `/a/b/0`。 */
 export function jsonPointer(pathText: string): string | null {
   const text = pathText.trim();
   if (text === "") return null;

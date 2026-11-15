@@ -1,6 +1,6 @@
 // DeepSeek Harness 全局配置 Adapter。
 //
-// 权威实现：`src-tauri/src/core/agent_global_config/adapters/deepseek_harness.rs`。
+// 实现入口：`packages/flowlet-core/src/agent/adapters/deepseek-harness.ts`。
 //
 // 受管内容：
 // - `~/.dsh/settings.yaml`：`llm-pi-ai.providers.flowlet` 与 `agent-default-model.*`；
@@ -8,7 +8,7 @@
 // - 每个 base-bundle Profile 的 `cordis.patch.yml`：可选「精确会话关联」桥与 MCP 服务器块；
 // - 可选受管插件文件 `.flowlet/flowlet-session-bridge.mjs`。
 //
-// YAML 使用 Document API 保留注释；受管块（session bridge / MCP）沿用 Rust 的
+// YAML 使用 Document API 保留注释；受管块（session bridge / MCP）沿用 Node Host 的
 // flowlet-managed 标记整块替换/移除；写者锁按 DSH 官方 `<file>.lock` 协议实现。
 import * as requireFs from "node:fs";
 import path from "node:path";

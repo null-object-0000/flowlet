@@ -55,7 +55,7 @@ export const credentialCommands = {
 
   /**
    * 已授权的 CLI（`flowlet login` 签发，作用域 `credentials:read`）。
-   * 桌面 Rust Host 暂未实现该命令，调用会拒绝；UI 按「当前 Host 不支持」优雅降级。
+   * 桌面 Node Host Host 暂未实现该命令，调用会拒绝；UI 按「当前 Host 不支持」优雅降级。
    */
   listCliAuthTokens: (): Promise<CliAuthToken[]> =>
     invokeCommand<CliAuthToken[]>("list_cli_auth_tokens").catch(toAppErr("cli_auth_tokens_failed")),

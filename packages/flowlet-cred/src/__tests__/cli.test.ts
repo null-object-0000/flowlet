@@ -272,7 +272,7 @@ describe("本地凭据库", () => {
     assert.ok(text.includes("not a pair"));
     assert.ok(text.includes("KEY_ONE=value"));
     assert.ok(text.includes("KEY_TWO=v2"));
-    // Rust 行为：每次写入都会再前置一次固定文件头（历史注释因此累积）；这里 2 次写入 = 2 份。
+    // Node Host 行为：每次写入都会再前置一次固定文件头（历史注释因此累积）；这里 2 次写入 = 2 份。
     assert.equal(text.split(HEADER).length - 1, 2);
     assert.deepEqual(readdirSync(dir).filter((name) => name.includes(".tmp-")), []);
   });
@@ -1419,7 +1419,7 @@ describe("pull", () => {
   });
 });
 
-// ─── 与 Rust legacy CLI 的兼容性（同序列、不同目录） ─────────────────────
+// ─── 与 Node Host legacy CLI 的兼容性（同序列、不同目录） ─────────────────────
 
 const RUST_AVAILABLE = existsSync(RUST_CLI);
 

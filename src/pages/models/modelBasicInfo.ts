@@ -22,7 +22,7 @@ export function buildModelBasicInfo(
   channelModels: ChannelModel[],
   prices: ModelPriceInfo[],
 ): ModelBasicInfo | null {
-  // 路由满足 virtual_model_id 与 upstream_model 属于同一规范模型（见 proxy_http.rs
+  // 路由满足 virtual_model_id 与 upstream_model 属于同一规范模型（见 packages/flowlet-core/src/proxy/http.ts
   // /models 暴露逻辑），publicModel 可作上游名兜底。
   const channelId =
     officialChannelIdForModel(model.publicModel)

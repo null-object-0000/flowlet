@@ -4,7 +4,7 @@ import { CHATGPT_CHANNEL_ID } from "../../domains/channel/types";
 import { formatFullTimestamp } from "../../shared/formatters/datetime";
 
 /**
- * 将一个 Codex 账号报告（来自 Rust `list_cached_codex_accounts`）
+ * 将一个 Codex 账号报告（来自 既有 `list_cached_codex_accounts`）
  * 转换为可插入渠道账号列表的伪 ChannelAccount 对象。
  *
  * 伪账号不可编辑、不参与路由、仅用于概览页底部非交互展示。

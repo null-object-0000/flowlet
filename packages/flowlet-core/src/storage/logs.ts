@@ -1,13 +1,13 @@
 // 请求日志 / 用量记录的读写 SQL 层。
 //
-// 逐条对照 src-tauri/src/core/storage_usage.rs：
-// - list_request_logs_page：筛选条件、汇总口径、列表 SQL 与 Rust 完全一致；
+// 对应 packages/flowlet-core/src/storage/usage.ts：
+// - list_request_logs_page：筛选条件、汇总口径、列表 SQL 与 Node Host 完全一致；
 // - list_request_logs_by_request_id：按 attempt_seq/created_at 升序取全部 attempt；
 // - insert_request_log / update_request_log_timing。
 //
-// Body 存储与 Rust 一致：新数据把 req/res body 写 `.flcap` 帧（request_logs 的 body 列
+// Body 存储保持既有兼容行为：新数据把 req/res body 写 `.flcap` 帧（request_logs 的 body 列
 // 保持 NULL），`request_capture_refs` 存指针；历史库可能仍有内联列 body（读时兼容）。
-// 详情查询从帧 hydrate，帧缺失/损坏按 Rust 行为降级（refs 置 corrupt，不抛错）。
+// 详情查询从帧 hydrate，帧缺失/损坏按 Node Host 行为降级（refs 置 corrupt，不抛错）。
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import type { JsonRow } from "../types.ts";
@@ -34,7 +34,7 @@ function bool(value: unknown): boolean {
 }
 
 interface BaseRowOptions {
-  /** 列表查询不返回四个大字段（Rust 同）。 */
+  /** 列表查询不返回四个大字段（Node Host 同）。 */
   includeBodies: boolean;
 }
 
@@ -123,7 +123,7 @@ const LIST_COLUMNS = {
   estimated_output_cost: true,
 };
 
-/** Rust list_request_logs_page（分页 + 筛选 + 汇总）。 */
+/** Node Host list_request_logs_page（分页 + 筛选 + 汇总）。 */
 export function listRequestLogsPage(db: DatabaseSync, filter: JsonRow): JsonRow {
   const page = Math.max(1, Number(filter.page ?? 1));
   const pageSize = Math.min(200, Math.max(8, Number(filter.page_size ?? 50)));
@@ -283,7 +283,7 @@ export function listRequestLogsPage(db: DatabaseSync, filter: JsonRow): JsonRow 
 }
 
 /**
- * Rust `hydrate_request_capture`：详情行填充 capture_state / failure_reason，
+ * Node Host `hydrate_request_capture`：详情行填充 capture_state / failure_reason，
  * 并在 refs=ready 时从帧读回 headers/body。损坏帧会把 refs 置 corrupt（不抛错）。
  */
 function hydrateRequestCapture(
@@ -310,7 +310,7 @@ function hydrateRequestCapture(
   }
 }
 
-/** Rust list_request_logs_by_request_id（详情抽屉：全部 attempt + 完整 body）。 */
+/** Node Host list_request_logs_by_request_id（详情抽屉：全部 attempt + 完整 body）。 */
 export function listRequestLogsByRequestId(
   db: DatabaseSync,
   store: RequestCaptureStore,
@@ -347,7 +347,7 @@ export function listRequestLogsByRequestId(
   return logRows;
 }
 
-/** Rust list_request_log_clients（筛选项：未知客户端用空 id + "未知"）。 */
+/** Node Host list_request_log_clients（筛选项：未知客户端用空 id + "未知"）。 */
 export function listRequestLogClients(db: DatabaseSync): JsonRow[] {
   const rows = db
     .prepare(
@@ -361,7 +361,7 @@ export function listRequestLogClients(db: DatabaseSync): JsonRow[] {
   return rows.map((row) => ({ id: String(row.client_id), name: String(row.client_name) }));
 }
 
-/** Rust list_request_log_models（camelCase：public_models / upstream_models）。 */
+/** Node Host list_request_log_models（camelCase：public_models / upstream_models）。 */
 export function listRequestLogModels(db: DatabaseSync): JsonRow {
   const publicModels = (
     db
@@ -392,9 +392,9 @@ export function listRequestLogModels(db: DatabaseSync): JsonRow {
 }
 
 /**
- * Rust `list_request_log_channel_accounts`（筛选项：渠道 + 渠道账号，camelCase）。
+ * Node Host `list_request_log_channel_accounts`（筛选项：渠道 + 渠道账号，camelCase）。
  * 账号名优先取当前 channel_accounts.name（改名后立即反映），回退日志落库的 account_name。
- * 排序与 Rust 一致：未知名（空串）后置，再按名称、id。
+ * 排序与 Node Host 一致：未知名（空串）后置，再按名称、id。
  */
 export function listRequestLogChannelAccounts(db: DatabaseSync): JsonRow {
   const channels = (
@@ -429,8 +429,8 @@ export function listRequestLogChannelAccounts(db: DatabaseSync): JsonRow {
 }
 
 /**
- * Rust `insert_request_log`：id 由 storage 生成，created_at = datetime('now')。
- * Body 不落内联列（与 Rust 一致：req_body_b64/res_body_b64 恒为 NULL），
+ * Node Host `insert_request_log`：id 由 storage 生成，created_at = datetime('now')。
+ * Body 不落内联列（与 Node Host 一致：req_body_b64/res_body_b64 恒为 NULL），
  * 而是压缩进 `.flcap` 帧并写 request_capture_refs 指针；写帧失败时 refs 置 failed。
  */
 export function insertRequestLog(db: DatabaseSync, store: RequestCaptureStore, log: JsonRow): string {
@@ -507,7 +507,7 @@ export function insertRequestLog(db: DatabaseSync, store: RequestCaptureStore, l
 }
 
 /**
- * Rust `update_request_log_timing`：只更新最近一条 last_attempt + stream 的日志，
+ * Node Host `update_request_log_timing`：只更新最近一条 last_attempt + stream 的日志，
  * 并把补写的响应 headers/body 追加到该日志的 `.flcap` 帧（refs 置 ready）。
  * `patch` 支持 ttfb_ms / ttft_ms / duration_ms / res_headers_json / res_body_b64 /
  * error_message / route_reason；未传的键保持原值。

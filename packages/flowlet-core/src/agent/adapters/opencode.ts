@@ -1,12 +1,12 @@
 // OpenCode 全局配置 Adapter。
 //
-// 权威实现：`src-tauri/src/core/agent_global_config/adapters/opencode.rs`。
+// 实现入口：`packages/flowlet-core/src/agent/adapters/opencode.ts`。
 // 配置位置：`~/.config/opencode/opencode.jsonc`（回退 opencode.json）、
 // `~/.local/share/opencode/auth.json`，以及受管权限事件插件
 // `~/.config/opencode/plugins/flowlet.ts`。
 //
 // 编辑策略：JSONC 使用 `jsonc-parser` 的 CST 级 modify/applyEdits，保留注释与格式；
-// 这正是 Rust `jsonc_parser::cst` 的等价实现。
+// 这正是 既有 `jsonc_parser::cst` 的等价实现。
 import path from "node:path";
 
 import {

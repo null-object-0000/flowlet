@@ -1,7 +1,7 @@
 // Web 命令 query_balance 的实现。Owner: node-web.
 //
-// 权威实现：src-tauri/src/core/account_balance.rs（公共编排 + 落库）与
-// channel_capability_adapter/adapters/{deepseek,kimi,openrouter,vibetoken}.rs
+// 实现入口：packages/flowlet-core/src/web/balance.ts（公共编排 + 落库）与
+// packages/flowlet-core/src/web/balance.ts
 // （各渠道官方余额接口的请求与响应解析）。官方余额接口需要网络；对拍脚本会跳过该命令
 // 并在报告注明（不允许用真实 Key 打生产上游）。
 import { randomUUID } from "node:crypto";
@@ -43,7 +43,7 @@ function presetBaseUrl(ctx: WebContext, channelId: string): string {
   return typeof base === "string" ? base : "";
 }
 
-/** Rust `ChannelsConfig::endpoint_or`：endpoints[channel][kind] 覆盖优先。 */
+/** 既有 `ChannelsConfig::endpoint_or`：endpoints[channel][kind] 覆盖优先。 */
 function endpointOr(ctx: WebContext, channelId: string, kind: string, fallback: () => string): string {
   const endpoints = ctx.channelsConfig.endpoints;
   if (endpoints !== null && typeof endpoints === "object" && !Array.isArray(endpoints)) {
@@ -77,7 +77,7 @@ function creditsEndpoint(ctx: WebContext): string {
   return endpointOr(ctx, "openrouter", "credits", () => `${presetBaseUrl(ctx, "openrouter").replace(/\/+$/, "")}/credits`);
 }
 
-/** 只在 Adapter 提供官方余额实现的渠道（Rust `supports_official_balance`）。 */
+/** 只在 Adapter 提供官方余额实现的渠道（Node Host `supports_official_balance`）。 */
 const OFFICIAL_BALANCE_CHANNELS = new Set(["deepseek", "kimi", "openrouter", "vibetoken"]);
 
 export async function queryBalance(ctx: WebContext, accountId: string): Promise<BalanceQueryResult> {

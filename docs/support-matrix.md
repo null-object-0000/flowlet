@@ -156,7 +156,7 @@ Channel + Account + Protocol
 
 目录查找同样按规范模型 ID 双侧归一：`models-cn.json` 按厂商自己的模型名收录（DeepSeek
 V4.1 Flash 收录为官方 API 名 `deepseek-flash`，而白名单规范 ID 是 `deepseek-v4.1-flash`），
-因此规格、能力与基准价格解析（前端 `findModelInCatalog`、Rust `find_models_cn_model`、
+因此规格、能力与基准价格解析（前端 `findModelInCatalog`、Node Host `proxy/catalog.ts::findModelsCnModel`、
 费用匹配 `estimate_cost_at`）都必须先归一再匹配，否则会出现「模型在目录中但界面显示暂无
 可用模型规格」或价格估算缺失。
 
@@ -205,7 +205,7 @@ Codex 账号的新增/重新授权通过独立 Codex CLI 的 `codex app-server` 
 - 恢复时保留用户后来新增的非 Flowlet 字段。
 
 默认模型必须从当前 Agent 协议下已开放的**规范模型 ID** 中选择：Claude Code 可分别选择
-主模型与快速模型（快速模型缺省等于主模型），其余 Agent 选择一个主模型。未选择时由 Rust
+主模型与快速模型（快速模型缺省等于主模型），其余 Agent 选择一个主模型。未选择时由 Node Host
 按模型 id 字典序取第一个可用模型；没有可用模型时禁用一键接入并提示先在模型服务页开放模型。
 Flowlet 不再提供聚合模型或虚拟模型别名，也不会把这类名字写入客户端配置。
 
@@ -305,10 +305,10 @@ Cline、Continue、Open WebUI、Gemini CLI 等目前没有完整的一等安装�
 
 - 渠道模板与能力：`config.json`
 - 前端模型白名单与档位：`src/domains/channel/types.ts`
-- Rust 模型白名单与路由生成：`src-tauri/src/core/channels_config.rs`
-- 代理入口与透明转发：`src-tauri/src/core/proxy.rs`
+- Node Host 模型白名单与路由生成：`packages/flowlet-core/src/config/index.ts`
+- 代理入口与透明转发：`packages/flowlet-core/src/proxy/index.ts`
 - Agent 一等入口：`src/features/agent-access/OverviewAgentAccessCard.tsx`
-- Agent 环境探测：`src-tauri/src/core/agent_environment.rs`
-- Agent 全局配置：`src-tauri/src/core/agent_global_config.rs`
-- 原生会话目录与时间线：`src-tauri/src/core/agent_session_metadata.rs`、
-  `src-tauri/src/core/agent_session_timeline.rs`
+- Agent 环境探测：`packages/flowlet-core/src/agent/environment.ts`
+- Agent 全局配置：`packages/flowlet-core/src/agent/adapters/index.ts`
+- 原生会话目录与时间线：`packages/flowlet-core/src/agent/sessions/native.ts`、
+  `packages/flowlet-core/src/agent/sessions/timeline.ts`

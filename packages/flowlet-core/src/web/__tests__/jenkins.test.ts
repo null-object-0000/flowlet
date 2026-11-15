@@ -275,7 +275,7 @@ describe("Jenkins 客户端基础", () => {
       describeError(500, { error: "boom" }),
       "boom（请检查用户名、token、实例地址与网络连通性）",
     );
-    // Rust 语义：message 键存在即采用（即使 null 渲染成 "null"），不回退 error。
+    // Node Host 语义：message 键存在即采用（即使 null 渲染成 "null"），不回退 error。
     assert.equal(
       describeError(500, { message: null, error: "boom" }),
       "null（请检查用户名、token、实例地址与网络连通性）",
@@ -300,7 +300,7 @@ describe("Jenkins 客户端基础", () => {
       () => new JenkinsClient("https://host", "alice", "  "),
       /Jenkins token 不能为空/,
     );
-    // token 优先于用户名校验（与 Rust 分支顺序一致）。
+    // token 优先于用户名校验（与 Node Host 分支顺序一致）。
     assert.throws(
       () => new JenkinsClient("https://host", "  ", "  "),
       /Jenkins token 不能为空/,

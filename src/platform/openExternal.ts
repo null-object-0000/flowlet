@@ -8,11 +8,11 @@ export type OpenExternalResult = "opened" | "blocked";
 /**
  * 在系统浏览器中打开外部链接。
  *
- * - Tauri 桌面壳：走 Tauri `open_external_url`（WebView 内不直接跳转，避免把登录页
+ * - 原生命令兼容分支：走 Tauri `open_external_url`（WebView 内不直接跳转，避免把登录页
  *   挤进应用窗口）；
  * - Electron desktop 壳：走 preload 桥（`platform:open-external` → 主进程
  *   `shell.openExternal`），同样不在应用窗口内跳转；
- * - Web Host：浏览器环境没有 Tauri command / 桌面桥，用 `window.open` 新标签页打开，
+ * - Web Host：浏览器环境没有 Host command / 桌面桥，用 `window.open` 新标签页打开，
  *   并显式使用 `noopener,noreferrer`。
  *
  * 返回 `blocked` 表示浏览器拦截了弹窗（调用方应展示可读提示），而不是静默失败。

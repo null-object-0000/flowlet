@@ -29,7 +29,7 @@ export interface A2aCall {
   responseBody: string | null;
 }
 
-/** Additive Node Host tables; old Rust hosts ignore them. No model/request-log schema changes. */
+/** Additive Node Host tables; old Node Host hosts ignore them. No model/request-log schema changes. */
 export class A2aStore {
   private db: DatabaseSync;
   constructor(db: DatabaseSync) {

@@ -4,7 +4,7 @@ import { manualModelValue, modelOptions, modelSelectionOptions, selectedModelVal
 /** DeepSeek Harness 写入的是 OpenAI-compatible `/v1` provider，可用模型只取 openai 协议。 */
 const DEEPSEEK_HARNESS_PROTOCOLS: AgentModelProtocol[] = ["openai"];
 
-/// 与 Rust 写入端保持一致：只声明用户所选单个模型，条目只写 `id`，
+/// 与 Host 写入端保持一致：只声明用户所选单个模型，条目只写 `id`，
 /// 不声明 contextWindow 或输入模态（聚合模型能力声明已移除）。
 function settingsSnippet(endpoint: string, primaryModel: string) {
   const declared = primaryModel ? [primaryModel] : ["<model-id>"];

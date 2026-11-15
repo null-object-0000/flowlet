@@ -1,12 +1,12 @@
-// 价格表重建 + 价格解析：与 Rust `storage_tasks::rebuild_price_table` /
-// `config.rs::ModelPrice::resolve_prices_at` 对齐。
+// 价格表重建 + 价格解析：与 既有 `storage_tasks::rebuild_price_table` /
+// `packages/flowlet-core/src/storage/scrape.ts` 对齐。
 //
-// 数据来源（顺序与 Rust 一致）：
+// 数据来源（顺序保持既有兼容行为）：
 //   1. `<catalogDir>/models-cn.json`（国内厂商官方价，CNY，含促销/分档/生效窗口/每日峰谷）
 //   2. `<catalogDir>/models-dev.json`（models.dev OpenAI 官方 API 价，USD）
 //   3. config.json `channels_config.model_prices`（只补目录未覆盖的 (channel, model)）
 //
-// provider → Flowlet channel 映射来自 model-catalog.json（与 Rust
+// provider → Flowlet channel 映射来自 model-catalog.json（与 Node Host
 // `owner_channel_for_models_cn_provider` / models.dev 的 openai→openai-api 一致）。
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -90,7 +90,7 @@ function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
-// ─── 价格解析（Rust config.rs::resolve_prices_at） ───────────────────────────
+// ─── 价格解析（Node Host packages/flowlet-core/src/storage/scrape.ts） ───────────────────────────
 
 function resolveTieredPrices(
   inputUncachedPrice: number,
@@ -136,7 +136,7 @@ interface ZonedClock {
   weekday: string;
 }
 
-/** 把 UTC 时刻换算到 IANA 时区的“分钟数 + 星期”（Rust chrono_tz 语义）。 */
+/** 把 UTC 时刻换算到 IANA 时区的“分钟数 + 星期”（Node Host chrono_tz 语义）。 */
 function zonedClock(atMs: number, timeZone: string): ZonedClock | null {
   try {
     const formatter = new Intl.DateTimeFormat("en-US", {
@@ -162,7 +162,7 @@ function zonedClock(atMs: number, timeZone: string): ZonedClock | null {
     if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
     return { minuteOfDay: hour * 60 + minute, weekday };
   } catch {
-    // 时区名无效（Intl 抛 RangeError）→ Rust chrono_tz 解析失败同样返回 false。
+    // 时区名无效（Intl 抛 RangeError）→ Node Host chrono_tz 解析失败同样返回 false。
     return null;
   }
 }
@@ -216,7 +216,7 @@ function scheduleResolvePrices(schedule: ModelPriceSchedule, inputTokens: number
 }
 
 /**
- * Rust `ModelPrice::resolve_prices_at`：存在目录时段数据时只返回当前生效且命中
+ * 既有 `ModelPrice::resolve_prices_at`：存在目录时段数据时只返回当前生效且命中
  * 每日时段的价格变体；无匹配返回 null（不用过期价格兜底）。
  */
 export function resolvePricesAt(
@@ -242,7 +242,7 @@ export function resolvePricesAt(
   for (const schedule of schedules) {
     if (!scheduleAppliesAt(schedule, atMs)) continue;
     const key = schedule.rate_type === "promotional" ? 1 : 0;
-    // Rust `max_by_key` 在并列时取最后一个匹配项。
+    // 既有 `max_by_key` 在并列时取最后一个匹配项。
     if (key >= bestKey) {
       best = schedule;
       bestKey = key;
@@ -251,7 +251,7 @@ export function resolvePricesAt(
   return best ? scheduleResolvePrices(best, inputTokens) : null;
 }
 
-/** Rust `ModelPrice::resolve_prices`：解析失败时回退扁平单价（= Utc::now 时刻）。 */
+/** 既有 `ModelPrice::resolve_prices`：解析失败时回退扁平单价（= Utc::now 时刻）。 */
 export function resolvePrices(
   price: ModelPrice,
   inputTokens: number | null,
@@ -280,7 +280,7 @@ interface BestModelPrice {
   source_url: string | null;
 }
 
-/** model-catalog.json 的 modelsCnProviderId → ownerChannelId（Rust owner_channel_for_models_cn_provider）。 */
+/** model-catalog.json 的 modelsCnProviderId → ownerChannelId（Node Host owner_channel_for_models_cn_provider）。 */
 export function providerIdToChannelId(providerId: string): string | null {
   const models = asArray(modelCatalog().raw().models);
   for (const entry of models) {
@@ -294,7 +294,7 @@ export function providerIdToChannelId(providerId: string): string | null {
   return null;
 }
 
-/** Rust `select_best_model_cn_price`：china+CNY+promotional 优先。 */
+/** 既有 `select_best_model_cn_price`：china+CNY+promotional 优先。 */
 function selectBestModelCnPrice(model: JsonRow): BestModelPrice | null {
   const prices = asArray(model.prices).map(asObject).filter((item): item is JsonRow => item !== null);
   if (prices.length === 0) return null;
@@ -368,7 +368,7 @@ function buildPriceTiersFromRows(rows: JsonRow[]): ModelPriceTier[] {
   }));
 }
 
-/** Rust `build_price_tiers`：与最优价同 (market, currency, rateType) 的区间行。 */
+/** 既有 `build_price_tiers`：与最优价同 (market, currency, rateType) 的区间行。 */
 function buildPriceTiers(model: JsonRow, best: BestModelPrice): ModelPriceTier[] {
   const matching = asArray(model.prices)
     .map(asObject)
@@ -382,7 +382,7 @@ function buildPriceTiers(model: JsonRow, best: BestModelPrice): ModelPriceTier[]
   return buildPriceTiersFromRows(matching);
 }
 
-/** Rust `build_price_schedules`：同 market/currency 的生效窗口/每日时段价格变体。 */
+/** 既有 `build_price_schedules`：同 market/currency 的生效窗口/每日时段价格变体。 */
 function buildPriceSchedules(model: JsonRow, best: BestModelPrice): ModelPriceSchedule[] {
   const prices = asArray(model.prices).map(asObject).filter((item): item is JsonRow => item !== null);
   const sameMarket = prices.filter(
@@ -411,7 +411,7 @@ function buildPriceSchedules(model: JsonRow, best: BestModelPrice): ModelPriceSc
     else groups.set(key, [price]);
   }
   const schedules: ModelPriceSchedule[] = [];
-  // Rust 用 BTreeMap 分组，按 key 排序输出（保证结果稳定）。
+  // Node Host 用 BTreeMap 分组，按 key 排序输出（保证结果稳定）。
   for (const key of [...groups.keys()].sort()) {
     const group = groups.get(key)!;
     const representative =
@@ -451,7 +451,7 @@ function parseDailyTimeRange(raw: JsonRow): ModelPriceDailyTimeRange {
   };
 }
 
-/** Rust `build_prices_from_models_cn_catalog`。 */
+/** 既有 `build_prices_from_models_cn_catalog`。 */
 export function buildPricesFromModelsCnCatalog(catalogJson: string, now = new Date().toISOString()): ModelPrice[] {
   const catalog = JSON.parse(catalogJson) as JsonRow;
   const providers = asArray(catalog.providers);
@@ -497,7 +497,7 @@ function modelsDevProviderToChannelId(providerId: string): string | null {
   return providerId === "openai" ? "openai-api" : null;
 }
 
-/** Rust `build_models_dev_tiers`：base 价覆盖 ≤ 第一个 context size，其余逐档。 */
+/** Node Host `build_models_dev_tiers`：base 价覆盖 ≤ 第一个 context size，其余逐档。 */
 function buildModelsDevTiers(
   cost: JsonRow,
   baseInput: number,
@@ -542,7 +542,7 @@ function buildModelsDevTiers(
   return tiers;
 }
 
-/** Rust `build_prices_from_models_dev_catalog`（仅 openai → openai-api，USD）。 */
+/** Node Host `build_prices_from_models_dev_catalog`（仅 openai → openai-api，USD）。 */
 export function buildPricesFromModelsDevCatalog(catalogJson: string, now = new Date().toISOString()): ModelPrice[] {
   const catalog = asObject(JSON.parse(catalogJson) as unknown);
   if (!catalog) throw new Error("models.dev 顶层必须是 provider 对象");
@@ -588,7 +588,7 @@ export function buildPricesFromModelsDevCatalog(catalogJson: string, now = new D
 
 // ─── 合并 / 重建 ────────────────────────────────────────────────────────────
 
-/** Rust `merge_price_tables`：目录优先，config 仅补未覆盖 key；排除 codex-native。 */
+/** Node Host `merge_price_tables`：目录优先，config 仅补未覆盖 key；排除 codex-native。 */
 export function mergePriceTables(catalogPrices: ModelPrice[], configPrices: ModelPrice[]): ModelPrice[] {
   const keys = new Set<string>();
   const merged: ModelPrice[] = [];
@@ -602,7 +602,7 @@ export function mergePriceTables(catalogPrices: ModelPrice[], configPrices: Mode
   return merged;
 }
 
-/** config.json `channels_config.model_prices` → ModelPrice（Rust ChannelConfigJson 的 price 部分）。 */
+/** config.json `channels_config.model_prices` → ModelPrice（Node Host ChannelConfigJson 的 price 部分）。 */
 export function configPricesFromJson(configJson: JsonRow): ModelPrice[] {
   const prices = parseChannelsConfig(configJson).prices as JsonRow[];
   return prices.map((price) => ({
@@ -633,7 +633,7 @@ export function configPricesFromJson(configJson: JsonRow): ModelPrice[] {
   }));
 }
 
-/** Rust `read_models_cn_file`/`read_models_dev_file` 的目录解析（FLOWLET_CATALOG_DIR 优先）。 */
+/** Node Host `read_models_cn_file`/`read_models_dev_file` 的目录解析（FLOWLET_CATALOG_DIR 优先）。 */
 export function resolveCatalogDir(catalogDir: string): string {
   return process.env.FLOWLET_CATALOG_DIR || catalogDir;
 }
@@ -656,7 +656,7 @@ export interface PriceTableBuildResult {
 }
 
 /**
- * Rust `storage_tasks::rebuild_price_table` 的等价实现：
+ * Node Host `storage_tasks::rebuild_price_table` 的等价实现：
  * models-cn + models.dev + config.json model_prices，合并后返回完整价格表。
  */
 export function buildPriceTable(catalogDir: string, configJson: JsonRow): PriceTableBuildResult {
@@ -666,7 +666,7 @@ export function buildPriceTable(catalogDir: string, configJson: JsonRow): PriceT
     try {
       catalogPrices.push(...buildPricesFromModelsCnCatalog(modelsCn));
     } catch {
-      /* 解析失败：忽略该目录（Rust 记 warn 后继续） */
+      /* 解析失败：忽略该目录（Node Host 记 warn 后继续） */
     }
   }
   const modelsDev = readCatalogFile(catalogDir, MODELS_DEV_FILE);

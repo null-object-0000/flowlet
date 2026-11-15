@@ -6,7 +6,7 @@ const HERMES_PROTOCOLS: AgentModelProtocol[] = ["openai"];
 
 // 复刻 Hermes `custom_endpoint_key_env(identity)`：从 Base URL 提取 host:port，归一为
 // `[A-Z0-9]+`（其余字符折叠为单个 `_`、去首尾 `_`），生成 `HERMES_CUSTOM_<slug>_API_KEY`。
-// 与 Rust 端 hermes.rs 保持一致，确保手动片段和一键写入引用同一个 .env 变量。
+// 与 Host 端 packages/flowlet-core/src/agent/adapters/hermes.ts 保持一致，确保手动片段和一键写入引用同一个 .env 变量。
 function hermesCustomKeyEnv(baseUrl: string): string {
   const withoutScheme = baseUrl.trim().replace(/^https?:\/\//, "");
   const identity = withoutScheme.split("/")[0].trim();

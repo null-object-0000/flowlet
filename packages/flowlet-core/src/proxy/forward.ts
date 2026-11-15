@@ -1,6 +1,6 @@
 // Model entry forwarding: routing → attempt loop → upstream → SSE/buffered.
 //
-// 权威实现：`src-tauri/src/core/proxy.rs::forward_request` + build_response +
+// 实现入口：`packages/flowlet-core/src/proxy/index.ts` + build_response +
 // capture_timed_stream + record_*。所有日志捕获都发生在"最终上游请求"构造之后，
 // 不使用客户端入站报文（AGENTS.md §9 硬指标）。
 import { readFileSync } from "node:fs";
@@ -113,7 +113,7 @@ const MAX_DEFLATE_RAW_RETRY_BYTES = 1024 * 1024;
 /** flush 观测解压器的等待上限：超时只放弃观测尾巴，绝不阻塞请求。 */
 const OBSERVATION_FLUSH_TIMEOUT_MS = 10_000;
 const FILES_UPLOAD_LIMIT_BYTES = 128 * 1024 * 1024 + 1024 * 1024;
-/** Node 模型路径沿用 Rust 的"无上限缓冲"（usize::MAX），仅给出实际保护上限。 */
+/** Node 模型路径沿用 Node Host 的"无上限缓冲"（usize::MAX），仅给出实际保护上限。 */
 const MODEL_BODY_HARD_LIMIT_BYTES = 1024 * 1024 * 1024;
 
 export class PayloadTooLargeError extends Error {
@@ -976,7 +976,7 @@ async function runAttempts(params: AttemptParams): Promise<void> {
     const timeoutSeconds =
       channel.timeout_seconds ?? deps.upstreamTimeoutSeconds ?? DEFAULT_UPSTREAM_TIMEOUT_SECONDS;
 
-    // 先构造最终上游请求头/体（含鉴权与 model 改写后的字节），再选出口 —— 与 Rust 一致：
+    // 先构造最终上游请求头/体（含鉴权与 model 改写后的字节），再选出口 —— 与 Node Host 一致：
     // 即使上游代理配置失败，日志里仍然是"本应发出的最终上游请求"。
     const upstreamHeaders = applyRequestHeaders(
       headers,
@@ -1451,7 +1451,7 @@ function usageRecordRow(
 // 探针、`StreamUsageAccumulator` 与终止事件追踪都解析不到事件，usage_records 随之缺失。
 // 这里把同一份上游字节增量解压出一份**只读观测副本**喂观测链路；转发给客户端的原始
 // 字节、`content-encoding` 头与响应体捕获（`captureResponseBody` 自行解压）完全不变。
-// 逐段对照 Rust `proxy_http::StreamUsageDecoder`。
+// 逐段对照 Node Host `proxy_http::StreamUsageDecoder`。
 //
 // identity / null / 未知编码不建解压器，观测链路继续直接吃原始字节（既有行为）。
 // 解压出错、单块明文超限或运行时缺少 zstd 支持时只把自身切换成 disabled，绝不影响

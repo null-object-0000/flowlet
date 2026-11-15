@@ -1,5 +1,9 @@
 # 管理端 OAuth / OIDC 单点登录设计
 
+> 历史档案：本文保留旧宿主设计和取证，不作为当前实施或构建指南。
+> 当前实现以 [Node/Electron 架构](../../architecture.md) 与 [Android 边界](../../android-rust-boundary.md) 为准。
+
+
 状态：**v0.6：准入 / 管理员 / 登录方式开关改为管理台自助配置（2026-11-13）**；v0.5 已实现并完成真实 GitLab 登录验证（2026-11-09）；首个 IdP = GitLab
 日期：2026-11-09（v0.2 纳入了规范、各 IdP 与 Rust crate 的实机核验；v0.3 收窄首个 IdP 落地细节）
 范围：headless / Docker Web Host 的浏览器管理台（`FLOWLET_WEB_ADDR` 暴露的 Web UI 与
@@ -233,7 +237,7 @@ Agent 机器，等于绕过本次 SSO 改造。方案是**一套独立的 CLI �
 - 它**不依赖** `ALLOW_TOKEN_LOGIN`；开关仍是 `0`，紧急兜底语义不变。
 - 授权码 32 字节随机、120 秒有效、exchange 一次即删；每次登录都签发新 token，旧 token 由用户
   在 UI 撤销。
-- 详见 [`credential-cli.md`](./credential-cli.md) §4。
+- 详见 [`credential-cli.md`](../../credential-cli.md) §4。
 
 ### 5.2 环境变量（v1 全部走环境变量，不改 `config.json`）
 
@@ -1076,7 +1080,7 @@ RBAC（viewer）、操作级审计表、RP-initiated logout、SQLite 会话持�
 **已解决（2026-11-10）**：Agent 机器如何在 OIDC-only 实例上同步服务凭据。结论是**不**打开
 管理 Bearer 兜底、**不**把管理凭据下发给 Agent 机器，而是新增独立的 CLI 授权面（浏览器 SSO
 → 作用域 `credentials:read` 的 30 天 token → `flowlet pull` 自动使用），见 5.1.1 与
-[`credential-cli.md`](./credential-cli.md) §4。`ALLOW_TOKEN_LOGIN` 保持默认关闭，紧急兜底语义不变。
+[`credential-cli.md`](../../credential-cli.md) §4。`ALLOW_TOKEN_LOGIN` 保持默认关闭，紧急兜底语义不变。
 
 ## 15. 参考资料
 

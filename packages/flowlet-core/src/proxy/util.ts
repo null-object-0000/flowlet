@@ -1,7 +1,7 @@
 // Shared primitives for the model proxy. Owner: node-proxy.
 //
 // Kept free of Node-only imports so the pure routing/usage logic stays easy to
-// unit-test. Behaviour mirrors `src-tauri/src/core/**`.
+// unit-test. Behaviour is shared by the Node Host proxy modules.
 
 export type JsonRow = Record<string, any>;
 export type Protocol = "openai" | "anthropic" | "responses";
@@ -34,7 +34,7 @@ export function nullableStr(value: unknown): string | null {
   return typeof value === "string" ? value : null;
 }
 
-/** Parse a UTF-8 JSON body; returns null for invalid JSON (Rust `serde_json`). */
+/** Parse a UTF-8 JSON body; returns null for invalid JSON (既有 `JSON`). */
 export function parseJson(body: Buffer | string | null | undefined): unknown {
   if (body === null || body === undefined) return null;
   try {
@@ -46,9 +46,9 @@ export function parseJson(body: Buffer | string | null | undefined): unknown {
 }
 
 /**
- * serde_json 默认使用 BTreeMap，序列化时对象键按字典序输出。Node 的
+ * JSON 默认使用 BTreeMap，序列化时对象键按字典序输出。Node 的
  * `JSON.stringify` 保留插入顺序，因此回写被改写的请求体（model 改写、受控补字段）
- * 时需要显式递归排序，才能贴近 Rust 的字节输出。
+ * 时需要显式递归排序，才能贴近 Node Host 的字节输出。
  */
 export function stringifySorted(value: unknown): string {
   return JSON.stringify(sortValue(value));
@@ -68,7 +68,7 @@ export function nowMs(): number {
   return Date.now();
 }
 
-/** 与 Rust `Instant::elapsed().as_millis() as i64` 对齐的整数毫秒。 */
+/** 与 既有 `Instant::elapsed().as_millis() as i64` 对齐的整数毫秒。 */
 export function elapsedMs(startedAtMs: number): number {
   return Date.now() - startedAtMs;
 }
@@ -82,7 +82,7 @@ export function randomId(): string {
   return crypto.randomUUID();
 }
 
-/** Token bucket，等价 `core/rate_limiter.rs`（容量 rpm，按整秒补充）。 */
+/** Token bucket，等价 `每分钟请求配额`（容量 rpm，按整秒补充）。 */
 export class RateLimiter {
   #buckets = new Map<string, { tokens: number; lastRefillMs: number }>();
   #maxTokens: number;
@@ -121,7 +121,7 @@ export class RateLimiter {
   }
 }
 
-/** 解析 RFC3339 / 纯数字时间戳为 Unix 秒（Rust `parse_unix_seconds`）。 */
+/** 解析 RFC3339 / 纯数字时间戳为 Unix 秒（既有 `parse_unix_seconds`）。 */
 export function parseUnixSeconds(raw: string): number {
   if (!raw) return 0;
   const asNumber = Number.parseInt(raw, 10);

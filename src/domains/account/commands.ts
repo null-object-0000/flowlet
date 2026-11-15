@@ -82,7 +82,7 @@ export const accountCommands = {
     invokeCommand<void>("close_scrape_console", { accountId }).catch(
       toAppErr("account_scrape_failed"),
     ),
-  /** 刷新控制台并等待页面业务响应。需要登录或页面未触发目标接口时 Rust 会展示 webview。 */
+  /** 刷新控制台并等待页面业务响应。需要登录或页面未触发目标接口时 Node Host 会展示 webview。 */
   probeScrapeLogin: (accountId: string, interactive = true): Promise<ScrapeLoginStatus> =>
     invokeCommand<ScrapeLoginStatus>("probe_scrape_login", { accountId, interactive }, SCRAPE_LOGIN_TIMEOUT_MS).catch(
       toAppErr("account_scrape_failed"),
@@ -91,14 +91,14 @@ export const accountCommands = {
     invokeCommand<ScrapeBalanceResult>("scrape_balance", { accountId, interactive }, SCRAPE_BALANCE_TIMEOUT_MS).catch(
       toAppErr("account_scrape_failed"),
     ),
-  /** 周期同步渠道资源。官方余额接口与控制台抓取由 Rust 按账号能力分流。 */
+  /** 周期同步渠道资源。官方余额接口与控制台抓取由 Node Host 按账号能力分流。 */
   syncChannelResources: (triggerSource: string): Promise<ChannelResourceSyncResult> =>
     invokeCommand<ChannelResourceSyncResult>("sync_scrape_balances", { triggerSource }, 10 * 60_000).catch(
       toAppErr("account_scrape_sync_failed"),
     ),
 };
 
-/** 控制台抓取结果类型(与 Rust ScrapeBalanceResult 对应)。 */
+/** 控制台抓取结果类型(与 Node Host ScrapeBalanceResult 对应)。 */
 export type ScrapeBalanceResult = {
   balance: number | null;
   currency: string | null;
@@ -113,7 +113,7 @@ export type ScrapeBalanceResult = {
   synced_at: string;
 };
 
-/** 登录态探测结果(与 Rust ScrapeLoginStatus 对应)。 */
+/** 登录态探测结果(与 Node Host ScrapeLoginStatus 对应)。 */
 export type ScrapeLoginStatus = {
   is_logged_in: boolean;
   channel_id: string;

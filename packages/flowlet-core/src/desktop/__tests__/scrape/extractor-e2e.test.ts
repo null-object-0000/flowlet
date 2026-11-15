@@ -4,9 +4,9 @@
 // `(extractor_js)(bundle, credential)` 同形。这里用 `node:vm` 模拟那个调用点，
 // 用仓库 config.json 里**真实的** interceptor/extractor 验证：
 // - 抽象包装不破坏 extractor（helper 内联约束不变）；
-// - bundle 形状（聚合槽位 → 解析后的 JSON）与 Rust `build_aggregate_bundle` 一致；
+// - bundle 形状（聚合槽位 → 解析后的 JSON）与 既有 `build_aggregate_bundle` 一致；
 // - credential 作为第二实参传入，内置 extractor 忽略它也不报错；
-// - 产物能按 Rust `ScrapeBalanceResult` 字段读出。
+// - 产物能按 既有 `ScrapeBalanceResult` 字段读出。
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
@@ -113,7 +113,7 @@ describe("真实 config.json extractor 端到端", () => {
     assert.equal(extracted.token_expire_at, null);
     assert.ok(extracted.token_packs !== null);
 
-    // Rust 侧进一步按 summary/list 归一化资源包。
+    // Node Host 侧进一步按 summary/list 归一化资源包。
     const normalized = normalizeScrapeTokenPacks("longcat", slots, extracted.token_packs);
     assert.ok(normalized !== null);
     const packs = JSON.parse(normalized) as JsonRow[];

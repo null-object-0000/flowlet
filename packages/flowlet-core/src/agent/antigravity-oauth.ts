@@ -1,5 +1,5 @@
 // Antigravity 浏览器 OAuth 与账号级远端额度观测。
-// 权威实现：`src-tauri/src/core/antigravity_oauth.rs`。
+// 实现入口：`packages/flowlet-core/src/agent/antigravity-oauth.ts`。
 //
 // 安全边界：OAuth client 只从环境变量成对读取（仓库不内置密钥）；凭据按账号邮箱
 // 的 SHA-256 命名保存在 `<root>/<hash>.json`（目录 0700、文件 0600，原子写入）；

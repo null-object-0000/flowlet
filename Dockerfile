@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# Flowlet Docker image — Node Host (migration: replaces the Rust headless binary).
+# Flowlet Docker image — Node Host.
 # Two build stages: the unchanged web UI bundle, then the Node host source+deps.
 # Runtime stage keeps the原 deployment contract: non-root 10001, /data volume,
 # ports 8080 (web) / 18640 (model entry), /health healthcheck, SIGTERM shutdown.

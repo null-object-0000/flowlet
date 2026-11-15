@@ -1,9 +1,9 @@
 // 跨设备同步存储域：导入设备快照、维度用量、账号资源，以及 S3 同步状态 / 后台任务。
 // Owner: desktop-device。
 //
-// 权威实现：src-tauri/src/core/storage_device_usage.rs（preview_device_usage_import /
+// 实现入口：packages/flowlet-core/src/storage/devices.ts（preview_device_usage_import /
 // import_device_usage / import_device_usage_breakdowns / import_device_account_resources /
-// usage_breakdown_for_sync）与 storage_tasks.rs（create_job / add_job_event / finish_job）。
+// usage_breakdown_for_sync）与 packages/flowlet-core/src/host/scheduler.ts（create_job / add_job_event / finish_job）。
 // 全部为纯函数，签名 `(db: DatabaseSync, ...)`；命令层通过 `ctx.storage.withDatabase` 调用。
 import type { DatabaseSync } from "node:sqlite";
 
@@ -93,7 +93,7 @@ export function loadS3Status(db: DatabaseSync): S3SyncStatus {
 }
 
 /**
- * Rust `save_status` 使用 `let _ = set_app_meta`：状态写失败不阻断同步主流程。
+ * 既有 `save_status` 使用 `let _ = set_app_meta`：状态写失败不阻断同步主流程。
  * 这里同样尽力而為，但数据库错误仍由调用方按需记录。
  */
 export function saveS3Status(db: DatabaseSync, status: S3SyncStatus): void {
@@ -139,7 +139,7 @@ export function saveRemoteEtags(db: DatabaseSync, state: RemoteEtagsState): void
 
 // ─── 已导入设备的会话 ───────────────────────────────────────────────────────
 
-/** Rust `imported_device_sessions`。 */
+/** 既有 `imported_device_sessions`。 */
 export function importedDeviceSessions(
   db: DatabaseSync,
   deviceId?: string | null,
@@ -178,7 +178,7 @@ export function importedDeviceSessions(
 
 // ─── 当前设备会话快照 ───────────────────────────────────────────────────────
 
-/** Rust `sanitize_session_text`：控制字符替换为空格、截断、trim、空串转 None。 */
+/** Node Host `sanitize_session_text`：控制字符替换为空格、截断、trim、空串转 None。 */
 function sanitizeSessionText(value: string | null, maxChars: number): string | null {
   if (value === null) return null;
   let result = "";
@@ -199,7 +199,7 @@ function sanitizeSessionText(value: string | null, maxChars: number): string | n
  * Node 版目前只有 SQLite 请求观测目录（原生目录解析属于 observability 领域），因此：
  * - 只输出 flowletObserved=true 的观测会话；
  * - 原生摘要字段（nativeTurnCount / nativeTotalTokens / nativeTruncated / lastInteraction）
- *   保持 null / false / null，与 Rust 在「未解析到原生会话」时的输出一致；
+ *   保持 null / false / null，与 Node Host 在「未解析到原生会话」时的输出一致；
  * - OpenCode 实时待确认权限仍会覆盖 runtimeStatus（见 opencode-control.pendingSessionIds）。
  */
 export function listAgentSessionsForDeviceSync(
@@ -241,7 +241,7 @@ export function listAgentSessionsForDeviceSync(
   return selectSessionsForSync(sessions.filter((session) => session.parentSessionId === null));
 }
 
-/** Rust `select_sessions_for_sync`：活跃会话优先，不足 10 条时按最近活动补足。 */
+/** Node Host `select_sessions_for_sync`：活跃会话优先，不足 10 条时按最近活动补足。 */
 export function selectSessionsForSync(sessions: SyncedAgentSession[]): SyncedAgentSession[] {
   sessions.sort((left, right) => {
     const byActivity = sessionTimeMillis(right.activityAt) - sessionTimeMillis(left.activityAt);
@@ -338,7 +338,7 @@ export interface DeviceUsageImportProfile {
   timezoneOffsetMinutes: number;
 }
 
-/** Rust `preview_device_usage_import`。 */
+/** Node Host `preview_device_usage_import`。 */
 export function previewDeviceUsageImport(
   db: DatabaseSync,
   currentDeviceId: string,
@@ -403,7 +403,7 @@ function withTransaction<T>(db: DatabaseSync, run: () => T): T {
   }
 }
 
-/** Rust `import_device_usage`：写 known_devices / 日 / 小时 / 会话 / Agent 摘要。 */
+/** Node Host `import_device_usage`：写 known_devices / 日 / 小时 / 会话 / Agent 摘要。 */
 export function importDeviceUsage(
   db: DatabaseSync,
   snapshotSchemaVersion: number,
@@ -579,7 +579,7 @@ export function importDeviceUsage(
   };
 }
 
-/** Rust `import_device_usage_breakdowns`：先删该设备旧行再整体写入。 */
+/** Node Host `import_device_usage_breakdowns`：先删该设备旧行再整体写入。 */
 export function importDeviceUsageBreakdowns(
   db: DatabaseSync,
   deviceId: string,
@@ -675,7 +675,7 @@ export function importDeviceUsageBreakdowns(
   });
 }
 
-/** Rust `import_device_account_resources`：整体替换该设备的账号资源观测。 */
+/** Node Host `import_device_account_resources`：整体替换该设备的账号资源观测。 */
 export function importDeviceAccountResources(
   db: DatabaseSync,
   deviceId: string,
@@ -713,10 +713,10 @@ export function importDeviceAccountResources(
 // ─── 本机维度用量（随快照发送） ─────────────────────────────────────────────
 
 /**
- * Rust `usage_breakdown_for_sync` 的代理账本部分：最近 `historyDays` 天按
+ * Node Host `usage_breakdown_for_sync` 的代理账本部分：最近 `historyDays` 天按
  * (日期, 客户端, 渠道, workspace 账号, 上游模型) 聚合。
  *
- * 缺口：Rust 还会合并 `native_usage_breakdowns_for_sync`（Agent 原生事件 + 价格估算 +
+ * 缺口：Node Host 还会合并 `native_usage_breakdowns_for_sync`（Agent 原生事件 + 价格估算 +
  * 模型归一），Node 侧原生用量账本尚未迁移，先只发代理账本，并在汇报中标注。
  */
 export function usageBreakdownForSync(

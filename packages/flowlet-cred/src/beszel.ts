@@ -1,20 +1,20 @@
 // Beszel API 客户端（开源服务器监控 Hub，PocketBase 底座，默认端口 8090）。Owner: node-web.
 //
-// 权威实现：src-tauri/src/core/beszel.rs 逐行为等价：
+// 实现入口：packages/flowlet-core/src/web/beszel.ts 保持既有行为：
 // - Beszel 没有长期 API Token：用「邮箱 + 密码」调
 //   `POST /api/collections/users/auth-with-password` 换短期 token，之后请求带
 //   `Authorization: <token>`（PocketBase 原生 token，**不是** `Bearer`）；
 // - 校验身份只能走 auth 端点；版本看 `GET /api/beszel/info`（失败不致命）；
 //   系统数量看 `GET /api/collections/systems/records` 的 `totalItems`；
 // - 地址反复剥末尾 `/`、`/api`、`/_`、`/_/`（用户可能粘贴 PocketBase 管理面板地址），保留子路径部署；
-// - 20s 超时；insecure 时跳过 TLS 校验；错误文案对齐 Rust Display。
+// - 20s 超时；insecure 时跳过 TLS 校验；错误文案对齐 Node Host Display。
 import { Agent, request } from "undici";
 
 const DEFAULT_TIMEOUT_MS = 20_000;
 const USER_AGENT = "flowlet/0.2.0";
 const AUTH_PATH = "/collections/users/auth-with-password";
 
-/** 与 Rust `BeszelAuth` 同形：record 字段缺失时为 null。 */
+/** 与 既有 `BeszelAuth` 同形：record 字段缺失时为 null。 */
 export interface BeszelAuth {
   token: string;
   email: string | null;
@@ -22,7 +22,7 @@ export interface BeszelAuth {
   role: string | null;
 }
 
-/** 与 Rust `BeszelSystem` 同形：字段缺失时为空串。 */
+/** 与 既有 `BeszelSystem` 同形：字段缺失时为空串。 */
 export interface BeszelSystem {
   id: string;
   name: string;
@@ -40,7 +40,7 @@ export interface BeszelSystems {
   items: BeszelSystem[];
 }
 
-/** 与 Rust `BeszelError` 同形：Display = `Beszel API {status}: {message}` / `Beszel API: {message}`。 */
+/** 与 既有 `BeszelError` 同形：Display = `Beszel API {status}: {message}` / `Beszel API: {message}`。 */
 export class BeszelError extends Error {
   status: number | null;
 
@@ -58,7 +58,7 @@ export class BeszelError extends Error {
 }
 
 /**
- * 规范化 Hub 地址（契约 §2）：与 Rust `normalize_base_url` 一致。
+ * 规范化 Hub 地址（契约 §2）：与 Node Host `normalize_base_url` 一致。
  * - 必须 http/https；拒绝 query / fragment；
  * - 反复剥掉末尾 `/`、`/api`、`/_`、`/_/`（用户可能粘贴 `http://host:8090/api`
  *   或 PocketBase 管理面板 `http://host:8090/_/`）；
@@ -97,7 +97,7 @@ export function normalizeBaseUrl(raw: string): string {
 }
 
 function urlParseErrorDetail(raw: string): string {
-  // url crate 的常见错误文本（用于保持错误信息可读且接近 Rust）。
+  // url crate 的常见错误文本（用于保持错误信息可读且接近 Node Host）。
   if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(raw)) return "relative URL without a base";
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/$/.test(raw)) return "empty host";
   return "invalid URL";
@@ -128,7 +128,7 @@ export function resolveApiPath(base: string, rawPath: string): string {
 }
 
 export interface BeszelClientOptions {
-  /** 内网自签证书：跳过 TLS 校验（对应 Rust `danger_accept_invalid_certs`）。 */
+  /** 内网自签证书：跳过 TLS 校验（对应 Node Host `danger_accept_invalid_certs`）。 */
   insecure?: boolean;
 }
 
@@ -340,7 +340,7 @@ function stringField(row: Record<string, unknown>, key: string): string {
 }
 
 /**
- * 把 Beszel/PocketBase 错误体转成可执行提示（契约 §4.3，与 Rust `describe_error` 文案一致）。
+ * 把 Beszel/PocketBase 错误体转成可执行提示（契约 §4.3，与 Node Host `describe_error` 文案一致）。
  * `fromAuth=true` 时 400 用「邮箱或密码错误」提示（PocketBase 认证失败返回 400）。
  */
 export function describeError(status: number, value: unknown, fromAuth = false): string {

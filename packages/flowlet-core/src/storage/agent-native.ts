@@ -1,24 +1,24 @@
-// Agent 原生会话 / 用量存储层（Rust core/storage_usage.rs + storage_tasks.rs 的读路径）。
+// Agent 原生会话 / 用量存储层（Node Host packages/flowlet-core/src/storage/usage.ts + packages/flowlet-core/src/host/scheduler.ts 的读路径）。
 //
 // Owner: desktop-observability。只做 SQL 与 JSON 解码：
 // - `agent_session_snapshots` 是后台 Agent 数据同步写入的原生会话快照。桌面读路径
 //   （用量页「原生用量」、会话详情摘要、成本账本探测）都从这里读，不重新解析完整会话。
 // - `request_logs` 用于判定「该会话已经由 Flowlet 代理观测」，避免与 usage_records 重复统计。
 //
-// 字段命名：返回结构体方面，Rust `AgentNativeUsageSummaryRow` / `LogFilterClient`
+// 字段命名：返回结构体方面，既有 `AgentNativeUsageSummaryRow` / `LogFilterClient`
 // 分别是 camelCase / id+name，逐字段对齐。
 import type { DatabaseSync } from "node:sqlite";
 import type { JsonRow } from "../types.ts";
 
 // ─── 会话客户端筛选项 ────────────────────────────────────────────────────────
 
-/** Rust `LogFilterClient`（snake_case 结构体，字段就是 id/name）。 */
+/** 既有 `LogFilterClient`（snake_case 结构体，字段就是 id/name）。 */
 export interface LogFilterClient {
   id: string;
   name: string;
 }
 
-/** Rust `Storage::list_agent_session_clients`：只统计带会话标识的末次 attempt。 */
+/** 既有 `Storage::list_agent_session_clients`：只统计带会话标识的末次 attempt。 */
 export function listAgentSessionClients(db: DatabaseSync): LogFilterClient[] {
   const rows = db
     .prepare(
@@ -35,7 +35,7 @@ export function listAgentSessionClients(db: DatabaseSync): LogFilterClient[] {
 
 // ─── 原生用量汇总 ────────────────────────────────────────────────────────────
 
-/** Rust `AgentSessionNativeUsage`（camelCase）。 */
+/** 既有 `AgentSessionNativeUsage`（camelCase）。 */
 export interface AgentSessionNativeUsage {
   inputTokens: number;
   cachedInputTokens: number;
@@ -48,7 +48,7 @@ export interface AgentSessionNativeUsage {
   apiEquivalent?: AgentSessionCostEstimate | null;
 }
 
-/** Rust `AgentSessionCostEstimate`（camelCase）。 */
+/** 既有 `AgentSessionCostEstimate`（camelCase）。 */
 export interface AgentSessionCostEstimate {
   amount: number | null;
   inputUncachedAmount?: number | null;
@@ -62,7 +62,7 @@ export interface AgentSessionCostEstimate {
   unpricedTurnCount: number;
 }
 
-/** Rust `AgentSessionNativeSummary`（camelCase）。 */
+/** 既有 `AgentSessionNativeSummary`（camelCase）。 */
 export interface AgentSessionNativeSummary {
   sourceAvailable: boolean;
   truncated: boolean;
@@ -71,7 +71,7 @@ export interface AgentSessionNativeSummary {
   models: string[];
 }
 
-/** Rust `AgentNativeUsageSummaryRow`（camelCase）。 */
+/** 既有 `AgentNativeUsageSummaryRow`（camelCase）。 */
 export interface AgentNativeUsageSummaryRow {
   date: string;
   activityAt: string;
@@ -97,7 +97,7 @@ function optText(value: unknown): string | null {
   return typeof value === "string" && value !== "" ? value : null;
 }
 
-/** 解析 Rust serde 输出的 `AgentSessionNativeSummary`；失败返回 null（Rust 同样跳过坏行）。 */
+/** 解析 Node Host serde 输出的 `AgentSessionNativeSummary`；失败返回 null（Node Host 同样跳过坏行）。 */
 export function parseNativeSummary(json: string | null): AgentSessionNativeSummary | null {
   if (json === null) return null;
   let value: unknown;
@@ -133,7 +133,7 @@ export function parseNativeSummary(json: string | null): AgentSessionNativeSumma
   };
 }
 
-/** Rust `native_usage_local_date`：RFC3339 → 本地日期，失败时回退前 10 个字符。 */
+/** 既有 `native_usage_local_date`：RFC3339 → 本地日期，失败时回退前 10 个字符。 */
 export function nativeUsageLocalDate(value: string): string | null {
   const parsed = Date.parse(value);
   if (!Number.isNaN(parsed)) {
@@ -146,7 +146,7 @@ export function nativeUsageLocalDate(value: string): string | null {
   return value.length >= 10 && value[4] === "-" ? value.slice(0, 10) : null;
 }
 
-/** 会话时间毫秒（Rust `agent_session_metadata::session_time_millis`）。 */
+/** 会话时间毫秒（Node Host `agent_session_metadata::session_time_millis`）。 */
 export function sessionTimeMillis(value: string): number {
   const rfc = Date.parse(value);
   if (!Number.isNaN(rfc)) return rfc;
@@ -204,12 +204,12 @@ function parseSessionRow(json: string | null): JsonRow | null {
 }
 
 /**
- * Rust `Storage::agent_native_usage_summary`（按快照读取的等价实现）。
+ * Node Host `Storage::agent_native_usage_summary`（按快照读取的等价实现）。
  *
  * 数据来源是后台同步写入的 `agent_session_snapshots`；只取根会话、且未被 Flowlet
  * 代理观测过的会话。`date` 取最近活动日（本地时区）。
  *
- * 与 Rust 的差异（已在交付汇报中标注）：Rust 会先合并本机实时解析的原生会话目录；
+ * 与 Node Host 的差异（已在交付汇报中标注）：Node Host 会先合并本机实时解析的原生会话目录；
  * 这里只读快照表，因此未执行过 `sync_agent_data` 的会话不会出现在结果里。
  */
 export function agentNativeUsageSummary(db: DatabaseSync): AgentNativeUsageSummaryRow[] {
@@ -267,7 +267,7 @@ export interface AgentSessionSnapshot {
   syncedAt: string;
 }
 
-/** 快照存在性与 fingerprint/parserVersion（Rust `needs_agent_snapshot_refresh` 输入）。 */
+/** 快照存在性与 fingerprint/parserVersion（Node Host `needs_agent_snapshot_refresh` 输入）。 */
 export function getAgentSnapshotMeta(
   db: DatabaseSync,
   agentType: string,
@@ -287,7 +287,7 @@ export function getAgentSnapshotMeta(
   };
 }
 
-/** Rust `save_agent_snapshot`。 */
+/** Node Host `save_agent_snapshot`。 */
 export function saveAgentSnapshot(db: DatabaseSync, snapshot: AgentSessionSnapshot): void {
   db.prepare(
     `INSERT INTO agent_session_snapshots
@@ -316,7 +316,7 @@ export function saveAgentSnapshot(db: DatabaseSync, snapshot: AgentSessionSnapsh
   );
 }
 
-/** Rust `mark_agent_snapshot_source_deleted`：把 source_available 改成 false。 */
+/** Node Host `mark_agent_snapshot_source_deleted`：把 source_available 改成 false。 */
 export function markAgentSnapshotSourceDeleted(
   db: DatabaseSync,
   agentType: string,
@@ -336,7 +336,7 @@ export function markAgentSnapshotSourceDeleted(
   ).run(agentType, sessionId, JSON.stringify(summary));
 }
 
-/** Rust `Storage::agent_session_snapshots`：全量快照键与 summary（同步 diff 用）。 */
+/** Node Host `Storage::agent_session_snapshots`：全量快照键与 summary（同步 diff 用）。 */
 export function listAgentSnapshotSummaries(
   db: DatabaseSync,
 ): Array<{ agentType: string; sessionId: string; summary: AgentSessionNativeSummary | null }> {
@@ -378,7 +378,7 @@ export interface AgentUsageEventRow {
   totalTokens: number;
 }
 
-/** Rust `save_agent_usage_events`：全量重解析先清旧行，增量解析只 INSERT OR IGNORE。 */
+/** Node Host `save_agent_usage_events`：全量重解析先清旧行，增量解析只 INSERT OR IGNORE。 */
 export function saveAgentUsageEvents(
   db: DatabaseSync,
   agentType: string,
@@ -416,7 +416,7 @@ export function saveAgentUsageEvents(
   }
 }
 
-/** Rust `Storage::delete_agent_usage_events`。 */
+/** Node Host `Storage::delete_agent_usage_events`。 */
 export function deleteAgentUsageEvents(
   db: DatabaseSync,
   agentType: string,
@@ -428,7 +428,7 @@ export function deleteAgentUsageEvents(
   );
 }
 
-// ─── 成本账本：网关探测快照（Rust `cost_ledger_gateway_probe_snapshot`） ──────
+// ─── 成本账本：网关探测快照（Node Host `cost_ledger_gateway_probe_snapshot`） ──────
 
 export interface GatewayUsageSample {
   requestId: string;

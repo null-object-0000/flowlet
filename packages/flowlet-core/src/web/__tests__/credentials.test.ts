@@ -158,7 +158,7 @@ function makeCtx(storage: FakeCredentialStorage, secrets: SecretBoxLike = fakeSe
 interface GitlabMockOptions {
   username?: string;
   version?: string;
-  /** /version 返回的状态码；403/404 时 Rust `version()` 静默降级为 null。 */
+  /** /version 返回的状态码；403/404 时 Node Host `version()` 静默降级为 null。 */
   versionStatus?: number;
   /** true 时模拟旧实例没有 /version 路由（404）。 */
   hideVersion?: boolean;
@@ -1074,7 +1074,7 @@ describe("服务凭据编排", () => {
     );
   });
 });
-// ─── Dockhand provider（与 Rust `check_dockhand` / save/test 分发对齐） ─────
+// ─── Dockhand provider（与 Node Host `check_dockhand` / save/test 分发对齐） ─────
 
 function dockhandInputFor(mock: MockDockhand, overrides: Partial<JsonRow> = {}): JsonRow {
   return {
@@ -1241,7 +1241,7 @@ describe("Dockhand 凭据", () => {
   });
 });
 
-// ─── Jenkins provider（与 Rust `check_jenkins` / save/test 分发对齐） ──────
+// ─── Jenkins provider（与 Node Host `check_jenkins` / save/test 分发对齐） ──────
 
 function jenkinsInputFor(mock: MockJenkins, overrides: Partial<JsonRow> = {}): JsonRow {
   return {
@@ -1454,7 +1454,7 @@ describe("Jenkins 凭据", () => {
   });
 });
 
-// ─── Beszel provider（与 Rust `check_beszel` / save/test 分发对齐） ────────
+// ─── Beszel provider（与 Node Host `check_beszel` / save/test 分发对齐） ────────
 
 function beszelInputFor(mock: MockBeszel, overrides: Partial<JsonRow> = {}): JsonRow {
   return {
@@ -1720,7 +1720,7 @@ describe("Beszel 凭据", () => {
   });
 });
 
-// ─── Registry provider（OCI 镜像仓库；与 Rust `check_registry` / save/test 分发对齐） ──
+// ─── Registry provider（OCI 镜像仓库；与 Node Host `check_registry` / save/test 分发对齐） ──
 
 function registryInputFor(mock: MockRegistry, overrides: Partial<JsonRow> = {}): JsonRow {
   return {
@@ -2045,7 +2045,7 @@ describe("环境前缀 / 多实例", () => {
       () => normalizeEnvPrefix("NA-SZ", "dockhand"),
       /环境前缀只能包含字母、数字和下划线，且以字母开头/,
     );
-    // Rust `to_ascii_uppercase` 不做 Unicode 上标：`ß` 不会变成 `SS`，必须报字符错误。
+    // Node Host `to_ascii_uppercase` 不做 Unicode 上标：`ß` 不会变成 `SS`，必须报字符错误。
     assert.throws(
       () => normalizeEnvPrefix("ß", "dockhand"),
       /环境前缀只能包含字母、数字和下划线，且以字母开头/,

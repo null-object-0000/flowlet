@@ -1,9 +1,9 @@
 // Model entry proxy controller: node:http listener, client-token auth, routing.
 //
-// 契约：docs/migration/node-host.md §3 + proxy-core.md。行为对齐
-// `src-tauri/src/core/proxy.rs` 的 ProxyController/handler 层；转发细节在 forward.ts。
+// 契约：docs/archive/tauri-migration/node-host.md §3 + proxy-core.md。行为对齐
+// `packages/flowlet-core/src/proxy/index.ts` 的 ProxyController/handler 层；转发细节在 forward.ts。
 //
-// 生命周期语义（与 Rust 对齐）：
+// 生命周期语义：
 // - start() 幂等：已在运行时不再重复绑定；监听地址取 bindConfig()。
 // - stop() 幂等：未运行时直接返回；已运行时等待 in-flight 结束（不强制杀 SSE）。
 // - bind config 变更不热重绑端口：下一次 start() 生效（前端负责重启）。
@@ -64,7 +64,7 @@ class ProxyControllerImpl implements ProxyController {
     this.#options = options;
     this.#identity = new ModelIdentityIndex(options.catalog);
     this.#bind = { ...options.bindConfig };
-    // Rust 的 ProxyRuntime.bind_addr 在 start 前也有默认值；这里取初始 bind config。
+    // Node Host 的 ProxyRuntime.bind_addr 在 start 前也有默认值；这里取初始 bind config。
     this.#addr = `${this.#bind.host}:${this.#bind.port}`;
   }
 
@@ -110,7 +110,7 @@ class ProxyControllerImpl implements ProxyController {
   }
 
   async stop(): Promise<void> {
-    // 运行期语义（与 Rust 一致）：等待 in-flight（含长 SSE）自然结束；空闲 keep-alive 直接断开。
+    // 运行期语义（与 Node Host 一致）：等待 in-flight（含长 SSE）自然结束；空闲 keep-alive 直接断开。
     await this.#closeServer(null);
   }
 
@@ -168,7 +168,7 @@ class ProxyControllerImpl implements ProxyController {
   }
 
   setBindConfig(config: ProxyBindConfig): void {
-    // 端口/主机变更不热重绑（与 Rust 一致，重启代理生效）；token 下一次请求即生效。
+    // 端口/主机变更不热重绑（与 Node Host 一致，重启代理生效）；token 下一次请求即生效。
     this.#bind = { ...config };
   }
 

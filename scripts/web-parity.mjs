@@ -10,7 +10,7 @@
 // 服务凭据对拍：脚本内启动 mock GitLab（CE 10.8.7 语义：/api/v4/user、/api/v4/version），
 // 两侧以 insecure + http 指向它，验证 providers/list/save/test/export/delete 与错误文案。
 //
-// 规则（docs/migration/node-host.md §6.2）：
+// 规则（docs/archive/tauri-migration/node-host.md §6.2）：
 // - 两侧使用**不同的** DB 副本文件，绝不复用同一个文件；
 // - 同一命令序列分别在两侧执行，再逐条深比较 JSON；时间戳/端口/设备标识归一化；
 // - 需要真实上游网络的命令跳过并报告：query_balance、test_connection、

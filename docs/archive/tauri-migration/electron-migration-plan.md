@@ -1,11 +1,16 @@
 # Flowlet 技术架构迁移方案：Rust / Tauri → Electron + Node/TS
 
+> 历史档案：本文记录迁移前的设计与验收，不是当前开发、部署或依赖指南。
+> 旧 Rust 桌面、服务端与 CLI 源码已移除；当前架构见 [架构说明](../../architecture.md)，
+> Android 保留范围见 [Android Rust 边界](../../android-rust-boundary.md)。
+
+
 > 状态：**执行中**——Docker/Web Host 已完成切换（Node Host 生产运行），桌面 Electron 阶段
 > 自 2026-11-10 起开工。本文是决策文档与阶段状态记录；施工细节见
-> [`commands-and-schema.md`](./migration/commands-and-schema.md)、
-> [`platform-gap-matrix.md`](./migration/platform-gap-matrix.md) 与 `docs/desktop-electron.md`。
-> 依据：本目录下的勘察结论 [`commands-and-schema.md`](./migration/commands-and-schema.md)、
-> [`platform-gap-matrix.md`](./migration/platform-gap-matrix.md)、`proxy-core.md`，
+> [`commands-and-schema.md`](commands-and-schema.md)、
+> [`platform-gap-matrix.md`](platform-gap-matrix.md) 与 `docs/desktop-electron.md`。
+> 依据：本目录下的勘察结论 [`commands-and-schema.md`](commands-and-schema.md)、
+> [`platform-gap-matrix.md`](platform-gap-matrix.md)、`proxy-core.md`，
 > 以及可运行骨架 PoC `poc/electron-host/`。
 > 基线：仓库工作区 @ `26fed4c`（2026-11-09）。
 
@@ -78,7 +83,7 @@
 - 端到端 `scripts/e2e-node-host.mjs` **12/12**（真实库副本 + mock 上游流式 + 日志落库）；
 - Rust↔Node 对拍 `scripts/web-parity.mjs` **命令差异 0 / HTTP 差异 0**（58 步命令序列）；
 - Docker 镜像：`Dockerfile` 已改为 Node 运行时（无 Rust 阶段），远端 Engine API 构建与容器冒烟见
-  `docs/migration/docker-node.md`。
+  `docs/archive/tauri-migration/docker-node.md`。
 
 ---
 
@@ -370,8 +375,8 @@ WebView2/WebKitGTK 运行时。另有两个可降低项：现状 Rust **实际�
 
 | 文件 | 内容 |
 | --- | --- |
-| `docs/migration/commands-and-schema.md` | 141+17 命令清单、难度分级、10 批排期、25 表 schema、19 索引、契约细节 |
-| `docs/migration/platform-gap-matrix.md` | Tauri → Electron 能力矩阵、6 硬缺口、工作量 |
-| `docs/migration/proxy-core.md` | 代理核心链路拆解、行为契约、Node 方案、spike 验收 |
-| `docs/migration/build-perf.md` | 构建提速实测数据与配置 |
+| `docs/archive/tauri-migration/commands-and-schema.md` | 141+17 命令清单、难度分级、10 批排期、25 表 schema、19 索引、契约细节 |
+| `docs/archive/tauri-migration/platform-gap-matrix.md` | Tauri → Electron 能力矩阵、6 硬缺口、工作量 |
+| `docs/archive/tauri-migration/proxy-core.md` | 代理核心链路拆解、行为契约、Node 方案、spike 验收 |
+| `docs/archive/tauri-migration/build-perf.md` | 构建提速实测数据与配置 |
 | `poc/electron-host/` | 可运行骨架：Electron + Node 命令服务 + 真实库副本 + 截图证据 |

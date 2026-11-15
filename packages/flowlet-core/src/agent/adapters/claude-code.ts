@@ -1,6 +1,6 @@
 // Claude Code 全局配置 Adapter。
 //
-// 权威实现：`src-tauri/src/core/agent_global_config/adapters/claude_code.rs`。
+// 实现入口：`packages/flowlet-core/src/agent/adapters/claude-code.ts`。
 // 配置位置：`~/.claude/settings.json`（`CLAUDE_CONFIG_DIR` 可覆盖）。
 // 写入 env 中的 Anthropic Base URL / Token / 主模型组 / 快速模型组；
 // 主模型组 = 主会话 + Fable/Opus/Sonnet 别名，快速模型组 = Haiku + SMALL_FAST + 子 Agent。

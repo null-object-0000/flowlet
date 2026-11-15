@@ -1,8 +1,8 @@
-// Agent 安装环境探测。权威实现：
-// `src-tauri/src/core/agent_environment.rs` 与 `agent_environment/adapters/*.rs`。
+// Agent 安装环境探测。实现入口：
+// `packages/flowlet-core/src/agent/environment.ts` 与 `agent_environment/adapters/packages/flowlet-core/src/proxy/identity.ts`。
 //
 // 探测内容：PATH + 官方常见安装位置 + 版本管理器 bin 目录；执行 `--version`
-// 读取版本；DSH 额外探测本机 Web 端口与 npx 缓存包。报告字段与 Rust
+// 读取版本；DSH 额外探测本机 Web 端口与 npx 缓存包。报告字段与 Node Host
 // `AgentEnvironmentReport` / `AgentInstallation` 逐字段一致（snake_case）。
 import { spawnSync } from "node:child_process";
 import { createConnection } from "node:net";
@@ -15,7 +15,7 @@ import { agentDescriptor } from "./registry.ts";
 
 const VERSION_TIMEOUT_MS = 5000;
 const DEFAULT_WEB_URL = "http://127.0.0.1:3080";
-/** 运行时健康检查地址（Rust `AgentRuntimeAdapter.health_addr`）。 */
+/** 运行时健康检查地址（既有 `AgentRuntimeAdapter.health_addr`）。 */
 let runtimeHealthAddress = "127.0.0.1:3080";
 
 /**
@@ -151,7 +151,7 @@ function displayPath(target: string): string {
   return target;
 }
 
-/** 解析版本输出中的首个语义化数字串（Rust `parse_version`）。 */
+/** 解析版本输出中的首个语义化数字串（Node Host `parse_version`）。 */
 export function parseVersion(output: string): string | null {
   for (const part of output.split(/\s+/u)) {
     const trimmed = part
@@ -1104,7 +1104,7 @@ const DETECTORS: Record<string, () => AgentEnvironmentReport | Promise<AgentEnvi
   hermes: detectHermes,
 };
 
-/** 探测 Agent 环境；未知 Agent 报 Rust 对齐错误（`暂不支持检测 Agent：<id>`）。 */
+/** 探测 Agent 环境；未知 Agent 报 Node Host 对齐错误（`暂不支持检测 Agent：<id>`）。 */
 export async function detectAgentEnvironment(agentId: string): Promise<AgentEnvironmentReport> {
   const descriptor = agentDescriptor(agentId);
   const environmentId = descriptor?.environmentAdapterId ?? agentId;
@@ -1121,7 +1121,7 @@ export async function detectAgentEnvironment(agentId: string): Promise<AgentEnvi
   return report;
 }
 
-/** DSH 运行时的可读启动命令（Rust `AgentRuntimeManager::enrich_report`）。 */
+/** DSH 运行时的可读启动命令（Node Host `AgentRuntimeManager::enrich_report`）。 */
 export function runtimeCommandFor(report: AgentEnvironmentReport): string | undefined {
   const installation = report.primary;
   if (installation === null || installation.error !== null) return undefined;

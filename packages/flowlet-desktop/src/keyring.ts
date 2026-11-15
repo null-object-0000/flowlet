@@ -1,10 +1,10 @@
 // OS 凭据库：Electron `safeStorage` + 自管理密文文件；兼容读取 Rust keyring 旧条目。
 //
-// 迁移背景（docs/migration/platform-gap-matrix.md HG-4）：`safeStorage` 读不到
+// 迁移背景（docs/archive/tauri-migration/platform-gap-matrix.md HG-4）：`safeStorage` 读不到
 // `keyring` crate 写入的 Generic Password 条目，因此首次读取时按平台调用系统 CLI
 // 读旧条目并重新加密写入新存储；迁移失败只告警，不阻塞调用方（下次重试）。
 //
-// Rust 旧条目（权威实现）：
+// Node Host 旧条目（历史兼容数据）：
 // - Linux Secret Service：attributes `service` + `username`（zbus-secret-service-keyring-store）；
 // - macOS Keychain：service + account（即 username）；
 // - Windows Credential Manager：generic credential，target 兼容 `service.username` / `service`。

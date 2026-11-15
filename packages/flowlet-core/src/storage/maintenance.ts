@@ -1,9 +1,9 @@
 // 存储维护：请求/响应 Body 保留策略、捕获帧清理、余额快照保留策略。
-// Owner: node-storage（task-11 起接管；Rust 权威实现见 core/storage.rs
+// Owner: node-storage（task-11 起接管；Node Host 权威实现见 packages/flowlet-core/src/storage/schema.ts
 // cleanup_expired_body_data / get_total_body_size_bytes / prune_oldest_body_data /
 // clear_body_data_by_log_ids / prune_balance_snapshots）。
 //
-// Body 数据有两份来源，与 Rust 完全一致：
+// Body 数据有两份来源，与 Node Host 完全一致：
 //   1. 历史内联列 request_logs.req_body_b64 / res_body_b64（旧库升级兼容）；
 //   2. `.flcap` 外置帧 + request_capture_refs 指针（新数据统一走这里）。
 // 清理时先处理帧（重写 segment、更新 refs/state、清空指针），再处理内联列。
@@ -13,7 +13,7 @@ import type { DatabaseSync } from "node:sqlite";
 import type { RequestCapturePointer, RequestCaptureStore } from "./capture-store.ts";
 import { rewriteCaptureSegment, type CaptureRewrite, type CaptureRewriteJob } from "./capture-compaction.ts";
 
-/** 与 Rust BODY_SIZE_PRUNE_MIN_AGE_HOURS 一致：至少一小时前的记录才按体积清理。 */
+/** 与 Node Host BODY_SIZE_PRUNE_MIN_AGE_HOURS 一致：至少一小时前的记录才按体积清理。 */
 const BODY_SIZE_PRUNE_MIN_AGE_HOURS = 1;
 
 /** 清理后返回的统计（供调度日志）。 */
@@ -29,7 +29,7 @@ interface StoredCaptureRef {
   failure_reason: string | null;
 }
 
-/** Rust `request_capture_ref`：把指针列解析为可选指针（缺列/负值视为无指针）。 */
+/** 既有 `request_capture_ref`：把指针列解析为可选指针（缺列/负值视为无指针）。 */
 export function readCaptureRef(db: DatabaseSync, requestLogId: string): StoredCaptureRef | null {
   const row = db
     .prepare(
@@ -67,7 +67,7 @@ export function readCaptureRef(db: DatabaseSync, requestLogId: string): StoredCa
   };
 }
 
-/** Rust `mark_request_capture_corrupt`。 */
+/** 既有 `mark_request_capture_corrupt`。 */
 export function markCaptureCorrupt(db: DatabaseSync, requestLogId: string, reason: string): void {
   db.prepare(
     `UPDATE request_capture_refs
@@ -76,7 +76,7 @@ export function markCaptureCorrupt(db: DatabaseSync, requestLogId: string, reaso
   ).run(requestLogId, reason);
 }
 
-/** Rust `set_request_capture_ready`。 */
+/** 既有 `set_request_capture_ready`。 */
 export function setCaptureReady(db: DatabaseSync, requestLogId: string, pointer: RequestCapturePointer): void {
   db.prepare(
     `UPDATE request_capture_refs
@@ -97,7 +97,7 @@ export function setCaptureReady(db: DatabaseSync, requestLogId: string, pointer:
   );
 }
 
-/** Rust `set_request_capture_failed`。 */
+/** 既有 `set_request_capture_failed`。 */
 export function setCaptureFailed(db: DatabaseSync, requestLogId: string, reason: string): void {
   db.prepare(
     `UPDATE request_capture_refs
@@ -107,7 +107,7 @@ export function setCaptureFailed(db: DatabaseSync, requestLogId: string, reason:
 }
 
 /**
- * Rust `read_request_capture_locked`：仅 state=ready 且有指针时读取；
+ * 既有 `read_request_capture_locked`：仅 state=ready 且有指针时读取；
  * 帧缺失/损坏/记录 ID 不匹配时把 refs 置 corrupt 并返回 null（不抛错）。
  */
 export function readCaptureRecord(
@@ -131,7 +131,7 @@ export function readCaptureRecord(
   }
 }
 
-/** 清空内联 Body 列（Rust `clear_body_data_by_log_ids` 的历史列分支）。 */
+/** 清空内联 Body 列（既有 `clear_body_data_by_log_ids` 的历史列分支）。 */
 function clearInlineBodies(db: DatabaseSync, ids: string[], reason: string): number {
   if (ids.length === 0) return 0;
   const statement = db.prepare(
@@ -149,7 +149,7 @@ function clearInlineBodies(db: DatabaseSync, ids: string[], reason: string): num
 }
 
 /**
- * Rust `clear_body_data_by_log_ids` 的完整移植：
+ * 既有 `clear_body_data_by_log_ids` 的完整移植：
  * 1. 按 storage_key 分组活帧引用，读出段内所有 ready 记录；
  * 2. 目标记录清空 body（保留 headers 等其它字段），整段重写到 `compacted-*.flcap`；
  * 3. 事务更新 refs（目标→cleared，其余→ready 新指针）与 request_logs 清理标记；
@@ -278,7 +278,7 @@ function* clearBodies(
         try {
           store.removeSegment(pointers[0].storage_key);
         } catch {
-          /* 忽略回滚清理失败（Rust 同样吞掉） */
+          /* 忽略回滚清理失败（Node Host 同样吞掉） */
         }
       }
       throw error;
@@ -473,7 +473,7 @@ export function pruneOldestBodyDataToGoal(
   return total;
 }
 
-/** Rust cleanup_old_logs：先清 Body（含帧）再删除两表，返回 (日志数, 用量数)。 */
+/** Node Host cleanup_old_logs：先清 Body（含帧）再删除两表，返回 (日志数, 用量数)。 */
 export function cleanupOldLogs(
   db: DatabaseSync,
   store: RequestCaptureStore,
@@ -497,7 +497,7 @@ export function cleanupOldLogs(
 
 /**
  * 余额/资源快照保留：按天数删除过期快照，并按账号限制条数（保留最新）。
- * Rust 用 `created_at` 判断过期、按 `rowid DESC` 保留最新；返回 [expired, overLimit]。
+ * Node Host 用 `created_at` 判断过期、按 `rowid DESC` 保留最新；返回 [expired, overLimit]。
  */
 export function pruneBalanceSnapshots(
   db: DatabaseSync,

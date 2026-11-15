@@ -1,6 +1,6 @@
 // Agent 全局配置的文件原语：读取、原子写入、事务回滚、备份快照。
 //
-// 权威实现：`src-tauri/src/core/agent_global_config.rs`（read_settings /
+// 实现入口：`packages/flowlet-core/src/agent/adapters/index.ts`（read_settings /
 // write_bytes_file / write_files_transactionally / capture_file / write_optional_file）。
 // 行为要求（AGENTS.md §1）：任何失败都不得破坏原文件；写入必须原子（临时文件 + rename）；
 // 多文件写入必须整体成功或回滚到写入前快照。
@@ -66,28 +66,28 @@ export function errorText(error: unknown): string {
 
 
 /**
- * 读取并校验 Agent 设置文件（Rust `read_settings`）。
+ * 读取并校验 Agent 设置文件（Node Host `read_settings`）。
  *
  * 使用 JSONC 解析以保留/接受注释（桌面端配置外科手术必须保注释），顶层必须是对象；
  * `env` 若存在必须是对象（Claude Code settings.json 语义）。
  */
-/** `serde_json::to_string_pretty` + 末尾换行（Rust `json_file_bytes`）。 */
+/** `JSON::to_string_pretty` + 末尾换行（Node Host `json_file_bytes`）。 */
 export function jsonFileBytes(value: unknown): Buffer {
   return Buffer.from(`${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
-/** 写入 JSON 文件（原子写入，Rust `write_json_file`）。 */
+/** 写入 JSON 文件（原子写入，Node Host `write_json_file`）。 */
 export function writeJsonFile(file: string, value: unknown): void {
   writeBytesFile(file, jsonFileBytes(value));
 }
 
-/** 文本文件内容，保证末尾换行（Rust `text_file_bytes`）。 */
+/** 文本文件内容，保证末尾换行（Node Host `text_file_bytes`）。 */
 export function textFileBytes(content: string): Buffer {
   return Buffer.from(content.endsWith("\n") ? content : `${content}\n`, "utf8");
 }
 
 /**
- * 受管文件内容比较：忽略 CRLF 差异与尾部空行（Rust `managed_text_file_matches`）。
+ * 受管文件内容比较：忽略 CRLF 差异与尾部空行（Node Host `managed_text_file_matches`）。
  * 未安装/不可读时返回 false。
  */
 export function managedTextFileMatches(file: string, expected: string): boolean {
@@ -100,7 +100,7 @@ function normalizeManagedText(value: string): string {
   return value.replace(/\r\n/g, "\n").replace(/\n+$/u, "");
 }
 
-/** 原子写入：同目录临时文件 + rename；Unix 上权限 0600（Rust `write_bytes_file`）。 */
+/** 原子写入：同目录临时文件 + rename；Unix 上权限 0600（Node Host `write_bytes_file`）。 */
 export function writeBytesFile(file: string, content: Buffer): void {
   const parent = path.dirname(file);
   try {
@@ -140,7 +140,7 @@ export function writeBytesFile(file: string, content: Buffer): void {
   }
 }
 
-/** Unix 权限 0600；Windows 无等价操作（Rust 侧同样是空实现）。 */
+/** Unix 权限 0600；Windows 无等价操作（Node Host 侧同样是空实现）。 */
 export function setPrivatePermissions(file: string): void {
   if (process.platform === "win32") return;
   try {
@@ -162,7 +162,7 @@ export class TransactionFailure extends Error {
 
 /**
  * 依次写入多个文件；任一失败时把此前写入的文件恢复到写入前快照
- * （Rust `write_files_transactionally`）。`content === null` 表示删除该文件。
+ * （Node Host `write_files_transactionally`）。`content === null` 表示删除该文件。
  */
 export function writeFilesTransactionally(
   description: string,
@@ -196,7 +196,7 @@ export function writeFilesTransactionally(
   }
 }
 
-/** 读取文件快照；不存在返回 null（Rust `capture_file`）。 */
+/** 读取文件快照；不存在返回 null（Node Host `capture_file`）。 */
 export function captureFile(file: string): Buffer | null {
   if (!fileExists(file)) return null;
   try {
@@ -220,7 +220,7 @@ function writeOptionalFile(file: string, content: Buffer | null): void {
   }
 }
 
-/** 删除文件并忽略不存在；其它错误带上 Rust 对齐的前缀。 */
+/** 删除文件并忽略不存在；其它错误带上 Node Host 对齐的前缀。 */
 export function removeFileIfExists(file: string, description: string): void {
   try {
     rmSync(file, { force: true });
@@ -234,7 +234,7 @@ export function writePrivateJson(file: string, value: unknown): void {
   writeJsonFile(file, value);
 }
 
-/** 当前时间 RFC3339（Rust `chrono::Utc::now().to_rfc3339()` 的可解析等价形式）。 */
+/** 当前时间 RFC3339（Node Host `chrono::Utc::now().to_rfc3339()` 的可解析等价形式）。 */
 export function rfc3339Now(): string {
   return new Date().toISOString();
 }

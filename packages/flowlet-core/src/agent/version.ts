@@ -1,4 +1,4 @@
-// Agent 最新版本查询（npm registry）。权威实现：`src-tauri/src/core/agent_version.rs`。
+// Agent 最新版本查询（npm registry）。实现入口：`packages/flowlet-core/src/agent/version.ts`。
 //
 // 只做「提示」：返回最新版本号与检查时间，不执行下载/升级；单个 Agent 失败
 // 独立返回 error，不影响其它 Agent。进程内 15 分钟 TTL 缓存。

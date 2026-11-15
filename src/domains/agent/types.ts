@@ -118,7 +118,7 @@ export type CodexAccountDeletionResult = {
   email?: string | null;
 };
 
-/** DeepSeek Harness 受管 MCP 服务器配置（与 Rust `McpServerSpec` 一致，字段 camelCase）。 */
+/** DeepSeek Harness 受管 MCP 服务器配置（与 既有 `McpServerSpec` 一致，字段 camelCase）。 */
 export type McpServerSpec = {
   /** Flowlet 内部稳定 id，同时决定 DSH 插件条目 id `mcp-<id>`。 */
   id: string;
@@ -176,7 +176,7 @@ export type AgentGlobalConfigOptions = {
   sessionExtension?: boolean;
   /** 仅 DeepSeek Harness：受管 MCP 服务器列表；空数组移除全部受管 MCP 块。 */
   mcpServers?: McpServerSpec[];
-  /** 用户显式选择的默认主模型（规范模型 ID）。缺省时由 Rust 按当前可用模型取第一个。 */
+  /** 用户显式选择的默认主模型（规范模型 ID）。缺省时由 Node Host 按当前可用模型取第一个。 */
   primaryModel?: string;
   /** 仅 Claude Code：快速/子 Agent 组模型；缺省等于 primaryModel。 */
   fastModel?: string;

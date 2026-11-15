@@ -1,5 +1,5 @@
 /** Proxy-domain types. Kept free of any React / UI / Semi dependency.
- *  Field names follow the Rust side (ProxyStatus / ProxyBindConfig). */
+ *  Field names follow the Host (ProxyStatus / ProxyBindConfig). */
 
 export type ProxyStatus = {
   running: boolean;

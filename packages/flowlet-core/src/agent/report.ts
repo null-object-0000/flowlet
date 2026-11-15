@@ -1,6 +1,6 @@
 // Agent 全局配置报告的结构与默认值。
 //
-// 权威实现：`src-tauri/src/core/agent_global_config.rs::AgentGlobalConfigReport`
+// 实现入口：`packages/flowlet-core/src/agent/adapters/index.ts`
 // （snake_case；所有字段都会序列化，缺省值由各 Adapter 填充）。
 import type { JsonRow } from "../types.ts";
 import type { McpServerSpecInput } from "./models.ts";
@@ -37,7 +37,7 @@ export interface AgentGlobalConfigReport {
 export type ReportDefaults = Partial<AgentGlobalConfigReport> &
   Pick<AgentGlobalConfigReport, "agent_id" | "settings_path">;
 
-/** 构造完整报告：未指定字段使用 Rust `Default`/None 等价值。 */
+/** 构造完整报告：未指定字段使用 既有 `Default`/None 等价值。 */
 export function buildReport(defaults: ReportDefaults): AgentGlobalConfigReport {
   return {
     credentials_path: null,
@@ -61,7 +61,7 @@ export function buildReport(defaults: ReportDefaults): AgentGlobalConfigReport {
   };
 }
 
-/** `BackedUpValue`（Rust 备份结构中的可空字段快照）。 */
+/** `BackedUpValue`（Node Host 备份结构中的可空字段快照）。 */
 export interface BackedUpValue {
   present: boolean;
   value: unknown;

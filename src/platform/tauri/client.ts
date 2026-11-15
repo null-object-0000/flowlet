@@ -3,7 +3,7 @@ import { isDesktopHost } from "../desktop/mode";
 import { isWebHost } from "../web/mode";
 
 /**
- * Default timeout (ms) for a single Tauri command invoke. The invoke itself
+ * Default timeout (ms) for a single Host command invocation. The invoke itself
  * never truly "hangs" in the browser sense, but a stuck async command should
  * surface as a retryable error rather than an orphan promise. Keep modest so
  * UI loading states resolve in a timely way. Individual calls may override.
@@ -13,7 +13,7 @@ export const DEFAULT_INVOKE_TIMEOUT_MS = 15_000;
 export type CommandArguments = Record<string, unknown>;
 
 /**
- * An error thrown by `invokeCommand` when the underlying Tauri invoke rejects.
+ * An error thrown by `invokeCommand` when the underlying Host transport rejects.
  * It is intentionally NOT an `AppError` so callers that want the raw shape can
  * still narrow on it before domain mapping turns it into an `AppError`.
  */
@@ -33,7 +33,7 @@ function normalizeInvokeFailure(command: string, err: unknown): InvokeError {
   if (err instanceof InvokeError) {
     return err;
   }
-  // Rust commands return `Result<T, String>`; Tauri surfaces the `Err` side as
+  // Host commands return `Result<T, String>`; Tauri surfaces the `Err` side as
   // a string. Timeout also reaches here with our own message prefix.
   const message = err instanceof Error ? err.message : String(err ?? "未知错误");
   const timeout = message.includes("timeout");
@@ -48,7 +48,7 @@ function normalizeInvokeFailure(command: string, err: unknown): InvokeError {
  * `AppError` values; pages/components must not call `invoke` directly.
  *
  * Transport selection:
- * - Tauri desktop shell → native IPC `invoke`;
+ * - Android Tauri shell → native IPC `invoke`;
  * - Web Host (`--mode web`) 与 Electron desktop 壳 (`--mode desktop`) →
  *   `POST /api/commands/{command}`（Bearer 管理 token）。
  *   `isWebHost` 语义保持不变，desktop 是独立的附加分支。

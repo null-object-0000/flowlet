@@ -1,6 +1,6 @@
 // Web Host 管理端鉴权（token / OIDC 两种模式）。Owner: node-web.
 //
-// 权威实现：src-tauri/src/core/web/auth.rs（1430 行）逐行为等价：
+// 实现入口：packages/flowlet-core/src/web/auth.ts（1430 行）保持既有行为：
 // - token 模式：Bearer + HMAC-SHA256 常量时间比较（保持旧行为）；
 // - oidc 模式：GitLab 等标准 OIDC 授权码登录 + 进程内 HttpOnly Cookie 会话 + CSRF，
 //   可选 ALLOW_TOKEN_LOGIN 兜底 Bearer。
@@ -8,7 +8,7 @@
 // 只使用 node:crypto / 全局 fetch，不引入第三方依赖。会话默认在内存中；Node Host
 // （Docker / headless）会注入文件型 AdminSessionStore，把会话落到 `/data`，
 // 这样容器重启/升级不再把管理台登录态全部踢掉（见 web/session-store.ts）。
-// Rust 桌面/headless 仍为纯内存实现，行为差异只在「重启后是否重新登录」。
+// Node Host 桌面/headless 仍为纯内存实现，行为差异只在「重启后是否重新登录」。
 import { createHash, createPublicKey, createHmac, randomUUID, timingSafeEqual, verify as cryptoVerify } from "node:crypto";
 import { readFileSync } from "node:fs";
 
@@ -213,7 +213,7 @@ interface Cached<T> {
   fetchedMs: number;
 }
 
-// ─── 环境变量解析（与 Rust auth.rs 的 env_trim/env_bool/env_csv 逐字一致） ────
+// ─── 环境变量解析（与 Node Host packages/flowlet-core/src/web/auth.ts 的 env_trim/env_bool/env_csv 逐字一致） ────
 
 function envTrim(env: NodeJS.ProcessEnv, name: string): string | null {
   const value = env[name];
@@ -294,7 +294,7 @@ function parsePublicWebUrl(value: string): string {
   return trimmed;
 }
 
-/** Rust `AdminAuthConfig::from_env`。 */
+/** Node Host `AdminAuthConfig::from_env`。 */
 export function adminAuthConfigFromEnv(
   env: NodeJS.ProcessEnv = process.env,
   fallbackAdminToken?: string,
@@ -619,7 +619,7 @@ function maskSecret(value: string): string {
   return `${value.slice(0, 8)}…`;
 }
 
-/** Rust base64 URL_SAFE_NO_PAD 解码（拒绝 padding）。 */
+/** Node Host base64 URL_SAFE_NO_PAD 解码（拒绝 padding）。 */
 function decodeBase64Url(value: string): Buffer {
   if (value.includes("=") || !/^[A-Za-z0-9_-]*$/.test(value)) {
     throw new Error("invalid base64url");
@@ -822,7 +822,7 @@ export class AdminAuth {
   }
 
   /**
-   * Rust `AdminAuth::from_env`；fallbackToken 仅用于宿主程序化注入（测试/embedding）。
+   * 既有 `AdminAuth::from_env`；fallbackToken 仅用于宿主程序化注入（测试/embedding）。
    * sessionStore 仅由 Node Host 注入：提供时 cookie 会话跨进程重启保留。
    */
   static fromEnv(
@@ -1255,7 +1255,7 @@ export class AdminAuth {
     } catch {
       return jsonError(500, "internal_error", "authorization_endpoint 不是合法 URL");
     }
-    // 顺序与 Rust url::Url::query_pairs_mut 追加顺序一致。
+    // 顺序与 Node Host url::Url::query_pairs_mut 追加顺序一致。
     authorizeUrl.searchParams.append("response_type", "code");
     authorizeUrl.searchParams.append("client_id", oidc.clientId);
     authorizeUrl.searchParams.append("redirect_uri", redirectUri);
@@ -1534,7 +1534,7 @@ export class AdminAuth {
           applyClaims(identity, oidc, userinfo);
         }
       } catch {
-        /* Rust 在 userinfo 失败/非 JSON 时只告警忽略 */
+        /* Node Host 在 userinfo 失败/非 JSON 时只告警忽略 */
       }
     }
     return identity;
@@ -1836,7 +1836,7 @@ function stringClaim(value: unknown, key: string): string | null {
   return typeof item === "string" ? item : null;
 }
 
-/** Rust `apply_claims`：ID token 优先，UserInfo 只补缺失字段。 */
+/** Node Host `apply_claims`：ID token 优先，UserInfo 只补缺失字段。 */
 function applyClaims(identity: Identity, oidc: OidcConfig, value: unknown): void {
   const email = stringClaim(value, oidc.emailClaim);
   if (email !== null) identity.email = email;
@@ -1858,7 +1858,7 @@ function applyClaims(identity: Identity, oidc: OidcConfig, value: unknown): void
   }
 }
 
-/** Rust `allowlisted`：任一命中即通过（sub / groups / email / email domain）。 */
+/** Node Host `allowlisted`：任一命中即通过（sub / groups / email / email domain）。 */
 export function allowlisted(oidc: OidcConfig, identity: Identity): boolean {
   if (oidc.allowAny) return true;
   if (oidc.allowedSubs.includes(identity.sub)) return true;

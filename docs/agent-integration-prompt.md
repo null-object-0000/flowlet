@@ -7,7 +7,7 @@
 | 范围 | 数据源 | 用途 |
 |------|--------|------|
 | 国内模型 | `models-cn/api.json` 的 `providers[].models[].prices[]` | 中国大陆模型厂商官方价格与模型信息 |
-| 国际模型 | `models.dev/api.json`（本地落盘为 `models-dev.json`） | OpenAI 等国际厂商官方价格，仅 Rust 侧用于成本估算（如 Codex 会话的 `openai-api` USD 等价） |
+| 国际模型 | `models.dev/api.json`（本地落盘为 `models-dev.json`） | OpenAI 等国际厂商官方价格，仅 Node Host 侧用于成本估算（如 Codex 会话的 `openai-api` USD 等价） |
 | 补全 | `models-cn/api.json` 的 `calibration.modelsDev` | models-cn 官方字段缺失时的唯一允许补全来源 |
 
 **注意**：`config.json` 的 `model_prices` 不再是主要价格来源，仅补充两份目录未覆盖的
@@ -83,7 +83,7 @@
 
 ## 7. 前端接入方式
 
-- **后台定时任务拉取**：Rust 后端启动后 1 小时触发第一次同步，之后每 1 小时顺序拉取 `https://null-object-0000.github.io/models-cn/api.json` 与 `https://models.dev/api.json`，分别保存为 exe 旁 `models-cn.json` / `models-dev.json` 文件（**不是 SQLite 表**）。每次同步独立写入 `background_jobs` 任务日志，并在任一同步成功后用两份目录 + `config.json` 的 `model_prices` 重建运行时价格表。
+- **后台定时任务拉取**：Node Host启动后 1 小时触发第一次同步，之后每 1 小时顺序拉取 `https://null-object-0000.github.io/models-cn/api.json` 与 `https://models.dev/api.json`，分别保存为 exe 旁 `models-cn.json` / `models-dev.json` 文件（**不是 SQLite 表**）。每次同步独立写入 `background_jobs` 任务日志，并在任一同步成功后用两份目录 + `config.json` 的 `model_prices` 重建运行时价格表。
 - **前端只读本地**：前端通过 `get_models_cn_catalog` 命令读取本地最新 models-cn 目录，不发起远程请求。本地无数据时，不展示 models-cn 相关内容（价格信息 Tab 展示空状态 + 「立即同步」按钮）。模型服务还会通过 `get_models_dev_provider_catalog("openrouter")` 只读取 models.dev 的 OpenRouter provider 子目录，避免把完整大文件经 IPC 传给前端；OpenRouter 模型规格按 `models-cn → models.dev` 回退，两份目录都未收录时不展示推测规格。
 - **手动同步**：用户可点击「立即同步」按钮，前端并发触发 `sync_models_cn_catalog` + `sync_models_dev_catalog` 两个命令；单个源失败不影响另一个。
 - **内容去重**：同步前计算 SHA-256 hash，与本地最新数据比较，内容未变化则跳过保存（返回 `skipped: true`）。

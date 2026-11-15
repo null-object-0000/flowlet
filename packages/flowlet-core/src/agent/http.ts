@@ -1,6 +1,6 @@
 // Agent 桌面命令的最小 HTTP 客户端（npm registry、ChatGPT usage、Google/Antigravity）。
 //
-// Rust 侧使用 `reqwest` + 全局上游代理配置。Node 侧复用 `undici`：
+// Host 侧使用 `reqwest` + 全局上游代理配置。Node 侧复用 `undici`：
 // - 未显式启用上游代理时使用 `EnvHttpProxyAgent`（近似 reqwest 的 env 代理行为）；
 // - 显式启用时使用 `ProxyAgent`；
 // - Antigravity 本地回环 https 自签证书需要 `rejectUnauthorized: false`。
@@ -75,7 +75,7 @@ export async function httpJson(url: string, options: HttpJsonOptions): Promise<H
   }
 }
 
-/** 把网络异常转成 Rust 风格的可读消息片段（不包含 URL/凭据）。 */
+/** 把网络异常转成 Node Host 风格的可读消息片段（不包含 URL/凭据）。 */
 export function describeNetworkError(error: unknown): string {
   if (error instanceof Error) {
     if (error.name === "AbortError" || /abort/iu.test(error.message)) return "请求超时";

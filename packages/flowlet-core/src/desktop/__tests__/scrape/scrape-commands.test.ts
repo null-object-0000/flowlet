@@ -405,7 +405,7 @@ describe("scrape_balance 成功落库", () => {
     assert.ok(typeof result["token_packs"] === "string");
     const packs = JSON.parse(String(result["token_packs"])) as JsonRow[];
     // summary 的两个 lot 是权威记录；list 里的 resourceId 没有对应 summary 时
-    // 作为补充包并入（Rust `merge_longcat_token_packs` 的 `_fromList` 分支）。
+    // 作为补充包并入（Node Host `merge_longcat_token_packs` 的 `_fromList` 分支）。
     assert.deepEqual(
       packs.map((pack) => String(pack["lotId"])),
       ["151724", "159869", "2071803119104245853"],
@@ -429,7 +429,7 @@ describe("scrape_balance 成功落库", () => {
     assert.equal(row["source"], "scrape");
     assert.equal(row["remark"], "控制台抓取");
     assert.equal(row["currency"], "CNY");
-    // 抓取成功后关闭窗口并解除人工接管（Rust 一致）。
+    // 抓取成功后关闭窗口并解除人工接管（Node Host 一致）。
     assert.equal(scrapeSessionDiagnostics().length, 0);
     assert.ok(
       test.host.calls.some(
@@ -671,7 +671,7 @@ describe("宿主已实现 scrape.evaluate 时复用已捕获响应", () => {
       "token_packs_list",
       "token_packs_summary",
     ]);
-    // bundle 是「已解析的 JSON」，与 Rust `build_aggregate_bundle` 一致。
+    // bundle 是「已解析的 JSON」，与 Node Host `build_aggregate_bundle` 一致。
     assert.equal(typeof bundle["token_packs_summary"], "object");
     assert.equal(evaluate.payload?.["credential"] instanceof Object, true);
     assert.equal(
@@ -1002,7 +1002,7 @@ describe("open_scrape_console / close_scrape_console", () => {
 
     const diagnostics = scrapeSessionDiagnostics();
     assert.equal(diagnostics.length, 1);
-    // 单纯打开控制台不登记人工接管（Rust 只在 probe_scrape_login 登记），
+    // 单纯打开控制台不登记人工接管（Node Host 只在 probe_scrape_login 登记），
     // 否则后台同步会永久跳过该账号。
     assert.equal(diagnostics[0]?.["interactionRequired"], false);
   });

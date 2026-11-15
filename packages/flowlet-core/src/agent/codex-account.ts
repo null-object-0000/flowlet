@@ -1,4 +1,4 @@
-// Codex 账号观测与授权。权威实现：`src-tauri/src/core/codex_account.rs`。
+// Codex 账号观测与授权。实现入口：`packages/flowlet-core/src/agent/codex-account.ts`。
 //
 // 数据位置：`<dataDir>/codex-accounts/<account-id>/{config.toml,auth.json,snapshot.json}`。
 // 观测路径：优先直接调用 ChatGPT 官方用量接口（auth.json 里的 OAuth access token），
@@ -160,7 +160,7 @@ function normalizeStoredReport(row: JsonRow): CodexAccountReport {
 }
 
 function writePrivateJson(file: string, value: unknown): void {
-  // 与 Rust write_private_json 一致：先写同目录临时文件（0600）再原子替换。
+  // 与 Node Host write_private_json 一致：先写同目录临时文件（0600）再原子替换。
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const temporary = `${file}.tmp`;
   fs.writeFileSync(temporary, JSON.stringify(value, null, 2), { mode: 0o600 });
@@ -422,7 +422,7 @@ export async function queryCodexAccount(
     writePrivateJson(snapshotPath, report);
     return report;
   } catch (oauthError) {
-    // 与 Rust 一致：app-server 成功但未登录 = 凭据失效；app-server 失败 = 组合错误。
+    // 与 Node Host 一致：app-server 成功但未登录 = 凭据失效；app-server 失败 = 组合错误。
     let appServerFailure: string | null = null;
     try {
       const report = await queryCodexAccountViaAppServer(profileDir, proxy);

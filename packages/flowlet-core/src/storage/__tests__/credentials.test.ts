@@ -1,10 +1,10 @@
 // task-12 测试：SecretBox（ChaCha20-Poly1305）与 service_credentials 持久化。
 //
 // 覆盖：secret.key 生成/权限/稳定性、加解密往返、篡改/版本/格式/长度/UTF-8 错误、
-// 表 CRUD/排序/校验字段更新，以及跨实现兼容（Rust debug headless oracle）：
-//   1) Node 写库+Node 生成的 secret.key → Rust `export_service_credentials` 得到明文；
-//   2) Rust 写库（save_service_credential 走 mock GitLab）→ Node 解密得到明文。
-// Rust 二进制不存在时自动跳过跨实现用例。
+// 表 CRUD/排序/校验字段更新，以及跨实现兼容（Node Host debug headless oracle）：
+//   1) Node 写库+Node 生成的 secret.key → 既有 `export_service_credentials` 得到明文；
+//   2) Node Host 写库（save_service_credential 走 mock GitLab）→ Node 解密得到明文。
+// Node Host 二进制不存在时自动跳过跨实现用例。
 import { strict as assert } from "node:assert";
 import { spawn } from "node:child_process";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
@@ -131,7 +131,7 @@ async function webCommand(webAddr: string, command: string, args: Record<string,
 // ─── SecretBox ──────────────────────────────────────────────────────────────
 
 test("secret.key：自动生成 32 字节 hex、文件 0600、实例间密钥稳定", () => {
-  // dataDir 由 loadOrCreate 首次创建时才应用 0700（与 Rust create_dir_all 行为一致）。
+  // dataDir 由 loadOrCreate 首次创建时才应用 0700（与 Node Host create_dir_all 行为一致）。
   const parent = tempDir("key-gen");
   const dir = path.join(parent, "data-dir");
   try {
@@ -141,7 +141,7 @@ test("secret.key：自动生成 32 字节 hex、文件 0600、实例间密钥稳
     const raw = readFileSync(keyPath, "utf8");
     assert.match(raw, /^[0-9a-f]{64}$/);
     assert.equal(Buffer.from(raw, "hex").length, 32);
-    // POSIX 有 0700 语义；Windows 没有 owner/group/other 位，chmod 结果不可断言（Rust 同平台测试同样只验内容）。
+    // POSIX 有 0700 语义；Windows 没有 owner/group/other 位，chmod 结果不可断言（Node Host 同平台测试同样只验内容）。
     if (process.platform !== "win32") {
       assert.equal(statSync(keyPath).mode & 0o777, 0o600);
       assert.equal(statSync(dir).mode & 0o777, 0o700);
@@ -176,7 +176,7 @@ test("密文格式：Rust 兼容布局 v1:base64(nonce12||ciphertext||tag16)", (
     const encoded = box.encrypt("payload");
     const payload = Buffer.from(encoded.slice("v1:".length), "base64");
     assert.equal(payload.length, 12 + Buffer.byteLength("payload") + 16);
-    // 手工按 Rust 布局解析：nonce || ciphertext || tag，并用同 key 解密。
+    // 手工按 Node Host 布局解析：nonce || ciphertext || tag，并用同 key 解密。
     const nonce = payload.subarray(0, 12);
     const ciphertext = payload.subarray(12, payload.length - 16);
     const tag = payload.subarray(payload.length - 16);
@@ -214,7 +214,7 @@ test("解密错误：篡改/错误版本/非法 base64/长度不足/非法 UTF-8
     assert.throws(() => box.decrypt("v1:abc"), /凭据密文格式无效/); // 长度非 4 的倍数
     assert.throws(() => box.decrypt(`v1:${Buffer.alloc(8).toString("base64")}`), /凭据密文长度无效/);
 
-    // 手工构造非法 UTF-8 明文（Rust String::from_utf8 会拒绝）。
+    // 手工构造非法 UTF-8 明文（Node Host String::from_utf8 会拒绝）。
     const nonce = randomBytes(12);
     const cipher = createCipheriv("chacha20-poly1305", key, nonce, { authTagLength: 16 }) as never as {
       update(data: Buffer): Buffer;
@@ -360,7 +360,7 @@ test("密码掩码与视图：maskSecret / toServiceCredentialView 与 Rust 一�
   assert.equal(credentialTimestamp(new Date("2026-11-10T02:03:04.567Z")), "2026-11-10T02:03:04Z");
 });
 
-// ─── 跨实现（Rust debug headless oracle） ────────────────────────────────────
+// ─── 跨实现（Node Host debug headless oracle） ────────────────────────────────────
 
 const MOCK_PORT = 18703;
 const RUST_BIND = "127.0.0.1:18701";
@@ -461,7 +461,7 @@ test("跨实现：Rust 写库（mock GitLab 校验）→ Node 用同一 secret.k
       }
     });
 
-    // Rust 创建了 secret.key 与 SQLite；Node 用同一目录加载。
+    // Node Host 创建了 secret.key 与 SQLite；Node 用同一目录加载。
     assert.ok(existsSync(secretKeyPath(dir)), "Rust 应已生成 secret.key");
     const secrets = SecretBox.loadOrCreate(dir);
     const storage = new SqliteStorage(path.join(dir, "flowlet.sqlite"));

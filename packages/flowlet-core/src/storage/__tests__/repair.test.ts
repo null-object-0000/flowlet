@@ -1,6 +1,6 @@
 // 数据完整性检查（Node Host）契约测试（node:test）。
 //
-// 覆盖移植自 Rust `storage_usage.rs` / `usage.rs` 的四个修复函数：
+// 覆盖移植自 既有 `packages/flowlet-core/src/storage/usage.ts` / `packages/flowlet-core/src/proxy/usage.ts` 的四个修复函数：
 //   repair_captured_usage / repair_unknown_usage / repair_usage_costs / repair_agent_sessions。
 // 全部使用临时文件库 + 真实 `.flcap` 捕获帧（RequestCaptureStore.forDatabase），
 // 不依赖真实生产库。
@@ -178,7 +178,7 @@ const ANTHROPIC_SSE_COMPLETE = [
   "",
 ].join("\n");
 
-/** 同一形状但被截断：没有终止标记，只有正数 output（宽松解析应接受，Rust 同）。 */
+/** 同一形状但被截断：没有终止标记，只有正数 output（宽松解析应接受，Node Host 同）。 */
 const ANTHROPIC_SSE_TRUNCATED = [
   "event: message_start",
   'data: {"type":"message_start","message":{"usage":{"input_tokens":6,"cache_read_input_tokens":23746,"cache_creation_input_tokens":11351,"output_tokens":0}}}',
@@ -234,7 +234,7 @@ test("修复捕获用量：完整 SSE 捕获写入 complete usage 且 created_at
     assert.equal(row.input_cache_write_tokens, 0);
     assert.equal(row.output_tokens, 20);
     assert.equal(row.total_tokens, 170);
-    // Rust 明确要求沿用原始请求时间（否则历史记录会落到修复当天）。
+    // Node Host 明确要求沿用原始请求时间（否则历史记录会落到修复当天）。
     assert.equal(row.created_at, createdAt);
     assert.ok(row.analyzed_at, "analyzed_at 必须写入");
     // 费用五列按价格表非空，且与公式一致。
@@ -288,7 +288,7 @@ test("修复捕获用量：已有 usage 行按 request_id 覆盖（不产生重�
     assert.equal(row.total_tokens, 170);
     assert.equal(row.usage_status, "complete");
     assert.equal(row.usage_source, "captured_response");
-    // Rust UPDATE 分支同样把 created_at 覆写为请求日志原始时间。
+    // Node Host UPDATE 分支同样把 created_at 覆写为请求日志原始时间。
     assert.equal(row.created_at, createdAt);
   });
 });
@@ -464,7 +464,7 @@ test("费用重算：按当前价格表补齐并覆盖 estimated_* 五列（含 
       usage_status: "complete",
       usage_source: "upstream_response",
     });
-    // 边界：Rust 只处理 `total_tokens IS NOT NULL` 的行，即使其它 token 字段有值。
+    // 边界：Node Host 只处理 `total_tokens IS NOT NULL` 的行，即使其它 token 字段有值。
     const noTotal = seedLog(storage, { responseBody: OPENAI_JSON_COMPLETE });
     storage.insertUsageRecord({
       request_id: noTotal.requestId,

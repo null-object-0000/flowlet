@@ -1,6 +1,6 @@
 // Beszel API 客户端（开源服务器监控 Hub，PocketBase 底座，默认端口 8090）。Owner: node-web.
 //
-// 权威实现：src-tauri/src/core/beszel.rs 逐行为等价：
+// 实现入口：packages/flowlet-core/src/web/beszel.ts 保持既有行为：
 // - Beszel 没有长期 API Token：只能用「邮箱 + 密码」调
 //   `POST /api/collections/users/auth-with-password` 换 PocketBase 短期 token（默认 14 天）；
 //   后续请求带 `Authorization: <token>`（PocketBase 原生 token，**不加** `Bearer`）；
@@ -9,7 +9,7 @@
 // - 系统列表走 PocketBase 集合 `GET /api/collections/systems/records`（`totalItems` 用于
 //   校验结果的 detail 文案）；
 // - 地址归一会剥掉用户粘贴的 `/api` 与 PocketBase 管理面板 `/_/` 后缀；
-// - 20s 超时；insecure 时跳过 TLS 校验；错误文案对齐 Rust Display。
+// - 20s 超时；insecure 时跳过 TLS 校验；错误文案对齐 Node Host Display。
 import { Agent, request } from "undici";
 
 const DEFAULT_TIMEOUT_MS = 20_000;
@@ -41,7 +41,7 @@ export interface BeszelSystemsPage {
   items: BeszelSystem[];
 }
 
-/** 与 Rust `BeszelError` 同形：Display = `Beszel API {status}: {message}` / `Beszel API: {message}`。 */
+/** 与 既有 `BeszelError` 同形：Display = `Beszel API {status}: {message}` / `Beszel API: {message}`。 */
 export class BeszelError extends Error {
   status: number | null;
 
@@ -59,7 +59,7 @@ export class BeszelError extends Error {
 }
 
 /**
- * 规范化 Hub 地址：口径与 Rust `normalize_base_url` 一致。
+ * 规范化 Hub 地址：口径与 Node Host `normalize_base_url` 一致。
  * - 必须 http/https；拒绝 query / fragment；
  * - 反复剥掉末尾的 `/`、`/api`、`/_`、`/_/`（用户可能粘贴 `http://host:8090/api`
  *   或 PocketBase 管理面板 `http://host:8090/_/`）；
@@ -102,7 +102,7 @@ export function normalizeBaseUrl(raw: string): string {
 }
 
 function urlParseErrorDetail(raw: string): string {
-  // url crate 的常见错误文本（用于保持错误信息可读且接近 Rust）。
+  // url crate 的常见错误文本（用于保持错误信息可读且接近 Node Host）。
   if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(raw)) return "relative URL without a base";
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/$/.test(raw)) return "empty host";
   return "invalid URL";
@@ -122,14 +122,14 @@ export function resolveApiPath(base: string, rawPath: string): string {
   if (path.startsWith("http://") || path.startsWith("https://")) {
     throw new Error("API 路径必须是相对路径（如 /collections/systems/records），不接受绝对 URL");
   }
-  // 与 Rust `resolve_api_path` 一致，只剥一层前缀，query 原样保留。
+  // 与 Node Host `resolve_api_path` 一致，只剥一层前缀，query 原样保留。
   if (path.startsWith("/api")) path = path.slice("/api".length);
   if (!path.startsWith("/")) path = `/${path}`;
   return `${apiBase(base)}${path}`;
 }
 
 export interface BeszelClientOptions {
-  /** 内网自签证书：跳过 TLS 校验（对应 Rust `danger_accept_invalid_certs`）。 */
+  /** 内网自签证书：跳过 TLS 校验（对应 Node Host `danger_accept_invalid_certs`）。 */
   insecure?: boolean;
 }
 
@@ -357,7 +357,7 @@ function number(row: Record<string, unknown>, key: string): number {
 /**
  * 把 PocketBase / Beszel 的错误转成可执行提示：
  * detail 取 body 的 `message`，其次 `error`，否则原文；有 detail 时拼成 `detail（hint）`。
- * 文案与契约 §4.3 / Rust `describe_error` 逐字一致。
+ * 文案与契约 §4.3 / Node Host `describe_error` 逐字一致。
  */
 export function describeError(
   status: number,

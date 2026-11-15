@@ -46,12 +46,14 @@ Flowlet 不以通用企业级 LLM 网关为核心定位。
 
 
 内置渠道、模型目录和 Agent 的扩展声明统一登记在仓库根目录
-`plugin-registry.json`。注册表只声明受控贡献，具体适配器仍由前端/Rust 编译期代码实现；
+`plugin-registry.json`。注册表只声明受控贡献，具体能力由前端与 Node Host 的类型化实现提供；
 渠道贡献必须声明 `adapterId`，Agent 贡献必须声明 `environmentAdapterId`、
 `globalConfigAdapterId`、`sessionAdapterId`、`identityAdapterId`、`sessionTypes`（含
-`clientId`）与 `configCapabilities`；四类 Agent 实现必须在
-`AgentPluginBundle` 中一次性组合，禁止各 Adapter 模块另建 Agent roster；新增适配器时必须同步
-注册表校验和对应编译期实现，禁止静默回退；
+`clientId`）与 `configCapabilities`；Node Host 的 Agent 元数据以
+`packages/flowlet-core/src/agent/registry.ts` 的 `AGENTS` 为统一 roster；全局配置入口位于
+`agent/adapters/index.ts`，环境探测位于 `agent/environment.ts`，会话解析位于 `agent/sessions/`，
+请求身份识别位于 `proxy/identity.ts`。新增 Agent 必须同步声明、对应实现及契约测试，
+禁止在各能力模块另建产品 roster 或静默回退；
 不得通过插件清单引入任意脚本执行、动态库加载或绕过类型化边界的直接状态修改。
 
 修改结构化 Agent 全局配置写入逻辑时，必须使用真实上游初始文件 fixture 补充
@@ -122,8 +124,8 @@ Android Rust 仅管理同步缓存、同步读取、系统凭据和扫码，不�
 - HTTP 请求转发；
 - 本地端口监听；
 - SQLite 持久化；
-- 文件系统和系统托盘能力；
-- Tauri command；
+- 文件系统等底层能力；窗口、托盘与系统能力由 Electron main 经 `DesktopHostBridge` 提供；
+- 类型化 Host command（Web 白名单 / 桌面命令超集）；
 - 配置读写；
 - 请求日志；
 - 模型同步和余额查询等底层能力；
@@ -131,19 +133,19 @@ Android Rust 仅管理同步缓存、同步读取、系统凭据和扫码，不�
 
 ### 默认决策原则
 
-当一个能力既可以在前端编排，也可以在 Rust 中做业务判断时：
+当一个能力既可以在前端编排，也可以在 Node Host 中做业务判断时：
 
 1. 优先把业务流程和产品判断放在前端；
-2. Rust 提供细粒度、稳定、可复用、可测试的底层 command；
-3. 不要因为“后端更稳”就把所有产品逻辑下沉到 Rust；
-4. 只有涉及并发安全、数据一致性、安全边界、系统生命周期或必须由底层保证的约束时，才下沉到 Rust。
+2. Node Host 提供细粒度、稳定、可复用、可测试的底层 command；
+3. 不要因为“后端更稳”就把所有产品逻辑下沉到 Node Host；
+4. 只有涉及并发安全、数据一致性、安全边界、系统生命周期或必须由底层保证的约束时，才下沉到 Node Host。
 
 示例：
 
 - 应用初始化后是否自动调用 `start_proxy`：由前端决定；
-- `start_proxy` 是否幂等、端口是否可监听：由 Rust 保证；
+- `start_proxy` 是否幂等、端口是否可监听：由 Node Host 保证；
 - 概览页展示“启动服务”还是“重启服务”：由前端决定；
-- 代理真实运行状态：由 Rust 返回。
+- 代理真实运行状态：由 Node Host 返回。
 
 ---
 
@@ -160,7 +162,7 @@ Android Rust 仅管理同步缓存、同步读取、系统凭据和扫码，不�
 - 账号和模型只决定代理当前是否有可用模型，不决定代理能否运行；
 - 自动启动失败后不得无限循环重试；
 - React StrictMode 下不得重复触发代理启动；
-- Rust 的 `start_proxy` 必须保持幂等；
+- Node Host 的 `start_proxy` 必须保持幂等；
 - 概览页不常驻展示停止按钮；
 - 代理运行中展示“重启服务”；
 - 代理未运行展示“启动服务”；
@@ -240,7 +242,7 @@ Flowlet 当前支持：
   的 data 行原样透传。新增/删除该行为须同步 `docs/deepseek-harness-integration.md`；
 * DeepSeek 推理上游强制 thinking 会话的 assistant 消息回传 `reasoning_content`（缺失即
   400）。部分客户端（如 DSH/pi-ai）只在识别到 `api.deepseek.com` 类端点时才自动补该字段，
-  经本地端点转发时识别不到。`ensure_reasoning_content_passback` 在转发到 DeepSeek 推理模型
+  经本地端点转发时识别不到。`proxy/http.ts::ensureReasoningContentPassback` 在转发到 DeepSeek 推理模型
   前为缺失该字段的 assistant 消息补空串（仅追加、不改写已有值），是「不随意改写请求结构」
   的受控例外：按上游模型（canonical_model_key 归一后的 DeepSeek 推理模型）门控，仅对
   OpenAI chat/completions 生效，其余请求与协议原样透传；新增/删除该行为须同步本说明与
@@ -249,7 +251,7 @@ Flowlet 当前支持：
   消息都回传 `thinking` 内容块（缺失即 400：`The content[].thinking in the thinking mode
   must be passed back to the API.`）。同一规范模型的候选池可能横跨返回/校验行为不同的中转
   渠道，Anthropic Files API 的账号绑定又会在会话中途把请求 pin 到 DeepSeek 官方账号，历史
-  里会出现由中转生成、缺失 thinking 块的 assistant 消息。`ensure_anthropic_thinking_passback`
+  里会出现由中转生成、缺失 thinking 块的 assistant 消息。`proxy/http.ts::ensureAnthropicThinkingPassback`
   在转发到 DeepSeek 推理模型前，为当前用户轮（最后一条含 `text` 块的 user 消息之后）内缺失
   thinking 块的 assistant 消息补空 thinking 块：插在内容数组最前，仅追加、不改写已有块与
   signature，已完成轮次不动。这是「不随意改写请求结构」的受控例外：按上游模型
@@ -261,7 +263,7 @@ Flowlet 当前支持：
   校验严格的上游直接返回 400：`The parameter `input.status` specified in the request are
   not valid: unknown status: .`。同一规范模型的候选池可能横跨不同上游，A 家吐出的 item 会被
   回放到 B 家；历史里一旦混入坏 item，客户端后续每一轮都会被拒（重试无效）。
-  Rust `normalize_responses_input_items` / Node Host `normalizeResponsesInputItems`
+  Node Host `proxy/http.ts::normalizeResponsesInputItems`
   在转发前把 `input[*].status` 的非法值归一为 `"completed"`，并清掉
   `encrypted_content: null`；合法 status、`input` 为字符串、非 Responses 协议一律原样透传，
   无修改时不重序列化（字节级透传）。这是「不随意改写请求结构」
@@ -272,7 +274,7 @@ Flowlet 当前支持：
   上游端点从渠道 OpenAI Base URL 派生、复用 OpenAI 鉴权；
 * Anthropic Files API（`<渠道 anthropic Base URL>/v1/files` 的 upload / list / retrieve / delete）
   无 `model` 字段、无法参与模型路由，按渠道能力标志 `supports_files_api` **绑定到单一账号**
-  （`proxy_routing::files_account`，按 `(渠道 id, 优先级, 创建时间, 账号 id)` 全序取第一个可用账号）
+  （Node Host `proxy/routing.ts` 的 Files 账号选择，按 `(渠道 id, 优先级, 创建时间, 账号 id)` 全序取第一个可用账号）
   转发；`/messages` 请求带 `anthropic-beta: files-api-*` 时把候选收窄到同一账号
   （`route_reason` 记 `files_api_pinned`／`files_api_pin_missed`），因为 file id 只在上传它的
   那把 API Key 上有效。这是「无模型请求也能被代理」的受控例外：上游 status / headers / body
@@ -397,8 +399,8 @@ Flowlet 支持的模型（全局白名单，不按渠道区分）：
   允许回退命中同规范模型的首个上游 ID。
 
 `channel_accounts.synced_models` 是候选池缓存和最近一次 `/models` 的来源凭据：
-记录最近一次拉取结果，既供编辑器预填，也参与已配置账号的路由生成校验。合并逻辑位于 Rust
-`channels_config.merge_default_routes` 与前端 `mergeDefaultRoutes`（只追加缺失路由，
+记录最近一次拉取结果，既供编辑器预填，也参与已配置账号的路由生成校验。合并逻辑位于 Node Host
+`packages/flowlet-core/src/config/index.ts::mergeDefaultRoutes` 与前端 `mergeDefaultRoutes`（只追加缺失路由，
 不覆盖用户已有状态；删除动作由前端 `reconcileAccountRoutes` 在保存时执行）。
 
 Qwen 是单渠道双资源模式：渠道级端点为按量付费地址；
@@ -412,7 +414,7 @@ DeepSeek 等其它模型，这些模型同样受全局白名单约束（在即�
 快照或别名。它们可能是独立计费、独立额度或不同有效期的上游资源；例如千问端点可同时
 返回 `deepseek-v4-flash` 与 `deepseek-v4-flash-0731`，或返回 `deepseek-v4-pro-0813`
 （即 DeepSeek 官方 `deepseek-v4-pro` 的日期快照），两者必须允许分别选择和路由。
-Flowlet 在 `model-catalog.json` 维护「上游变体 → 规范模型 ID」映射，前端和 Rust
+Flowlet 在 `model-catalog.json` 维护「上游变体 → 规范模型 ID」映射，前端和 Node Host
 读取同一目录，不得重新引入两份别名表。变体按规范 ID 命中白名单、参与用量合并与
 品牌/基准价格解析；编辑器勾选、`synced_models`、`exposed_models` 与路由的
 `upstream_model` 均保留 `/models` 返回的上游原名，路由 `virtual_model_id` 使用规范 ID。
@@ -420,10 +422,10 @@ Flowlet 在 `model-catalog.json` 维护「上游变体 → 规范模型 ID」映
 降级的 Route Candidate；`/models` 对外仍只返回一次规范模型 ID。
 
 同一份映射也用于**入站**：代理在路由前把客户端请求里的模型名按该目录归一
-（Rust `model_catalog::routing_model_id`，复用 `find` 的别名 + 厂商前缀 + 大小写查表，
+（Node Host `catalog/index.ts::routingModelId`，复用规范模型目录的别名 + 厂商前缀 + 大小写查表，
 未登记的名字原样透传），因此客户端可以直接用厂商官方 API 名或别名发请求
 （如 DSH 原生 DeepSeek Provider 固定发 `deepseek-flash`）。归一必须发生在路由匹配之前
-（`proxy.rs`），`match_candidates` 只做精确匹配、不解析别名；日志里 `public_model` 保留
+（`packages/flowlet-core/src/proxy/forward.ts`），`routing.ts::matchCandidates` 只做精确匹配、不解析别名；日志里 `public_model` 保留
 客户端原始名、`virtual_model` 记录归一后的规范 ID。别名是目录里**明确、可审计**的登记项，
 不得借此引入跨厂商的模糊身份映射（见 `docs/competitor-analysis.md`）。
 日期快照变体（如 `deepseek-v4-flash-0731`）归一后与规范模型共享同一候选池，客户端指定
@@ -433,7 +435,7 @@ Flowlet 在 `model-catalog.json` 维护「上游变体 → 规范模型 ID」映
 V4.1 Flash 的官方 API 名是 `deepseek-flash`，目录以该名收录，而白名单规范 ID 是
 `deepseek-v4.1-flash`（`deepseek-flash` 登记为其别名）。因此规格、能力与基准价格的目录
 查找必须按规范 ID **双侧归一**后匹配，不得只做字符串相等：前端 `findModelInCatalog`、
-Rust `find_models_cn_model` 与费用匹配 `estimate_cost_at` 均已按此实现；新增目录查找入口
+Node Host `proxy/catalog.ts::findModelsCnModel` 与 `storage/usage.ts::estimateCostAt` 均已按此实现；新增目录查找入口
 时必须保持一致，否则会出现「模型明明在模型目录里，界面却显示暂无可用模型规格」或费用
 估算缺失。
 
@@ -562,14 +564,14 @@ Agent 接入必须让用户在接入抽屉中显式选择默认模型：Claude C
 区分的 Agent（如 Pi，其 UA 为通用 `OpenAI/JS`），必须在 Flowlet 写入的全局配置中
 注入 `x-flowlet-client: <agent_id>`（Pi 写在 `models.json` 的 `providers.flowlet.headers`），
 使 Flowlet 接管后即可识别。该头仅用于归属，不参与鉴权或路由；Flowlet 在识别后、
-转发上游前会将其剥离（见 `proxy_http.rs` 的 `apply_request_headers`），不向上游泄露。
-新增此类 Agent 时，需同步在 Rust `proxy_http.rs` 的 `agent_client_marker_name` 登记
+转发上游前会将其剥离（见 `packages/flowlet-core/src/proxy/http.ts` 的 `applyRequestHeaders`），不向上游泄露。
+新增此类 Agent 时，需同步在 Node Host `proxy/identity.ts` 中登记客户端标记、UA 规则与
 展示名，并在一键写入与手动配置片段中同时注入该头。
 
 **历史修复路径**：客户端归属在捕获时一次性落库（`client_id` / `client_name`），`ua_rules`
-修改只影响新请求。对于历史日志中 `client_id IS NULL` 的记录，`storage_usage.rs` 的
-`repair_agent_sessions` 会按最新 `ua_rules` 重识别（通过 `proxy.rs` 的
-`identify_client_from_json` 复用实时识别逻辑），已有归属的记录不会被覆盖。用户在
+修改只影响新请求。对于历史日志中 `client_id IS NULL` 的记录，Node Host `storage/repair-sessions.ts` 的
+`repairAgentSessions` 会按最新 `ua_rules` 重识别（通过 `proxy/identity.ts` 的
+`identifyClientFromJson` 复用实时识别逻辑），已有归属的记录不会被覆盖。用户在
 “设置 → 维护 → 数据完整性检查”点击”开始检查”即可触发修复。
 
 ### OpenCode / Pi 输入模态声明（已移除）
@@ -595,14 +597,14 @@ Claude Code（`x-claude-code-session-id`）那样直接读取。对这类 Agent�
 
 代理侧由 Pi 的独立 Identity Adapter 以 `x-flowlet-client: pi` 为门控读取
 `x-flowlet-session`；实时请求和历史日志修复复用同一套 Identity Adapter。识别后、转发
-上游前在 `apply_request_headers` 将其与 `x-flowlet-client` 一并剥离，不向上游泄露。
+上游前在 `proxy/http.ts::applyRequestHeaders` 将其与 `x-flowlet-client` 一并剥离，不向上游泄露。
 注入的 session UUID 与 Pi 原生会话文件头行的 `id` 是同一个值，因此
-`merge_agent_session_catalog` 能按 `(agent_type, session_id)` 把经过 Flowlet 的观测会话
+Node Host `agent/sessions/native.ts` 的会话目录合并 能按 `(agent_type, session_id)` 把经过 Flowlet 的观测会话
 与 Pi 原生会话精确合并。
 
-新增此类 Agent 时，需在独立 `AgentIdentityAdapter` 中声明 UA 客户端归属规则和 Session Header
-提取逻辑；实时请求与历史修复统一经过 Identity Adapter registry，不得在代理主流程继续增加
-Agent ID 分支。`apply_request_headers` 仅负责统一剥离 Flowlet 保留头；一键写入与手动配置片段
+新增此类 Agent 时，在 Node Host `proxy/identity.ts` 的统一识别入口维护 UA 规则和 Session Header
+提取逻辑；实时请求与历史修复复用同一实现，不得在 `proxy/index.ts` 或 `proxy/forward.ts`
+中增加独立的 Agent 身份识别分支。`proxy/http.ts::applyRequestHeaders` 仅负责统一剥离 Flowlet 保留头；一键写入与手动配置片段
 需保持一致。
 
 DeepSeek Harness 使用其强制携带的 `deepseek-harness/` User-Agent 识别来源，不注入
@@ -724,9 +726,10 @@ Flowlet 已完成前端目录正式化：`src/` 是唯一正式前端，使用 R
 * 页面组件不要无限膨胀；
 * 复杂状态和动作优先抽成 Hook；
 * 后端数据由领域 command 与 TanStack Query 读取，mutation 成功后只失效受影响的 query，不恢复全局 `refreshAll`；
-* 页面和组件不得直接拼写 Tauri command 名称，必须通过 `src/domains` 到 `src/platform/tauri` 的类型化边界调用；
+* 页面和组件不得直接拼写 Host command 名称，必须通过 `src/domains` 到 `src/platform` 的类型化边界调用；
+  `src/platform/tauri/client.ts` 是沿用名称的统一命令入口，Electron/Web 经 HTTP，Android 经 Tauri IPC；
 * 页面负责展示与有限交互；
-* 不要在 render 期间触发 Tauri command；
+* 不要在 render 期间触发 Host command；
 * React Effect 必须考虑 StrictMode 重复执行；
 * 异步操作必须有 loading 和 error 状态；
 * 不要吞掉 Promise rejection；
@@ -756,7 +759,7 @@ src/
   ├── pages/        # 路由页面和页面状态组合
   ├── features/     # 用户动作与业务编排
   ├── domains/      # 领域类型、command、query、mutation
-  ├── platform/     # Tauri 等运行平台边界
+  ├── platform/     # Electron / Web / Android 传输与平台边界
   ├── shared/       # 无业务含义的共享 UI 与工具
   └── styles/       # reset 与 Design Tokens
 ```
@@ -765,9 +768,9 @@ src/
 
 ## 11. Host 底层开发原则
 
-* Tauri command 应保持职责单一；
+* Host command 应保持职责单一；
 * command 返回明确的 `Result<T, String>` 或结构化错误；
-* 不要在 Rust 中重复前端页面状态逻辑；
+* 不要在 Node Host 中重复前端页面状态逻辑；
 * 代理共享配置必须支持运行时读取最新值；
 * 启动、停止操作必须具备并发安全性；
 * `start_proxy` 必须幂等；
@@ -786,7 +789,7 @@ src/
 1. 先检查当前分支最新代码；
 2. 不要根据旧对话或旧文件结构直接猜测；
 3. 找到真实调用链；
-4. 确认前端、Tauri command、代理核心和存储之间的职责；
+4. 确认前端、Host command、代理核心和存储之间的职责；
 5. 评估是否会影响热更新、日志、托盘和便携模式。
 
 涉及代理时重点检查：
@@ -820,8 +823,9 @@ src/
 
    * 前端 typecheck；
    * 前端 build；
-   * `cargo check`；
-   * 相关 Rust tests；
+   * Node Host / Electron typecheck 与受影响的 Node 测试；
+   * Android Rust 变更才运行 `cargo check --manifest-path src-tauri/Cargo.toml --no-default-features --locked`
+     与移动核心 Rust tests，必要时 `npm run tauri:android:build`；
 6. 不得在未实际运行检查时声称全部通过；
 7. 如有失败，列出真实错误和未完成项；
 8. 不要为了通过检查删除有效测试或关闭类型检查。
@@ -858,7 +862,7 @@ src/
 1. 字段新增 / 修改 / 删除时，更新 `docs/config.md` 对应章节的字段表和行为说明；
 2. 新增渠道时，按 `docs/config.md` 第 8 节的步骤操作；
 3. 若运行时行为（热更新 / 需重启）发生变化，同步更新第 7 节；
-4. 若源码中反序列化结构（`channels_config.rs` / `config.rs`）发生变化，同步更新第 9 节；
+4. 若Node Host 配置结构（`packages/flowlet-core/src/config/index.ts`）发生变化，同步更新第 9 节；
 5. **默认值同步**：修改 `channels_config.default_exposed_models` 时，必须同步 `model-catalog.json` 中对应渠道的模型身份，或明确说明该预设为何不属于支持白名单；修改 Node Host 默认配置时同步 `packages/flowlet-core/src/config/index.ts`（详见 `docs/config.md`）。
 
 ### 加载优先级

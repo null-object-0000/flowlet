@@ -14,7 +14,7 @@ export function resolveDesktopHost(mode: string, desktopBridgePresent: boolean):
 /**
  * True when the frontend runs inside the Electron desktop shell
  * (`vite --mode desktop`, loaded by the Node Host / Electron window) instead of
- * the Tauri desktop shell or the browser-based Web Host.
+ * the Android Tauri shell or the browser-based Web Host.
  *
  * 注意：`isWebHost` 的语义保持不变（Docker / Web Host 仍只认 `--mode web`），
  * 这里新增的是独立的 desktop 运行模式，不改变 web 分支行为。

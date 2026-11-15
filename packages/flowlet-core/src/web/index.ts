@@ -1,15 +1,15 @@
 // Web Host（管理界面 + 命令 API）。Owner: node-web.
 //
-// 契约：docs/migration/node-host.md §2、docs/admin-sso-design.md §6/§9；权威 Rust 实现：
-// src-tauri/src/core/web/{mod.rs,commands.rs,auth.rs} 与 src-tauri/src/bin/headless.rs。
+// 契约：docs/archive/tauri-migration/node-host.md §2、docs/admin-sso-design.md §6/§9；权威 Node Host 实现：
+// packages/flowlet-core/src/web/{packages/flowlet-core/src/web/auth.ts,packages/flowlet-core/src/desktop/commands.ts,packages/flowlet-core/src/web/auth.ts} 与 packages/flowlet-core/src/index.ts。
 //
-// 路由与鉴权（与 Rust axum router 逐条对齐）：
+// 路由与鉴权（与 Node Host axum router 逐条对齐）：
 //   公开：GET|HEAD /health、/api/auth/config、/api/auth/login、/api/auth/callback、静态资源
 //   受保护（auth 中间件 + 非安全方法 CSRF）：GET|HEAD /api/session、
 //     POST /api/auth/logout、POST /api/commands/{cmd}
 //   其他 /api/*：404 空 body（绝不回退 SPA）；错误方法 405（allow 与 axum 一致）
 //   token 模式：Bearer + HMAC 常量时间比较；OIDC 模式：HttpOnly Cookie 会话 + CSRF。
-//   受保护响应统一 Cache-Control: no-store（401/403 由中间件提前返回，不带该头，与 Rust 一致）。
+//   受保护响应统一 Cache-Control: no-store（401/403 由中间件提前返回，不带该头，保持既有兼容行为）。
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { a2aGateway, closeA2aGateway } from "../a2a/gateway.ts";
 
@@ -292,7 +292,7 @@ export function createWebHost(options: WebHostOptions): WebHost {
       return a2aGateway(ctx).handle(request, response, pathname);
     }
 
-    // ── 公开 OIDC 路由（与 Rust 的 public Router 一致：无鉴权、无 no-store 中间件） ──
+    // ── 公开 OIDC 路由（与 Node Host 的 public Router 一致：无鉴权、无 no-store 中间件） ──
     if (
       pathname === "/api/auth/config" ||
       pathname === "/api/auth/login" ||
@@ -613,7 +613,7 @@ export function createWebHost(options: WebHostOptions): WebHost {
   };
 }
 
-/** 供 index.ts 记录启动信息时复用（与 Rust headless tracing 行保持近似）。 */
+/** 供 index.ts 记录启动信息时复用（与 Node Host headless tracing 行保持近似）。 */
 export function webStartupSummary(publicProxyUrl: string, deviceId: string): JsonRow {
   return { public_proxy_url: publicProxyUrl, device_id: deviceId };
 }

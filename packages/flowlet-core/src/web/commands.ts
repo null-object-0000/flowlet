@@ -1,6 +1,6 @@
 // Web Host 命令 dispatch。Owner: node-web.
 //
-// 权威实现：src-tauri/src/core/web/commands.rs。命令名、参数名（camelCase）、
+// 实现入口：packages/flowlet-core/src/web/commands.ts。命令名、参数名（camelCase）、
 // 返回形状、错误 (status, code, message) 必须逐条等价。
 // 存储/配置读写全部通过注入的 storage / runtimeConfig / proxy，不在 web 里写 SQL。
 import { createHash, randomUUID } from "node:crypto";
@@ -325,7 +325,7 @@ function describe(value: unknown): string {
   return Array.isArray(value) ? "sequence" : "map";
 }
 
-/** Rust chrono `parse_from_rfc3339` 的常见错误文本（近似复刻）。 */
+/** Node Host chrono `parse_from_rfc3339` 的常见错误文本（近似复刻）。 */
 function parseRfc3339(label: string, value: string): number {
   const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.exec(
     value,
@@ -530,7 +530,7 @@ export async function dispatch(ctx: WebContext, command: string, rawArgs: unknow
     case "save_route_candidates": {
       const routes = structArray(args, "routes", "RouteCandidate", ROUTE_CANDIDATE_REQUIRED);
       s.saveRouteCandidates(routes);
-      // Rust 直接把入参写进快照（不重新读取），这里保持同样语义。
+      // Node Host 直接把入参写进快照（不重新读取），这里保持同样语义。
       ctx.runtimeConfig.update((draft) => {
         draft.routes = routes;
       });
@@ -573,7 +573,7 @@ export async function dispatch(ctx: WebContext, command: string, rawArgs: unknow
       } catch (error) {
         throw CommandError.badRequest(error instanceof Error ? error.message : String(error));
       }
-      // Rust 先更新内存 bind config，再持久化调用方传入的原始值（不写归一化结果）。
+      // Node Host 先更新内存 bind config，再持久化调用方传入的原始值（不写归一化结果）。
       ctx.storage.setAppMeta("proxy_bind_config", JSON.stringify(config));
       ctx.proxy.setBindConfig(normalized);
       return null;
@@ -586,7 +586,7 @@ export async function dispatch(ctx: WebContext, command: string, rawArgs: unknow
       return ctx.customScrapeChannels;
 
     // 千问平台 device-flow 登录与 HTTP 直连同步：Web Host 没有 WebView，这条路径是
-    // 它获取余额与免费额度的唯一方式（权威实现 src-tauri/src/core/qwen_platform.rs）。
+    // 它获取余额与免费额度的唯一方式（权威实现 packages/flowlet-core/src/web/qwen-platform.ts）。
     case "qwen_platform_status":
       return qwenPlatformStatus(ctx, argString(args, "accountId"));
     case "qwen_platform_login_start":
@@ -616,8 +616,8 @@ export async function dispatch(ctx: WebContext, command: string, rawArgs: unknow
       return queryBalance(ctx, argString(args, "accountId"));
 
     case "list_request_logs": {
-      // Rust LogsPageResult 是 camelCase 结构体：page/pageSize。storage 层曾用
-      // page_size（历史 stub 契约），这里做一次字段归一，保证 Web 输出与 Rust 逐字段一致。
+      // Node Host LogsPageResult 是 camelCase 结构体：page/pageSize。storage 层曾用
+      // page_size（历史 stub 契约），这里做一次字段归一，保证 Web 输出与 Node Host 逐字段一致。
       const page = s.listRequestLogsPage(parseLogsFilter(args));
       if (page && typeof page === "object" && !("pageSize" in page) && "page_size" in page) {
         const { page_size: pageSize, ...rest } = page as JsonRow;

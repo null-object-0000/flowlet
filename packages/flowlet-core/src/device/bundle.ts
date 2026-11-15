@@ -1,10 +1,10 @@
 // 设备用量快照 / 加密包（bundle）契约。Owner: desktop-device。
 //
-// 权威实现：src-tauri/src/core/device_identity.rs（DeviceUsageBundle / DeviceUsageSnapshot /
+// 实现入口：packages/flowlet-core/src/device/identity.ts（DeviceUsageBundle / DeviceUsageSnapshot /
 // validate / from_bytes）。字段命名与磁盘 JSON 完全一致（全部 camelCase），因为该 JSON
 // 会被其它设备与移动端直接读取；任何字段改名都会让其它设备读不了。
 //
-// 校验口径必须与 Rust 逐条一致，否则导入端会接受 Rust 会拒绝的文件（或相反）：
+// 校验口径必须与 Node Host 逐条一致，否则导入端会接受 Node Host 会拒绝的文件（或相反）：
 // - bundle.format = "flowlet-device-usage"、version = 1；
 // - snapshot.schemaVersion ∈ (0, 13]；deviceId 为 UUID；两个时间戳为 RFC3339；
 // - days 严格按日期升序且不能重复；hours 必须是整点且严格升序；
@@ -12,7 +12,7 @@
 // - sessions / agents 的标识长度、运行状态、文本长度与控制字符限制。
 import { randomUUID } from "node:crypto";
 
-/** Rust `DEVICE_USAGE_SNAPSHOT_SCHEMA_VERSION`。 */
+/** 既有 `DEVICE_USAGE_SNAPSHOT_SCHEMA_VERSION`。 */
 export const DEVICE_USAGE_SNAPSHOT_SCHEMA_VERSION = 13;
 export const BUNDLE_FORMAT = "flowlet-device-usage";
 export const BUNDLE_VERSION = 1;
@@ -241,7 +241,7 @@ export interface KnownDevice {
 
 // ─── 基础校验工具 ────────────────────────────────────────────────────────────
 
-/** Rust `chars().count()`：统计 Unicode 标量值而不是 UTF-16 code unit。 */
+/** 既有 `chars().count()`：统计 Unicode 标量值而不是 UTF-16 code unit。 */
 export function charCount(value: string): number {
   let count = 0;
   for (const _ of value) count += 1;
@@ -296,7 +296,7 @@ function validClockParts(hour: string, minute: string, second: string): boolean 
   return Number(hour) <= 23 && Number(minute) <= 59 && Number(second) <= 59;
 }
 
-/** RFC3339 时间比较；解析失败返回 null（Rust 只在两段都合法时比较）。 */
+/** RFC3339 时间比较；解析失败返回 null（Node Host 只在两段都合法时比较）。 */
 export function parseRfc3339Millis(value: string): number | null {
   if (!isRfc3339(value)) return null;
   const millis = Date.parse(value);
@@ -638,7 +638,7 @@ export function normalizeBundle(value: unknown): DeviceUsageBundle {
   };
 }
 
-// ─── 校验（Rust DeviceUsageBundle::validate） ────────────────────────────────
+// ─── 校验（Node Host DeviceUsageBundle::validate） ────────────────────────────────
 
 function validateDisplayName(value: string): void {
   const count = charCount(value);
@@ -815,7 +815,7 @@ export function validateBundle(bundle: DeviceUsageBundle): void {
   }
 }
 
-/** Rust DeviceUsageBundle::from_bytes：解析 + 校验。 */
+/** Node Host DeviceUsageBundle::from_bytes：解析 + 校验。 */
 export function parseBundleBytes(bytes: Uint8Array): DeviceUsageBundle {
   let parsed: unknown;
   try {
@@ -841,10 +841,10 @@ export function resolvedAppVersion(snapshot: DeviceUsageSnapshot): string {
 }
 
 /**
- * Rust DeviceUsageSnapshot::new。
+ * Node Host DeviceUsageSnapshot::new。
  *
- * `appVersion` 来自桌面宿主（Rust 是编译期 CARGO_PKG_VERSION）；`timezoneOffsetMinutes`
- * 使用本机本地时区偏移（东八区 +480），与 Rust `Local::now().offset()` 同号。
+ * `appVersion` 来自桌面宿主（Node Host 是编译期 CARGO_PKG_VERSION）；`timezoneOffsetMinutes`
+ * 使用本机本地时区偏移（东八区 +480），与 Node Host `Local::now().offset()` 同号。
  */
 export function newDeviceUsageSnapshot(input: {
   identity: { device_id: string; created_at: string; display_name: string; platform: string };
@@ -877,7 +877,7 @@ export function newDeviceUsageBundle(snapshot: DeviceUsageSnapshot): DeviceUsage
   return { format: BUNDLE_FORMAT, version: BUNDLE_VERSION, snapshot };
 }
 
-/** Rust randomUUID 用法：任务/操作 ID。 */
+/** Node Host randomUUID 用法：任务/操作 ID。 */
 export function newUuid(): string {
   return randomUUID();
 }

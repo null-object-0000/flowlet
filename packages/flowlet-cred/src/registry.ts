@@ -1,12 +1,12 @@
 // OCI 镜像仓库客户端（Docker Registry HTTP API V2 / OCI Distribution）。Owner: node-web.
 //
-// 权威实现：src-tauri/src/core/registry.rs 与 Node Host `packages/flowlet-core/src/web/registry.ts`
-// 逐行为等价（契约 .dsh-scratch/registry-contract.md，v7）：
+// 实现入口：packages/flowlet-core/src/web/registry.ts 与 Node Host `packages/flowlet-core/src/web/registry.ts`
+// 保持既有行为（契约 .dsh-scratch/registry-contract.md，v7）：
 // - 只按行业通用标准：`GET {base}/v2/` 带 Basic；401 的 `WWW-Authenticate: Bearer` 质询用
 //   realm / service / scope 换 token，再用 Bearer 重试；Harbor / Docker Hub / GHCR / Quay / ACR
 //   都走同一套，robot account 只是普通「用户名 + 密码/token」，不特判；
 // - **不做** Harbor 专属探测：不请求 `/api/v2.0/*`、不请求 `/v2/_catalog`、不按主机名猜 Harbor；
-// - 20s 超时；insecure 时跳过 TLS 校验；错误文案逐字对齐契约 §4（与 Rust / Node Host 一致）。
+// - 20s 超时；insecure 时跳过 TLS 校验；错误文案逐字对齐契约 §4（与 Node Host / Node Host 一致）。
 import { Agent, request } from "undici";
 
 const DEFAULT_TIMEOUT_MS = 20_000;
@@ -14,7 +14,7 @@ const USER_AGENT = "flowlet/0.2.0";
 /** `GET /v2/` 成功响应头：如 `registry/2.0`。 */
 const VERSION_HEADER = "docker-distribution-api-version";
 
-/** 校验结果（与 Node Host `checkRegistry` / Rust `RegistryCheck` 同形）。 */
+/** 校验结果（与 Node Host `checkRegistry` / 既有 `RegistryCheck` 同形）。 */
 export interface RegistryCheckResult {
   /** 响应头 `docker-distribution-api-version`（如 `registry/2.0`），缺失时 null。 */
   version: string | null;
@@ -27,7 +27,7 @@ export interface RegistryCheckResult {
 /**
  * registry 错误。与 Jenkins / Beszel 不同，契约 §4 的文案本身已是完整可执行提示
  * （如 `用户名或 token 无效（registry 认证失败）`），因此 `toString()` 不再拼
- * `Registry API {status}:` 前缀——CLI 直接输出该文案即可与 Node Host / Rust 逐字一致。
+ * `Registry API {status}:` 前缀——CLI 直接输出该文案即可与 Node Host / Node Host 逐字一致。
  */
 export class RegistryError extends Error {
   /** HTTP 状态码；网络/解析类错误为 null。 */
@@ -65,7 +65,7 @@ export function normalizeBaseUrl(raw: string): string {
     parsed = new URL(withScheme);
   } catch {
     const detail = urlParseErrorDetail(withScheme);
-    // 与 Rust `Url::parse("https://")` 的 empty host 对齐：主机号缺失是独立文案。
+    // 与 Node Host `Url::parse("https://")` 的 empty host 对齐：主机号缺失是独立文案。
     if (detail === "empty host") throw new Error("镜像仓库地址缺少主机名");
     throw new Error(`镜像仓库地址无法解析：${detail}`);
   }
@@ -107,7 +107,7 @@ export function registryHost(baseUrl: string): string {
 }
 
 function urlParseErrorDetail(raw: string): string {
-  // url crate 的常见错误文本（用于保持错误信息可读且接近 Rust）。
+  // url crate 的常见错误文本（用于保持错误信息可读且接近 Node Host）。
   if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(raw)) return "relative URL without a base";
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/$/.test(raw)) return "empty host";
   return "invalid URL";
@@ -140,7 +140,7 @@ export function normalizeUsername(raw: string): string {
 }
 
 export interface RegistryClientOptions {
-  /** 内网自签证书：跳过 TLS 校验（对应 Rust `danger_accept_invalid_certs`）。 */
+  /** 内网自签证书：跳过 TLS 校验（对应 Node Host `danger_accept_invalid_certs`）。 */
   insecure?: boolean;
 }
 

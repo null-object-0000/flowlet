@@ -40,7 +40,7 @@ Flowlet 是一个面向 AI Agent 的本地桌面模型服务控制台。
 Flowlet 不以通用企业级 LLM 网关为核心定位。
 
 除桌面 Host，也支持独立 headless / Docker Host 与浏览器管理界面，部署步骤见
-`docs/docker.md`。服务端复用 `FlowletServices`、存储和渠道能力；管理 HTTP API 必须使用
+`docs/docker.md`。服务端复用 Node Host 的存储、配置和渠道能力；管理 HTTP API 必须使用
 显式命令白名单，并将管理凭据与模型调用凭据分开鉴权。Web Host 不提供本机 Agent 配置写入、
 桌面 WebView 抓取或本机 OAuth 能力；不能为了复用页面而开放任意桌面命令。
 
@@ -74,7 +74,7 @@ Flowlet 采用前端优先的桌面应用架构。
 
 ### 宿主形态（2026-11 起）
 
-桌面端正在从 Rust/Tauri 迁到 **Electron + Node/TS**，两条宿主共用同一份前端与命令契约：
+桌面端使用 **Electron + Node/TS**；Android 保留 Tauri/Rust，共用前端领域契约：
 
 - **Electron 桌面宿主**（`packages/flowlet-desktop/`）：Electron main 在主进程内启动
   `packages/flowlet-core` 的 `startHost()`（Node Host：SQLite/代理/本机 HTTP 命令 API/
@@ -82,8 +82,12 @@ Flowlet 采用前端优先的桌面应用架构。
   （随机管理 token 由 preload 注入，不落盘）；平台能力（窗口/托盘/自启/凭据/抓取/电源/
   托管运行时）由 main 实现为 `DesktopHostBridge`，命令层只通过
   `ctx.desktop.host.invoke(channel, payload)` 调用，**禁止在命令层 import electron**；
-- **Tauri/Rust 宿主**（`src-tauri/`）：**回滚路径**，迁移完成前继续可用，不得删除；
-  Android 端仍在此路径，未迁移；
+- **Tauri/Rust 宿主**（`src-tauri/`）：仅保留 Android 辅助端的 SQLite、S3 读取、LAN 客户端、远程权限 DTO 与扫码能力。
+  旧桌面命令、窗口/托盘/抓取、代理、Agent Adapter、Rust headless/凭据 CLI 源码与对应依赖均已移除。
+  Cargo 默认 feature 为 `mobile`；宿主单测使用 `--no-default-features`。
+  保留完整旧数据库 schema/migration 以兼容已安装手机，不得借裁剪删除用户表或重建数据库。
+  根 `tauri` 脚本仍供 Android Gradle 回调使用，不得作为无用桌面入口删除。
+  共享资源统一位于根目录 `resources/`，测试 fixture 位于 `tests/fixtures/`，Electron 构建与必跑测试不得依赖 `src-tauri/`；
 - **Web/Docker Host**（`packages/flowlet-core`）：生产管理台，命令面使用显式 Web 白名单（含 A2A 管理命令）；
   桌面命令在 `packages/flowlet-core/src/desktop/` 注册，仅在 `ctx.desktop` 存在时生效，
   Web Host 行为不变。
@@ -93,9 +97,10 @@ Flowlet 采用前端优先的桌面应用架构。
   之外一律不可用）；远程凭据只允许留在 Electron 主进程（token 用 safeStorage 加密存储，
   OIDC 会话 Cookie 放在独立分区），渲染进程与页面不得直接持有远程凭据。
 
-桌面命令面覆盖度用 `node scripts/desktop-command-parity.mjs` 追踪（Rust
-`generate_handler!` ↔ Web Host + desktop 注册表），新增桌面命令必须同步该脚本报出的缺口，
-并保持命令名、camelCase 参数、返回字段风格与 Rust 逐条一致。
+桌面命令兼容性用 `node scripts/desktop-command-parity.mjs --check` 追踪
+（`tests/contracts/desktop-commands.json` 中冻结的 154 条旧命令 ↔ Web Host + desktop 注册表）。
+新增命令在 Node/TS 类型化边界登记；既有命令名、camelCase 参数与返回字段风格保持兼容。
+新增命令无需同步已退役的 Rust 桌面注册表；Android 命令仍按其独立契约维护。
 
 ### React 前端负责
 
@@ -108,7 +113,10 @@ Flowlet 采用前端优先的桌面应用架构。
 - 通知、提示和用户反馈；
 - 组合多个后端 command 完成完整业务流程。
 
-### Rust 后端负责
+### Node Host 底层负责
+
+当前桌面与 Web Host 使用 Node/TS；以下代理、渠道和本机 Agent 职责均由 Node Host 实现。
+Android Rust 仅管理同步缓存、同步读取、系统凭据和扫码，不提供本地模型服务或 Agent 接入。
 
 - 本地代理服务；
 - HTTP 请求转发；
@@ -357,13 +365,13 @@ Flowlet 支持的模型（全局白名单，不按渠道区分）：
 ```
 
 这是 Flowlet **总共支持哪些模型**，单一事实源为仓库根目录 `model-catalog.json`；
-前端 `FLOWLET_SUPPORTED_MODELS` 与 Rust `ChannelsConfig::supported_models()` 均读取该目录，
+前端 `FLOWLET_SUPPORTED_MODELS` 与 Node Host 模型目录均读取该目录，
 不是按渠道切分的列表。
 任意渠道账号只要底层 `/models` 返回了其中的模型，就可勾选开放——**不再按渠道区分**。
 
 一个账号开放哪些模型由**用户显式选择**，流程为：
 
-1. 用户在账号编辑器里点「拉取模型列表」→ 调底层 `/models`（Rust command
+1. 用户在账号编辑器里点「拉取模型列表」→ 调底层 `/models`（Host command
    `fetch_channel_models`，用连接参数拉取，不依赖账号是否已保存）；
 2. 编辑器展示 `/models` 返回的**全量**上游模型，白名单之外的模型展示但**禁用勾选**；
 3. 用户勾选要开放的上游模型资源 → 将 `/models` 返回的原始 ID 保存到
@@ -544,7 +552,7 @@ Agent 默认只做非侵入接入，禁止照搬已有 Agent 的特殊扩展路�
 
 Agent 接入必须让用户在接入抽屉中显式选择默认模型：Claude Code 可分别选择主模型与快速模型
 （快速模型缺省等于主模型），其余 Agent 选择一个主模型；模型必须是当前 Agent 协议下已开放的
-规范模型 ID。未选择时由 Rust command 按模型 id 字典序取第一个可用模型；没有可用模型时禁用
+规范模型 ID。未选择时由 Host command 按模型 id 字典序取第一个可用模型；没有可用模型时禁用
 一键接入并提示先开放模型。不得再写入聚合模型或虚拟模型别名。
 
 ### 客户端归属标记头
@@ -623,7 +631,7 @@ base-bundle DSH Profile 的 `cordis.patch.yml` 部署受管 `deepseek-harness-mc
 服务器一个 `- insert:` 的 `@deepseek-ai/dsh-mcp-client` 插件实例（stdio 或 streamable-http），
 把 MCP 工具注册为 `mcp__<serverName>__<工具名>`；增删改整块重写、随 Profile 配置一同备份和恢复，
 不写入插件文件、不修改 DSH npm 包。受管模型 `McpServerSpec`（id / serverName / transport /
-command / args / env / cwd / url / headers，camelCase）在 Rust 与前端同步；写入端执行与 DSH
+command / args / env / cwd / url / headers，camelCase）在 Node Host 与前端同步；写入端执行与 DSH
 一致的校验（serverName `[A-Za-z0-9_-]{1,32}` 且唯一、stdio 必须有 command、http 必须有 url），
 先校验后落盘。配置修改由 DSH 热替换生效（断开 + 重连），无需重启；关闭移除受管块，inspect 从
 受管块按 id 跨 Profile 合并回读当前列表。管理界面位于接入抽屉的独立「MCP 服务器」Tab
@@ -644,7 +652,7 @@ Codex 与 Claude Code、OpenCode、Pi 同为标准一等 Agent（`AgentKind = "c
 防止 Codex 携带 `store`/`previous_response_id` 破坏多账号路由；Client Token 写入
 `auth.json` 的 `OPENAI_API_KEY`（不动系统环境变量，备份/恢复保留原有登录态字段）。
 聚合模型已移除：接入抽屉要求用户为 Codex 显式选择一个当前 `responses` 协议下已开放的
-规范模型作为 `model`；未传模型时 Rust command 按模型 id 字典序取第一个可用模型。
+规范模型作为 `model`；未传模型时 Host command 按模型 id 字典序取第一个可用模型。
 Codex 使用自定义模型、不在内置目录中，必须额外声明模型元数据（上下文窗口、推理档位）：
 一键写入会**按所选模型动态生成**单条目 `~/.codex/model-catalog.flowlet.json`——
 `context_window` / `max_context_window` 取 `models-cn.json` 的 `limits.contextTokens`，
@@ -660,12 +668,12 @@ Codex 使用自定义模型、不在内置目录中，必须额外声明模型�
 目录文件。模型目录是 Codex 启动时 serde 反序列化的必填字段集合，缺 `shell_type` 等字段会
 直接报错（`missing field ...`）；推理档位只使用 `none` / `minimal` / `low` / `medium` /
 `high` / `xhigh`，不使用 `max` / `ultra`（后者需 Codex ≥ 0.144）。字段清单见
-`docs/config.md` 第 10 节，`src-tauri/src/core/codex_model_catalog.rs` 有对应回归测试。
+`docs/config.md` 第 10 节，`packages/flowlet-core/src/agent/models.ts` 有对应回归测试。
 Codex 的 User-Agent（`codex_cli_rs/`）可区分，归属走 UA 规则（config.json 默认集 +
 内置兜底规则），不需要 `x-flowlet-client` 标记头。
 
 Codex 账号观测（订阅用量、套餐、Credits、重置机会、授权/刷新）承载于概览页
-渠道账号卡片：Codex 账号由 Rust 端自动发现与同步，作为伪 `ChannelAccount` 插入
+渠道账号卡片：Codex 账号由 Node Host自动发现与同步，作为伪 `ChannelAccount` 插入
 渠道账号列表（不参与路由、不开放编辑、`priority: -1000` 排底），
 伪账号行点击打开详情抽屉（`CodexAccountSideSheet`）：凭据只读展示，
 支持刷新用量、重新授权与删除。删除（`delete_codex_account`）只移除 Flowlet
@@ -755,7 +763,7 @@ src/
 
 ---
 
-## 11. Rust 开发原则
+## 11. Host 底层开发原则
 
 * Tauri command 应保持职责单一；
 * command 返回明确的 `Result<T, String>` 或结构化错误；
@@ -767,7 +775,7 @@ src/
 * 请求路由必须校验账号启用状态和 API Key；
 * 不得因为无账号或无模型而阻止代理监听；
 * 不得因单次请求失败导致代理进程退出；
-* 新增代理行为应补充 Rust 测试。
+* 新增代理行为应补充 Node Host 测试；移动同步变化补充 Rust 测试。
 
 ---
 
@@ -790,11 +798,11 @@ src/
 * `src/features/proxy-lifecycle/ProxyStatusCard.tsx`
 * `src/pages/overview/OverviewPage.tsx`
 * `src/platform/tauri/client.ts`
-* `src-tauri/src/lib.rs`
-* `src-tauri/src/commands.rs`
-* `src-tauri/src/core/proxy.rs`
-* `src-tauri/src/core/proxy_http.rs`
-* `src-tauri/src/core/proxy_routing.rs`
+* `packages/flowlet-desktop/src/main.ts`
+* `packages/flowlet-core/src/desktop/commands.ts`
+* `packages/flowlet-core/src/proxy/index.ts`
+* `packages/flowlet-core/src/proxy/http.ts`
+* `packages/flowlet-core/src/proxy/routing.ts`
 
 文件结构可能变化，以当前代码为准。
 
@@ -837,7 +845,7 @@ src/
 
 新增渠道或扩展渠道协议、余额、模型同步等能力前，**必须先阅读并按
 `docs/channel-integration.md` 执行**。该文档以 LongCat、DeepSeek、Kimi 为参照，
-覆盖官方能力核实、配置默认值、SQLite 升级迁移、Rust command、前端账号流程、
+覆盖官方能力核实、配置默认值、SQLite 升级迁移、Host command、前端账号流程、
 默认路由、品牌图标和回归测试。
 
 不得只修改 `config.json` 或只让渠道出现在前端。必须验证从旧 SQLite 升级后，
@@ -851,12 +859,12 @@ src/
 2. 新增渠道时，按 `docs/config.md` 第 8 节的步骤操作；
 3. 若运行时行为（热更新 / 需重启）发生变化，同步更新第 7 节；
 4. 若源码中反序列化结构（`channels_config.rs` / `config.rs`）发生变化，同步更新第 9 节；
-5. **默认值同步**：修改 `channels_config.default_exposed_models` 时，必须同步 `model-catalog.json` 中对应渠道的模型身份，或明确说明该预设为何不属于支持白名单；修改 Rust 工厂默认值时同步 `src-tauri/src/core/config.rs`（详见 `docs/config.md`）。
+5. **默认值同步**：修改 `channels_config.default_exposed_models` 时，必须同步 `model-catalog.json` 中对应渠道的模型身份，或明确说明该预设为何不属于支持白名单；修改 Node Host 默认配置时同步 `packages/flowlet-core/src/config/index.ts`（详见 `docs/config.md`）。
 
 ### 加载优先级
 
 - 外部 `config.json`（exe 旁）优先；
-- 缺失或解析失败时，回退到编译时 `include_str!` 进二进制的默认副本；
+- 缺失或解析失败时，回退到 Node Host 随包默认配置；
 - 首次启动不存在时，写入内置副本到磁盘。
 
 因此修改仓库根目录 `config.json` 会同时影响「编译时默认值」和「便携版打包产物」。
@@ -864,12 +872,11 @@ src/
 涉及文件：
 
 - `config.json` — 项目根目录
-- `src-tauri/src/core/channels_config.rs` — JSON 反序列化与 `DEFAULT_CONFIG_JSON`
-- `src-tauri/src/core/config.rs` — 运行时结构体
-- `src-tauri/src/core/proxy.rs` / `proxy_http.rs` — 读写与热加载
-- `src-tauri/src/lib.rs` — 启动时加载与回退
-- `src-tauri/src/commands.rs` — `read_config` / `write_config` command
-- `scripts/build-portable.mjs` — 便携版打包
+- `packages/flowlet-core/src/config/index.ts` — 默认配置、解析与运行时快照
+- `packages/flowlet-core/src/proxy/index.ts` / `packages/flowlet-core/src/proxy/http.ts` — 读写与热加载
+- `packages/flowlet-desktop/src/main.ts` — 启动时加载与回退
+- `packages/flowlet-core/src/desktop/commands.ts` — `read_config` / `write_config` command
+- `scripts/build-desktop-portable.mjs` — 便携版打包
 
 ---
 

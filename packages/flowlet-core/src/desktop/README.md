@@ -1,11 +1,14 @@
 # 桌面（Electron）命令层
 
-本目录是 Rust/Tauri 桌面端 142 条命令的 Node/TS 等价实现。**Web Host 已实现的 66 条命令不在这里重复**，
+本目录提供 Electron 桌面命令实现。旧 Tauri 桌面的 154 条命令已冻结到
+`tests/contracts/desktop-commands.json`，其中 60 条由 Web Host 覆盖、94 条由本目录覆盖。
+**Web Host 已实现的命令不在这里重复**，
 它们继续由 `../web/commands.ts` 的 dispatch 处理；桌面命令是 Web 命令面的**超集**。
+兼容性检查不再读取 `src-tauri/`；后续新命令按 Node/TS 契约扩展。
 
 ## 目录与负责人
 
-| 文件 | 负责命令（权威行为见 `src-tauri/src/commands/*.rs`） | 负责人 |
+| 文件 | 负责命令（Rust 原实现仅作历史对照） | 负责人 |
 | --- | --- | --- |
 | `agent.ts` | Agent 环境/运行时/Codex/Antigravity/全局配置（17 条） | desktop-agent |
 | `maintenance.ts` | 设置、配置导入导出、存储维护、自启、路由规则（22 条） | desktop-maintenance |

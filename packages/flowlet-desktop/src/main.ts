@@ -747,7 +747,7 @@ function createTray(
   logger: DesktopLogger,
 ): Tray {
   const candidates = [
-    join(paths.repoRoot, "src-tauri", "icons", "tray.png"),
+    join(paths.repoRoot, "resources", "icons", "tray.png"),
     join(paths.runtimeRoot, "icons", "tray.png"),
     join(paths.runtimeRoot, "icons", "icon.png"),
   ];

@@ -86,16 +86,18 @@ Flowlet 默认只在本机保存渠道 API Key、Client Token、配置和使用�
 <details>
 <summary>从源码运行</summary>
 
-需要 Node.js 22、Rust stable 与 Tauri 2 系统依赖：
+桌面开发需要 Node.js 24+，使用 Electron + Node Host。Android 另需 Rust stable、Java 与 Android SDK/NDK：
 
 ```bash
 git clone https://github.com/null-object-0000/flowlet.git
 cd flowlet
 npm ci
-npm run tauri:dev
+npm run fetch:catalogs
+npm run desktop:dev
 ```
 
-架构与贡献说明见 [架构文档](docs/architecture.md)。
+架构与贡献说明见 [架构文档](docs/architecture.md)。`src-tauri/` 仅保留 Android 同步查看器，
+不再构建桌面、headless 或 Rust CLI，详见 [Android Rust 边界](docs/android-rust-boundary.md)。
 
 </details>
 

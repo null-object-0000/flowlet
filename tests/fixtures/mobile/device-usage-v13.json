@@ -1,0 +1,33 @@
+{
+  "format": "flowlet-device-usage",
+  "version": 1,
+  "snapshot": {
+    "schemaVersion": 13,
+    "deviceId": "1411a7d7-55d8-4024-8363-95858788aa91",
+    "deviceCreatedAt": "2026-07-21T00:00:00Z",
+    "displayName": "Home PC",
+    "platform": "windows",
+    "appVersion": "0.2.0",
+    "generatedAt": "2026-11-15T00:00:00Z",
+    "timezoneOffsetMinutes": 480,
+    "days": [{
+      "date": "2026-11-14",
+      "requestCount": 2,
+      "knownTokens": 42,
+      "inputTokens": 30,
+      "inputCachedTokens": 10,
+      "inputUncachedTokens": 20,
+      "cacheMeasuredInputTokens": 30,
+      "outputTokens": 12,
+      "unknownCount": 0,
+      "nativeEventCount": 1,
+      "nativeInputTokens": 4,
+      "nativeTotalTokens": 4
+    }],
+    "hours": [],
+    "sessions": [],
+    "agents": [],
+    "accountResources": [],
+    "usageBreakdowns": []
+  }
+}

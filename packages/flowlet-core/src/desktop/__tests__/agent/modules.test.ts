@@ -405,9 +405,9 @@ describe("内嵌受管插件资源", () => {
     "../../../../../..",
   );
 
-  it("内嵌源码与 src-tauri/resources/agent-plugins 上游文件逐字一致", () => {
+  it("内嵌源码与 resources/agent-plugins 上游文件逐字一致", () => {
     const upstream = (relative: string): string =>
-      readFileSync(path.join(REPO_ROOT, "src-tauri", "resources", "agent-plugins", relative), "utf8");
+      readFileSync(path.join(REPO_ROOT, "resources", "agent-plugins", relative), "utf8");
     assert.equal(
       DSH_SESSION_BRIDGE_SOURCE,
       upstream("deepseek-harness/flowlet-session-bridge.mjs"),

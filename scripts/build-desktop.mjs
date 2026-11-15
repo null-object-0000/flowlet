@@ -162,7 +162,7 @@ function runBuilder() {
       : process.platform === "darwin"
         ? ["--mac", "dmg"]
         : ["--linux", "AppImage", "deb"];
-  const status = run(process.execPath, [cli, ...targets], { cwd: DESKTOP_DIR, env: builderEnv() });
+  const status = run(process.execPath, [cli, ...targets, ...passthrough], { cwd: DESKTOP_DIR, env: builderEnv() });
   if (status !== 0) process.exitCode = status;
 }
 

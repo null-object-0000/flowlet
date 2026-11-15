@@ -1,6 +1,6 @@
 // Agent 可选扩展 / 受管插件的内嵌源码（与 Rust `include_str!` 等价）。
 //
-// 来源：`src-tauri/resources/agent-plugins/**` 与 Adapter 内的受管常量；桌面版打包后
+// 来源：`resources/agent-plugins/**` 与 Adapter 内的受管常量；桌面版打包后
 // 不能依赖仓库资源文件，因此编译进 Node 代码。修改上游资源时必须同步本文件。
 
 /** OpenCode 权限事件插件（~/.config/opencode/plugins/flowlet.ts）。 */

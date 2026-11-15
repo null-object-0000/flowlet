@@ -1,85 +1,62 @@
 # 安装包自动构建
 
-仓库通过 `.github/workflows/build-installers.yml` 构建桌面安装包和 Android APK。
+桌面端使用 `.github/workflows/desktop-electron.yml`（Electron + Node Host），
+Android 使用 `.github/workflows/build-installers.yml`（Tauri/Rust）。Tauri 桌面构建、
+发布与便携版脚本已退役；保留 Android 工程和 Rust 核心。
 
-## 触发方式
+`src-tauri/` 已进一步裁剪为 Android 同步查看器，不再包含旧桌面、headless 或 Rust CLI。
+Cargo 默认 feature 为 `mobile`；Android CI 先运行核心 Rust 测试再构建 APK。
+边界与数据兼容说明见 [Android Rust 裁剪](android-rust-boundary.md)。
 
-- 在 GitHub 仓库的 **Actions → Build installers → Run workflow** 中手动触发。构建结果保存在该次运行的 Artifacts 中。
-- 发布 GitHub Release 时自动触发。构建结果除保存在 Artifacts 外，还会自动上传到对应 Release。
+## 触发与产物
 
-Release 应指向需要构建的版本提交。发布前请同步更新 `package.json`、`src-tauri/Cargo.toml` 和 `src-tauri/tauri.conf.json` 中的版本号。
+两个工作流都支持手动运行及 GitHub Release 发布触发；发布时将对应产物上传至该 Release。
+Electron 也保留 `v*-beta*` 标签推送触发，标签推送仅保存 workflow artifacts。
 
-## 平台验证状态
+| 平台 | 架构 | 产物 |
+| --- | --- | --- |
+| Windows | x64 | NSIS `.exe`、应用 `.zip`、带 `portable.tag` 的便携 `.zip` |
+| Linux | x64 | AppImage、Debian `.deb` |
+| macOS | arm64 / x64 | `.dmg`，ad-hoc 签名，未公证 |
+| Android | arm64 | 正式签名 `.apk`，实验性移动辅助端 |
 
-当前主要开发与完整回归环境是 **Windows 11 原生环境**，开发流程未启用或依赖 WSL。
+各平台任务独立。Linux 桌面 job 包含 Node 测试、154 条冻结命令兼容基线检查、
+首屏与全部页面冒烟；Windows/macOS 跑类型检查与 Node 测试并打包。
+这些 CI 定义的更新尚需在线运行验证；构建成功不代表跨平台真机回归完成。
+当前主要开发环境为 Windows 11 原生环境，Linux/macOS 仍需真机验证。
 
-GitHub Actions 会为 Windows、Linux 和 macOS 生成产物，但“自动构建成功”不等同于已经完成
-对应系统的真机功能回归。Linux 与 macOS 当前尚未完成作者真机回归验证；后续在对应环境完成
-安装、启动、代理、托盘、Agent 接入与核心数据链路测试后，再更新支持状态。
+发布前执行 `npm run version:set -- <semver>`：同步根包、Electron 包和 Android
+Rust crate 版本；Tauri 配置从根 `package.json` 读取版本。
 
-## 构建产物
+## 本地构建
 
-| 平台 | 架构 | 产物 | 当前验证状态 |
-| --- | --- | --- | --- |
-| Windows 11 | x64 | NSIS `.exe`、MSI `.msi`、便携版 `.zip` | 主要开发与完整回归环境（原生、无 WSL） |
-| Linux | x64 | AppImage、Debian `.deb` | CI 自动构建，尚未完成作者真机回归 |
-| macOS | Apple Silicon | `.dmg` | CI 自动构建并使用 ad-hoc 签名，尚未完成作者完整真机回归，未经过 Apple 公证 |
-| macOS | Intel | `.dmg` | CI 自动构建并使用 ad-hoc 签名，尚未完成作者完整真机回归，未经过 Apple 公证 |
-| Android | arm64 | 正式签名 `.apk` | 实验性移动辅助端 |
+```bash
+npm ci
+npm run fetch:catalogs
+npm run desktop:dist
+npm run desktop:portable
+```
 
-各平台任务彼此独立；单个平台失败不会取消其他平台正在执行的构建。
+共享图标、Agent 扩展源码分别位于 `resources/icons/` 与 `resources/agent-plugins/`；
+共享模型目录由抓取脚本生成到 `resources/catalogs/`，Electron 和 Android 均从这里读取。
+macOS 使用 `resources/icons/macos-icon.icns`，其余桌面平台使用通用图标。
+模型目录未入库，缺失时构建会报告需先拉取，不会静默打出缺少目录的 Electron 包。
 
-## Electron 桌面端（迁移验证包）
-
-桌面端迁移到 Electron 期间，`.github/workflows/desktop-electron.yml` 会构建
-**迁移验证包**（Windows NSIS/zip、Linux AppImage/deb、macOS dmg），与上面的 Tauri
-正式产物并行，**不覆盖** Release 资产：
-
-- 触发：Actions → **Desktop (Electron) build & smoke** → Run workflow；
-  推送 `v*-beta*` 标签时也会触发；
-- Linux job 会额外跑 `node --test packages/flowlet-core/src`、
-  `node scripts/desktop-command-parity.mjs --check`（Rust 154 条命令覆盖门禁）、
-  `npm run desktop:smoke`（首屏 + `/health`）与 `npm run desktop:smoke:pages`
-  （逐路由渲染 + 截图 + console/命令错误），产物里带 `.flowlet-dev-data/desktop-pages/`
-  的截图与 `report.json`；
-- Windows / macOS job 目前只构建与跑 Node 测试，**真机回归仍需人工完成**（见
-  `docs/desktop-electron.md` §8）。
-
-本地对应命令：`npm run desktop:smoke:pages`（可传 `--db=<sqlite>` 用老用户数据库副本）。
+Android 使用 `npm run tauri:android:init`、`npm run tauri:android:build`，
+AAB 使用 `npm run tauri:android:build:aab`。Android CLI、签名与上传蒲公英步骤保留。
+根脚本 `tauri` 保留给 Android Gradle 的 `android-studio-script` 回调使用；
+桌面入口 `tauri:dev`、`tauri:build` 和 Tauri 便携版脚本已移除。
 
 ## Android 签名
 
-Android Release job 需要配置以下 GitHub Actions Secrets：
+Release job 需要 GitHub Actions Secrets：`ANDROID_KEYSTORE_BASE64`、
+`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`；
+上传蒲公英另需 `PGYER_API_KEY`。CI 使用 Android SDK `apksigner` 验证正式签名，
+keystore 与临时配置不入库、不作为 artifact 上传。
 
-- `ANDROID_KEYSTORE_BASE64`：release keystore 文件的 Base64 内容；
-- `ANDROID_KEYSTORE_PASSWORD`：keystore 密码；
-- `ANDROID_KEY_ALIAS`：签名 Key Alias；
-- `ANDROID_KEY_PASSWORD`：签名 Key 密码。
+## 桌面签名
 
-流水线会生成仅包含 `arm64-v8a` 原生库的签名 APK，并在上传前使用 Android SDK 的
-`apksigner` 验证签名。keystore 和临时 `keystore.properties` 只存在于 Actions Runner，
-不会写入仓库或上传为构建产物。
-
-## 桌面签名说明
-
-Windows 安装包当前未签名。macOS 构建通过 `APPLE_SIGNING_IDENTITY=-` 使用 ad-hoc
-签名，满足 Apple Silicon 对应用签名结构的要求；流水线会在构建后、上传 Release 前运行
-`codesign --verify` 并确认签名类型为 `adhoc`，验证失败的 DMG 不会上传。ad-hoc 签名
-不代表开发者身份，也不等同于 Apple 公证。
-
-从浏览器下载未公证的 DMG 后，Gatekeeper 仍可能阻止首次启动。只应对从本仓库官方
-Release 下载并已核对 SHA-256 的文件执行以下操作：
-
-1. 打开 DMG，将 Flowlet 拖入 `Applications`；
-2. 在终端中执行 `xattr -dr com.apple.quarantine /Applications/Flowlet.app`；
-3. 再从“应用程序”或终端打开 Flowlet。
-
-正式签名后应移除上述手动放行说明，并将流水线切换为 `Developer ID Application`
-证书签名、Apple notarization 和 stapling。Windows 正式对外分发前也仍需补充代码签名。
-
-## macOS 图标
-
-macOS 使用 `src-tauri/icons/macos-icon.png` 作为专用图标源，并将生成的
-`macos-icon.icns` 配置到 Tauri bundle。该版本使用接近满画布的背景层承载 Flowlet 标记，
-避免新版 macOS 为大面积透明的旧式图标自动添加灰色兼容底板。其它平台继续使用
-`src-tauri/icon-manifest.json` 中的通用透明 logo，不受此次调整影响。
+Windows 安装包当前未签名。macOS 使用 electron-builder `identity: "-"` 进行 ad-hoc
+签名，在上传前运行 `codesign --verify --deep --strict` 并检查签名类型。ad-hoc 不代表
+开发者身份或 Apple 公证；Gatekeeper 仍可能阻止首次启动。正式分发需补充 Developer ID、
+Apple notarization/stapling 与 Windows 代码签名。

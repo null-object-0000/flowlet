@@ -401,7 +401,7 @@ v0–v3 轨迹事件的解析覆盖（与官方 `ui-conversation` / `ui-trajecto
   对话渲染审批历史行。
 - `llm/retry`：投影为 `model-retry` 事件（次数/延迟/失败原因）；`llm/retry-started` 不单列。
 
-回归夹具见 `src-tauri/tests/fixtures/dsh/`（真实会话裁剪，含未 seeded v3、seeded v3 与 v0），
+回归夹具见 `tests/fixtures/dsh/`（真实会话裁剪，含未 seeded v3、seeded v3 与 v0），
 另有 `#[ignore]` 的 `dsh_real_store_lists_and_projects_every_session` 可对真实
 `~/.dsh/sessions` 全量核对列表与投影。
 

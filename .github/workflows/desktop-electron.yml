@@ -1,22 +1,16 @@
-# Electron 桌面端（迁移验证）构建与冒烟。
-#
-# 与 build-installers.yml（Tauri 正式产物）并行存在，本 workflow 只产出
-# “Electron 迁移验证包”，不覆盖正式 Release 资产；确认桌面端切换后可在
-# build-installers.yml 中改为主产物。
-#
-# 触发：
-#   - 手动 Run workflow（默认构建三平台，可选只跑 Linux 冒烟）
-#   - 预发布标签（v*-beta*）推送
+# Official Electron desktop build/release; Android stays in build-installers.yml.
 name: Desktop (Electron) build & smoke
 
 on:
   workflow_dispatch:
+  release:
+    types: [published]
   push:
     tags:
       - "v*-beta*"
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: desktop-electron-${{ github.ref }}
@@ -34,14 +28,16 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: Fetch shared model catalogs
+        run: npm run fetch:catalogs
       - name: Typecheck (core + desktop host + frontend)
         run: |
           npm run node:typecheck
           npm run check
           npm run desktop:typecheck
       - name: Node tests (core + desktop commands)
-        run: node --test packages/flowlet-core/src
-      - name: Desktop command parity (Rust ↔ Node)
+        run: node --test "packages/flowlet-core/src/**/*.test.ts"
+      - name: Desktop command contract coverage
         run: node scripts/desktop-command-parity.mjs --check
       - name: Build desktop frontend + host bundle
         run: |
@@ -55,6 +51,19 @@ jobs:
         run: npm run desktop:smoke:pages
       - name: Package (AppImage + deb)
         run: npm run desktop:dist
+      - name: Upload desktop assets to Release
+        if: github.event_name == 'release'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s nullglob
+          assets=(packages/flowlet-desktop/release/*.AppImage packages/flowlet-desktop/release/*.deb packages/flowlet-desktop/release/*.exe packages/flowlet-desktop/release/*.zip packages/flowlet-desktop/release/*.dmg packages/flowlet-desktop/release/portable/*.zip)
+          if [ ${#assets[@]} -eq 0 ]; then
+            echo "No desktop assets were produced" >&2
+            exit 1
+          fi
+          gh release upload "${{ github.event.release.tag_name }}" "${assets[@]}" --clobber
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -78,17 +87,34 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: Fetch shared model catalogs
+        run: npm run fetch:catalogs
       - name: Typecheck + tests
         run: |
           npm run node:typecheck
           npm run desktop:typecheck
-          node --test packages/flowlet-core/src
+          node --test "packages/flowlet-core/src/**/*.test.ts"
       - name: Build desktop frontend + host bundle
         run: |
           npm run build:desktop
           npm run desktop:build
-      - name: Package (nsis + portable zip)
+      - name: Package (nsis + zip)
         run: npm run desktop:dist
+      - name: Build Windows portable ZIP
+        run: node scripts/build-desktop-portable.mjs --no-build
+      - name: Upload desktop assets to Release
+        if: github.event_name == 'release'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s nullglob
+          assets=(packages/flowlet-desktop/release/*.AppImage packages/flowlet-desktop/release/*.deb packages/flowlet-desktop/release/*.exe packages/flowlet-desktop/release/*.zip packages/flowlet-desktop/release/*.dmg packages/flowlet-desktop/release/portable/*.zip)
+          if [ ${#assets[@]} -eq 0 ]; then
+            echo "No desktop assets were produced" >&2
+            exit 1
+          fi
+          gh release upload "${{ github.event.release.tag_name }}" "${assets[@]}" --clobber
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -96,12 +122,16 @@ jobs:
           path: |
             packages/flowlet-desktop/release/*.exe
             packages/flowlet-desktop/release/*.zip
-            packages/flowlet-desktop/release/*.msi
+            packages/flowlet-desktop/release/portable/*.zip
           if-no-files-found: error
 
   macos:
-    name: macOS (build only)
+    name: macOS ${{ matrix.arch }} (build only)
     runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, x64]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -110,11 +140,13 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: Fetch shared model catalogs
+        run: npm run fetch:catalogs
       - name: Typecheck + tests
         run: |
           npm run node:typecheck
           npm run desktop:typecheck
-          node --test packages/flowlet-core/src
+          node --test "packages/flowlet-core/src/**/*.test.ts"
       - name: Build desktop frontend + host bundle
         run: |
           npm run build:desktop
@@ -122,10 +154,33 @@ jobs:
       - name: Package (dmg, ad-hoc)
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: npm run desktop:dist
+        run: npm run desktop:dist -- -- --${{ matrix.arch }}
+      - name: Verify macOS ad-hoc signature
+        shell: bash
+        run: |
+          shopt -s nullglob
+          apps=(packages/flowlet-desktop/release/mac*/Flowlet.app)
+          if [ ${#apps[@]} -eq 0 ]; then exit 1; fi
+          for app in "${apps[@]}"; do
+            codesign --verify --deep --strict --verbose=2 "$app"
+            codesign --display --verbose=4 "$app" 2>&1 | grep -q "^Signature=adhoc$"
+          done
+      - name: Upload desktop assets to Release
+        if: github.event_name == 'release'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s nullglob
+          assets=(packages/flowlet-desktop/release/*.AppImage packages/flowlet-desktop/release/*.deb packages/flowlet-desktop/release/*.exe packages/flowlet-desktop/release/*.zip packages/flowlet-desktop/release/*.dmg packages/flowlet-desktop/release/portable/*.zip)
+          if [ ${#assets[@]} -eq 0 ]; then
+            echo "No desktop assets were produced" >&2
+            exit 1
+          fi
+          gh release upload "${{ github.event.release.tag_name }}" "${assets[@]}" --clobber
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: flowlet-desktop-macos
+          name: flowlet-desktop-macos-${{ matrix.arch }}
           path: packages/flowlet-desktop/release/*.dmg
           if-no-files-found: error

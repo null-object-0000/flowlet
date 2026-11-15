@@ -1,5 +1,8 @@
 # Flowlet 代理核心迁移勘察：行为契约、Node 等价实现设计与 Spike 定义
 
+> 历史迁移记录：2026-11-15 起旧 Rust 桌面、headless 与凭据 CLI 源码已移除。
+> 本文中的旧路径/构建命令仅描述当时基线，当前 Android 边界见 [Android Rust 裁剪](../android-rust-boundary.md)。
+
 > **性质**：只读勘察结论 + 重写技术设计，是 `task-5` 的唯一产物。
 > **基线**：`main` @ `26fed4c`（2026-11-09，`feat: support LongCat-2.5`）。
 > **范围**：`src-tauri/src/core/{proxy,proxy_http,proxy_routing,proxy_anthropic_compat,proxy_tests,request_capture,logging,usage,rate_limiter}.rs`，及其装配点 `services.rs`、`bin/headless.rs`、`core/web/*`、`commands/proxy.rs`、`upstream_proxy.rs`、`model_catalog.rs`、`model_input_capabilities.rs`、`agent_identity_adapter*`、`agent_session_identity.rs`、`storage_usage.rs`（捕获/日志/用量段）、`config.rs`（代理相关结构）。

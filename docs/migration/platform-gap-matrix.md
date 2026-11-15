@@ -1,5 +1,8 @@
 # Flowlet Tauri/Rust → Electron + Node/TS 平台能力缺口矩阵
 
+> 历史迁移记录：2026-11-15 起旧 Rust 桌面、headless 与凭据 CLI 源码已移除。
+> 本文中的旧路径/构建命令仅描述当时基线，当前 Android 边界见 [Android Rust 裁剪](../android-rust-boundary.md)。
+
 > 状态：只读盘点结论（未运行任何 `cargo` / `npm` 构建，未修改 `src-tauri/` 与 `src/`）
 > 盘点基线：`main` @ `26fed4c`（2026-11-09）
 > Electron 依据：`electron/electron` 的 `main` 分支 API 文档（2026-11 拉取）与 `www.electron.build/docs/*`；本机 `web_fetch` 工具因上游 401 不可用，改用 `curl` 直接读取 `raw.githubusercontent.com` 文档源，见文末「取证方式与限制」
@@ -147,7 +150,7 @@ Flowlet 的桌面平台能力面比「标准 Electron 应用」大得多：除�
 | A5 | 退出清理（代理、Agent 运行时） | `lib.rs:603-621`；`agent_runtime::stop_all()`（`core/agent_runtime.rs`）；正常退出前 `taskkill /T /F` | `app.on('before-quit', e => { e.preventDefault(); await stopProxy(); await stopRuntimes(); app.exit(0); })`；渲染进程 `beforeunload` 不可靠，不要放业务清理 | EQ：需保证「先停代理/运行时、再退出」的顺序，并防止异步清理期间二次退出触发重入 | M | 中 |
 | A6 | 崩溃/panic 日志 | `core/logging.rs`：`init_file_logging()` + `install_panic_hook()`，`main.rs:4-7` 启动即装；`write_emergency_log` 兜底 | `process.on('uncaughtException' / 'unhandledRejection')`；`crashReporter.start()`（可选，需上传端）；日志用 pino/winston + 自实现轮转 | EQ | S | 低 |
 | A7 | 日志文件与轮转 | `tracing-appender`，默认写 `exe/logs`（与 SQLite 同级） | `app.getPath('logs')` / `app.setAppLogsPath(path)`；`pino` + `pino-roll` 或 `winston-daily-rotate-file` | EQ | S | 低 |
-| A8 | 数据目录自包含（便携版：SQLite/config/logs/device/WebView 全在 exe 旁） | `lib.rs:225-240` 数据库=exe 旁；`lib.rs:242-257` 便携版 config=exe 旁；`webview_profile.rs:15-34` 便携版 WebView 根=exe/data/webview；`scripts/build-portable.mjs:130-147` 复制 config + 写 `portable.tag` | `app.setPath('userData', dirname(process.execPath))` + `app.setPath('sessionData', ...)`（必须在 `ready` 前、任何 session 创建前调用）；`app.getPath('userData')`；`app.setAppLogsPath()` | DG：Electron 默认把 userData 放 `%APPDATA%/AppData`；便携语义需要显式重定向并处理「Program Files 只读」；Chromium 缓存/Partitions 会落在 `sessionData` 下，需与 Tauri 的 per-WebView 目录语义对齐 | M | 中 |
+| A8 | 数据目录自包含（便携版：SQLite/config/logs/device/WebView 全在 exe 旁） | `lib.rs:225-240` 数据库=exe 旁；`lib.rs:242-257` 便携版 config=exe 旁；`webview_profile.rs:15-34` 便携版 WebView 根=exe/data/webview；`scripts/build-desktop-portable.mjs:130-147` 复制 config + 写 `portable.tag` | `app.setPath('userData', dirname(process.execPath))` + `app.setPath('sessionData', ...)`（必须在 `ready` 前、任何 session 创建前调用）；`app.getPath('userData')`；`app.setAppLogsPath()` | DG：Electron 默认把 userData 放 `%APPDATA%/AppData`；便携语义需要显式重定向并处理「Program Files 只读」；Chromium 缓存/Partitions 会落在 `sessionData` 下，需与 Tauri 的 per-WebView 目录语义对齐 | M | 中 |
 | A9 | SIGTERM/SIGINT 优雅退出（headless/桌面共用服务层） | `src/bin/headless.rs:shutdown()`：`SIGTERM` / `ctrl_c` → `services.stop_proxy()`；Docker `STOPSIGNAL SIGTERM` + `stop_grace_period: 30s`（`docker-compose.yml`） | `process.on('SIGTERM'/'SIGINT')` + 关闭 server/proxy + SQLite checkpoint；Electron 桌面侧对应 `before-quit` | EQ | S | 低 |
 | A10 | 后台定时任务（S3 同步 15min、存储清理 15min、模型目录 1h） | `lib.rs:642-742`（S3 + 工作区同步，5s 首跑）、`744-768`（存储清理）、`770-791`（目录同步）；headless 侧 `src/bin/headless.rs` 三个 `spawn_*` | Node `setInterval`/`setTimeout`（`timers`）；注意 Electron 主进程不会因窗口隐藏而暂停，行为与 Tauri runtime 一致 | EQ | S | 低 |
 
@@ -241,7 +244,7 @@ Flowlet 的桌面平台能力面比「标准 Electron 应用」大得多：除�
 | # | 能力 | Rust 现状（实现位置与行为） | Electron 方案（具体 API / electron-builder 配置） | 缺口或降级 | 工作量 | 风险 |
 | --- | --- | --- | --- | --- | --- | --- |
 | I1 | Windows NSIS + MSI | `tauri.conf.json bundle.targets="all"`；CI `--bundles nsis,msi`（`build-installers.yml` Windows job）；未签名 | electron-builder `win.target: ['nsis','msi']`；`msi` 由内置 WiX Toolset 生成（`www.electron.build/docs/msi`）；`artifactName` 控制命名 | EQ；MSI 依赖 WiX 工具链（electron-builder 自动下载） | M | 中 |
-| I2 | Windows 便携版 ZIP（exe 旁数据、`portable.tag`、`config.json`） | `scripts/build-portable.mjs`：复制 exe + `flowlet_lib.dll`（旧）/config + 写 `portable.tag` + Python zip；CI 上传 `flowlet-windows-x64-portable` 产物并附 Release | electron-builder `win.target: ['zip']`（保留目录结构）或 `portable`（**单 exe 自解压到临时目录**）；主进程 `app.setPath('userData', dirname(process.execPath))` 恢复「exe 旁数据」；`portable.tag` 判定可保留 | **DG + HG-3**：`portable` target 语义是解压运行，不等于当前 ZIP 目录；要保住现有语义应选 `zip` + 自定义脚本；便携版 toast/AUMID 仍是硬缺口 | M | 高 |
+| I2 | Windows 便携版 ZIP（exe 旁数据、`portable.tag`、`config.json`） | `scripts/build-desktop-portable.mjs`：复制 exe + `flowlet_lib.dll`（旧）/config + 写 `portable.tag` + Python zip；CI 上传 `flowlet-windows-x64-portable` 产物并附 Release | electron-builder `win.target: ['zip']`（保留目录结构）或 `portable`（**单 exe 自解压到临时目录**）；主进程 `app.setPath('userData', dirname(process.execPath))` 恢复「exe 旁数据」；`portable.tag` 判定可保留 | **DG + HG-3**：`portable` target 语义是解压运行，不等于当前 ZIP 目录；要保住现有语义应选 `zip` + 自定义脚本；便携版 toast/AUMID 仍是硬缺口 | M | 高 |
 | I3 | Linux AppImage + deb | CI `--bundles appimage,deb`；依赖 `libwebkit2gtk-4.1-dev` 等系统包 | electron-builder `linux.target: ['AppImage','deb']`；无需 WebKitGTK，但仍需 GTK/X11 运行库；AppImage 需 FUSE/`--appimage-extract-and-run` 兼容说明 | EQ | M | 低 |
 | I4 | macOS dmg（aarch64 + x64） | CI `--bundles dmg`，`APPLE_SIGNING_IDENTITY=-` ad-hoc，构建后 `codesign --verify` + 校验 `Signature=adhoc` 才上传；文档说明未公证、需 `xattr -dr com.apple.quarantine`（`docs/release-builds.md`） | electron-builder `mac.target: ['dmg']`；ad-hoc：`mac.sign.identity: "-"`（electron-builder 文档；ad-hoc 应用仅适合自有分发，正式分发要 Developer ID + notarization）；公证：`mac.notarize`（@electron/notarize，需 Apple 凭据） | DG：可复制现有 ad-hoc 分发策略；一旦要公证需证书/Apple ID/Team ID，CI secrets 增加 | M | 中 |
 | I5 | Android 签名 APK | `tauri:android:build --apk --target aarch64`；CI 用 4 个 secrets 写 keystore + `keystore.properties`，`apksigner verify`，上传 Release + Pgyer（`build-installers.yml` android job） | **无**（Electron 无 Android target） | **HG-1**：见第 2 节 HG-1；若保留 Tauri Android，则此 job 原样保留（构建的是 Rust 核心而非 Electron） | L | 高 |
@@ -249,7 +252,7 @@ Flowlet 的桌面平台能力面比「标准 Electron 应用」大得多：除�
 | I7 | CI 构建矩阵 | `build-installers.yml`：4 个桌面 job（windows/linux/mac arm+intel）+ android job；步骤含 Rust toolchain、WebKitGTK 依赖、模型目录抓取重试、`tauri-apps/tauri-action@v1`、mac ad-hoc 校验、portable ZIP、Pgyer | GitHub Actions matrix：`npm ci` + electron-builder（`--win/--linux/--mac`）；缓存 Electron 二进制；删除 Rust/WebKitGTK/Android SDK 步骤（Android 视决策保留）；mac 签名/公证步骤；产物上传与 Release | DG：CI 重写；构建时间/缓存策略变化；Android job 是否保留取决于 HG-1 | M | 中 |
 | I8 | 自动更新 | 未启用：`uploadUpdaterJson: false`（`build-installers.yml`），无 updater 插件 | `electron-updater`（可选）；当前可继续不做 | EQ（无现状缺口） | S | 低 |
 | I9 | 随包资源（config.json / models-cn / models-dev） | `tauri.conf.json bundle.resources`；首次启动从 resource_dir 复制到 exe 旁（`lib.rs:326-348`） | electron-builder `extraResources` + 主进程首启复制到 userData/exe 旁；`process.resourcesPath` 定位 | EQ | S | 低 |
-| I10 | 图标/托盘资源 | `src-tauri/icons/*`、`tray.png`、`macos-icon.icns`、`icon-manifest.json`；macOS 专用图标处理（`docs/release-builds.md`） | electron-builder `icon`（ico/icns/png 目录）；`nativeImage.createFromPath('icons/tray.png')`；macOS Template Image 注意 Retina | EQ | S | 低 |
+| I10 | 图标/托盘资源 | `resources/icons/*`、`tray.png`、`macos-icon.icns`、`icon-manifest.json`；macOS 专用图标处理（`docs/release-builds.md`） | electron-builder `icon`（ico/icns/png 目录）；`nativeImage.createFromPath('icons/tray.png')`；macOS Template Image 注意 Retina | EQ | S | 低 |
 
 ### 3.10 平台覆盖矩阵（移动端与浏览器 Host）
 
@@ -267,7 +270,7 @@ Flowlet 的桌面平台能力面比「标准 Electron 应用」大得多：除�
 
 | 平台 | 现有产物 / CI 参数 | electron-builder 等价 target | 签名差异 | 风险/备注 |
 | --- | --- | --- | --- | --- |
-| Windows 11 x64 | NSIS `.exe` + MSI `.msi`（`--bundles nsis,msi`），**未签名**；另加便携 ZIP（`scripts/build-portable.mjs`） | `win.target: ['nsis','msi']`；便携语义用 `zip`（保目录结构）或 `portable`（单 exe 自解压，语义不同） | 均为未签名；electron-builder 可用 `signtool`/Azure Trusted Signing/HSM（需证书） | MSI 依赖 WiX；便携版 toast/AUMID 见 HG-3；`portable` target 会改变「exe 旁数据目录」语义 |
+| Windows 11 x64 | NSIS `.exe` + MSI `.msi`（`--bundles nsis,msi`），**未签名**；另加便携 ZIP（`scripts/build-desktop-portable.mjs`） | `win.target: ['nsis','msi']`；便携语义用 `zip`（保目录结构）或 `portable`（单 exe 自解压，语义不同） | 均为未签名；electron-builder 可用 `signtool`/Azure Trusted Signing/HSM（需证书） | MSI 依赖 WiX；便携版 toast/AUMID 见 HG-3；`portable` target 会改变「exe 旁数据目录」语义 |
 | Linux x64 | AppImage + Debian `.deb`（`--bundles appimage,deb`）；CI 装 `libwebkit2gtk-4.1-dev` 等 | `linux.target: ['AppImage','deb']` | 无签名要求 | 不再需要 WebKitGTK 开发包；AppImage 需说明 FUSE/`--appimage-extract-and-run`；文件管理器/桌面集成行为不同需回归 |
 | macOS Apple Silicon | `.dmg` + ad-hoc（`APPLE_SIGNING_IDENTITY=-`），CI `codesign --verify` 断言 `Signature=adhoc` | `mac.target: ['dmg']` + `mac.sign.identity: "-"`（ad-hoc） | ad-hoc 不能公证；正式分发需 Developer ID + `mac.notarize`（@electron/notarize） | 当前分发依赖 `xattr -dr com.apple.quarantine`；electron-builder 的 ad-hoc 文档措辞是「仅可在构建机运行」，实际分发策略需 PoC 确认 |
 | macOS Intel | 同上 | 同上（`--x64`） | 同上 | 同上 |
@@ -411,7 +414,7 @@ Flowlet 的桌面平台能力面比「标准 Electron 应用」大得多：除�
 
 ## 8. 取证方式与限制（「未确认」项）
 
-- 本文所有 Rust 现状均来自对 `src-tauri/src/**`、`src-tauri/Cargo.toml`、`src-tauri/tauri*.conf.json`、`src-tauri/gen/android`、`.github/workflows/build-installers.yml`、`scripts/build-portable.mjs`、`Dockerfile`、`docker-compose.yml`、`docs/*.md`、`src/platform/**`、`src/app/shell/**`、`package.json` 的直接阅读；未运行 `cargo`/`npm` 构建，未修改 `src-tauri/` 与 `src/` 下任何文件。
+- 本文所有 Rust 现状均来自对 `src-tauri/src/**`、`src-tauri/Cargo.toml`、`src-tauri/tauri*.conf.json`、`src-tauri/gen/android`、`.github/workflows/build-installers.yml`、`scripts/build-desktop-portable.mjs`、`Dockerfile`、`docker-compose.yml`、`docs/*.md`、`src/platform/**`、`src/app/shell/**`、`package.json` 的直接阅读；未运行 `cargo`/`npm` 构建，未修改 `src-tauri/` 与 `src/` 下任何文件。
 - Electron API 依据 `electron/electron` **main 分支**文档（2026-11 拉取）：`docs/api/app.md`、`power-save-blocker.md`、`power-monitor.md`、`safe-storage.md`、`notification.md`、`tray.md`、`debugger.md`、`session.md`、`web-contents.md`、`browser-window.md`、`structures/base-window-options.md`、`tutorial/notifications.md`、`tutorial/custom-window-styles.md`。注意 main 分支可能领先当前稳定版（例如 safeStorage 同步 API 在 Electron 46 移除），**迁移时需锁定目标 Electron 版本重读对应版本文档**。
 - electron-builder 依据 `www.electron.build/docs/{targets,nsis,msi,linux,mac,appimage,dmg}`（2026-11 拉取）。
 - 本机 `web_fetch` 工具因上游 API 401 不可用，改用 `curl` 读取 `raw.githubusercontent.com` 文档源；属于只读取证，不影响结论。
@@ -445,6 +448,6 @@ Flowlet 的桌面平台能力面比「标准 Electron 应用」大得多：除�
   - `src-tauri/src/core/web/{mod,commands}.rs`、`src-tauri/src/mobile_commands.rs`、`src-tauri/src/commands/{scrape,maintenance,agent}.rs`
   - `src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json`、`src-tauri/tauri.android.conf.json`、`src-tauri/tauri.ios.conf.json`、`src-tauri/gen/android/**`
   - `src/app/shell/{WindowControls,WindowResizeHandles}.tsx`、`src/platform/{tauri,web}/**`、`src/shared/ui/overlayLayers.ts`
-  - `.github/workflows/build-installers.yml`、`scripts/build-portable.mjs`、`Dockerfile`、`docker-compose.yml`
+  - `.github/workflows/build-installers.yml`、`scripts/build-desktop-portable.mjs`、`Dockerfile`、`docker-compose.yml`
   - `docs/{release-builds,docker,windows-suspend-resume-network-resilience}.md`
 

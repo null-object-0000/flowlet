@@ -1,18 +1,10 @@
-use super::config::{AuthStrategy, ConfigBundle, ModelPrice};
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::Connection;
 use std::{
-    collections::{HashMap, HashSet},
-    path::{Path, PathBuf},
+    collections::HashMap,
+    path::Path,
     sync::{Arc, Mutex},
 };
 use thiserror::Error;
-
-#[path = "request_capture.rs"]
-mod request_capture;
-use request_capture::RequestCaptureStore;
-
-/// 体积上限是软限制：最近一小时的 Body 始终保留，避免用户刚完成请求就看不到详情。
-const BODY_SIZE_PRUNE_MIN_AGE_HOURS: i64 = 1;
 
 #[derive(Debug, Error)]
 pub enum StorageError {
@@ -24,69 +16,17 @@ pub enum StorageError {
     InvalidImport(String),
     #[error("数据库状态锁定失败")]
     LockFailed,
-    #[error("后台任务运行冲突: {0}")]
-    JobRuntime(String),
-    #[error("请求明细存储错误: {0}")]
-    RequestCapture(#[from] request_capture::RequestCaptureError),
 }
 
-#[path = "storage_config.rs"]
-mod storage_config;
-#[path = "storage_credentials.rs"]
-mod storage_credentials;
 #[path = "storage_device_usage.rs"]
 mod storage_device_usage;
-#[path = "storage_maintenance.rs"]
-mod storage_maintenance;
-#[path = "storage_stats.rs"]
-mod storage_stats;
-#[path = "storage_tasks.rs"]
-pub(crate) mod storage_tasks;
-#[path = "storage_usage.rs"]
-mod storage_usage;
-pub use storage_maintenance::{DatabaseCompactionResult, DatabaseMaintenanceStats};
-pub use storage_stats::{StorageUsageCategory, StorageUsageSummary};
-pub use storage_tasks::{
-    AgentDataSyncResult, AgentSyncStatusReport, BackgroundJobDetail, BackgroundJobRow,
-    BackgroundJobsFilter, BackgroundJobsPage, CatalogSyncResult, CleanupBackgroundJobsResult,
-};
-
-/// 三方服务凭据的持久化行：`secret_ciphertext` 是 `secret_box` 加密后的密文，
-/// 明文只在保存、校验和导出时短暂出现在内存里。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ServiceCredentialRow {
-    pub id: String,
-    pub name: String,
-    pub provider: String,
-    pub base_url: String,
-    pub secret_ciphertext: String,
-    pub secret_hint: String,
-    pub kind: String,
-    pub note: Option<String>,
-    /// 环境前缀（已归一大写）；旧行为 NULL，读取时按 provider 默认解析。
-    pub env_prefix: Option<String>,
-    /// Jenkins 用户名（明文）；GitLab/Dockhand 恒为 NULL。
-    pub username: Option<String>,
-    pub enabled: bool,
-    pub created_at: String,
-    pub updated_at: String,
-    pub last_verified_at: Option<String>,
-    pub last_error: Option<String>,
-}
 
 #[derive(Clone)]
 pub struct Storage {
     connection: Arc<Mutex<Connection>>,
-    prices: Arc<Mutex<Vec<ModelPrice>>>,
-    db_path: Arc<PathBuf>,
-    capture_store: Arc<RequestCaptureStore>,
 }
 
 impl Storage {
-    pub(crate) fn database_path(&self) -> &Path {
-        self.db_path.as_path()
-    }
-
     pub fn open(path: impl AsRef<Path>) -> Result<Self, StorageError> {
         let is_new_database = std::fs::metadata(path.as_ref())
             .map(|metadata| metadata.len() == 0)
@@ -100,640 +40,43 @@ impl Storage {
         connection.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")?;
         let storage = Self {
             connection: Arc::new(Mutex::new(connection)),
-            prices: Arc::new(Mutex::new(Vec::new())),
-            db_path: Arc::new(path.as_ref().to_path_buf()),
-            capture_store: Arc::new(RequestCaptureStore::for_database(path.as_ref())),
         };
         storage.migrate()?;
         Ok(storage)
-    }
-
-    /// 设置运行时模型价格（三段价格）。仅来自 config.json，这是价格的唯一真实来源。
-    /// 写入后费用计算直接使用此内存副本，不再读取数据库。
-    pub fn set_prices(&self, prices: Vec<ModelPrice>) {
-        if let Ok(mut current) = self.prices.lock() {
-            *current = prices;
-        }
-    }
-
-    pub fn prices(&self) -> Vec<ModelPrice> {
-        self.prices.lock().map(|p| p.clone()).unwrap_or_default()
     }
 
     #[cfg(test)]
     pub(crate) fn from_connection_for_test(connection: Connection) -> Self {
         Self {
             connection: Arc::new(Mutex::new(connection)),
-            prices: Arc::new(Mutex::new(Vec::new())),
-            db_path: Arc::new(PathBuf::from(":memory:")),
-            capture_store: Arc::new(RequestCaptureStore::for_test()),
         }
     }
 
-    // ─── Config Import/Export ────────────────────────────────────────────────
-
-    /// 导出完整配置为 JSON 字符串
-    pub fn export_config(&self) -> Result<String, StorageError> {
-        let bundle = ConfigBundle {
-            version: "1".to_string(),
-            exported_at: chrono::Utc::now().to_rfc3339(),
-            channels: self.list_channel_presets()?,
-            accounts: self.list_channel_accounts()?,
-            routes: self.list_route_candidates()?,
-            rules: self.list_route_rules()?,
-            prices: self.prices(),
-            virtual_models: self.list_virtual_models()?,
-        };
-        serde_json::to_string_pretty(&bundle)
-            .map_err(|e| StorageError::Sqlite(rusqlite::Error::ToSqlConversionFailure(Box::new(e))))
-    }
-
-    /// 从 JSON 字符串导入配置（覆盖现有配置）
-    pub fn import_config(&self, json: &str) -> Result<(), StorageError> {
-        let bundle: ConfigBundle = serde_json::from_str(json).map_err(|e| {
-            StorageError::Sqlite(rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
-        })?;
-
-        self.save_channel_presets(&bundle.channels)?;
-        self.save_channel_accounts(&bundle.accounts)?;
-        self.save_route_candidates(&bundle.routes)?;
-        self.save_route_rules(&bundle.rules)?;
-        self.save_virtual_models(&bundle.virtual_models)?;
-
-        // 价格不再持久化到数据库；配置导入时直接更新内存中的价格副本。
-        self.set_prices(bundle.prices);
-        Ok(())
-    }
-
-    /// 用已经过验证的数据库安全替换当前数据库。
-    ///
-    /// 整个切换期间持有连接锁，先把导入库复制到目标目录并完成迁移，再关闭旧连接，
-    /// 通过同目录 rename 切换文件。打开新库失败时会恢复原文件和连接。
-    pub fn replace_database_from(&self, source: impl AsRef<Path>) -> Result<(), StorageError> {
-        let target = self.db_path.as_ref();
-        let parent = target.parent().unwrap_or_else(|| Path::new("."));
-        let nonce = uuid::Uuid::new_v4();
-        let staged = parent.join(format!(".flowlet-import-stage-{nonce}.sqlite"));
-        let rollback = parent.join(format!(".flowlet-import-rollback-{nonce}.sqlite"));
-
-        std::fs::copy(source.as_ref(), &staged)?;
-
-        let staged_storage = match Storage::open(&staged) {
-            Ok(storage) => storage,
-            Err(error) => {
-                remove_sqlite_files(&staged);
-                return Err(error);
-            }
-        };
-        {
-            let connection = staged_storage
-                .connection
-                .lock()
-                .map_err(|_| StorageError::LockFailed)?;
-            let check: String = connection.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
-            if check != "ok" {
-                drop(connection);
-                drop(staged_storage);
-                remove_sqlite_files(&staged);
-                return Err(StorageError::InvalidImport(check));
-            }
-            connection
-                .execute_batch("PRAGMA wal_checkpoint(TRUNCATE); PRAGMA journal_mode = DELETE;")?;
-        }
-        drop(staged_storage);
-
-        let mut guard = self
-            .connection
-            .lock()
-            .map_err(|_| StorageError::LockFailed)?;
-        guard.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
-        let placeholder = Connection::open_in_memory()?;
-        let old_connection = std::mem::replace(&mut *guard, placeholder);
-        drop(old_connection);
-        remove_sqlite_sidecars(target);
-
-        let switch_result = (|| -> Result<Connection, StorageError> {
-            if target.exists() {
-                std::fs::rename(target, &rollback)?;
-            }
-            std::fs::rename(&staged, target)?;
-            let connection = Connection::open(target)?;
-            connection.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")?;
-            Ok(connection)
-        })();
-
-        match switch_result {
-            Ok(connection) => {
-                *guard = connection;
-                remove_sqlite_files(&rollback);
-                Ok(())
-            }
-            Err(switch_error) => {
-                let restore_file_result = if rollback.exists() {
-                    remove_sqlite_files(target);
-                    std::fs::rename(&rollback, target).map_err(StorageError::Io)
-                } else {
-                    Ok(())
-                };
-
-                let restore_connection_result = Connection::open(target).and_then(|connection| {
-                    connection
-                        .execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")?;
-                    Ok(connection)
-                });
-
-                remove_sqlite_files(&staged);
-
-                match (restore_file_result, restore_connection_result) {
-                    (Ok(()), Ok(connection)) => {
-                        *guard = connection;
-                        Err(switch_error)
-                    }
-                    (file_result, connection_result) => {
-                        let restore_error = file_result
-                            .err()
-                            .map(|error| error.to_string())
-                            .or_else(|| connection_result.err().map(|error| error.to_string()))
-                            .unwrap_or_else(|| "未知恢复错误".to_string());
-                        Err(StorageError::InvalidImport(format!(
-                            "数据库切换失败（{switch_error}），恢复原数据库也失败（{restore_error}）"
-                        )))
-                    }
-                }
-            }
-        }
-    }
-
-    /// 备份当前数据库到指定路径（使用独立连接，不阻塞主连接和代理请求）
-    pub fn backup_to_path(&self, dest: impl AsRef<Path>) -> Result<(), StorageError> {
-        // Brief WAL flush on main connection (PASSIVE = non-blocking)
-        if let Ok(conn) = self.connection.lock() {
-            let _ = conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);");
-        }
-        // Open separate connection for backup — the main connection stays free
-        // for the proxy to continue logging requests
-        let src = Connection::open(self.db_path.as_ref())?;
-        let mut dst = Connection::open(dest.as_ref())?;
-        let backup = rusqlite::backup::Backup::new(&src, &mut dst).map_err(StorageError::Sqlite)?;
-        backup
-            .run_to_completion(100, std::time::Duration::from_millis(10), None)
-            .map_err(StorageError::Sqlite)?;
-        Ok(())
-    }
-
-    // ─── Maintenance ─────────────────────────────────────────────────────────
-
-    /// 清理指定天数之前的请求日志和用量记录，返回删除的记录数
-    pub fn cleanup_old_logs(&self, keep_days: i64) -> Result<(usize, usize), StorageError> {
-        let cutoff = format!("datetime('now', '-{} days')", keep_days);
-
-        let request_log_ids = {
-            let connection = self
-                .connection
-                .lock()
-                .map_err(|_| StorageError::LockFailed)?;
-            let mut stmt = connection.prepare(&format!(
-                "SELECT id FROM request_logs WHERE created_at < {cutoff}"
-            ))?;
-            let rows = stmt
-                .query_map([], |row| row.get::<_, String>(0))?
-                .collect::<Result<Vec<_>, _>>()?;
-            rows
-        };
-        // 先从捕获 segment 中移除敏感 Body，再删除 SQLite 索引。日志清理失败时
-        // 最多保留不含 Body 的明细，不会出现数据库已删但文件仍保留原始报文。
-        self.clear_body_data_by_log_ids(&request_log_ids, "log_retention")?;
-
+    pub fn get_app_meta(&self, key: &str) -> Result<Option<String>, StorageError> {
         let connection = self
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
-
-        let deleted_logs = connection.execute(
-            &format!("DELETE FROM request_logs WHERE created_at < {}", cutoff),
-            [],
-        )?;
-
-        let deleted_usage = connection.execute(
-            &format!("DELETE FROM usage_records WHERE created_at < {}", cutoff),
-            [],
-        )?;
-
-        // 注意：不再在此处执行 VACUUM。VACUUM 会重写整个 DB 文件，大库清理时
-        // 会冻结数秒。 SQLite WAL + 空闲页复用已足够回收空间；如需压缩磁盘
-        // 可在程序空闲时由外部 sqlite3 命令行手动执行 VACUUM。
-
-        Ok((deleted_logs, deleted_usage))
+        let mut stmt = connection.prepare("SELECT value FROM app_meta WHERE key = ?1")?;
+        let mut rows = stmt.query_map([key], |row| row.get::<_, String>(0))?;
+        Ok(rows.next().transpose()?)
     }
 
-    /// 清理超过保留天数的请求/响应 Body 数据。
-    ///
-    /// 仅清除已有完整 Token 用量统计的记录（输入、输出 Token 均已计算），
-    /// 确保数据修复（reanalyze_captured_usage）不会因 Body 提前清理而丢失可重解析对象。
-    ///
-    /// 返回清除 Body 的记录数。
-    pub fn cleanup_expired_body_data(&self, retention_days: i64) -> Result<usize, StorageError> {
-        if retention_days < 0 {
-            // -1 = 永久保留，不做清理
-            return Ok(0);
-        }
-        let cutoff = format!("datetime('now', '-{} days')", retention_days);
-        let ids = {
-            let connection = self
-                .connection
-                .lock()
-                .map_err(|_| StorageError::LockFailed)?;
-            let mut stmt = connection.prepare(&format!(
-                r#"SELECT rl.id
-                   FROM request_logs rl
-                   LEFT JOIN request_capture_refs refs ON refs.request_log_id = rl.id
-                   WHERE rl.created_at < {}
-                     AND (
-                       rl.req_body_b64 IS NOT NULL OR rl.res_body_b64 IS NOT NULL
-                       OR (refs.state = 'ready' AND (refs.req_body_bytes > 0 OR refs.res_body_bytes > 0))
-                     )
-                     AND EXISTS (
-                       SELECT 1 FROM usage_records ur
-                       WHERE ur.request_id = rl.request_id
-                         AND ur.input_tokens IS NOT NULL
-                         AND ur.output_tokens IS NOT NULL
-                     )"#,
-                cutoff
-            ))?;
-            let rows = stmt
-                .query_map([], |row| row.get::<_, String>(0))?
-                .collect::<Result<Vec<_>, _>>()?;
-            rows
-        };
-        self.clear_body_data_by_log_ids(&ids, "retention")
-    }
-
-    /// 获取当前 Body 数据总占用字节数（req_body_b64 + res_body_b64 的 length 之和）。
-    pub fn get_total_body_size_bytes(&self) -> Result<i64, StorageError> {
-        let connection = self
-            .connection
-            .lock()
-            .map_err(|_| StorageError::LockFailed)?;
-
-        let size: i64 = connection.query_row(
-            r#"SELECT
-                 COALESCE((
-                   SELECT SUM(length(COALESCE(req_body_b64, '')) + length(COALESCE(res_body_b64, '')))
-                   FROM request_logs
-                   WHERE req_body_b64 IS NOT NULL OR res_body_b64 IS NOT NULL
-                 ), 0)
-                 + COALESCE((
-                   SELECT SUM(req_body_bytes + res_body_bytes)
-                   FROM request_capture_refs
-                   WHERE state = 'ready'
-                 ), 0)"#,
-            [],
-            |row| row.get(0),
-        )?;
-
-        Ok(size)
-    }
-
-    /// 按体积上限清理最老的 Body 数据（单次清理，不长期持锁）。
-    /// 仅清除至少一小时前、输入与输出 Token 均已计算的记录。
-    /// 如果近期 Body 自身超过上限，则允许暂时超限，不牺牲刚完成请求的可排查性。
-    ///
-    /// 清理策略（按体积而非记录数）：
-    /// - 当前体积已低于 target_bytes * (1 - prune_ratio) 时直接返回 0
-    /// - 否则按"符合条件记录总数的 prune_ratio"换算成单批数量，一次性删最老的这批
-    /// - 若要压到目标以下，由调用方循环多次调用本函数（每次调用只持锁一次）
-    ///
-    /// 返回实际清理的行数。
-    pub fn prune_oldest_body_data(
-        &self,
-        target_bytes: i64,
-        prune_ratio: f64,
-    ) -> Result<usize, StorageError> {
-        let prune_ratio = prune_ratio.clamp(0.0, 1.0);
-        if prune_ratio <= 0.0 {
-            return Ok(0);
-        }
-
-        // 目标：压到 target_bytes * (1 - prune_ratio) 以下
-        let goal_bytes = ((target_bytes as f64) * (1.0 - prune_ratio)).max(0.0) as i64;
-
-        // 当前体积
-        let current_bytes = self.get_total_body_size_bytes()?;
-        if current_bytes <= goal_bytes {
-            return Ok(0);
-        }
-
-        // 符合条件记录总数（决定批大小）
-        let connection = self
-            .connection
-            .lock()
-            .map_err(|_| StorageError::LockFailed)?;
-        let total_eligible: i64 = connection.query_row(
-            r#"SELECT COUNT(*) FROM request_logs rl
-               LEFT JOIN request_capture_refs refs ON refs.request_log_id = rl.id
-               WHERE rl.created_at < datetime('now', '-1 hour')
-                 AND (rl.req_body_b64 IS NOT NULL OR rl.res_body_b64 IS NOT NULL
-                      OR (refs.state = 'ready' AND (refs.req_body_bytes > 0 OR refs.res_body_bytes > 0)))
-                 AND EXISTS (
-                   SELECT 1 FROM usage_records ur
-                   WHERE ur.request_id = rl.request_id
-                     AND ur.input_tokens IS NOT NULL
-                     AND ur.output_tokens IS NOT NULL
-                 )"#,
-            [],
-            |row| row.get(0),
-        )?;
-        if total_eligible == 0 {
-            return Ok(0);
-        }
-
-        // 批大小：按 prune_ratio 换算成数量（至少 1 条）
-        let batch_size = ((total_eligible as f64) * prune_ratio).ceil() as i64;
-        let batch_size = std::cmp::max(batch_size, 1);
-
-        let ids = {
-            let mut stmt = connection.prepare(&format!(
-                r#"SELECT rl.id FROM request_logs rl
-                   LEFT JOIN request_capture_refs refs ON refs.request_log_id = rl.id
-                   WHERE rl.created_at < datetime('now', '-{} hours')
-                     AND (rl.req_body_b64 IS NOT NULL OR rl.res_body_b64 IS NOT NULL
-                          OR (refs.state = 'ready' AND (refs.req_body_bytes > 0 OR refs.res_body_bytes > 0)))
-                     AND EXISTS (
-                       SELECT 1 FROM usage_records ur
-                       WHERE ur.request_id = rl.request_id
-                         AND ur.input_tokens IS NOT NULL
-                         AND ur.output_tokens IS NOT NULL
-                     )
-                   ORDER BY rl.created_at ASC
-                   LIMIT {}"#,
-                BODY_SIZE_PRUNE_MIN_AGE_HOURS, batch_size
-            ))?;
-            let rows = stmt
-                .query_map([], |row| row.get::<_, String>(0))?
-                .collect::<Result<Vec<_>, _>>()?;
-            rows
-        };
-        drop(connection);
-        self.clear_body_data_by_log_ids(&ids, "size_limit")
-    }
-
-    fn clear_body_data_by_log_ids(
-        &self,
-        request_log_ids: &[String],
-        reason: &str,
-    ) -> Result<usize, StorageError> {
-        if request_log_ids.is_empty() {
-            return Ok(0);
-        }
-        let targets = request_log_ids.iter().cloned().collect::<HashSet<_>>();
-        let mut segments = HashMap::<String, Vec<String>>::new();
-        {
-            let connection = self
-                .connection
-                .lock()
-                .map_err(|_| StorageError::LockFailed)?;
-            for request_log_id in request_log_ids {
-                let storage_key = connection
-                    .query_row(
-                        r#"SELECT storage_key FROM request_capture_refs
-                           WHERE request_log_id = ?1 AND state = 'ready'"#,
-                        [request_log_id],
-                        |row| row.get::<_, String>(0),
-                    )
-                    .optional()?;
-                if let Some(storage_key) = storage_key {
-                    segments
-                        .entry(storage_key)
-                        .or_default()
-                        .push(request_log_id.clone());
-                }
-            }
-        }
-
-        let mut cleared = HashSet::<String>::new();
-        for storage_key in segments.keys() {
-            let writer_guard = self.capture_store.lock_writer()?;
-            let live = {
-                let connection = self
-                    .connection
-                    .lock()
-                    .map_err(|_| StorageError::LockFailed)?;
-                let mut stmt = connection.prepare(
-                    r#"SELECT request_log_id, frame_offset, frame_length, checksum,
-                              format_version, req_body_bytes, res_body_bytes
-                       FROM request_capture_refs
-                       WHERE storage_key = ?1 AND state = 'ready'
-                       ORDER BY frame_offset"#,
-                )?;
-                let rows = stmt
-                    .query_map([storage_key], |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            request_capture::RequestCapturePointer {
-                                storage_key: storage_key.clone(),
-                                offset: row.get::<_, i64>(1)? as u64,
-                                length: row.get::<_, i64>(2)? as u64,
-                                checksum: row.get(3)?,
-                                format_version: row.get::<_, i64>(4)? as u16,
-                                req_body_bytes: row.get(5)?,
-                                res_body_bytes: row.get(6)?,
-                            },
-                        ))
-                    })?
-                    .collect::<Result<Vec<_>, _>>()?;
-                rows
-            };
-            let mut records = Vec::with_capacity(live.len());
-            let mut ids = Vec::with_capacity(live.len());
-            let mut body_presence = Vec::with_capacity(live.len());
-            for (request_log_id, pointer) in &live {
-                let mut record = self.capture_store.read(pointer)?;
-                let had_req_body = record.req_body_b64.is_some();
-                let had_res_body = record.res_body_b64.is_some();
-                if targets.contains(request_log_id) && (had_req_body || had_res_body) {
-                    record.req_body_b64 = None;
-                    record.res_body_b64 = None;
-                    cleared.insert(request_log_id.clone());
-                }
-                ids.push(request_log_id.clone());
-                body_presence.push((had_req_body, had_res_body));
-                records.push(record);
-            }
-            if records.is_empty() {
-                continue;
-            }
-            let pointers =
-                self.capture_store
-                    .rewrite_segment_locked(storage_key, &records, &writer_guard)?;
-            let update_result = (|| -> Result<(), StorageError> {
-                let mut connection = self
-                    .connection
-                    .lock()
-                    .map_err(|_| StorageError::LockFailed)?;
-                let transaction = connection.transaction()?;
-                for ((request_log_id, (had_req_body, had_res_body)), pointer) in
-                    ids.iter().zip(body_presence.iter()).zip(pointers.iter())
-                {
-                    transaction.execute(
-                        r#"UPDATE request_capture_refs
-                           SET storage_key = ?2, frame_offset = ?3, frame_length = ?4,
-                               checksum = ?5, format_version = ?6,
-                               req_body_bytes = ?7, res_body_bytes = ?8,
-                               state = ?9, failure_reason = NULL, updated_at = datetime('now')
-                           WHERE request_log_id = ?1"#,
-                        rusqlite::params![
-                            request_log_id,
-                            pointer.storage_key,
-                            pointer.offset as i64,
-                            pointer.length as i64,
-                            pointer.checksum,
-                            pointer.format_version as i64,
-                            pointer.req_body_bytes,
-                            pointer.res_body_bytes,
-                            if targets.contains(request_log_id) {
-                                "cleared"
-                            } else {
-                                "ready"
-                            },
-                        ],
-                    )?;
-                    if targets.contains(request_log_id) {
-                        transaction.execute(
-                            r#"UPDATE request_logs
-                               SET req_body_cleared_at = CASE WHEN ?2 THEN datetime('now') ELSE req_body_cleared_at END,
-                                   req_body_cleanup_reason = CASE WHEN ?2 THEN ?4 ELSE req_body_cleanup_reason END,
-                                   res_body_cleared_at = CASE WHEN ?3 THEN datetime('now') ELSE res_body_cleared_at END,
-                                   res_body_cleanup_reason = CASE WHEN ?3 THEN ?4 ELSE res_body_cleanup_reason END,
-                                   req_body_b64 = NULL, res_body_b64 = NULL
-                               WHERE id = ?1"#,
-                            rusqlite::params![
-                                request_log_id,
-                                had_req_body,
-                                had_res_body,
-                                reason,
-                            ],
-                        )?;
-                    }
-                }
-                transaction.commit()?;
-                Ok(())
-            })();
-            if let Err(error) = update_result {
-                if let Some(pointer) = pointers.first() {
-                    let _ = self
-                        .capture_store
-                        .remove_segment_locked(&pointer.storage_key, &writer_guard);
-                }
-                return Err(error);
-            }
-            self.capture_store
-                .remove_segment_locked(storage_key, &writer_guard)?;
-        }
-
-        // Historical rows without file references remain supported during migration.
-        let connection = self
-            .connection
-            .lock()
-            .map_err(|_| StorageError::LockFailed)?;
-        for request_log_id in request_log_ids {
-            let changed = connection.execute(
-                r#"UPDATE request_logs
-                   SET req_body_cleared_at = CASE WHEN req_body_b64 IS NOT NULL THEN datetime('now') ELSE req_body_cleared_at END,
-                       req_body_cleanup_reason = CASE WHEN req_body_b64 IS NOT NULL THEN ?2 ELSE req_body_cleanup_reason END,
-                       res_body_cleared_at = CASE WHEN res_body_b64 IS NOT NULL THEN datetime('now') ELSE res_body_cleared_at END,
-                       res_body_cleanup_reason = CASE WHEN res_body_b64 IS NOT NULL THEN ?2 ELSE res_body_cleanup_reason END,
-                       req_body_b64 = NULL, res_body_b64 = NULL
-                   WHERE id = ?1 AND (req_body_b64 IS NOT NULL OR res_body_b64 IS NOT NULL)"#,
-                rusqlite::params![request_log_id, reason],
-            )?;
-            if changed > 0 {
-                cleared.insert(request_log_id.clone());
-            }
-        }
-        Ok(cleared.len())
-    }
-
-    /// 按体积上限循环清理最老的 Body 数据，直到低于目标或无记录可删。
-    /// 每次清理都单独持锁（不阻塞其他 DB 操作），带安全兜底上限。
-    /// 返回实际清理的总行数。
-    pub fn prune_oldest_body_data_to_goal(
-        &self,
-        target_bytes: i64,
-        prune_ratio: f64,
-        max_rounds: usize,
-    ) -> Result<usize, StorageError> {
-        let mut total = 0usize;
-        for _ in 0..max_rounds {
-            let cleared = self.prune_oldest_body_data(target_bytes, prune_ratio)?;
-            if cleared == 0 {
-                break;
-            }
-            total += cleared;
-        }
-        Ok(total)
-    }
-
-    /// 获取数据库统计信息
-    pub fn db_stats(&self) -> Result<(i64, i64, i64), StorageError> {
-        let connection = self
-            .connection
-            .lock()
-            .map_err(|_| StorageError::LockFailed)?;
-
-        let logs: i64 =
-            connection.query_row("SELECT COUNT(*) FROM request_logs", [], |row| row.get(0))?;
-
-        let usage: i64 =
-            connection.query_row("SELECT COUNT(*) FROM usage_records", [], |row| row.get(0))?;
-
-        let file_size: i64 = connection.query_row(
-            "SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()",
-            [],
-            |row| row.get(0),
-        )?;
-
-        Ok((logs, usage, file_size))
-    }
-
-    /// 测试辅助：将所有请求日志的 created_at 更新为指定天数前
-    #[cfg(test)]
-    pub fn test_set_logs_created_at_days_ago(&self, days: i64) -> Result<(), StorageError> {
+    pub fn set_app_meta(&self, key: &str, value: &str) -> Result<(), StorageError> {
         let connection = self
             .connection
             .lock()
             .map_err(|_| StorageError::LockFailed)?;
         connection.execute(
-            &format!(
-                "UPDATE request_logs SET created_at = datetime('now', '-{} days')",
-                days
-            ),
-            [],
+            r#"
+            INSERT INTO app_meta (key, value, updated_at)
+            VALUES (?1, ?2, datetime('now'))
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')
+            "#,
+            [key, value],
         )?;
         Ok(())
     }
-
-    /// 测试辅助：将指定 request_id 的 created_at 更新为指定天数前
-    #[cfg(test)]
-    pub fn test_set_log_created_at_days_ago(
-        &self,
-        request_id: &str,
-        days: i64,
-    ) -> Result<(), StorageError> {
-        let connection = self
-            .connection
-            .lock()
-            .map_err(|_| StorageError::LockFailed)?;
-        connection.execute(
-            &format!(
-                "UPDATE request_logs SET created_at = datetime('now', '-{} days') WHERE request_id = ?1",
-                days
-            ),
-            [request_id],
-        )?;
-        Ok(())
-    }
-
-    // ─── Migration ───────────────────────────────────────────────────────────
 
     pub(crate) fn migrate(&self) -> Result<(), StorageError> {
         let connection = self
@@ -2235,23 +1578,6 @@ fn remove_legacy_aggregate_virtual_models(connection: &Connection) -> Result<(),
     Ok(())
 }
 
-fn remove_sqlite_sidecars(path: &Path) {
-    let _ = std::fs::remove_file(format!("{}-wal", path.display()));
-    let _ = std::fs::remove_file(format!("{}-shm", path.display()));
-}
-
-fn remove_sqlite_files(path: &Path) {
-    let _ = std::fs::remove_file(path);
-    remove_sqlite_sidecars(path);
-}
-
-fn parse_auth_strategy(value: &str) -> AuthStrategy {
-    match value {
-        "x_api_key" => AuthStrategy::XApiKey,
-        _ => AuthStrategy::Bearer,
-    }
-}
-
 #[cfg(test)]
 #[path = "storage_tests.rs"]
-mod storage_tests;
+mod tests;

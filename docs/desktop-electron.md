@@ -1,7 +1,8 @@
 # Electron 桌面宿主（packages/flowlet-desktop）
 
-> 状态：**实现中 / 冒烟通过**（2026-11-10）。Rust/Tauri 版仍是行为权威参考
-> （`src-tauri/**` 只读）；本包是桌面端迁移到 Electron + Node/TS 后的正式宿主。
+> 状态：**正式桌面宿主**（2026-11-15）。Tauri 桌面构建与发布入口已退役；
+> Android 保留 Rust/Tauri。Electron 的构建资源与必跑测试独立于 `src-tauri/`。
+> 共享资源位于 `resources/`，真实上游 fixture 位于 `tests/fixtures/`。
 >
 > 设计决策见 [`electron-migration-plan.md`](./electron-migration-plan.md)、
 > [`migration/platform-gap-matrix.md`](./migration/platform-gap-matrix.md)、
@@ -62,13 +63,9 @@ Electron main（Node 24 / ESM，dist-host/main.mjs）
 
 ## 2. 数据目录（必须与 Rust/Tauri 版一致）
 
-权威实现：
-
-- `src-tauri/src/lib.rs::app_database_path`：**SQLite 始终在 exe 同级目录**；
-- `src-tauri/src/core/webview_profile.rs::is_portable`：exe 旁存在
-  `portable.tag` 即便携版；
-- `scripts/build-portable.mjs`：复制 `config.json` / 模型目录并写入
-  `portable.tag`。
+当前实现位于 `packages/flowlet-desktop/src/paths.ts` 与
+`scripts/build-desktop-portable.mjs`。旧 Rust 的同库/便携语义保持兼容，
+对应桌面源码已移除；历史差异可从 Git 历史查询。
 
 Electron 侧解析（`packages/flowlet-desktop/src/paths.ts`）：
 
@@ -96,8 +93,7 @@ Electron 侧解析（`packages/flowlet-desktop/src/paths.ts`）：
 
 ### 便携版构建与更新（Electron）
 
-Tauri 时代的 `tauri:build:portable` / `tauri:update:portable` 只认 `src-tauri/target/release`
-和 `flowlet(.exe)`，**Electron 桌面端不走这套**。对应命令：
+桌面便携版统一使用 Electron 构建与更新命令：
 
 ```bash
 npm run desktop:portable           # 前端+host → electron-builder --dir → 组装便携目录 → 打 zip
@@ -119,13 +115,25 @@ npm run desktop:update:portable    # 构建 → 停进程 → 覆盖程序文件
 - 首次打包需要能访问 `github.com/electron/electron/releases` 下 electron 二进制，
   受限网络先 `export HTTPS_PROXY=http://127.0.0.1:7890`。
 
-`scripts/update-portable.mjs` 现在**两种布局都认**（`--layout auto|tauri|electron`，
-按目录里的 `resources/app.asar` 或 `flowlet_lib.*` 判断）：
+`scripts/update-portable.mjs` 只更新 Electron 便携版（`--layout auto|electron`）。
+目标必须包含 `resources/app.asar` 与 `portable.tag`；旧 Tauri 程序目录会被拒绝，
+迁移时请先解压到独立 Electron 目录，再按既有数据兼容契约迁移数据。
 
 - `npm run desktop:update:portable` → `--layout electron`
-- `npm run tauri:update:portable` → `--layout tauri --replace-config`（保持旧行为）
 - 覆盖时保留：`config.json`、`portable.tag`、`flowlet.sqlite*`、`data/`、`logs/`、`desktop-config.json`
-- `--skip-build` 可跳过构建直接用现有产物；`--dry-run` 只打印识别结果
+- `--replace-config` 仅允许替换配置，不影响数据库与运行数据的保留
+- `--skip-build` 可复用已有产物；`--dry-run` 只打印识别结果
+
+### 共享资源与发布
+
+`npm run fetch:catalogs` 生成 `resources/catalogs/models-cn.json` 与 `models-dev.json`，
+Electron 打包和 Android `bundle.resources` 读取相同来源。模型目录不入库；缺失时
+Electron host 构建会明确报错。图标位于 `resources/icons/`，Agent 扩展源码位于
+`resources/agent-plugins/`；内嵌源码一致性检查读取共享目录。
+
+`tests/contracts/desktop-commands.json` 冻结退役时的 154 条桌面命令，覆盖脚本不再读取
+Rust 注册表。`.github/workflows/desktop-electron.yml` 负责正式桌面 Release 资产；
+`build-installers.yml` 只保留 Android 签名、构建与发布。旧 Rust 桌面、服务端和 CLI 源码已按 Android 边界移除；历史实现可从 Git 历史查阅。旧迁移盘点文档描述的是当时基线，不作为当前构建入口。
 
 ---
 
@@ -435,17 +443,37 @@ xvfb-run ... flowlet-desktop --screenshot=... --data-dir=<data-dir>
 
 ---
 
-## 7.1 验证命令（迁移期门禁）
+## 7.1 验证命令
 
 | 命令 | 覆盖 | 通过标准 |
 | --- | --- | --- |
 | `npm run node:typecheck` | flowlet-core TS | 0 error |
-| `node --test packages/flowlet-core/src` | Node Host + 桌面命令 | 0 fail |
+| `node --test "packages/flowlet-core/src/**/*.test.ts"` | Node Host + 桌面命令 | 0 fail |
 | `npm run check` | 前端 TS | 0 error |
-| `node scripts/desktop-command-parity.mjs` | Rust 154 条桌面命令覆盖度 | missing = 0 |
+| `node scripts/desktop-command-parity.mjs --check` | 冻结的 154 条桌面兼容命令 | missing = 0 |
 | `npm run desktop:smoke` | Electron 启动 + 首屏 + `/health` + preload 桥 | `SMOKE OK` |
 | `npm run desktop:smoke:pages` | 逐路由渲染 + 截图 + console/命令错误 | 全部路由 ok、0 console error、0 命令失败 |
 | `npm run desktop:dist` | electron-builder 出包 | AppImage/deb 生成 |
+
+构建前先执行 `npm run fetch:catalogs`。`desktop:smoke` 的单窗口脚本使用 Linux/xvfb；
+Windows/macOS 可使用跨平台的 `desktop:smoke:pages` 或隔离数据目录启动验证。
+Node 24 下请使用表中的显式测试 glob，直接传目录不会递归执行 TypeScript 测试。
+
+### 桌面退役清理验证（2026-11-15）
+
+以下为共享资源迁移阶段记录；随后 Android Rust 裁剪的当前状态和测试以
+[Android Rust 边界](android-rust-boundary.md) 为准，旧桌面/Rust 服务端测试已随对应实现退役。
+
+- 临时移走 `src-tauri/` 后，Electron 前端、main/preload、Node Host bundle 与
+  154 条命令覆盖检查通过；Node 测试 638 通过、5 条条件跳过、0 失败。
+- 迁出的 55 个图标、扩展源码和 fixture 与原文件逐字节一致；Rust 全局配置测试
+  60 通过，DSH 会话解析测试 29 通过、1 条真实用户目录测试按原标记忽略。
+- 前端/core/desktop 类型检查与移动前端构建通过；Windows 原生 Electron 使用
+  隔离数据目录和随机代理端口启动、渲染并截图后正常退出。
+- Android arm64 release APK 构建通过，`apksigner verify` 通过（v2 签名）；
+  APK 内模型目录与共享来源逐字节一致。
+- CI YAML 已解析检查；本次未运行 GitHub Actions 或 Linux/macOS 真机验收。
+  无数据库迁移，无配置字段或热更新语义变化；资源路径调整需重新构建产物。
 
 `desktop:smoke:pages` 默认用空数据目录（新用户路径）；传 `--db=<sqlite>` 用已有数据库副本
 （老用户升级路径）。报告与截图在 `.flowlet-dev-data/desktop-pages/`（`report.json` +

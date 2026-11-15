@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// 桌面命令面对拍：Rust `generate_handler!` ↔ Node 实现（Web Host 命令 + desktop 注册表）。
+// 桌面命令面对拍：冻结桌面契约 ↔ Node 实现（Web Host 命令 + desktop 注册表）。
 //
-// 用途：桌面 Electron 迁移期间追踪「142 条桌面命令还差几条」。只读，不改任何文件。
+// 用途：追踪已退役 Tauri 桌面的 154 条兼容命令。只读，不改任何文件。
 // 用法：node scripts/desktop-command-parity.mjs [--json]
 //
 // 判定：
@@ -14,35 +14,19 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const LIB = path.join(ROOT, "src-tauri/src/lib.rs");
+const CONTRACT = path.join(ROOT, "tests/contracts/desktop-commands.json");
 const WEB = path.join(ROOT, "packages/flowlet-core/src/web/commands.ts");
 const DESKTOP_DIR = path.join(ROOT, "packages/flowlet-core/src/desktop");
 
-/** 抽出 `generate_handler![ ... ]` 里 `commands::<name>` 的命令名（跳过注释行）。 */
+/** 已退役 Tauri 桌面命令的冻结契约；不依赖 Android/Rust 源码。 */
 function rustDesktopCommands() {
-  const lines = readFileSync(LIB, "utf8").split("\n");
-  const names = [];
-  let block = 0;
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (line.startsWith("//")) continue;
-    if (line.includes("generate_handler![")) {
-      block += 1;
-      continue;
-    }
-    if (block === 1) {
-      if (line.includes("])") || line.startsWith("]")) {
-        block = 2;
-        continue;
-      }
-      const match = /commands::([a-zA-Z0-9_]+)/.exec(line);
-      if (match) names.push(match[1]);
-    } else if (block === 2) {
-      // 桌面 handler 已结束；移动端 handler 是第二块，不在本脚本统计范围。
-      break;
-    }
+  const { commands } = JSON.parse(readFileSync(CONTRACT, "utf8"));
+  if (!Array.isArray(commands) || commands.length === 0
+      || commands.some((name) => typeof name !== "string" || !/^[a-z][a-z0-9_]*$/.test(name))
+      || new Set(commands).size !== commands.length) {
+    throw new Error("桌面命令基线无效");
   }
-  return names;
+  return commands;
 }
 
 function webCommands() {

@@ -25,7 +25,7 @@ import { fileURLToPath } from "node:url";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.resolve(HERE, "..", "cli.ts");
 const MOCK_SERVER = path.resolve(HERE, "mock-server.ts");
-const RUST_CLI = "/home/nichangen/代码/self-code/flowlet/src-tauri/target/debug/flowlet-cred";
+const RUST_CLI = process.env.FLOWLET_RUST_CRED ?? "";
 
 const GITLAB_TOKEN = "glpat-test-fixture-token-1a2b";
 const DOCKHAND_TOKEN = "dockhand-test-fixture-token-9x8y";

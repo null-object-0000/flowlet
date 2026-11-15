@@ -1,5 +1,8 @@
 # Flowlet Tauri(Rust) → Electron(Node/TS) 迁移：命令面与 SQLite Schema 清点
 
+> 历史迁移记录：2026-11-15 起旧 Rust 桌面、headless 与凭据 CLI 源码已移除。
+> 本文中的旧路径/构建命令仅描述当时基线，当前 Android 边界见 [Android Rust 裁剪](../android-rust-boundary.md)。
+
 > **性质**：只读勘察结论，作为重写排期与任务拆分的输入。
 > **基线**：仓库当前工作区（`src-tauri/src/lib.rs` 中 `invoke_handler` 注册表为命令权威来源）。
 > **范围**：`src-tauri/src/commands/*.rs`（约 5,049 行）、`src-tauri/src/mobile_commands.rs`、`src-tauri/src/lib.rs`、`src-tauri/src/core/storage*.rs`、`src-tauri/src/core/request_capture.rs`；不含代理转发协议细节、不含 `src-tauri/src/core/web/*` 的 HTTP 路由实现（仅在 §5.3 标注其命令白名单规模）。

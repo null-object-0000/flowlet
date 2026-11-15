@@ -1,6 +1,6 @@
 // 构建 Electron 桌面端的便携版（未安装、绿色目录）ZIP。
 //
-// 与 Tauri 版 `scripts/build-portable.mjs` 的产物同构：
+// 便携目录布局：
 //   目录里放程序 + portable.tag + config.json，双击即可跑，数据落在程序旁边
 //   （`packages/flowlet-desktop/src/paths.ts`：exe 旁有 portable.tag → 数据目录 = exe 目录）。
 //

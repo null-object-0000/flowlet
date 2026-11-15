@@ -1,5 +1,5 @@
-// 打包前从 models-cn 官方拉取最新的 api.json，写入 src-tauri/models-cn.json，
-// 随 Tauri bundle.resources 打包进安装包，让用户开箱即用。
+// 打包前从 models-cn 官方拉取最新的 api.json，写入 resources/catalogs/models-cn.json，
+// 由 Electron 和 Android 共用，让用户开箱即用。
 //
 // 用法：node scripts/fetch-models-cn.mjs
 
@@ -9,9 +9,10 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, "..");
-const SRC_TAURI = join(PROJECT_ROOT, "src-tauri");
-const DEST = join(SRC_TAURI, "models-cn.json");
-const BACKUP = join(SRC_TAURI, "models-cn.json.bak");
+const CATALOG_DIR = join(PROJECT_ROOT, "resources", "catalogs");
+mkdirSync(CATALOG_DIR, { recursive: true });
+const DEST = join(CATALOG_DIR, "models-cn.json");
+const BACKUP = join(CATALOG_DIR, "models-cn.json.bak");
 
 const SOURCE_URL = "https://null-object-0000.github.io/models-cn/api.json";
 
@@ -53,7 +54,7 @@ async function main() {
     writeFileSync(DEST, body, "utf8");
     const providers = parsed.providers.length;
     const models = parsed.providers.reduce((sum, p) => sum + (p.models?.length ?? 0), 0);
-    console.log(`  写入：${join("src-tauri", "models-cn.json")}`);
+    console.log(`  写入：${join("resources", "catalogs", "models-cn.json")}`);
     console.log(`  ${providers} 个厂商、${models} 个模型`);
 
     // 清理备份

@@ -1,5 +1,8 @@
 # Docker 镜像迁移到 Node Host
 
+> 历史迁移记录：2026-11-15 起旧 Rust 桌面、headless 与凭据 CLI 源码已移除。
+> 本文中的旧路径/构建命令仅描述当时基线，当前 Android 边界见 [Android Rust 裁剪](../android-rust-boundary.md)。
+
 > 状态：**Node Host 已与当前线上版本（含 GitLab OIDC SSO）对齐**：严格对拍 0/0
 > （命令 58 步 + HTTP 检查，Rust oracle = 线上容器二进制 + 生产库快照），镜像已在远端构建并
 > 通过容器冒烟（token / oidc 两种模式）；**尚未替换线上 `flowlet` 栈**（部署需要用户授权）。

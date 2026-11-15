@@ -36,7 +36,7 @@ import {
 } from "../credentials.ts";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
-const RUST_BIN = "/home/nichangen/代码/self-code/flowlet/src-tauri/target/debug/headless";
+const RUST_BIN = process.env.FLOWLET_RUST_HEADLESS ?? "";
 const hasRustOracle = existsSync(RUST_BIN);
 const ADMIN = "task12-admin-token-0123456789abcdef";
 const CLIENT = "task12-client-token-0123456789abc";

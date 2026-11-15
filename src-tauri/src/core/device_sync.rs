@@ -1,33 +1,23 @@
-use crate::core::agent_environment::{AgentInstallMethod, AgentSurface};
-use crate::core::agent_global_config::AgentGlobalConfigState;
-use crate::core::config::ProxyBindConfig;
-use crate::core::device_identity::{
-    DeviceIdentity, DeviceUsageBundle, DeviceUsageSnapshot, SyncedAgentInstallation,
-    SyncedAgentInteraction, SyncedAgentInteractionEvent, SyncedAgentProfile, SyncedAgentSession,
-};
+use crate::core::device_identity::DeviceUsageBundle;
 use crate::core::storage::Storage;
-use reqwest::{Client, Response, StatusCode};
+use reqwest::{Client, Response};
 use rusty_s3::actions::{ListObjectsV2, S3Action as _};
 use rusty_s3::{Bucket, Credentials, UrlStyle};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use url::Url;
 
 const CONFIG_KEY: &str = "device_sync_s3_config_v1";
 const STATUS_KEY: &str = "device_sync_s3_status_v1";
-const CURRENT_ETAG_KEY: &str = "device_sync_s3_current_etag_v1";
-const REMOTE_ETAGS_KEY: &str = "device_sync_s3_remote_etags_v1";
 const KEYRING_SERVICE: &str = "Flowlet Device Sync";
 const MAX_REMOTE_BUNDLE_BYTES: u64 = 64 * 1024 * 1024;
 const SIGNED_URL_TTL: Duration = Duration::from_secs(60);
 pub const AUTO_SYNC_INITIAL_DELAY: Duration = Duration::from_secs(5);
-pub const AUTO_SYNC_INTERVAL: Duration = Duration::from_secs(15 * 60);
 /// 移动端后台 S3-only 拉取周期。与桌面端 15 分钟上传周期独立；
 /// 移动端不做 LAN 直连，只做云端拉取。
 pub const MOBILE_AUTO_SYNC_INTERVAL: Duration = Duration::from_secs(5 * 60);
 pub const SYNC_ALREADY_RUNNING_ERROR: &str = "设备用量同步正在运行";
-const MIN_SYNCED_RECENT_SESSIONS: usize = 10;
 
 fn acquire_sync_lease(
     jobs: &crate::core::job_runtime::JobRuntime,
@@ -100,312 +90,11 @@ pub struct S3ConnectionTestResult {
     pub message: String,
 }
 
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct S3DeviceSyncResult {
-    pub remote_devices: usize,
-    pub imported_devices: usize,
-    pub imported_days: usize,
-    pub unchanged_days: usize,
-    pub failed_objects: usize,
-    pub uploaded_key: String,
-    pub uploaded_bytes: usize,
-    pub downloaded_bytes: u64,
-    pub skipped_objects: usize,
-    pub list_ms: u64,
-    pub download_ms: u64,
-    pub import_ms: u64,
-    pub snapshot_ms: u64,
-    pub upload_ms: u64,
-}
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceRefreshResult {
     pub source: String,
     pub refreshed_devices: usize,
-}
-
-pub async fn build_synced_agent_session(
-    storage: Storage,
-    agent_type: &str,
-    session_id: &str,
-) -> Result<Option<SyncedAgentSession>, String> {
-    let agent_type = agent_type.trim().to_string();
-    let session_id = session_id.trim().to_string();
-    if agent_type.is_empty() || session_id.is_empty() {
-        return Err("Agent 类型和会话 ID 不能为空".to_string());
-    }
-    let opencode_pending_sessions = crate::core::opencode_control::pending_session_ids().await;
-    tokio::task::spawn_blocking(move || {
-        let Some(row) = storage
-            .list_agent_sessions_for_device_sync(&opencode_pending_sessions)
-            .map_err(|error| error.to_string())?
-            .into_iter()
-            .find(|row| row.agent_type == agent_type && row.session_id == session_id)
-        else {
-            return Ok(None);
-        };
-        let mut session = synced_agent_session_from_row(row);
-        if let Some(timeline) =
-            crate::core::agent_session_timeline::get_native_agent_session_last_interaction(
-                &session.agent_type,
-                &session.session_id,
-            )
-            .map_err(|error| error.to_string())?
-        {
-            session.last_interaction = Some(SyncedAgentInteraction {
-                events: timeline
-                    .events
-                    .into_iter()
-                    .map(|event| SyncedAgentInteractionEvent {
-                        id: event.id,
-                        kind: event.kind,
-                        timestamp: event.timestamp,
-                        title: event.title,
-                        content: event.content,
-                        model: event.model,
-                        status: event.status,
-                    })
-                    .collect(),
-            });
-        }
-        Ok(Some(session))
-    })
-    .await
-    .map_err(|_| "读取单个 Agent 会话任务失败".to_string())?
-}
-
-pub async fn build_device_snapshot(
-    storage: Storage,
-    identity: DeviceIdentity,
-) -> Result<DeviceUsageSnapshot, String> {
-    let snapshot_storage = storage.clone();
-    // 与 PC 列表页同一入口合并 OpenCode 实时待确认权限，否则移动端快照会把
-    // “等待确认”的会话固化为 SQLite 推断出的“自动运行中”。
-    let opencode_pending_sessions = crate::core::opencode_control::pending_session_ids().await;
-    let (days, hours, sessions) = tokio::task::spawn_blocking(move || {
-        // 快照携带「代理 + Agent 原生」合并口径，其他设备/移动端才能看到
-        // 本机未经过 Flowlet 的 Token（schema v6 的日/小时 native_* 字段）。
-        let days = snapshot_storage
-            .local_daily_usage_totals_with_native()
-            .map_err(|error| error.to_string())?;
-        let hours = snapshot_storage
-            .local_hourly_usage_totals_with_native()
-            .map_err(|error| error.to_string())?;
-        let sessions = snapshot_storage
-            .list_agent_sessions_for_device_sync(&opencode_pending_sessions)
-            .map_err(|error| error.to_string())?
-            .into_iter()
-            .map(synced_agent_session_from_row)
-            .collect::<Vec<_>>();
-        let mut sessions = select_sessions_for_sync(sessions);
-        for session in &mut sessions {
-            match crate::core::agent_session_timeline::get_native_agent_session_last_interaction(
-                &session.agent_type,
-                &session.session_id,
-            ) {
-                Ok(Some(timeline)) => {
-                    session.last_interaction = Some(SyncedAgentInteraction {
-                        events: timeline
-                            .events
-                            .into_iter()
-                            .map(|event| SyncedAgentInteractionEvent {
-                                id: event.id,
-                                kind: event.kind,
-                                timestamp: event.timestamp,
-                                title: event.title,
-                                content: event.content,
-                                model: event.model,
-                                status: event.status,
-                            })
-                            .collect(),
-                    });
-                }
-                Ok(None) => {}
-                Err(error) => tracing::warn!(
-                    agent_type = session.agent_type,
-                    session_id = session.session_id,
-                    error,
-                    "读取设备同步会话最后交互失败"
-                ),
-            }
-        }
-        Ok::<_, String>((days, hours, sessions))
-    })
-    .await
-    .map_err(|_| "生成设备用量快照任务失败".to_string())??;
-    let agents = build_synced_agent_profiles(&storage, &sessions).await?;
-    // 维度用量聚合：最近 90 天按 (日期, 客户端, 渠道, 账号, 模型) 聚合，
-    // 附带在快照中发给对方，供用量分析页按设备维度汇总。
-    let usage_breakdowns = tokio::task::spawn_blocking({
-        let snapshot_storage = storage.clone();
-        move || snapshot_storage.usage_breakdown_for_sync(90)
-    })
-    .await
-    .map_err(|_| "生成维度用量聚合任务失败".to_string())?
-    .map_err(|error| error.to_string())?;
-    let mut snapshot = DeviceUsageSnapshot::new(&identity, days, hours, sessions, agents);
-    snapshot.lan_peer = crate::core::lan_sync::current_descriptor(&storage);
-    snapshot.usage_breakdowns = usage_breakdowns;
-    snapshot.account_resources =
-        crate::core::account_resource_sync::build_synced_account_resources(&storage)?;
-    Ok(snapshot)
-}
-
-async fn build_synced_agent_profiles(
-    storage: &Storage,
-    sessions: &[SyncedAgentSession],
-) -> Result<Vec<SyncedAgentProfile>, String> {
-    let (claude, opencode, pi, chatgpt) = tokio::join!(
-        crate::core::agent_environment::detect_agent_environment("claude-code"),
-        crate::core::agent_environment::detect_agent_environment("opencode"),
-        crate::core::agent_environment::detect_agent_environment("pi"),
-        crate::core::agent_environment::detect_agent_environment("chatgpt-desktop"),
-    );
-    let environments = [claude?, opencode?, pi?, chatgpt?];
-    let config_storage = storage.clone();
-    let config_states = tokio::task::spawn_blocking(move || {
-        let bind = config_storage
-            .get_app_meta("proxy_bind_config")
-            .unwrap_or_default()
-            .and_then(|json| serde_json::from_str::<ProxyBindConfig>(&json).ok())
-            .unwrap_or_default()
-            .normalized();
-        [
-            (
-                "claude-code",
-                format!("http://127.0.0.1:{}/anthropic", bind.port),
-            ),
-            ("opencode", format!("http://127.0.0.1:{}/v1", bind.port)),
-            ("pi", format!("http://127.0.0.1:{}/v1", bind.port)),
-        ]
-        .into_iter()
-        .map(|(agent_id, base_url)| {
-            let state = crate::core::plugin_registry::plugin_registry()
-                .agent(agent_id)
-                .and_then(|plugin| {
-                    crate::core::agent_global_config::inspect_agent_global_config(
-                        &plugin.global_config_adapter_id,
-                        &base_url,
-                    )
-                    .ok()
-                })
-                .map(|report| global_config_state_name(&report.state).to_string());
-            (agent_id.to_string(), state)
-        })
-        .collect::<std::collections::HashMap<_, _>>()
-    })
-    .await
-    .map_err(|_| "检测 Agent 接入状态任务失败".to_string())?;
-
-    Ok(environments
-        .into_iter()
-        .map(|environment| SyncedAgentProfile {
-            flowlet_observed: sessions.iter().any(|session| {
-                session.flowlet_observed
-                    && session_matches_agent(&session.agent_type, &environment.agent_id)
-            }),
-            flowlet_config_state: config_states.get(&environment.agent_id).cloned().flatten(),
-            agent_id: environment.agent_id,
-            agent_name: environment.agent_name,
-            installed: environment.installed,
-            installations: environment
-                .installations
-                .into_iter()
-                .map(|installation| SyncedAgentInstallation {
-                    surface: agent_surface_name(&installation.surface).to_string(),
-                    install_method: agent_install_method_name(&installation.install_method)
-                        .to_string(),
-                    version: installation.version,
-                })
-                .collect(),
-        })
-        .collect())
-}
-
-fn global_config_state_name(state: &AgentGlobalConfigState) -> &'static str {
-    match state {
-        AgentGlobalConfigState::NotConfigured => "not_configured",
-        AgentGlobalConfigState::Flowlet => "flowlet",
-        AgentGlobalConfigState::OtherGateway => "other_gateway",
-        AgentGlobalConfigState::Partial => "partial",
-        AgentGlobalConfigState::Invalid => "invalid",
-    }
-}
-
-fn agent_surface_name(surface: &AgentSurface) -> &'static str {
-    match surface {
-        AgentSurface::Cli => "cli",
-        AgentSurface::Desktop => "desktop",
-        AgentSurface::Web => "web",
-    }
-}
-
-fn agent_install_method_name(method: &AgentInstallMethod) -> &'static str {
-    match method {
-        AgentInstallMethod::Native => "native",
-        AgentInstallMethod::Winget => "winget",
-        AgentInstallMethod::Npm => "npm",
-        AgentInstallMethod::Npx => "npx",
-        AgentInstallMethod::Bun => "bun",
-        AgentInstallMethod::LegacyNpm => "legacy_npm",
-        AgentInstallMethod::Homebrew => "homebrew",
-        AgentInstallMethod::SystemPackage => "system_package",
-        AgentInstallMethod::Desktop => "desktop",
-        AgentInstallMethod::Unknown => "unknown",
-    }
-}
-
-fn session_matches_agent(agent_type: &str, agent_id: &str) -> bool {
-    let registry = crate::core::plugin_registry::plugin_registry();
-    registry
-        .agent(agent_id)
-        .or_else(|| registry.agent_for_environment_adapter(agent_id))
-        .is_some_and(|agent| {
-            agent
-                .session_types
-                .iter()
-                .any(|session| session.id == agent_type)
-        })
-}
-
-fn sanitize_session_text(value: Option<String>, max_chars: usize) -> Option<String> {
-    let value = value?;
-    let sanitized = value
-        .chars()
-        .map(|character| {
-            if character.is_control() {
-                ' '
-            } else {
-                character
-            }
-        })
-        .take(max_chars)
-        .collect::<String>();
-    let sanitized = sanitized.trim();
-    (!sanitized.is_empty()).then(|| sanitized.to_string())
-}
-
-fn select_sessions_for_sync(mut sessions: Vec<SyncedAgentSession>) -> Vec<SyncedAgentSession> {
-    sessions.sort_by(|left, right| {
-        crate::core::agent_session_metadata::session_time_millis(&right.activity_at)
-            .cmp(&crate::core::agent_session_metadata::session_time_millis(
-                &left.activity_at,
-            ))
-            .then_with(|| right.session_id.cmp(&left.session_id))
-    });
-    let (mut active, inactive): (Vec<_>, Vec<_>) = sessions
-        .into_iter()
-        .partition(|session| matches!(session.runtime_status.as_str(), "running" | "waiting_user"));
-    if active.len() < MIN_SYNCED_RECENT_SESSIONS {
-        active.extend(
-            inactive
-                .into_iter()
-                .take(MIN_SYNCED_RECENT_SESSIONS - active.len()),
-        );
-    }
-    active
 }
 
 #[derive(Clone, Serialize)]
@@ -417,43 +106,6 @@ pub struct S3DevicePullResult {
     pub unchanged_days: usize,
     pub failed_objects: usize,
     pub failure_details: Vec<String>,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CurrentEtagState {
-    endpoint: String,
-    bucket: String,
-    key: String,
-    etag: String,
-}
-
-#[derive(Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RemoteEtagsState {
-    endpoint: String,
-    bucket: String,
-    etags: std::collections::HashMap<String, String>,
-}
-
-fn load_remote_etags(storage: &Storage, config: &S3SyncConfig) -> RemoteEtagsState {
-    storage
-        .get_app_meta(REMOTE_ETAGS_KEY)
-        .ok()
-        .flatten()
-        .and_then(|raw| serde_json::from_str::<RemoteEtagsState>(&raw).ok())
-        .filter(|state| state.endpoint == config.endpoint && state.bucket == config.bucket)
-        .unwrap_or_else(|| RemoteEtagsState {
-            endpoint: config.endpoint.clone(),
-            bucket: config.bucket.clone(),
-            etags: std::collections::HashMap::new(),
-        })
-}
-
-fn save_remote_etags(storage: &Storage, state: &RemoteEtagsState) {
-    if let Ok(raw) = serde_json::to_string(state) {
-        let _ = storage.set_app_meta(REMOTE_ETAGS_KEY, &raw);
-    }
 }
 
 impl Default for S3SyncStatus {
@@ -553,29 +205,6 @@ impl S3SyncConfig {
         format!("{}{device_id}/snapshot.json", self.object_prefix())
     }
 
-    pub(crate) fn workspace_accounts_key(&self) -> String {
-        if self.prefix.is_empty() {
-            "flowlet/v1/workspace/channel-accounts.enc".to_string()
-        } else {
-            format!("{}/flowlet/v1/workspace/channel-accounts.enc", self.prefix)
-        }
-    }
-
-    pub(crate) fn workspace_prefix(&self) -> String {
-        if self.prefix.is_empty() {
-            "flowlet/v1/workspace/".to_string()
-        } else {
-            format!("{}/flowlet/v1/workspace/", self.prefix)
-        }
-    }
-
-    fn supports_conditional_put(&self) -> bool {
-        Url::parse(&self.endpoint)
-            .ok()
-            .and_then(|url| url.host_str().map(str::to_ascii_lowercase))
-            .is_none_or(|host| !host.ends_with(".aliyuncs.com"))
-    }
-
     pub(crate) fn credential_username(&self) -> String {
         let mut digest = Sha256::new();
         digest.update(self.endpoint.as_bytes());
@@ -591,10 +220,18 @@ pub(crate) struct S3Store {
     bucket: Bucket,
     credentials: Credentials,
     client: Client,
-    supports_conditional_put: bool,
 }
 
 impl S3Store {
+    async fn head_bucket(&self) -> Result<(), String> {
+        let url = self
+            .bucket
+            .head_bucket(Some(&self.credentials))
+            .sign(SIGNED_URL_TTL);
+        checked_response(self.client.head(url).send().await, "检查 Bucket").await?;
+        Ok(())
+    }
+
     pub(crate) fn new(config: &S3SyncConfig, secret: &str) -> Result<Self, String> {
         let endpoint =
             Url::parse(&config.endpoint).map_err(|_| "S3 Endpoint 格式无效".to_string())?;
@@ -619,17 +256,7 @@ impl S3Store {
             bucket,
             credentials: Credentials::new(&config.access_key_id, secret),
             client,
-            supports_conditional_put: config.supports_conditional_put(),
         })
-    }
-
-    async fn head_bucket(&self) -> Result<(), String> {
-        let url = self
-            .bucket
-            .head_bucket(Some(&self.credentials))
-            .sign(SIGNED_URL_TTL);
-        checked_response(self.client.head(url).send().await, "检查 Bucket").await?;
-        Ok(())
     }
 
     pub(crate) async fn list(&self, prefix: &str) -> Result<Vec<RemoteObject>, String> {
@@ -651,7 +278,6 @@ impl S3Store {
                 .map_err(|_| "解析 S3 对象列表失败".to_string())?;
             objects.extend(parsed.contents.into_iter().map(|object| RemoteObject {
                 key: object.key,
-                etag: object.etag,
                 size: object.size,
             }));
             continuation = parsed.next_continuation_token;
@@ -680,77 +306,10 @@ impl S3Store {
         }
         Ok(bytes.to_vec())
     }
-
-    pub(crate) async fn head_etag(&self, key: &str) -> Result<Option<String>, String> {
-        let url = self
-            .bucket
-            .head_object(Some(&self.credentials), key)
-            .sign(SIGNED_URL_TTL);
-        let response =
-            checked_response(self.client.head(url).send().await, "读取对象元信息").await?;
-        Ok(response
-            .headers()
-            .get("etag")
-            .and_then(|value| value.to_str().ok())
-            .map(str::to_string))
-    }
-
-    pub(crate) async fn put(
-        &self,
-        key: &str,
-        body: Vec<u8>,
-        etag: Option<&str>,
-    ) -> Result<Option<String>, String> {
-        // Alibaba Cloud OSS accepts S3-compatible PutObject requests but does
-        // not support If-Match on PutObject. The caller already compares the
-        // saved and current remote ETags before reaching this write, so OSS
-        // keeps that best-effort conflict check and omits only the unsupported
-        // conditional request header.
-        let conditional_etag = etag.filter(|_| self.supports_conditional_put);
-        let mut action = self.bucket.put_object(Some(&self.credentials), key);
-        action
-            .headers_mut()
-            .insert("content-type", "application/json");
-        if let Some(etag) = conditional_etag {
-            action.headers_mut().insert("if-match", etag.to_string());
-        }
-        let url = action.sign(SIGNED_URL_TTL);
-        let mut request = self
-            .client
-            .put(url)
-            .header("content-type", "application/json")
-            .body(body);
-        if let Some(etag) = conditional_etag {
-            request = request.header("if-match", etag);
-        }
-        let response = request
-            .send()
-            .await
-            .map_err(|_| "上传 S3 设备快照时网络请求失败".to_string())?;
-        if response.status() == StatusCode::PRECONDITION_FAILED {
-            return Err("远端设备快照已被其他写入者修改，可能存在重复设备 ID".to_string());
-        }
-        let response = checked_response(Ok(response), "上传设备快照").await?;
-        Ok(response
-            .headers()
-            .get("etag")
-            .and_then(|value| value.to_str().ok())
-            .map(str::to_string))
-    }
-
-    async fn delete(&self, key: &str) -> Result<(), String> {
-        let url = self
-            .bucket
-            .delete_object(Some(&self.credentials), key)
-            .sign(SIGNED_URL_TTL);
-        checked_response(self.client.delete(url).send().await, "删除测试对象").await?;
-        Ok(())
-    }
 }
 
 pub(crate) struct RemoteObject {
     pub(crate) key: String,
-    etag: String,
     size: u64,
 }
 
@@ -843,20 +402,6 @@ pub fn load_settings(storage: &Storage) -> Result<S3SyncSettings, String> {
     })
 }
 
-pub fn export_connection_config(storage: &Storage) -> Result<S3SyncConfigInput, String> {
-    let config = load_config(storage)?.ok_or_else(|| "尚未配置 S3 同步".to_string())?;
-    let secret_access_key = read_secret(&config)?;
-    Ok(S3SyncConfigInput {
-        endpoint: config.endpoint,
-        region: config.region,
-        bucket: config.bucket,
-        prefix: config.prefix,
-        access_key_id: config.access_key_id,
-        secret_access_key: Some(secret_access_key),
-        path_style: config.path_style,
-    })
-}
-
 pub fn save_config(storage: &Storage, input: &S3SyncConfigInput) -> Result<(), String> {
     let previous = load_config(storage)?;
     let config = S3SyncConfig::from_input(input)?;
@@ -884,40 +429,6 @@ pub fn save_config(storage: &Storage, input: &S3SyncConfigInput) -> Result<(), S
         }
     }
     Ok(())
-}
-
-pub async fn test_connection(input: &S3SyncConfigInput) -> Result<S3ConnectionTestResult, String> {
-    let config = S3SyncConfig::from_input(input)?;
-    let provided_secret = input
-        .secret_access_key
-        .as_deref()
-        .map(str::trim)
-        .filter(|secret| !secret.is_empty())
-        .map(str::to_string);
-    let secret = match provided_secret {
-        Some(secret) => secret,
-        None => read_secret(&config)?,
-    };
-    let store = S3Store::new(&config, &secret)?;
-    store
-        .head_bucket()
-        .await
-        .map_err(|error| format!("{error}；请确认已授予 Bucket 级 oss:HeadBucket 权限"))?;
-    let test_prefix = if config.prefix.is_empty() {
-        "flowlet/v1/tests/".to_string()
-    } else {
-        format!("{}/flowlet/v1/tests/", config.prefix)
-    };
-    store.list(&test_prefix).await?;
-    let test_key = format!("{}{}.json", test_prefix, uuid::Uuid::new_v4());
-    store.put(&test_key, b"{}".to_vec(), None).await?;
-    let downloaded = store.get(&test_key).await;
-    let deleted = store.delete(&test_key).await;
-    downloaded?;
-    deleted?;
-    Ok(S3ConnectionTestResult {
-        message: "连接、列举、写入、读取和删除权限均正常".to_string(),
-    })
 }
 
 pub async fn test_read_connection(
@@ -1073,29 +584,6 @@ pub async fn pull_device_usage(
         failed_objects: failure_details.len(),
         failure_details,
     })
-}
-
-fn synced_agent_session_from_row(row: crate::core::config::AgentSessionRow) -> SyncedAgentSession {
-    let native_summary = row.native_summary.as_ref();
-    SyncedAgentSession {
-        agent_type: row.agent_type,
-        session_id: row.session_id,
-        parent_session_id: row.parent_session_id,
-        runtime_status: row.runtime_status,
-        title: sanitize_session_text(row.title, 512),
-        client_name: sanitize_session_text(row.client_name, 128),
-        activity_at: row.activity_at,
-        flowlet_observed: row.flowlet_observed,
-        request_count: row.request_count,
-        error_count: row.error_count,
-        known_tokens: row.known_tokens,
-        native_turn_count: native_summary.map(|summary| summary.turn_count),
-        native_total_tokens: native_summary
-            .and_then(|summary| summary.usage.as_ref())
-            .map(|usage| usage.total_tokens),
-        native_truncated: native_summary.is_some_and(|summary| summary.truncated),
-        last_interaction: None,
-    }
 }
 
 async fn pull_device_usage_for_device(
@@ -1277,289 +765,6 @@ pub async fn run_configured_pull(
     }
 }
 
-pub async fn sync_device_usage(
-    storage: Storage,
-    identity: DeviceIdentity,
-    job_id: &str,
-) -> Result<S3DeviceSyncResult, String> {
-    let config = load_config(&storage)?.ok_or_else(|| "尚未配置 S3 同步".to_string())?;
-    let secret = read_secret(&config)?;
-    let store = S3Store::new(&config, &secret)?;
-    let prefix = config.object_prefix();
-    let current_key = config.snapshot_key(&identity.device_id);
-    let list_started_at = Instant::now();
-    let objects = store.list(&prefix).await?;
-    let list_ms = list_started_at.elapsed().as_millis() as u64;
-    let _ = storage.add_job_event(
-        job_id,
-        "info",
-        "列出远端对象",
-        &format!("在 {prefix} 下共发现 {} 个对象", objects.len()),
-    );
-    let current_etag = objects
-        .iter()
-        .find(|object| object.key == current_key)
-        .map(|object| object.etag.clone());
-    let saved_etag = storage
-        .get_app_meta(CURRENT_ETAG_KEY)
-        .ok()
-        .flatten()
-        .and_then(|raw| serde_json::from_str::<CurrentEtagState>(&raw).ok())
-        .filter(|state| {
-            state.endpoint == config.endpoint
-                && state.bucket == config.bucket
-                && state.key == current_key
-        });
-    if let (Some(saved), Some(remote)) = (saved_etag.as_ref(), current_etag.as_ref()) {
-        if saved.etag != *remote {
-            return Err("远端当前设备快照已被另一个写入者修改，可能存在重复设备 ID".to_string());
-        }
-    }
-    let remote_objects = objects
-        .into_iter()
-        .filter(|object| object.key != current_key && object.key.ends_with("/snapshot.json"))
-        .collect::<Vec<_>>();
-    let mut remote_etags = load_remote_etags(&storage, &config);
-    remote_etags
-        .etags
-        .retain(|key, _| remote_objects.iter().any(|object| object.key == *key));
-    let skipped_objects = remote_objects
-        .iter()
-        .filter(|object| remote_etags.etags.get(&object.key) == Some(&object.etag))
-        .count();
-    let _ = storage.add_job_event(
-        job_id,
-        "info",
-        "读取远端设备",
-        &format!(
-            "发现 {} 台远端设备快照（不含本机），其中 {} 个未变化，跳过下载",
-            remote_objects.len(),
-            skipped_objects
-        ),
-    );
-
-    let mut bundles = Vec::new();
-    let mut failed_objects = 0usize;
-    let mut downloaded_bytes = 0u64;
-    let download_started_at = Instant::now();
-    for object in &remote_objects {
-        if remote_etags.etags.get(&object.key) == Some(&object.etag) {
-            continue;
-        }
-        if object.size > MAX_REMOTE_BUNDLE_BYTES {
-            failed_objects += 1;
-            continue;
-        }
-        match store.get(&object.key).await {
-            Ok(bytes) => {
-                downloaded_bytes += bytes.len() as u64;
-                match DeviceUsageBundle::from_bytes(&bytes) {
-                    Ok(bundle)
-                        if bundle.snapshot.device_id != identity.device_id
-                            && config.snapshot_key(&bundle.snapshot.device_id) == object.key =>
-                    {
-                        crate::core::lan_sync::remember_peer(&storage, &bundle.snapshot);
-                        bundles.push((
-                            object.key.clone(),
-                            object.etag.clone(),
-                            prefer_lan_bundle(&storage, bundle).await,
-                        ))
-                    }
-                    Ok(_) => failed_objects += 1,
-                    Err(_) => failed_objects += 1,
-                }
-            }
-            Err(_) => failed_objects += 1,
-        }
-    }
-    let download_ms = download_started_at.elapsed().as_millis() as u64;
-
-    let import_storage = storage.clone();
-    let import_started_at = Instant::now();
-    let import_result = tokio::task::spawn_blocking(move || {
-        let mut imported_devices = 0usize;
-        let mut imported_days = 0usize;
-        let mut unchanged_days = 0usize;
-        let mut import_failures = 0usize;
-        let mut imported_etags = Vec::new();
-        for (object_key, object_etag, bundle) in bundles {
-            let snapshot = bundle.snapshot;
-            let failures_before = import_failures;
-            let result = match import_storage.import_device_usage(
-                snapshot.schema_version,
-                &snapshot.device_id,
-                &snapshot.device_created_at,
-                &snapshot.resolved_display_name(),
-                &snapshot.resolved_platform(),
-                &snapshot.resolved_app_version(),
-                &snapshot.generated_at,
-                snapshot.timezone_offset_minutes,
-                &snapshot.days,
-                &snapshot.hours,
-                &snapshot.sessions,
-                &snapshot.agents,
-            ) {
-                Ok(result) => result,
-                Err(_) => {
-                    import_failures += 1;
-                    continue;
-                }
-            };
-            if import_storage
-                .import_device_usage_breakdowns(
-                    &snapshot.device_id,
-                    &snapshot.generated_at,
-                    &snapshot.usage_breakdowns,
-                )
-                .is_err()
-            {
-                import_failures += 1;
-            }
-            if import_storage
-                .import_device_account_resources(
-                    &snapshot.device_id,
-                    &snapshot.generated_at,
-                    &snapshot.account_resources,
-                )
-                .is_err()
-            {
-                import_failures += 1;
-            }
-            imported_devices += 1;
-            imported_days += result.imported_days;
-            unchanged_days += result.unchanged_days;
-            if import_failures == failures_before {
-                imported_etags.push((object_key, object_etag));
-            }
-        }
-        Ok::<_, String>((
-            imported_devices,
-            imported_days,
-            unchanged_days,
-            import_failures,
-            imported_etags,
-        ))
-    })
-    .await
-    .map_err(|_| "导入远端设备快照任务失败".to_string())??;
-    let import_ms = import_started_at.elapsed().as_millis() as u64;
-    for (key, etag) in &import_result.4 {
-        remote_etags.etags.insert(key.clone(), etag.clone());
-    }
-    save_remote_etags(&storage, &remote_etags);
-    let _ = storage.add_job_event(
-        job_id,
-        "info",
-        "导入远端用量",
-        &format!(
-            "成功导入 {} 台设备，新增或更新 {} 天，{} 天未变化",
-            import_result.0, import_result.1, import_result.2
-        ),
-    );
-
-    let snapshot_started_at = Instant::now();
-    let snapshot = build_device_snapshot(storage.clone(), identity.clone()).await?;
-    let bundle = DeviceUsageBundle::new(snapshot);
-    let bytes = serde_json::to_vec(&bundle).map_err(|_| "序列化当前设备快照失败".to_string())?;
-    let uploaded_bytes = bytes.len();
-    let snapshot_ms = snapshot_started_at.elapsed().as_millis() as u64;
-    let expected_etag = saved_etag
-        .as_ref()
-        .map(|state| state.etag.as_str())
-        .or(current_etag.as_deref());
-    let upload_started_at = Instant::now();
-    let uploaded_etag = match store.put(&current_key, bytes, expected_etag).await? {
-        Some(etag) => Some(etag),
-        None => store.head_etag(&current_key).await?,
-    };
-    let upload_ms = upload_started_at.elapsed().as_millis() as u64;
-    let _ = storage.add_job_event(
-        job_id,
-        "info",
-        "上传本机快照",
-        &format!("已上传当前设备快照 {current_key}（{uploaded_bytes} 字节）"),
-    );
-    if let Some(etag) = uploaded_etag {
-        let etag_state = CurrentEtagState {
-            endpoint: config.endpoint.clone(),
-            bucket: config.bucket.clone(),
-            key: current_key.clone(),
-            etag,
-        };
-        if let Ok(raw) = serde_json::to_string(&etag_state) {
-            let _ = storage.set_app_meta(CURRENT_ETAG_KEY, &raw);
-        }
-    }
-
-    Ok(S3DeviceSyncResult {
-        remote_devices: remote_objects.len(),
-        imported_devices: import_result.0,
-        imported_days: import_result.1,
-        unchanged_days: import_result.2,
-        failed_objects: failed_objects + import_result.3,
-        uploaded_key: current_key,
-        uploaded_bytes,
-        downloaded_bytes,
-        skipped_objects,
-        list_ms,
-        download_ms,
-        import_ms,
-        snapshot_ms,
-        upload_ms,
-    })
-}
-
-/// 恢复重装系统或还原便携目录后的当前设备同步所有权。
-///
-/// 这一步必须由用户明确确认。远端对象只有在设备 ID 与身份创建时间都和
-/// `flowlet-device.json` 一致时才允许认领，避免误把其它设备的对象覆盖掉。
-pub async fn recover_current_device_sync(
-    storage: Storage,
-    identity: DeviceIdentity,
-) -> Result<S3ConnectionTestResult, String> {
-    let config = load_config(&storage)?.ok_or_else(|| "尚未配置 S3 同步".to_string())?;
-    let secret = read_secret(&config)?;
-    let store = S3Store::new(&config, &secret)?;
-    let current_key = config.snapshot_key(&identity.device_id);
-    let remote = store
-        .list(&config.object_prefix())
-        .await?
-        .into_iter()
-        .find(|object| object.key == current_key)
-        .ok_or_else(|| "远端不存在当前设备快照，请直接执行同步".to_string())?;
-    let bundle = DeviceUsageBundle::from_bytes(&store.get(&current_key).await?)?;
-    validate_recoverable_current_snapshot(&identity, &bundle)?;
-
-    let state = CurrentEtagState {
-        endpoint: config.endpoint,
-        bucket: config.bucket,
-        key: current_key,
-        etag: remote.etag,
-    };
-    let raw =
-        serde_json::to_string(&state).map_err(|_| "序列化当前设备同步状态失败".to_string())?;
-    storage
-        .set_app_meta(CURRENT_ETAG_KEY, &raw)
-        .map_err(|error| error.to_string())?;
-    Ok(S3ConnectionTestResult {
-        message: "已恢复当前设备的云端同步所有权".to_string(),
-    })
-}
-
-fn validate_recoverable_current_snapshot(
-    identity: &DeviceIdentity,
-    bundle: &DeviceUsageBundle,
-) -> Result<(), String> {
-    if bundle.snapshot.device_id != identity.device_id
-        || bundle.snapshot.device_created_at != identity.created_at
-    {
-        return Err(
-            "远端快照与本机身份文件不一致，拒绝恢复；请保留现有数据并检查设备 ID".to_string(),
-        );
-    }
-    Ok(())
-}
-
 async fn prefer_lan_bundle(storage: &Storage, fallback: DeviceUsageBundle) -> DeviceUsageBundle {
     let Some(descriptor) = fallback.snapshot.lan_peer.as_ref() else {
         return fallback;
@@ -1595,142 +800,6 @@ fn snapshot_is_newer(candidate: &str, fallback: &str) -> bool {
     }
 }
 
-pub async fn run_configured_sync(
-    storage: Storage,
-    jobs: &crate::core::job_runtime::JobRuntime,
-    identity: DeviceIdentity,
-    trigger_source: &str,
-) -> Result<S3DeviceSyncResult, String> {
-    let lease = acquire_sync_lease(jobs, &crate::core::job_runtime::DEVICE_S3_SYNC)?;
-    let started_at = Instant::now();
-    let job_id = create_sync_job(&storage, trigger_source)?;
-    lease.attach_job_id(&job_id);
-    let now = chrono::Utc::now().to_rfc3339();
-    let previous = load_status(&storage);
-    save_status(
-        &storage,
-        &S3SyncStatus {
-            status: "running".to_string(),
-            last_attempt_at: Some(now.clone()),
-            last_success_at: previous.last_success_at.clone(),
-            message: "正在同步设备用量".to_string(),
-            remote_devices: previous.remote_devices,
-            imported_devices: 0,
-            imported_days: 0,
-            failed_objects: 0,
-            failure_details: Vec::new(),
-        },
-    );
-
-    match sync_device_usage(storage.clone(), identity, &job_id).await {
-        Ok(result) => {
-            if result.failed_objects > 0 {
-                let _ = storage.add_job_event(
-                    &job_id,
-                    "warning",
-                    "失败对象",
-                    &format!("共 {} 个对象读取或导入失败", result.failed_objects),
-                );
-            }
-            let status = if result.failed_objects == 0 {
-                "success"
-            } else {
-                "partial"
-            };
-            save_status(
-                &storage,
-                &S3SyncStatus {
-                    status: status.to_string(),
-                    last_attempt_at: Some(now),
-                    last_success_at: Some(chrono::Utc::now().to_rfc3339()),
-                    message: format!(
-                        "同步完成：发现 {} 台远端设备，导入 {} 天，失败 {} 个对象",
-                        result.remote_devices, result.imported_days, result.failed_objects
-                    ),
-                    remote_devices: result.remote_devices,
-                    imported_devices: result.imported_devices,
-                    imported_days: result.imported_days,
-                    failed_objects: result.failed_objects,
-                    failure_details: Vec::new(),
-                },
-            );
-            let duration_ms = started_at.elapsed().as_millis() as u64;
-            let summary = serde_json::json!({
-                "remoteDevices": result.remote_devices,
-                "importedDevices": result.imported_devices,
-                "importedDays": result.imported_days,
-                "unchangedDays": result.unchanged_days,
-                "failedObjects": result.failed_objects,
-                "uploadedKey": result.uploaded_key,
-                "uploadedBytes": result.uploaded_bytes,
-                "downloadedBytes": result.downloaded_bytes,
-                "skippedObjects": result.skipped_objects,
-                "listMs": result.list_ms,
-                "downloadMs": result.download_ms,
-                "importMs": result.import_ms,
-                "snapshotMs": result.snapshot_ms,
-                "uploadMs": result.upload_ms,
-                "durationMs": duration_ms,
-            })
-            .to_string();
-            let job_status = if result.failed_objects == 0 {
-                "succeeded"
-            } else {
-                "succeeded_with_warnings"
-            };
-            let _ = storage.update_job_progress(&job_id, 1, 1);
-            if let Err(error) = storage.finish_job(
-                &job_id,
-                job_status,
-                &summary,
-                &format!(
-                    "S3 设备同步完成：发现 {} 台远端设备，导入 {} 天，失败 {} 个对象",
-                    result.remote_devices, result.imported_days, result.failed_objects
-                ),
-            ) {
-                tracing::warn!(%error, job_id = %job_id, "failed to finish S3 device sync task log");
-            }
-            Ok(result)
-        }
-        Err(error) => {
-            save_status(
-                &storage,
-                &S3SyncStatus {
-                    status: "failed".to_string(),
-                    last_attempt_at: Some(now),
-                    last_success_at: previous.last_success_at,
-                    message: error.clone(),
-                    remote_devices: previous.remote_devices,
-                    imported_devices: 0,
-                    imported_days: 0,
-                    failed_objects: 0,
-                    failure_details: Vec::new(),
-                },
-            );
-            if let Err(job_error) = storage.fail_job(&job_id, &error) {
-                tracing::warn!(error = %job_error, job_id = %job_id, "failed to record S3 device sync task failure");
-            }
-            Err(error)
-        }
-    }
-}
-
-fn create_sync_job(storage: &Storage, trigger_source: &str) -> Result<String, String> {
-    let job_id = uuid::Uuid::new_v4().to_string();
-    storage
-        .create_job(
-            &job_id,
-            crate::core::job_runtime::DEVICE_S3_SYNC.job_type,
-            "S3 设备同步",
-            "同步设备用量",
-            trigger_source,
-            1,
-            "开始上传当前设备快照并读取其它设备快照",
-        )
-        .map_err(|error| format!("创建 S3 设备同步任务失败：{error}"))?;
-    Ok(job_id)
-}
-
 pub fn save_status(storage: &Storage, status: &S3SyncStatus) {
     if let Ok(raw) = serde_json::to_string(status) {
         let _ = storage.set_app_meta(STATUS_KEY, &raw);
@@ -1741,16 +810,33 @@ pub fn save_status(storage: &Storage, status: &S3SyncStatus) {
 mod tests {
     use super::*;
 
-    #[test]
-    fn session_environment_matching_comes_from_the_agent_registry() {
-        assert!(session_matches_agent("codex-cli", "chatgpt-desktop"));
-        assert!(session_matches_agent("codex-desktop", "chatgpt-desktop"));
-        assert!(session_matches_agent(
-            "deepseek-harness",
-            "deepseek-harness"
-        ));
-        assert!(!session_matches_agent("pi", "chatgpt-desktop"));
-        assert!(!session_matches_agent("unknown", "unknown"));
+    #[tokio::test]
+    async fn mobile_s3_client_only_reads_signed_bucket_list_and_snapshot() {
+        let (endpoint, server) = crate::core::test_http::serve(3, |request| {
+            let line = request.lines().next().unwrap();
+            assert!(line.to_lowercase().contains("x-amz-signature="));
+            if line.starts_with("HEAD ") {
+                return (200, Vec::new());
+            }
+            assert!(line.starts_with("GET "), "mobile S3 must not write: {line}");
+            if line.contains("snapshot.json") {
+                (
+                    200,
+                    include_bytes!("../../../tests/fixtures/mobile/device-usage-v13.json").to_vec(),
+                )
+            } else {
+                (200, br#"<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Name>mobile-test</Name><Prefix>flowlet/v1/devices/</Prefix><KeyCount>1</KeyCount><MaxKeys>1000</MaxKeys><IsTruncated>false</IsTruncated><Contents><Key>flowlet/v1/devices/1411a7d7-55d8-4024-8363-95858788aa91/snapshot.json</Key><LastModified>2026-11-15T00:00:00Z</LastModified><ETag>"test"</ETag><Size>1024</Size><StorageClass>STANDARD</StorageClass></Contents></ListBucketResult>"#.to_vec())
+            }
+        });
+        let config = S3SyncConfig::from_input(&input(&endpoint)).unwrap();
+        let store = S3Store::new(&config, "fixture-secret").unwrap();
+        store.head_bucket().await.unwrap();
+        let objects = store.list("flowlet/v1/devices/").await.unwrap();
+        assert_eq!(objects.len(), 1);
+        let raw = store.get(&objects[0].key).await.unwrap();
+        let bundle = DeviceUsageBundle::from_bytes(&raw).unwrap();
+        assert_eq!(bundle.snapshot.days[0].known_tokens, 42);
+        server.join().unwrap();
     }
 
     fn input(endpoint: &str) -> S3SyncConfigInput {
@@ -1763,90 +849,6 @@ mod tests {
             secret_access_key: Some("secret".to_string()),
             path_style: true,
         }
-    }
-
-    fn synced_session(id: usize, status: &str) -> SyncedAgentSession {
-        SyncedAgentSession {
-            agent_type: "codex-cli".to_string(),
-            session_id: format!("session-{id:02}"),
-            parent_session_id: None,
-            runtime_status: status.to_string(),
-            title: Some(format!("Session {id}")),
-            client_name: Some("Codex CLI".to_string()),
-            activity_at: format!("2026-07-29T12:{id:02}:00Z"),
-            flowlet_observed: true,
-            request_count: id as i64,
-            error_count: 0,
-            known_tokens: id as i64 * 100,
-            native_turn_count: None,
-            native_total_tokens: None,
-            native_truncated: false,
-            last_interaction: None,
-        }
-    }
-
-    #[test]
-    fn synced_session_keeps_native_summary_separate_from_flowlet_metrics() {
-        let row = crate::core::config::AgentSessionRow {
-            agent_type: "codex-cli".to_string(),
-            session_id: "native-session".to_string(),
-            runtime_status: "idle".to_string(),
-            title: Some("Native Codex".to_string()),
-            project_path: None,
-            parent_session_id: None,
-            client_id: None,
-            client_name: Some("Codex CLI".to_string()),
-            native_started_at: Some("2026-08-01T09:00:00Z".to_string()),
-            native_updated_at: Some("2026-08-01T10:00:00Z".to_string()),
-            activity_at: "2026-08-01T10:00:00Z".to_string(),
-            flowlet_observed: false,
-            started_at: "2026-08-01T09:00:00Z".to_string(),
-            updated_at: "2026-08-01T10:00:00Z".to_string(),
-            request_count: 0,
-            success_count: 0,
-            error_count: 0,
-            known_tokens: 0,
-            input_tokens: 0,
-            input_cached_tokens: 0,
-            input_uncached_tokens: 0,
-            cache_measured_input_tokens: 0,
-            output_tokens: 0,
-            unknown_usage_count: 0,
-            estimated_cost: 0.0,
-            estimated_input_uncached_cost: 0.0,
-            estimated_input_cached_cost: 0.0,
-            estimated_input_cache_write_cost: 0.0,
-            estimated_output_cost: 0.0,
-            native_summary: Some(crate::core::config::AgentSessionNativeSummary {
-                source_available: true,
-                truncated: true,
-                turn_count: 8,
-                usage: Some(crate::core::config::AgentSessionNativeUsage {
-                    input_tokens: 10_000,
-                    cached_input_tokens: 2_000,
-                    cache_write_input_tokens: 0,
-                    output_tokens: 345,
-                    reasoning_tokens: 0,
-                    total_tokens: 12_345,
-                    cost: None,
-                    cost_currency: None,
-                    api_equivalent: None,
-                }),
-                models: vec!["gpt-5".to_string()],
-            }),
-            native_synced_at: Some("2026-08-01T10:01:00Z".to_string()),
-            native_source: None,
-            native_profile: None,
-            native_session_dir: None,
-            has_flowlet_requests: false,
-        };
-
-        let synced = synced_agent_session_from_row(row);
-        assert_eq!(synced.request_count, 0);
-        assert_eq!(synced.known_tokens, 0);
-        assert_eq!(synced.native_turn_count, Some(8));
-        assert_eq!(synced.native_total_tokens, Some(12_345));
-        assert!(synced.native_truncated);
     }
 
     #[test]
@@ -1885,11 +887,7 @@ mod tests {
         let mut valid = input("https://s3.oss-cn-shanghai.aliyuncs.com");
         valid.region = "cn-shanghai".to_string();
         valid.path_style = false;
-        let config = S3SyncConfig::from_input(&valid).unwrap();
-        assert!(!config.supports_conditional_put());
-        assert!(S3SyncConfig::from_input(&input("https://example.com"))
-            .unwrap()
-            .supports_conditional_put());
+        assert!(S3SyncConfig::from_input(&valid).is_ok());
     }
 
     #[test]
@@ -1904,28 +902,13 @@ mod tests {
     #[test]
     fn sync_runtime_rejects_overlap_and_recovers_after_drop() {
         let jobs = crate::core::job_runtime::JobRuntime::default();
-        let first = acquire_sync_lease(&jobs, &crate::core::job_runtime::DEVICE_S3_SYNC).unwrap();
+        let first = acquire_sync_lease(&jobs, &crate::core::job_runtime::DEVICE_S3_PULL).unwrap();
         assert_eq!(
             acquire_sync_lease(&jobs, &crate::core::job_runtime::DEVICE_S3_PULL).unwrap_err(),
             SYNC_ALREADY_RUNNING_ERROR
         );
         drop(first);
         assert!(acquire_sync_lease(&jobs, &crate::core::job_runtime::DEVICE_S3_PULL).is_ok());
-    }
-
-    #[test]
-    fn creates_device_sync_task_log_with_trigger_source() {
-        let storage =
-            Storage::from_connection_for_test(rusqlite::Connection::open_in_memory().unwrap());
-        storage.migrate().unwrap();
-        let job_id = create_sync_job(&storage, "background").unwrap();
-        let detail = storage.get_background_job_detail(&job_id).unwrap().unwrap();
-        assert_eq!(detail.job.job_type, "device-s3-sync");
-        assert_eq!(detail.job.title, "S3 设备同步");
-        assert_eq!(detail.job.trigger_source, "background");
-        assert_eq!(detail.job.status, "running");
-        assert_eq!(detail.job.progress_total, 1);
-        assert_eq!(detail.events.len(), 1);
     }
 
     #[test]
@@ -1953,110 +936,6 @@ mod tests {
         assert_eq!(
             snapshot_object_label("users/demo/flowlet/v1/devices/device-1/snapshot.json"),
             "设备 device-1"
-        );
-    }
-
-    #[test]
-    fn remote_etag_cache_is_scoped_to_endpoint_and_bucket() {
-        let storage =
-            Storage::from_connection_for_test(rusqlite::Connection::open_in_memory().unwrap());
-        storage.migrate().unwrap();
-        let config = S3SyncConfig::from_input(&input("https://example.com")).unwrap();
-        let mut state = load_remote_etags(&storage, &config);
-        state.etags.insert(
-            "flowlet/v1/devices/device-1/snapshot.json".to_string(),
-            "etag-1".to_string(),
-        );
-        save_remote_etags(&storage, &state);
-
-        assert_eq!(load_remote_etags(&storage, &config).etags.len(), 1);
-
-        let mut other_input = input("https://example.com");
-        other_input.bucket = "other-bucket".to_string();
-        let other_config = S3SyncConfig::from_input(&other_input).unwrap();
-        assert!(load_remote_etags(&storage, &other_config).etags.is_empty());
-    }
-
-    #[test]
-    fn recovers_only_snapshot_from_the_same_device_identity() {
-        let identity = DeviceIdentity {
-            schema_version: 1,
-            device_id: "8d58734f-0b71-49ea-b5a4-115b389a9ae7".to_string(),
-            created_at: "2026-07-28T00:00:00Z".to_string(),
-            display_name: "工作电脑".to_string(),
-            platform: "windows".to_string(),
-        };
-        let matching = DeviceUsageBundle::new(DeviceUsageSnapshot::new(
-            &identity,
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-        ));
-        assert!(validate_recoverable_current_snapshot(&identity, &matching).is_ok());
-
-        let mut other_install = matching.clone();
-        other_install.snapshot.device_created_at = "2026-08-08T00:00:00Z".to_string();
-        assert!(validate_recoverable_current_snapshot(&identity, &other_install).is_err());
-
-        let mut other_device = matching;
-        other_device.snapshot.device_id = "7f482379-ed34-46e7-9da7-7a0c05d447be".to_string();
-        assert!(validate_recoverable_current_snapshot(&identity, &other_device).is_err());
-    }
-
-    #[test]
-    fn session_snapshot_keeps_all_active_when_more_than_ten() {
-        let sessions = (0..12)
-            .map(|index| {
-                synced_session(
-                    index,
-                    if index % 2 == 0 {
-                        "running"
-                    } else {
-                        "waiting_user"
-                    },
-                )
-            })
-            .chain((12..18).map(|index| synced_session(index, "idle")))
-            .collect();
-        let selected = select_sessions_for_sync(sessions);
-        assert_eq!(selected.len(), 12);
-        assert!(selected
-            .iter()
-            .all(|row| matches!(row.runtime_status.as_str(), "running" | "waiting_user")));
-    }
-
-    #[test]
-    fn session_snapshot_fills_active_sessions_to_ten_by_recency() {
-        let sessions = (0..3)
-            .map(|index| synced_session(index, "running"))
-            .chain((3..15).map(|index| synced_session(index, "idle")))
-            .collect();
-        let selected = select_sessions_for_sync(sessions);
-        assert_eq!(selected.len(), 10);
-        assert_eq!(
-            selected
-                .iter()
-                .filter(|row| row.runtime_status == "running")
-                .count(),
-            3
-        );
-        let idle_ids = selected
-            .iter()
-            .filter(|row| row.runtime_status == "idle")
-            .map(|row| row.session_id.as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(
-            idle_ids,
-            vec![
-                "session-14",
-                "session-13",
-                "session-12",
-                "session-11",
-                "session-10",
-                "session-09",
-                "session-08",
-            ]
         );
     }
 

@@ -213,14 +213,7 @@ scripts/run-node-host.sh          # 复制数据副本到 .flowlet-dev-data/ 后
 
 端到端冒烟：`node scripts/e2e-node-host.mjs`；Rust↔Node 对拍：`node scripts/web-parity.mjs`。
 
-Rust 版 host 已不参与构建与部署（生产 Web Host 由 Node Host 承载），仅在需要回滚对照或
-Rust↔Node 对拍时按需编译，Cargo feature `legacy-server` 默认关闭：
-
-```bash
-export FLOWLET_ADMIN_TOKEN="$(openssl rand -hex 32)"
-cargo run --manifest-path src-tauri/Cargo.toml --no-default-features --features legacy-server --bin headless
-```
-
-默认监听 `127.0.0.1:8080` 和 `127.0.0.1:18640`，数据库位于 `flowlet-data/`。
-桌面构建继续使用默认 Cargo feature；`core::web` 与 `headless` 二进制只在 `legacy-server`
-下编译，不会进入桌面产物。
+Rust `headless` 与 `legacy-server` 源码已经退役，当前 `src-tauri/` 仅构建 Android。
+生产与本地服务均使用 Node Host。需要额外的历史 Rust↔Node 对拍时，
+必须通过 `FLOWLET_RUST_HEADLESS` 指定此前保留的可信二进制；该可选工具不再从
+当前仓库构建 Rust 服务端。

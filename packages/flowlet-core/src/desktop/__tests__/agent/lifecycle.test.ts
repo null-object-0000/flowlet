@@ -4,7 +4,7 @@
 // 并在每一步用独立解析器重新解析输出（JSONC / YAML / TOML），而不是只断言字符串包含。
 // Fixtures：
 // - OpenCode / Pi / DSH 的 cordis.patch.yml 与 credentials 直接复用
-//   `src-tauri/tests/fixtures/**` 的真实上游初始文件；
+//   `tests/fixtures/**` 的真实上游初始文件；
 // - Claude / Codex / Hermes / DSH settings 使用 `./fixtures/` 中与上游默认文件同形的副本。
 import assert from "node:assert/strict";
 import {
@@ -34,7 +34,7 @@ import { readJsoncSettings } from "../../../agent/jsonc.ts";
 
 const FIXTURES = path.dirname(fileURLToPath(import.meta.url)) + "/fixtures";
 const UPSTREAM_FIXTURES = fileURLToPath(
-  new URL("../../../../../../src-tauri/tests/fixtures", import.meta.url),
+  new URL("../../../../../../tests/fixtures", import.meta.url),
 );
 const BASE_URL = "http://127.0.0.1:18640";
 

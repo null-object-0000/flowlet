@@ -2,10 +2,7 @@
 // Rust `flowlet-cred` (legacy) ↔ Node `@flowlet/cred` 兼容性验收。
 //
 // 用法：node packages/flowlet-cred/scripts/compat.mjs
-//   FLOWLET_RUST_CRED=<path>   覆盖 Rust CLI 路径（默认主仓库 debug 构建）
-//   Rust CLI 默认不参与构建（Cargo feature `legacy-cred`），先构建一次：
-//   cargo build --manifest-path src-tauri/Cargo.toml \
-//     --no-default-features --features legacy-cred --bin flowlet-cred
+//   FLOWLET_RUST_CRED=<历史二进制> 必填；当前 Android crate 不再构建 Rust CLI。
 //
 // 做法：同一命令序列分别在两个**独立临时目录**跑 Rust 与 Node CLI（同一 mock GitLab /
 // mock Flowlet Web），逐条比较 exit/stdout/stderr 与 credentials.env / credentials.json
@@ -18,13 +15,9 @@ import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(HERE, "..");
-const REPO_ROOT = path.resolve(PKG_ROOT, "..", "..");
 const NODE_CLI = path.join(PKG_ROOT, "src", "cli.ts");
 const MOCK_SERVER = path.join(PKG_ROOT, "src", "__tests__", "mock-server.ts");
-// REPO_ROOT 是 .worktrees/electron；主仓库在其上两级（Rust 产物属于主树）。
-const RUST_CLI =
-  process.env.FLOWLET_RUST_CRED ??
-  path.resolve(REPO_ROOT, "..", "..", "src-tauri", "target", "debug", "flowlet-cred");
+const RUST_CLI = process.env.FLOWLET_RUST_CRED ?? "";
 
 const GITLAB_TOKEN = "glpat-compat-fixture-token-9z8y";
 const ADMIN_TOKEN = "flowlet-admin-token-0123456789";
@@ -125,6 +118,7 @@ function fileMode(dir, name) {
 }
 
 async function main() {
+  if (!RUST_CLI) throw new Error("请用 FLOWLET_RUST_CRED 指定已保留的历史 Rust CLI oracle");
   const gitlab = await startMock({
     mode: "gitlab",
     gitlabToken: GITLAB_TOKEN,

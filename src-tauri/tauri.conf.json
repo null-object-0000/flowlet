@@ -4,26 +4,19 @@
   "version": "../package.json",
   "identifier": "site.snewbie.flowlet",
   "build": {
-    "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
-    "frontendDist": "../dist"
+    "beforeDevCommand": "npm run dev:mobile",
+    "beforeBuildCommand": "npm run build:mobile",
+    "frontendDist": "../dist-mobile"
   },
   "app": {
-    "enableGTKAppId": true,
     "windows": [
       {
-        "create": false,
+        "label": "main",
+        "create": true,
         "title": "Flowlet",
-        "userAgent": "Flowlet",
-        "width": 1200,
-        "height": 720,
-        "minWidth": 1200,
-        "minHeight": 720,
+        "decorations": true,
         "resizable": true,
-        "maximizable": true,
-        "decorations": false,
-        "visible": false
+        "fullscreen": false
       }
     ],
     "security": {
@@ -32,18 +25,13 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
     "icon": [
-      "icons/32x32.png",
-      "icons/128x128.png",
-      "icons/128x128@2x.png",
-      "icons/macos-icon.icns",
-      "icons/icon.ico"
+      "../resources/icons/icon.png"
     ],
     "resources": {
       "../config.json": "config.json",
-      "models-cn.json": "models-cn.json",
-      "models-dev.json": "models-dev.json"
+      "../resources/catalogs/models-cn.json": "models-cn.json",
+      "../resources/catalogs/models-dev.json": "models-dev.json"
     }
   }
 }

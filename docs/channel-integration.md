@@ -121,7 +121,7 @@ Token Plan 模式时自动写入覆盖。两种资源模式均由官方控制台
 `resource_sync_mode = "auto"`（此前仅有手动维护，无自动数据可丢）。
 
 Qwen API 按量付费的余额与免费额度还有一条**不依赖 WebView** 的官方 HTTP 通道
-（`src-tauri/src/core/qwen_platform.rs`）：账号在编辑器里点「登录千问平台」后，
+（`packages/flowlet-core/src/web/qwen-platform.ts`）：账号在编辑器里点「登录千问平台」后，
 Flowlet 走千问官方 CLI（`@qianwenai/qianwen-cli`）使用的 device flow（PKCE S256）
 取得访问令牌，再以 `POST https://cli.qianwenai.com/data/v2/api.json` 调用
 `BssOpenAPI-V3` 的 `DescribeFqInstance`（免费额度实例，`Template.Name` 由网关直接
@@ -261,13 +261,16 @@ ChatGPT API 的最终网络错误日志及重连告警记录底层原因链，�
 
 ### 3.2 同步代码默认值
 
+2026-11-15 起渠道能力仅由 Node Host 实现，Android 不编译渠道 Adapter。下文旧 Rust
+函数名用于说明兼容语义，当前 TypeScript 函数名和调用边界以标注文件中的实现为准。
+
 以下位置必须与 `config.json` 一致：
 
 - `src/domains/channel/types.ts`
   - `DEFAULT_EXPOSED_MODELS_BY_CHANNEL`
-- `src-tauri/src/core/config.rs`
+- `packages/flowlet-core/src/config/index.ts`
   - `ChannelPreset::<channel>()`
-- `src-tauri/src/core/presets.rs`
+- `packages/flowlet-core/src/config/index.ts`
   - `builtin_channel_presets()`
 
 外部 `config.json` 可能来自旧版本。新增渠道时必须确认内置配置合并和 SQLite 迁移能够把新渠道带到已有安装，不能只验证全新数据库。
@@ -284,23 +287,23 @@ Flowlet 运行时的渠道预设会进入 SQLite。新增或修改渠道时至�
 
 当前相关实现：
 
-- `src-tauri/src/core/storage_config.rs`
+- `packages/flowlet-core/src/storage/config.ts`
   - `ensure_missing_presets`
   - `sync_preset_maintained_config`
   - 渠道能力字段的其他定向迁移
-- `src-tauri/src/lib.rs`
+- `packages/flowlet-desktop/src/main.ts`
   - `build_app_state`
   - `merge_builtin_config`
-- `src-tauri/src/core/storage_tests.rs`
+- `packages/flowlet-core/src/storage/__tests__/`
   - 新增渠道与旧预设升级测试
 
 修改字段时不能只扩展 `ensure_missing_presets`：该函数遇到已存在的渠道会跳过，已有用户仍会保留旧值。
 
-## 5. Rust 渠道能力适配
+## 5. Node Host 渠道能力适配
 
 ### 5.1 端点解析
 
-在 `src-tauri/src/core/channels_config.rs` 中为非标准端点提供小型 helper。解析优先级保持：
+在 `packages/flowlet-core/src/config/index.ts` 中为非标准端点提供小型 helper。解析优先级保持：
 
 1. `config.json` 的 `endpoints` 显式覆盖；
 2. 基于渠道 Base URL 的兼容拼接；
@@ -310,14 +313,14 @@ Flowlet 运行时的渠道预设会进入 SQLite。新增或修改渠道时至�
 
 ### 5.2 模型同步
 
-在对应的 `src-tauri/src/core/channel_capability_adapter/adapters/<adapter>.rs` 中提供模型同步入口；
+在对应的 `packages/flowlet-core/src/web/model-sync.ts` 中提供模型同步入口；
 可复用 `sync.rs` 的通用 OpenAI-compatible HTTP 与响应映射，响应不兼容时把渠道专属最小反序列化
 结构和转换留在该 Adapter 模块，最终统一返回 `ChannelModel`：
 
 - `channel_id`、`model`、`display_name` 正确；
 - `supported_protocols` 不超过渠道真实能力；
 - 官方返回上下文和输出上限时原样使用；
-- 官方未返回时使用 `None`，不要统一硬编码；
+- 官方未返回时使用 `null`，不要统一硬编码；
 - 保留 `source`、`synced_at`、创建和更新时间；
 - 空模型 ID 必须过滤；
 - 网络、HTTP 状态和 JSON 解析错误必须真实返回。
@@ -339,11 +342,11 @@ DTO、发布时间校准与模型转换均归档在 Kimi Adapter。`sync.rs` 只
 
 Token 资源包、配额、用量等能力同理。UI 应依赖渠道能力或明确的渠道特例，不应假定所有渠道都有资源包。
 
-### 5.4 Capability Adapter 与 Tauri command 分发
+### 5.4 渠道能力与 Host command 分发
 
 渠道贡献必须在根目录 `plugin-registry.json` 声明 `channelId` 和 `adapterId`。统一注册与能力门控位于
-`src-tauri/src/core/channel_capability_adapter.rs`，渠道实现入口位于
-`src-tauri/src/core/channel_capability_adapter/adapters/`：
+`packages/flowlet-core/src/web/model-sync.ts`，渠道实现入口位于
+`packages/flowlet-core/src/web/`：
 
 1. 行为与既有渠道完全兼容时，复用既有 `adapterId`；
 2. 模型响应、余额响应或路径规则不兼容时，新增一个小型 Adapter，并登记模型同步函数、可选的
@@ -498,17 +501,17 @@ cargo test <相关测试名>
 - [ ] `config.json`
 - [ ] `docs/config.md`
 - [ ] `src/domains/channel/types.ts`
-- [ ] `src-tauri/src/core/config.rs`
-- [ ] `src-tauri/src/core/presets.rs`
-- [ ] `src-tauri/src/core/channels_config.rs`
-- [ ] `src-tauri/src/core/storage_config.rs`
-- [ ] `src-tauri/src/lib.rs`
-- [ ] `src-tauri/src/core/sync.rs`
-- [ ] `src-tauri/src/commands.rs`
+- [ ] `packages/flowlet-core/src/config/index.ts`
+- [ ] `packages/flowlet-core/src/config/index.ts`
+- [ ] `packages/flowlet-core/src/config/index.ts`
+- [ ] `packages/flowlet-core/src/storage/config.ts`
+- [ ] `packages/flowlet-desktop/src/main.ts`
+- [ ] `packages/flowlet-core/src/web/model-sync.ts`
+- [ ] `packages/flowlet-core/src/desktop/commands.ts`
 - [ ] `src/features/channel-accounts/`
 - [ ] `src/pages/overview/`
 - [ ] `public/icons/lobe/`
-- [ ] Rust 存储、同步、路由测试
+- [ ] Node Host 存储、同步、路由测试
 - [ ] 前端账号、默认路由和 UI 测试
 
 交付说明必须包含：

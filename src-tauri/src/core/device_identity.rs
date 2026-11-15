@@ -1,174 +1,9 @@
-use chrono::{Local, Timelike, Utc};
+use chrono::Timelike;
 use serde::{Deserialize, Serialize};
 
 use crate::core::config::DeviceUsageBreakdownRow;
-use std::fs::{self, OpenOptions};
-use std::io::Write;
-use std::path::Path;
-use thiserror::Error;
 
-const DEVICE_IDENTITY_FILE: &str = "flowlet-device.json";
-const DEVICE_IDENTITY_SCHEMA_VERSION: u32 = 1;
 pub const DEVICE_USAGE_SNAPSHOT_SCHEMA_VERSION: u32 = 13;
-
-#[derive(Debug, Error)]
-pub enum DeviceIdentityError {
-    #[error("读写设备身份文件失败: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("设备身份文件格式无效: {0}")]
-    Json(#[from] serde_json::Error),
-    #[error("不支持的设备身份版本: {0}")]
-    UnsupportedVersion(u32),
-    #[error("设备 ID 无效: {0}")]
-    InvalidDeviceId(String),
-    #[error("设备名称无效: {0}")]
-    InvalidDisplayName(String),
-}
-
-/// 安装实例身份。它保存在 SQLite 之外，因此配置导入和数据库替换不会复制
-/// 其它设备的身份。普通 Flowlet Bundle 也不得包含这个文件。
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct DeviceIdentity {
-    pub schema_version: u32,
-    pub device_id: String,
-    pub created_at: String,
-    #[serde(default)]
-    pub display_name: String,
-    #[serde(default)]
-    pub platform: String,
-}
-
-impl DeviceIdentity {
-    pub fn load_or_create(data_dir: &Path) -> Result<Self, DeviceIdentityError> {
-        fs::create_dir_all(data_dir)?;
-        let path = data_dir.join(DEVICE_IDENTITY_FILE);
-        if path.exists() {
-            return Self::read_and_validate(&path);
-        }
-
-        let device_id = uuid::Uuid::new_v4().to_string();
-        let platform = current_platform();
-        let identity = Self {
-            schema_version: DEVICE_IDENTITY_SCHEMA_VERSION,
-            display_name: default_display_name(&platform, &device_id),
-            device_id,
-            created_at: Utc::now().to_rfc3339(),
-            platform,
-        };
-        identity.persist_new(&path)
-    }
-
-    fn read_and_validate(path: &Path) -> Result<Self, DeviceIdentityError> {
-        let mut identity: Self = serde_json::from_slice(&fs::read(path)?)?;
-        if identity.schema_version != DEVICE_IDENTITY_SCHEMA_VERSION {
-            return Err(DeviceIdentityError::UnsupportedVersion(
-                identity.schema_version,
-            ));
-        }
-        uuid::Uuid::parse_str(&identity.device_id)
-            .map_err(|_| DeviceIdentityError::InvalidDeviceId(identity.device_id.clone()))?;
-        let detected_platform = current_platform();
-        identity.platform =
-            resolve_platform(&identity.platform, &detected_platform, std::env::consts::OS);
-        if identity.display_name.trim().is_empty() {
-            identity.display_name = default_display_name(&identity.platform, &identity.device_id);
-        }
-        validate_display_name(&identity.display_name)?;
-        Ok(identity)
-    }
-
-    fn persist_new(&self, path: &Path) -> Result<Self, DeviceIdentityError> {
-        let parent = path.parent().unwrap_or_else(|| Path::new("."));
-        let temp_path = parent.join(format!(
-            ".flowlet-device-{}.tmp",
-            uuid::Uuid::new_v4().simple()
-        ));
-        let bytes = serde_json::to_vec_pretty(self)?;
-
-        let write_result = (|| -> Result<(), std::io::Error> {
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&temp_path)?;
-            file.write_all(&bytes)?;
-            file.sync_all()?;
-            fs::rename(&temp_path, path)?;
-            Ok(())
-        })();
-
-        if let Err(error) = write_result {
-            let _ = fs::remove_file(&temp_path);
-            // 两个进程同时首次启动时，采用先成功落盘的身份。
-            if path.exists() {
-                return Self::read_and_validate(path);
-            }
-            return Err(DeviceIdentityError::Io(error));
-        }
-        Ok(self.clone())
-    }
-
-    pub fn update_display_name(
-        &mut self,
-        data_dir: &Path,
-        display_name: &str,
-    ) -> Result<(), DeviceIdentityError> {
-        let display_name = display_name.trim();
-        validate_display_name(display_name)?;
-
-        let path = data_dir.join(DEVICE_IDENTITY_FILE);
-        let temporary = data_dir.join(format!(
-            ".flowlet-device-{}.tmp",
-            uuid::Uuid::new_v4().simple()
-        ));
-        let backup = data_dir.join(format!(
-            ".flowlet-device-{}.backup",
-            uuid::Uuid::new_v4().simple()
-        ));
-        let mut updated = self.clone();
-        updated.display_name = display_name.to_string();
-        let bytes = serde_json::to_vec_pretty(&updated)?;
-
-        let write_result = (|| -> Result<(), std::io::Error> {
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&temporary)?;
-            file.write_all(&bytes)?;
-            file.sync_all()
-        })();
-        if let Err(error) = write_result {
-            let _ = fs::remove_file(&temporary);
-            return Err(DeviceIdentityError::Io(error));
-        }
-
-        if path.exists() {
-            if let Err(error) = fs::rename(&path, &backup) {
-                let _ = fs::remove_file(&temporary);
-                return Err(DeviceIdentityError::Io(error));
-            }
-        }
-        match fs::rename(&temporary, &path) {
-            Ok(()) => {
-                let _ = fs::remove_file(&backup);
-                *self = updated;
-                Ok(())
-            }
-            Err(error) => {
-                let _ = fs::remove_file(&temporary);
-                if backup.exists() {
-                    let _ = fs::rename(&backup, &path);
-                }
-                Err(DeviceIdentityError::Io(error))
-            }
-        }
-    }
-
-    #[cfg(test)]
-    fn file_path(data_dir: &Path) -> std::path::PathBuf {
-        data_dir.join(DEVICE_IDENTITY_FILE)
-    }
-}
 
 /// 单台设备按其本地自然日计算的最小用量汇总。不包含账号、Header 或 Body。
 /// `estimated_cost` 仅包含经过 Flowlet 代理且已成功计价的请求费用。
@@ -241,77 +76,6 @@ pub struct HourlyUsageTotal {
     pub native_reasoning_tokens: i64,
     #[serde(default)]
     pub native_total_tokens: i64,
-}
-
-/// 把 other 的全部字段（含 native_*）累加进 into。用于合并代理聚合、
-/// Agent 原生聚合与导入快照等多个来源的日/小时汇总。
-pub fn merge_daily_usage_total(into: &mut DailyUsageTotal, other: &DailyUsageTotal) {
-    into.request_count += other.request_count;
-    into.known_tokens += other.known_tokens;
-    into.input_tokens += other.input_tokens;
-    into.input_cached_tokens += other.input_cached_tokens;
-    into.input_uncached_tokens += other.input_uncached_tokens;
-    into.cache_measured_input_tokens += other.cache_measured_input_tokens;
-    into.output_tokens += other.output_tokens;
-    into.unknown_count += other.unknown_count;
-    into.estimated_cost += other.estimated_cost;
-    into.native_event_count += other.native_event_count;
-    into.native_input_tokens += other.native_input_tokens;
-    into.native_cached_input_tokens += other.native_cached_input_tokens;
-    into.native_cache_write_input_tokens += other.native_cache_write_input_tokens;
-    into.native_output_tokens += other.native_output_tokens;
-    into.native_reasoning_tokens += other.native_reasoning_tokens;
-    into.native_total_tokens += other.native_total_tokens;
-}
-
-/// 按日期合并多个来源的日汇总，输出严格按日期升序（快照 validate 要求）。
-pub fn merge_daily_usage_totals(
-    days: impl IntoIterator<Item = DailyUsageTotal>,
-) -> Vec<DailyUsageTotal> {
-    let mut by_date = std::collections::BTreeMap::<String, DailyUsageTotal>::new();
-    for day in days {
-        match by_date.get_mut(&day.date) {
-            Some(total) => merge_daily_usage_total(total, &day),
-            None => {
-                by_date.insert(day.date.clone(), day);
-            }
-        }
-    }
-    by_date.into_values().collect()
-}
-
-pub fn merge_hourly_usage_total(into: &mut HourlyUsageTotal, other: &HourlyUsageTotal) {
-    into.request_count += other.request_count;
-    into.known_tokens += other.known_tokens;
-    into.input_tokens += other.input_tokens;
-    into.input_cached_tokens += other.input_cached_tokens;
-    into.cache_measured_input_tokens += other.cache_measured_input_tokens;
-    into.output_tokens += other.output_tokens;
-    into.unknown_count += other.unknown_count;
-    into.estimated_cost += other.estimated_cost;
-    into.native_event_count += other.native_event_count;
-    into.native_input_tokens += other.native_input_tokens;
-    into.native_cached_input_tokens += other.native_cached_input_tokens;
-    into.native_cache_write_input_tokens += other.native_cache_write_input_tokens;
-    into.native_output_tokens += other.native_output_tokens;
-    into.native_reasoning_tokens += other.native_reasoning_tokens;
-    into.native_total_tokens += other.native_total_tokens;
-}
-
-/// 按小时合并多个来源的小时汇总，输出严格按小时升序。
-pub fn merge_hourly_usage_totals(
-    hours: impl IntoIterator<Item = HourlyUsageTotal>,
-) -> Vec<HourlyUsageTotal> {
-    let mut by_hour = std::collections::BTreeMap::<String, HourlyUsageTotal>::new();
-    for hour in hours {
-        match by_hour.get_mut(&hour.hour) {
-            Some(total) => merge_hourly_usage_total(total, &hour),
-            None => {
-                by_hour.insert(hour.hour.clone(), hour);
-            }
-        }
-    }
-    by_hour.into_values().collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -535,43 +299,7 @@ pub struct KnownDevice {
     pub last_seen_at: String,
 }
 
-impl DeviceUsageSnapshot {
-    pub fn new(
-        identity: &DeviceIdentity,
-        days: Vec<DailyUsageTotal>,
-        hours: Vec<HourlyUsageTotal>,
-        sessions: Vec<SyncedAgentSession>,
-        agents: Vec<SyncedAgentProfile>,
-    ) -> Self {
-        Self {
-            schema_version: DEVICE_USAGE_SNAPSHOT_SCHEMA_VERSION,
-            device_id: identity.device_id.clone(),
-            device_created_at: identity.created_at.clone(),
-            display_name: identity.display_name.clone(),
-            platform: identity.platform.clone(),
-            app_version: env!("CARGO_PKG_VERSION").to_string(),
-            generated_at: Utc::now().to_rfc3339(),
-            timezone_offset_minutes: Local::now().offset().local_minus_utc() / 60,
-            days,
-            hours,
-            sessions,
-            agents,
-            lan_peer: None,
-            usage_breakdowns: Vec::new(),
-            account_resources: Vec::new(),
-        }
-    }
-}
-
 impl DeviceUsageBundle {
-    pub fn new(snapshot: DeviceUsageSnapshot) -> Self {
-        Self {
-            format: "flowlet-device-usage".to_string(),
-            version: 1,
-            snapshot,
-        }
-    }
-
     pub fn validate(&self) -> Result<(), String> {
         if self.format != "flowlet-device-usage" || self.version != 1 {
             return Err("不支持的 Flowlet 设备用量文件".to_string());
@@ -819,65 +547,6 @@ pub fn resolve_device_display_name(display_name: &str, platform: &str, device_id
     }
 }
 
-fn current_platform() -> String {
-    match std::env::consts::OS {
-        "windows" => "windows".to_string(),
-        "macos" => "macos".to_string(),
-        "linux" => linux_distro_id().unwrap_or_else(|| "linux".to_string()),
-        _ => "unknown".to_string(),
-    }
-}
-
-/// 读取 Linux 发行版 ID（`/etc/os-release` 的 `ID=`，如 `ubuntu`、`debian`）。
-/// 读取失败时返回 `None`，由调用方回退到泛化的 `linux`。
-fn linux_distro_id() -> Option<String> {
-    let contents = fs::read_to_string("/etc/os-release").ok()?;
-    linux_distro_id_from(&contents)
-}
-
-fn linux_distro_id_from(contents: &str) -> Option<String> {
-    for line in contents.lines() {
-        let Some(rest) = line.strip_prefix("ID=") else {
-            continue;
-        };
-        let id = rest.trim().trim_matches('"');
-        if !id.is_empty() && !id.chars().any(char::is_control) {
-            return Some(id.to_string());
-        }
-    }
-    None
-}
-
-/// 迁移或首次识别后，把旧平台键收敛为当前系统应使用的值：
-/// - 空值或与当前系统不匹配（例如从 Windows 迁移到 Linux）→ 重新识别；
-/// - Linux 下泛化的 `linux` → 升级为具体发行版 ID；
-/// - 其余情况保留原值。
-fn resolve_platform(existing: &str, detected: &str, os: &str) -> String {
-    if existing.trim().is_empty() || !platform_matches_os(existing, os) {
-        return detected.to_string();
-    }
-    if os == "linux" && existing == "linux" {
-        return detected.to_string();
-    }
-    existing.to_string()
-}
-
-fn platform_matches_os(platform: &str, os: &str) -> bool {
-    match os {
-        "windows" => platform == "windows",
-        "macos" => platform == "macos",
-        "linux" => is_linux_platform(platform),
-        _ => false,
-    }
-}
-
-fn is_linux_platform(platform: &str) -> bool {
-    !matches!(
-        platform,
-        "" | "unknown" | "windows" | "macos" | "android" | "ios"
-    )
-}
-
 fn default_display_name(platform: &str, device_id: &str) -> String {
     let suffix = device_id
         .chars()
@@ -917,100 +586,9 @@ fn platform_label(platform: &str) -> String {
     }
 }
 
-fn validate_display_name(display_name: &str) -> Result<(), DeviceIdentityError> {
-    let count = display_name.chars().count();
-    if count == 0 {
-        return Err(DeviceIdentityError::InvalidDisplayName(
-            "名称不能为空".to_string(),
-        ));
-    }
-    if count > 64 {
-        return Err(DeviceIdentityError::InvalidDisplayName(
-            "名称不能超过 64 个字符".to_string(),
-        ));
-    }
-    if display_name.chars().any(char::is_control) {
-        return Err(DeviceIdentityError::InvalidDisplayName(
-            "名称不能包含控制字符".to_string(),
-        ));
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn device_identity_is_stable_across_reloads() {
-        let directory =
-            std::env::temp_dir().join(format!("flowlet-device-identity-{}", uuid::Uuid::new_v4()));
-
-        let first = DeviceIdentity::load_or_create(&directory).expect("create device identity");
-        let second = DeviceIdentity::load_or_create(&directory).expect("reload device identity");
-
-        assert_eq!(first, second);
-        assert!(DeviceIdentity::file_path(&directory).is_file());
-        uuid::Uuid::parse_str(&first.device_id).expect("valid UUID device id");
-        assert!(!first.display_name.is_empty());
-        assert!(!first.platform.is_empty());
-
-        let _ = fs::remove_dir_all(directory);
-    }
-
-    #[test]
-    fn device_display_name_is_persisted_without_changing_identity() {
-        let directory =
-            std::env::temp_dir().join(format!("flowlet-device-rename-{}", uuid::Uuid::new_v4()));
-        let mut identity =
-            DeviceIdentity::load_or_create(&directory).expect("create device identity");
-        let device_id = identity.device_id.clone();
-
-        identity
-            .update_display_name(&directory, "公司笔记本")
-            .expect("rename device");
-        let reloaded = DeviceIdentity::load_or_create(&directory).expect("reload renamed device");
-
-        assert_eq!(reloaded.device_id, device_id);
-        assert_eq!(reloaded.display_name, "公司笔记本");
-        let _ = fs::remove_dir_all(directory);
-    }
-
-    #[test]
-    fn legacy_identity_gets_safe_readable_defaults() {
-        let directory =
-            std::env::temp_dir().join(format!("flowlet-device-legacy-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(&directory).unwrap();
-        fs::write(
-            DeviceIdentity::file_path(&directory),
-            r#"{"schemaVersion":1,"deviceId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","createdAt":"2026-07-28T00:00:00Z"}"#,
-        )
-        .unwrap();
-
-        let identity = DeviceIdentity::load_or_create(&directory).expect("load legacy identity");
-        assert!(identity.display_name.ends_with("AAAA"));
-        assert!(!identity.platform.is_empty());
-        let _ = fs::remove_dir_all(directory);
-    }
-
-    #[test]
-    fn invalid_existing_identity_is_not_silently_replaced() {
-        let directory = std::env::temp_dir().join(format!(
-            "flowlet-invalid-device-identity-{}",
-            uuid::Uuid::new_v4()
-        ));
-        fs::create_dir_all(&directory).unwrap();
-        fs::write(
-            DeviceIdentity::file_path(&directory),
-            r#"{"schemaVersion":1,"deviceId":"not-a-uuid","createdAt":"2026-07-28T00:00:00Z"}"#,
-        )
-        .unwrap();
-
-        let error = DeviceIdentity::load_or_create(&directory).unwrap_err();
-        assert!(matches!(error, DeviceIdentityError::InvalidDeviceId(_)));
-
-        let _ = fs::remove_dir_all(directory);
-    }
 
     #[test]
     fn legacy_device_bundle_without_sessions_remains_supported() {
@@ -1280,91 +858,6 @@ mod tests {
     }
 
     #[test]
-    fn merge_daily_usage_totals_sums_proxy_and_native_fields() {
-        let merged = merge_daily_usage_totals(vec![
-            DailyUsageTotal {
-                date: "2026-07-30".to_string(),
-                request_count: 2,
-                known_tokens: 15,
-                input_tokens: 10,
-                output_tokens: 5,
-                estimated_cost: 0.125,
-                ..Default::default()
-            },
-            DailyUsageTotal {
-                date: "2026-07-30".to_string(),
-                native_event_count: 1,
-                native_input_tokens: 60,
-                native_output_tokens: 40,
-                native_total_tokens: 100,
-                estimated_cost: 0.375,
-                ..Default::default()
-            },
-            DailyUsageTotal {
-                date: "2026-07-31".to_string(),
-                native_event_count: 1,
-                native_total_tokens: 40,
-                ..Default::default()
-            },
-        ]);
-        assert_eq!(merged.len(), 2);
-        assert_eq!(merged[0].date, "2026-07-30");
-        assert_eq!(merged[0].request_count, 2);
-        assert_eq!(merged[0].known_tokens, 15);
-        assert_eq!(merged[0].native_total_tokens, 100);
-        assert_eq!(merged[0].estimated_cost, 0.5);
-        assert_eq!(merged[1].date, "2026-07-31");
-        assert_eq!(merged[1].known_tokens, 0);
-        assert_eq!(merged[1].native_total_tokens, 40);
-    }
-
-    #[test]
-    fn merge_hourly_usage_totals_sums_unknown_and_native_fields() {
-        let merged = merge_hourly_usage_totals(vec![
-            HourlyUsageTotal {
-                hour: "2026-07-30T09:00:00".to_string(),
-                request_count: 2,
-                known_tokens: 15,
-                input_tokens: 10,
-                input_cached_tokens: 4,
-                cache_measured_input_tokens: 10,
-                output_tokens: 5,
-                unknown_count: 1,
-                estimated_cost: 0.125,
-                ..Default::default()
-            },
-            HourlyUsageTotal {
-                hour: "2026-07-30T09:00:00".to_string(),
-                native_event_count: 3,
-                native_input_tokens: 60,
-                native_cached_input_tokens: 20,
-                native_cache_write_input_tokens: 10,
-                native_output_tokens: 40,
-                native_reasoning_tokens: 5,
-                native_total_tokens: 100,
-                ..Default::default()
-            },
-        ]);
-
-        assert_eq!(merged.len(), 1);
-        assert_eq!(merged[0].request_count, 2);
-        assert_eq!(merged[0].known_tokens, 15);
-        assert_eq!(merged[0].input_tokens, 10);
-        assert_eq!(merged[0].input_cached_tokens, 4);
-        assert_eq!(merged[0].cache_measured_input_tokens, 10);
-        assert_eq!(merged[0].output_tokens, 5);
-        assert_eq!(merged[0].unknown_count, 1);
-        assert_eq!(merged[0].estimated_cost, 0.125);
-        assert_eq!(merged[0].native_event_count, 3);
-        assert_eq!(merged[0].native_input_tokens, 60);
-        assert_eq!(merged[0].native_cached_input_tokens, 20);
-        assert_eq!(merged[0].native_cache_write_input_tokens, 10);
-        assert_eq!(merged[0].native_output_tokens, 40);
-        assert_eq!(merged[0].native_reasoning_tokens, 5);
-        assert_eq!(merged[0].native_total_tokens, 100);
-    }
-
-    #[test]
     fn device_bundle_accepts_generated_local_hour_values() {
         let bundle = DeviceUsageBundle::from_bytes(
             br#"{
@@ -1421,48 +914,6 @@ mod tests {
     }
 
     #[test]
-    fn linux_distro_id_is_parsed_from_os_release() {
-        let contents = "NAME=\"Ubuntu\"\nVERSION_ID=\"26.04\"\nID=ubuntu\nID_LIKE=debian\n";
-        assert_eq!(linux_distro_id_from(contents).as_deref(), Some("ubuntu"));
-
-        let quoted = "ID=\"debian\"\n";
-        assert_eq!(linux_distro_id_from(quoted).as_deref(), Some("debian"));
-    }
-
-    #[test]
-    fn linux_distro_id_ignores_malformed_os_release() {
-        assert_eq!(
-            linux_distro_id_from("NAME=Ubuntu\nVERSION=1\n").as_deref(),
-            None
-        );
-        assert_eq!(linux_distro_id_from("").as_deref(), None);
-    }
-
-    #[test]
-    fn resolve_platform_redetects_when_migrated_to_another_os() {
-        assert_eq!(resolve_platform("windows", "ubuntu", "linux"), "ubuntu");
-        assert_eq!(resolve_platform("linux", "windows", "windows"), "windows");
-    }
-
-    #[test]
-    fn resolve_platform_upgrades_generic_linux_to_distro() {
-        assert_eq!(resolve_platform("linux", "ubuntu", "linux"), "ubuntu");
-        assert_eq!(resolve_platform("linux", "linux", "linux"), "linux");
-    }
-
-    #[test]
-    fn resolve_platform_keeps_existing_distro_id() {
-        assert_eq!(resolve_platform("ubuntu", "ubuntu", "linux"), "ubuntu");
-        assert_eq!(resolve_platform("debian", "ubuntu", "linux"), "debian");
-        assert_eq!(resolve_platform("windows", "windows", "windows"), "windows");
-    }
-
-    #[test]
-    fn resolve_platform_fills_empty_platform() {
-        assert_eq!(resolve_platform("", "ubuntu", "linux"), "ubuntu");
-    }
-
-    #[test]
     fn platform_label_maps_distro_ids() {
         assert_eq!(platform_label("ubuntu"), "Ubuntu");
         assert_eq!(platform_label("linux"), "Linux");
@@ -1480,4 +931,18 @@ mod tests {
             "unexpected default name: {name}"
         );
     }
+}
+
+fn validate_display_name(display_name: &str) -> Result<(), String> {
+    let count = display_name.chars().count();
+    if count == 0 {
+        return Err("设备名称无效: 名称不能为空".to_string());
+    }
+    if count > 64 {
+        return Err("设备名称无效: 名称不能超过 64 个字符".to_string());
+    }
+    if display_name.chars().any(char::is_control) {
+        return Err("设备名称无效: 名称不能包含控制字符".to_string());
+    }
+    Ok(())
 }

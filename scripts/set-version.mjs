@@ -28,15 +28,19 @@ update("package.json", (content) =>
   replaceRequired(content, /("version"\s*:\s*")[^"]+(")/, `$1${nextVersion}$2`, "package.json"),
 );
 
+update("packages/flowlet-desktop/package.json", (content) =>
+  replaceRequired(content, /("version"\s*:\s*")[^"]+(")/, `$1${nextVersion}$2`, "flowlet-desktop/package.json"),
+);
+
 update("package-lock.json", (content) => {
-  let count = 0;
-  const next = content.replace(/("version"\s*:\s*")[^"]+(")/g, (match, prefix, suffix) => {
-    if (count >= 2) return match;
-    count += 1;
-    return `${prefix}${nextVersion}${suffix}`;
-  });
-  if (count !== 2) throw new Error("无法更新 package-lock.json 的根包版本");
-  return next;
+  const lock = JSON.parse(content);
+  if (!lock.packages?.[""] || !lock.packages["packages/flowlet-desktop"]) {
+    throw new Error("无法更新 package-lock.json 的根包与桌面包版本");
+  }
+  lock.version = nextVersion;
+  lock.packages[""].version = nextVersion;
+  lock.packages["packages/flowlet-desktop"].version = nextVersion;
+  return `${JSON.stringify(lock, null, 2)}\n`;
 });
 
 update("src-tauri/Cargo.toml", (content) =>

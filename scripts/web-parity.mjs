@@ -3,13 +3,9 @@
 //
 // 用法：npm run node:parity
 //   FLOWLET_PARITY_DB=<源库副本>        默认 /home/nichangen/.local/state/flowlet-docker-migration-20261109/flowlet.sqlite
-//   FLOWLET_RUST_HEADLESS=<二进制>      默认 <主仓库>/src-tauri/target/release/headless
-//   FLOWLET_PARITY_KEEP=1               保留两侧数据库副本（默认保留，便于排查）
-//
-// Rust oracle 默认不参与构建（Cargo feature `legacy-server`，生产 Web Host 已是 Node Host），
-// 需要先显式构建一次：
-//   cargo build --release --manifest-path src-tauri/Cargo.toml \
-//     --no-default-features --features legacy-server --bin headless
+//   FLOWLET_RUST_HEADLESS=<历史二进制> 必填；从可信历史构建保留的外部 oracle。
+//   FLOWLET_PARITY_KEEP=1             保留对拍副本。
+// Rust 服务端源码已退役，当前 src-tauri 仅构建 Android，不能用于构建此 oracle。
 //
 // 服务凭据对拍：脚本内启动 mock GitLab（CE 10.8.7 语义：/api/v4/user、/api/v4/version），
 // 两侧以 insecure + http 指向它，验证 providers/list/save/test/export/delete 与错误文案。
@@ -33,16 +29,7 @@ const REPO = path.resolve(HERE, "..");
 const SOURCE_DB =
   process.env.FLOWLET_PARITY_DB ??
   "/home/nichangen/.local/state/flowlet-docker-migration-20261109/flowlet.sqlite";
-const RUST_HEADLESS =
-  process.env.FLOWLET_RUST_HEADLESS ??
-  (() => {
-    // REPO 是 .worktrees/electron；仓库主树在其上两级（Rust 二进制属于主树）。
-    // 优先 debug（包含 SSO + 服务凭据的最新全功能构建），缺失再回退 release。
-    const mainRepo = path.resolve(REPO, "..", "..");
-    const debug = path.join(mainRepo, "src-tauri", "target", "debug", "headless");
-    if (existsSync(debug)) return debug;
-    return path.join(mainRepo, "src-tauri", "target", "release", "headless");
-  })();
+const RUST_HEADLESS = process.env.FLOWLET_RUST_HEADLESS ?? "";
 const NODE_ENTRY =
   process.env.FLOWLET_NODE_ENTRY ?? path.join(REPO, "packages", "flowlet-core", "src", "index.ts");
 const STATIC_DIR = path.join(REPO, "dist-web");
@@ -707,11 +694,9 @@ class MockGitlab {
 
 async function main() {
   if (!existsSync(STATIC_DIR)) throw new Error(`找不到静态界面目录：${STATIC_DIR}`);
-  if (!existsSync(RUST_HEADLESS)) throw new Error(
-    `找不到 Rust headless 二进制：${RUST_HEADLESS}（可用 FLOWLET_RUST_HEADLESS 指定；` +
-      "或先构建：cargo build --release --manifest-path src-tauri/Cargo.toml " +
-      "--no-default-features --features legacy-server --bin headless）",
-  );
+  if (!RUST_HEADLESS || !existsSync(RUST_HEADLESS)) {
+    throw new Error("请用 FLOWLET_RUST_HEADLESS 指定已保留的历史 Rust oracle；当前 Android crate 不提供服务端二进制");
+  }
   if (!existsSync(NODE_ENTRY)) throw new Error(`找不到 Node host 入口：${NODE_ENTRY}`);
   mkdirSync(RUN_DIR, { recursive: true });
   console.log(`对拍工作目录：${RUN_DIR}`);
@@ -777,7 +762,7 @@ async function main() {
       console.warn(
         "[warn] Rust oracle 未包含 SSO 路由（/api/auth/config → 404）；\n" +
           "       跳过 SSO HTTP 检查，并把旧 token 模式 /api/session 形状归一化。\n" +
-          "       Node 侧 SSO 行为已按合并后的 src-tauri/src/core/web/auth.rs 实现，\n" +
+          "       Node 侧 SSO 由 packages/flowlet-core/src/web/auth.ts 实现，\n" +
           "       如需严格对拍请用 SSO 版本 Rust headless（FLOWLET_RUST_HEADLESS=...）。",
       );
     }

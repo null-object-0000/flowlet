@@ -244,7 +244,10 @@ after(async () => {
   for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
 });
 
+let deviceTokenExpiresAt: string;
+
 function installDefaultHandlers(): void {
+  deviceTokenExpiresAt = futureIso();
   mock.on("/cli/device/code", () => ({
     json: {
       Success: true,
@@ -263,7 +266,7 @@ function installDefaultHandlers(): void {
         Status: "complete",
         Credentials: {
           AccessToken: "access-token-1",
-          ExpireTime: "2026-11-12T05:54:20Z",
+          ExpireTime: deviceTokenExpiresAt,
           User: { Id: 1494342465971857 },
         },
       },
@@ -986,7 +989,7 @@ describe("device-flow 登录（本地 mock）", () => {
     const credentials = store.platforms[platformKey];
     assert.ok(credentials !== undefined);
     assert.equal(credentials.accessToken, "access-token-1");
-    assert.equal(credentials.expiresAt, "2026-11-12T05:54:20Z");
+    assert.equal(credentials.expiresAt, deviceTokenExpiresAt);
     assert.equal(credentials.aliyunId, "1494342465971857");
     assert.equal(credentials.email, "nich*****@outlook.com");
     if (process.platform !== "win32") {
@@ -998,7 +1001,7 @@ describe("device-flow 登录（本地 mock）", () => {
     assert.equal(platformStatus.loggedIn, true);
     assert.equal(platformStatus.aliyunId, "1494342465971857");
     assert.equal(platformStatus.email, "nich*****@outlook.com");
-    assert.equal(platformStatus.expiresAt, "2026-11-12T05:54:20Z");
+    assert.equal(platformStatus.expiresAt, deviceTokenExpiresAt);
 
     logout(ctx, "acc-payg");
     assert.equal(status(ctx, "acc-payg").loggedIn, false);

@@ -363,3 +363,12 @@ node scripts/e2e-node-host.mjs            # 端到端冒烟（含 mock 上游流
 | 生产验证 | 容器镜像 = 新 tag 且 healthy；`/api/auth/config` 仍 `mode=oidc`；`/v1/models` 200；`/assets/WebApp-DZUObtVq.js` 含 `generic-aksk` 与「通用 AK/SK」；容器日志无错误 |
 | 单测 | Node `credentials.test.ts` 57 项通过（含新增 generic-aksk 元数据/保存/导出/envKeys 4 项）；CLI `node --test packages/flowlet-cred/src/__tests__/` 167 项通过；根 `tsc --noEmit`、`flowlet-core`/`flowlet-cred` tsc 通过；`npm run build:web` 通过 |
 | 遗留 | 下次从 `feat/channel-integration`（或任何不含 `ada60ed` 的分支）整树重建仍会丢掉该功能；需要把 `ada60ed` cherry-pick/合并进发布分支，或改为从含该提交的分支发布 |
+
+
+## Agent 网关 ACP/A2A 适配发布（2026-11-16）
+
+- 源码提交：`3105f66`；镜像：`flowlet:node-20261116-acp-3105f66`。从当前生产镜像 overlay 本次 4 个核心文件、隔离构建的 Web/CLI 下载包、静态 Go 辅助程序与依赖许可证；三方合并保留线上 commands/storage 的既有修复，未包含工作区 OIDC 配置 WIP。
+- canary：健康检查、原有 Agent 列表兼容、新能力命令、默认拒绝 Web ACP 程序登记、下载 CLI 的 ACP 启动及页面资源哈希通过。
+- 生产：21:21 切换完成，最长健康探测成功间隔 3.40s，egress 未重建；health 200、OIDC 登录模式保留、models 200、模型流式请求 1/1 读到 DONE；Agent 网关资源哈希与 CLI 下载清单验证通过。未做实际 T3/Paseo 界面联调。
+- Web ACP 托管仍默认关闭；A2A 服务可使用页面生成的 ACP 客户端桥配置。程序托管需另行启用 `FLOWLET_ENABLE_ACP=1` 并安装目标 Agent。
+- 回滚镜像：`flowlet:node-20261116-aksk-restore`。compose 备份：部署技能 `.work/compose.before-20261116-212147.yaml`。Dockhand 正确凭据映射为 `DOCKHAND_SZ_TEST`，env=2；旧手册的凭据映射已过时。

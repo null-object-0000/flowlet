@@ -264,7 +264,7 @@ it("allows T3's injected MCP only with explicit remote-only opt-in and exposes a
       updates.filter((update) =>
         JSON.stringify(update).includes("客户端附带的 MCP 配置未传递给上游"),
       ).length,
-      1,
+      0,
     );
     assert.equal(JSON.stringify(sends).includes("must-not-run"), false);
   }, true));

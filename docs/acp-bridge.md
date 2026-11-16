@@ -59,7 +59,7 @@ Host 最多保留 8 个运行环境（原生 ACP 会话与 A2A 执行器实例�
 A2A 扩展协商头。密钥不放命令参数；页面默认预览占位符；点击复制完整配置时读取当前 Client Token 并填入，不在浏览器持久化。
 
 T3 Code 的 Local ACP Provider 使用生成的 executable/args/env。Paseo 使用 `extends: "acp"`，
-`options.supportsMcpServers: false` 及禁用文件/终端能力的配置。默认拒绝客户端附带 MCP 服务器。生成的启动参数显式添加 `--ignore-client-mcp`，兼容 T3 自动注入自带 MCP 的行为：只使用远程 Agent 能力，不执行或转发这些 MCP 配置，并在首次回复中说明。Paseo 仍应关闭 MCP 注入。
+`options.supportsMcpServers: false` 及禁用文件/终端能力的配置。默认拒绝客户端附带 MCP 服务器。生成的启动参数显式添加 `--ignore-client-mcp`，兼容 T3 自动注入自带 MCP 的行为：只使用远程 Agent 能力，不执行或转发这些 MCP 配置，不向助手回复或会话历史插入内部兼容提示。Paseo 仍应关闭 MCP 注入。
 
 原生 ACP 上游在网关 Card 中声明可选扩展 `urn:flowlet:acp-session:1`。新版 CLI 发现后使用同源
 `/a2a/<id>/acp` 会话入口，保留上游 `configOptions` 中 `category: "model"` 的 select 列表、分组、

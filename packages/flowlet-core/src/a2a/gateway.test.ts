@@ -1204,6 +1204,10 @@ describe("generic A2A gateway through real Host command and HTTP boundaries", ()
             assert.equal((await pending).stopReason, "cancelled");
           },
         );
+        assert.doesNotMatch(
+          JSON.stringify(updates),
+          /客户端附带的 MCP 配置未传递给上游/,
+        );
         const logs = a2aGateway(web.context).calls("native", true);
         assert.ok(
           logs.some(

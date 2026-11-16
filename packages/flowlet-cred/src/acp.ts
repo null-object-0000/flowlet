@@ -35,7 +35,6 @@ type Session = {
   state: A2aSession | null;
   cwd: string;
   history: SessionUpdate[];
-  noticePending?: boolean;
   active?: { taskId?: string; cancelled: boolean; cancel?: Promise<void> };
 };
 
@@ -86,7 +85,6 @@ export function createAcpBridge(config: AcpBridgeConfig) {
   const sessions = new Map<string, Session>();
   let card: A2aObject = {};
   let native: RemoteAcp | undefined;
-  const nativeNotices = new Set<string>();
   const remote = async (
     method: string,
     params: A2aObject,
@@ -217,7 +215,6 @@ export function createAcpBridge(config: AcpBridgeConfig) {
         {},
         signal,
       )) as unknown as NewSessionResponse;
-      if (params.mcpServers.length) nativeNotices.add(result.sessionId);
       return result;
     }
     if (sessions.size >= 100)
@@ -238,7 +235,6 @@ export function createAcpBridge(config: AcpBridgeConfig) {
       state,
       cwd: params.cwd,
       history: [],
-      noticePending: params.mcpServers.length > 0,
     };
     saveHistory(session);
     sessions.set(id, session);
@@ -274,7 +270,6 @@ export function createAcpBridge(config: AcpBridgeConfig) {
           signal,
           peer,
         )) as unknown as LoadSessionResponse;
-        if (params.mcpServers.length) nativeNotices.add(params.sessionId);
         return result;
       }
       if (!/^[a-f0-9-]{36}$/.test(params.sessionId))
@@ -307,7 +302,6 @@ export function createAcpBridge(config: AcpBridgeConfig) {
           state,
           cwd: params.cwd,
           history: history.history,
-          noticePending: params.mcpServers.length > 0,
         });
         return { configOptions: configOptions() };
       } finally {
@@ -351,17 +345,6 @@ export function createAcpBridge(config: AcpBridgeConfig) {
           throw RequestError.invalidParams(
             "Remote ACP accepts text only; local files and resources are not forwarded",
           );
-        if (nativeNotices.delete(params.sessionId))
-          await peer.notify(methods.client.session.update, {
-            sessionId: params.sessionId,
-            update: {
-              sessionUpdate: "agent_message_chunk",
-              content: {
-                type: "text",
-                text: "此远程 Agent 不使用本机 MCP 工具；客户端附带的 MCP 配置未传递给上游。\n",
-              },
-            },
-          });
         return (await remote(
           "session/prompt",
           { sessionId: params.sessionId, prompt: params.prompt },
@@ -481,12 +464,6 @@ export function createAcpBridge(config: AcpBridgeConfig) {
           });
         }
         saveHistory(session);
-        if (session.noticePending) {
-          await say(
-            "此远程 Agent 不使用本机 MCP 工具；客户端附带的 MCP 配置未传递给上游。\n",
-          );
-          session.noticePending = false;
-        }
         const message = {
           messageId: randomUUID(),
           role: "ROLE_USER",

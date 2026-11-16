@@ -4,6 +4,22 @@
 # Runtime stage keeps the原 deployment contract: non-root 10001, /data volume,
 # ports 8080 (web) / 18640 (model entry), /health healthcheck, SIGTERM shutdown.
 
+FROM golang:1.27-bookworm AS agent-bridge
+WORKDIR /src
+COPY packages/flowlet-agent-bridge/go.mod packages/flowlet-agent-bridge/go.sum ./
+RUN go mod download
+COPY packages/flowlet-agent-bridge/*.go ./
+RUN CGO_ENABLED=0 go build -trimpath -o /out/flowlet-agent-bridge . \
+    && mkdir -p /out/licenses \
+    && go list -m -f '{{.Dir}}' all | while IFS= read -r dir; do \
+      if [ -n "$dir" ] && [ "$dir" != /src ]; then \
+        target="/out/licenses/${dir##*/}"; mkdir -p "$target"; \
+        for file in "$dir"/LICENSE* "$dir"/COPYING* "$dir"/NOTICE*; do \
+          if [ -f "$file" ]; then cp "$file" "$target/"; fi; \
+        done; \
+      fi; \
+    done
+
 FROM node:26-bookworm-slim AS web
 WORKDIR /src
 COPY package.json package-lock.json ./
@@ -40,6 +56,9 @@ COPY packages/flowlet-core/src ./packages/flowlet-core/src
 COPY packages/flowlet-core/healthcheck.mjs ./packages/flowlet-core/healthcheck.mjs
 COPY --from=server-deps /app/packages/flowlet-core/node_modules ./packages/flowlet-core/node_modules
 COPY --from=web /src/dist-web /app/ui
+COPY --from=agent-bridge /out/flowlet-agent-bridge ./packages/flowlet-agent-bridge/bin/flowlet-agent-bridge
+COPY --from=agent-bridge /out/licenses ./packages/flowlet-agent-bridge/bin/licenses
+COPY packages/flowlet-agent-bridge/NOTICE packages/flowlet-agent-bridge/LICENSE.a2a-go ./packages/flowlet-agent-bridge/
 
 # 源码/静态资源只需可读：本地工作区的文件权限可能是 0600（agent 写入），
 # 而容器以 10001 运行；统一放开读权限，可写目录只有 /data（已 chown）。

@@ -30,8 +30,11 @@ Flowlet 的第一阶段目标是做一个桌面优先、本地运行、多协议
 
 ## 总体结构
 
-Node Host 提供独立的通用 A2A Agent 网关：外部 Agent 注册、专用调用密钥、JSON-RPC/SSE
-透传与任务观测。它与模型渠道、内置客户端适配器及模型计费分开，前端复用现有管理命令边界。
+Node Host 提供独立的通用 Agent 网关：登记原生 A2A 服务或 ACP stdio 程序，提供专用调用密钥、
+A2A JSON-RPC/SSE 入口及 `flowlet acp` 客户端桥。原生 A2A 透传，ACP 上游由官方
+a2a-go/a2aacp 辅助进程执行；ACP 客户端桥基于官方 TypeScript SDK。转换仅限共同能力，
+不改变模型协议透传原则。它与模型渠道、内置客户端适配器及模型计费分开，前端复用现有管理命令边界。
+运行环境、许可及数据兼容性详见 [ACP 适配](acp-bridge.md)。
 新增 SQLite 表为增量扩展，Rust 回滚宿主不读取；协议范围、权限及存储契约见
 [A2A 网关](a2a-gateway.md)。
 

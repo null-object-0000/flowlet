@@ -11,12 +11,19 @@ function call<T>(
   });
 }
 export const a2aCommands = {
+  capabilities: () =>
+    call<{ acpRegistration: boolean }>("get_agent_gateway_capabilities"),
   list: () => call<A2aAgent[]>("list_a2a_agents"),
   inspect: (input: A2aAgentInput) =>
-    call<{ card: A2aAgent["card"]; endpoint: string }>("inspect_a2a_agent", {
-      input,
-    }),
-  save: (input: A2aAgentInput) => call<A2aAgent>("save_a2a_agent", { input }),
+    call<{ card: A2aAgent["card"]; endpoint: string }>(
+      "inspect_a2a_agent",
+      {
+        input,
+      },
+      30000,
+    ),
+  save: (input: A2aAgentInput) =>
+    call<A2aAgent>("save_a2a_agent", { input }, 30000),
   remove: (id: string) => call<void>("delete_a2a_agent", { id }),
   keys: () => call<A2aKey[]>("list_a2a_keys"),
   createKey: (name: string, agentIds: string[]) =>

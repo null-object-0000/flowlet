@@ -1,5 +1,10 @@
 import type { DatabaseSync } from "node:sqlite";
 
+export interface AcpCommand {
+  command: string;
+  args: string[];
+  cwd: string;
+}
 export interface A2aAgent {
   id: string;
   name: string;
@@ -11,6 +16,9 @@ export interface A2aAgent {
   timeoutSeconds: number;
   tokenCipher: string | null;
   updatedAt: string;
+  /** Missing in old records means A2A. */
+  protocol?: "a2a" | "acp";
+  acp?: AcpCommand;
 }
 
 export interface A2aCall {
@@ -165,8 +173,18 @@ export class A2aStore {
 }
 
 /** Existing databases without A2A stay untouched by the periodic maintenance job. */
-export function cleanupA2aBodies(db: DatabaseSync, retentionDays: number, maxMb: number): void {
-  if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='a2a_calls'").get()) {
+export function cleanupA2aBodies(
+  db: DatabaseSync,
+  retentionDays: number,
+  maxMb: number,
+): void {
+  if (
+    db
+      .prepare(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='a2a_calls'",
+      )
+      .get()
+  ) {
     new A2aStore(db).pruneBodies(retentionDays, maxMb);
   }
 }

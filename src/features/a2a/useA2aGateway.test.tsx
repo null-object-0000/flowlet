@@ -8,6 +8,7 @@ import { useA2aGateway } from "./useA2aGateway";
 
 vi.mock("../../domains/a2a/commands", () => ({
   a2aCommands: {
+    capabilities: vi.fn(),
     list: vi.fn(),
     keys: vi.fn(),
     calls: vi.fn(),
@@ -56,6 +57,9 @@ function setup() {
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(a2aCommands.capabilities).mockResolvedValue({
+    acpRegistration: false,
+  });
   vi.mocked(a2aCommands.list).mockResolvedValue([agent]);
   vi.mocked(a2aCommands.keys).mockResolvedValue([]);
   vi.mocked(a2aCommands.calls).mockResolvedValue([]);
@@ -106,5 +110,28 @@ describe("A2A management orchestration", () => {
     expect(result.current.newToken).toBe("flwa2a_test");
     act(() => result.current.setNewToken(""));
     expect(result.current.newToken).toBe("");
+  });
+  it("continues paused tasks but never resubmits a completed task ID", async () => {
+    const { result } = setup();
+    act(() => result.current.setSelected(agent));
+    for (const state of ["TASK_STATE_INPUT_REQUIRED", "TASK_STATE_COMPLETED"]) {
+      vi.mocked(a2aCommands.invoke).mockResolvedValue({
+        status: 200,
+        body: {
+          result: {
+            task: { id: "task-1", contextId: "context-1", status: { state } },
+          },
+        },
+      });
+      await act(() =>
+        result.current.invoke.mutateAsync(result.current.rpc("SendMessage")),
+      );
+      const params = result.current.rpc("SendMessage").params;
+      const message = "message" in params ? params.message : undefined;
+      expect(message).toHaveProperty("contextId", "context-1");
+      if (state === "TASK_STATE_INPUT_REQUIRED")
+        expect(message).toHaveProperty("taskId", "task-1");
+      else expect(message).not.toHaveProperty("taskId");
+    }
   });
 });

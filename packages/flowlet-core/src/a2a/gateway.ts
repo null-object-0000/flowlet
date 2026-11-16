@@ -5,6 +5,8 @@ import type { WebContext } from "../web/context.ts";
 import { CommandError } from "../types.ts";
 import { A2aStore, type A2aAgent, type A2aCall } from "../storage/a2a.ts";
 import { a2aRequest, parseHttpUrl, readLimited } from "./network.ts";
+import { AcpRuntimes, acpCommand, requireAcpRuntime } from "./acp-runtime.ts";
+import type { AcpCommand } from "../storage/a2a.ts";
 import {
   METHODS,
   PUSH_METHODS,
@@ -33,6 +35,8 @@ export interface A2aAgentInput {
   timeoutSeconds: number;
   /** omitted = preserve; empty = remove */
   upstreamToken?: string;
+  protocol?: "a2a" | "acp";
+  acp?: AcpCommand;
 }
 
 function inputOf(value: unknown): A2aAgentInput {
@@ -41,8 +45,12 @@ function inputOf(value: unknown): A2aAgentInput {
     throw new Error("Agent ID 需为 1–64 位小写字母、数字、下划线或连字符");
   if (typeof i.name !== "string" || !i.name.trim() || i.name.length > 100)
     throw new Error("请输入不超过 100 字的 Agent 名称");
-  if (typeof i.cardUrl !== "string") throw new Error("请填写 Agent Card URL");
-  parseHttpUrl(i.cardUrl);
+  if (i.protocol !== undefined && i.protocol !== "a2a" && i.protocol !== "acp")
+    throw new Error("不支持的 Agent 接入协议");
+  if (i.protocol !== "acp") {
+    if (typeof i.cardUrl !== "string") throw new Error("请填写 Agent Card URL");
+    parseHttpUrl(i.cardUrl);
+  }
   if (
     typeof i.enabled !== "boolean" ||
     typeof i.allowPrivateNetwork !== "boolean"
@@ -64,7 +72,9 @@ function inputOf(value: unknown): A2aAgentInput {
   return {
     id: i.id,
     name: i.name,
-    cardUrl: i.cardUrl,
+    cardUrl: i.protocol === "acp" ? "" : (i.cardUrl as string),
+    protocol: i.protocol === "acp" ? "acp" : "a2a",
+    acp: i.protocol === "acp" ? acpCommand(i.acp) : undefined,
     enabled: i.enabled,
     allowPrivateNetwork: i.allowPrivateNetwork,
     timeoutSeconds: Number(i.timeoutSeconds),
@@ -144,6 +154,7 @@ export class A2aObserver {
 
 export class A2aGateway {
   readonly store: A2aStore;
+  readonly acp: AcpRuntimes;
   private active = new Set<AbortController>();
   private finishing = new Set<Promise<void>>();
   private ctx: WebContext;
@@ -154,15 +165,18 @@ export class A2aGateway {
         throw new Error("FLOWLET_PUBLIC_A2A_URL 必须是根地址");
     }
     this.ctx = ctx;
+    this.acp = new AcpRuntimes(ctx);
     this.store = ctx.storage.withDatabase((db) => new A2aStore(db));
   }
   async close(): Promise<void> {
     for (const controller of this.active) controller.abort();
     await Promise.allSettled([...this.finishing]);
+    await this.acp.close();
   }
   list() {
     return this.store.agents().map(({ tokenCipher, ...a }) => ({
       ...a,
+      protocol: a.protocol ?? "a2a",
       hasUpstreamToken: !!tokenCipher,
       gatewayPath: `/a2a/${a.id}`,
       gatewayUrl: process.env.FLOWLET_PUBLIC_A2A_URL
@@ -185,7 +199,10 @@ export class A2aGateway {
     return cipher ? this.ctx.secrets.decrypt(cipher) : undefined;
   }
   async inspect(raw: unknown) {
+    if (object(raw).protocol === "acp") requireAcpRuntime(this.ctx);
     const input = inputOf(raw);
+    if (input.protocol === "acp")
+      return this.acp.probe(input.name, input.acp!, input.timeoutSeconds);
     const upstream = await a2aRequest(input.cardUrl, {
       allowPrivate: input.allowPrivateNetwork,
       token: this.token(input),
@@ -218,9 +235,13 @@ export class A2aGateway {
     }
   }
   async save(raw: unknown) {
+    if (object(raw).protocol === "acp") requireAcpRuntime(this.ctx);
     const input = inputOf(raw);
+    const previous = this.store.agent(input.id);
+    if (previous && (previous.protocol ?? "a2a") !== input.protocol)
+      throw new Error("已登记 Agent 不可切换接入协议；请使用新的 Agent ID");
     const inspected = await this.inspect(input);
-    const token = this.token(input);
+    const token = input.protocol === "acp" ? undefined : this.token(input);
     this.store.save({
       ...input,
       upstreamToken: undefined,
@@ -229,7 +250,12 @@ export class A2aGateway {
       tokenCipher: token ? this.ctx.secrets.encrypt(token) : null,
       updatedAt: new Date().toISOString(),
     } as A2aAgent);
+    if (input.protocol === "acp") await this.acp.stop(input.id);
     return this.list().find((a) => a.id === input.id);
+  }
+  async remove(id: string) {
+    this.store.remove(id);
+    await this.acp.stop(id);
   }
   createKey(name: unknown, agentIds: unknown) {
     if (typeof name !== "string" || !name.trim() || name.length > 100)
@@ -363,11 +389,15 @@ export class A2aGateway {
     let jsonSize = 0;
     try {
       validateCapabilities(agent.card, rpc, service);
-      upstream = await a2aRequest(agent.endpoint, {
-        allowPrivate: agent.allowPrivateNetwork,
-        token: agent.tokenCipher
-          ? this.ctx.secrets.decrypt(agent.tokenCipher)
-          : undefined,
+      const runtime =
+        agent.protocol === "acp" ? await this.acp.ensure(agent) : undefined;
+      upstream = await a2aRequest(runtime?.endpoint ?? agent.endpoint, {
+        allowPrivate: runtime ? true : agent.allowPrivateNetwork,
+        token:
+          runtime?.token ??
+          (agent.tokenCipher
+            ? this.ctx.secrets.decrypt(agent.tokenCipher)
+            : undefined),
         body,
         extensions: service.extensions,
         signal: combined,

@@ -11,8 +11,10 @@
 // 因此用 esbuild 插件把它们重写到 `FLOWLET_RUNTIME_ROOT_URL` 下的虚拟目录树
 // （packages/flowlet-core/src/...），运行期只要求 runtime/ 存在对应资源文件。
 import { createRequire } from "node:module";
+import { spawnSync } from "node:child_process";
 import {
   copyFileSync,
+  cpSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -61,6 +63,9 @@ function copyIfExists(source, target) {
 function copyRuntimeResources() {
   mkdirSync(RUNTIME_DIR, { recursive: true });
   const copied = [];
+  const bridge = join(REPO_ROOT, "packages/flowlet-agent-bridge");
+  cpSync(join(bridge, "bin"), join(RUNTIME_DIR, "packages/flowlet-agent-bridge/bin"), { recursive: true });
+  for (const name of ["NOTICE", "LICENSE.a2a-go"]) copyIfExists(join(bridge, name), join(RUNTIME_DIR, "packages/flowlet-agent-bridge", name));
   for (const name of ["config.json", "model-catalog.json", "package.json"]) {
     if (copyIfExists(join(REPO_ROOT, name), join(RUNTIME_DIR, name))) copied.push(name);
   }
@@ -194,6 +199,8 @@ async function buildWorker() {
 }
 
 async function main() {
+  const bridgeBuild = spawnSync(process.execPath, [join(SCRIPT_DIR, "build-agent-bridge.mjs")], { stdio: "inherit" });
+  if (bridgeBuild.status !== 0) throw new Error("ACP runtime build failed; Go 1.26+ is required");
   rmSync(OUT_DIR, { recursive: true, force: true });
   mkdirSync(OUT_DIR, { recursive: true });
   copyRuntimeResources();

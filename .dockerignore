@@ -21,6 +21,7 @@ flowlet-data
 .DS_Store
 src-tauri/gen
 src-tauri/binaries
+packages/flowlet-agent-bridge/bin
 website/.next
 .worktrees
 apps

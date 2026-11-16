@@ -28,7 +28,7 @@ const navGroups: Array<{
     items: [
       { to: "/", label: "运行概览", icon: <IconHome /> },
       { to: "/models", label: "模型服务", icon: <IconServer /> },
-      { to: "/a2a", label: "A2A 网关", icon: <IconLink /> },
+      { to: "/a2a", label: "Agent 网关", icon: <IconLink /> },
       { to: "/credentials", label: "服务凭据", icon: <IconKey /> },
     ],
   },

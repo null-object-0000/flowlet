@@ -3,6 +3,7 @@ import { createServer, type Server } from "node:http";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { before, after, describe, it } from "node:test";
 import { SqliteStorage } from "../storage/index.ts";
 import { SecretBox } from "../storage/secret-box.ts";
@@ -811,6 +812,70 @@ describe("generic A2A gateway through real Host command and HTTP boundaries", ()
     await command("delete_a2a_agent", { id: "research" });
     assert.equal((await call("SendMessage")).status, 404);
     assert.ok((await command("list_a2a_calls")).length > 0);
+  });
+  it("registers ACP through the explicit management API and serves it with scoped A2A keys", async () => {
+    const previous = process.env.FLOWLET_ENABLE_ACP;
+    const fixture = fileURLToPath(
+      new URL("../../../flowlet-agent-bridge/test-agent.mjs", import.meta.url),
+    );
+    const config = {
+      ...input("acp-fixture"),
+      protocol: "acp",
+      upstreamToken: undefined,
+      cardUrl: "",
+      acp: {
+        command: process.execPath,
+        args: [fixture],
+        cwd: path.dirname(fixture),
+      },
+    };
+    delete process.env.FLOWLET_ENABLE_ACP;
+    try {
+      assert.equal(
+        (await command("get_agent_gateway_capabilities")).acpRegistration,
+        false,
+      );
+      const blocked = await fetch(`${base}/api/commands/save_a2a_agent`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${ADMIN}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ input: config }),
+      });
+      assert.equal(blocked.status, 403);
+      process.env.FLOWLET_ENABLE_ACP = "1";
+      assert.equal(
+        (await command("get_agent_gateway_capabilities")).acpRegistration,
+        true,
+      );
+      assert.equal(
+        (await command("save_a2a_agent", { input: config })).protocol,
+        "acp",
+      );
+      const credential = await command("create_a2a_key", {
+        name: "ACP test",
+        agentIds: [config.id],
+      });
+      assert.equal((await call("SendMessage", ADMIN, config.id)).status, 401);
+      const result = (await (
+        await call("SendMessage", credential.token, config.id)
+      ).json()) as any;
+      assert.equal(result.result.task.status.state, "TASK_STATE_COMPLETED");
+      assert.match(JSON.stringify(result), /你好/);
+      await command("save_a2a_agent", { input: { ...config, enabled: false } });
+      assert.equal(
+        (await call("SendMessage", credential.token, config.id)).status,
+        404,
+      );
+      assert.ok(
+        (await command("list_a2a_calls", { agentId: config.id })).length > 0,
+      );
+    } finally {
+      await command("delete_a2a_agent", { id: config.id });
+      if (previous === undefined) delete process.env.FLOWLET_ENABLE_ACP;
+      else process.env.FLOWLET_ENABLE_ACP = previous;
+    }
   });
   it("drains aborted A2A work before the Host closes its database", async () => {
     const created = await command("create_a2a_key", {

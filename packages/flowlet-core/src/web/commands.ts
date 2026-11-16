@@ -9,6 +9,7 @@ import path from "node:path";
 
 import { CommandError } from "../types.ts";
 import { a2aGateway } from "../a2a/gateway.ts";
+import { acpCapabilities } from "../a2a/acp-runtime.ts";
 import type { JsonRow } from "../types.ts";
 import type { WebContext } from "./context.ts";
 import {
@@ -487,6 +488,8 @@ export async function dispatch(ctx: WebContext, command: string, rawArgs: unknow
   const s = storageOf(ctx);
 
   switch (command) {
+    case "get_agent_gateway_capabilities":
+      return acpCapabilities(ctx);
     case "list_a2a_agents":
       return a2aGateway(ctx).list();
     case "inspect_a2a_agent":

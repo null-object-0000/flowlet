@@ -10,7 +10,7 @@
 // 约束：
 // - 纯 Node，不新增 npm 依赖；打包使用系统 tar（缺失时给出明确错误）。
 // - CLI 命令名来自 packages/flowlet-cred/package.json 的 bin 映射，不硬编码旧名。
-// - CLI 唯一运行时依赖 undici 从仓库根 node_modules 复制，离线可用。
+// - CLI 运行时依赖从仓库根 node_modules 复制，保留许可证，离线可用。
 // - 产物先写入临时目录，全部成功后才替换 dist-web/downloads；任何失败非 0 退出。
 
 import { createHash } from "node:crypto";
@@ -121,12 +121,17 @@ function stageCli(tmpRoot) {
   // 2) CLI 源码（排除测试）。
   copySourceTree(join(CRED_DIR, "src"), join(cliRoot, "src"));
 
-  // 3) 唯一运行时依赖 undici（离线可用）。
-  const undiciSource = join(PROJECT_ROOT, "node_modules", "undici");
-  if (!existsSync(undiciSource)) {
-    throw new Error("未找到 node_modules/undici，请先在仓库根目录执行 npm install");
+  // 3) Runtime dependencies, including transitive dependencies and licenses.
+  const copiedDependencies = new Set();
+  function copyDependency(name) {
+    if (copiedDependencies.has(name)) return;
+    copiedDependencies.add(name);
+    const source = join(PROJECT_ROOT, "node_modules", name);
+    if (!existsSync(source)) throw new Error(`未找到 ${name}，请先执行 npm install`);
+    cpSync(source, join(cliRoot, "node_modules", name), { recursive: true });
+    for (const child of Object.keys(readJson(join(source, "package.json")).dependencies ?? {})) copyDependency(child);
   }
-  cpSync(undiciSource, join(cliRoot, "node_modules", "undici"), { recursive: true });
+  for (const name of Object.keys(credPackage.dependencies ?? {})) copyDependency(name);
 
   // 4) 生成包元数据：CLI 启动时读取版本号，bin 名供安装脚本定位。
   const packageJson = {

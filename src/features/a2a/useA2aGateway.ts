@@ -8,6 +8,10 @@ import { errorMessage } from "../../shared/errors/AppError";
 const report = (error: unknown) => Toast.error(errorMessage(error));
 export function useA2aGateway() {
   const qc = useQueryClient();
+  const capabilities = useQuery({
+    queryKey: ["a2a", "capabilities"],
+    queryFn: a2aCommands.capabilities,
+  });
   const agents = useQuery({
     queryKey: ["a2a", "agents"],
     queryFn: a2aCommands.list,
@@ -102,6 +106,24 @@ export function useA2aGateway() {
               role: "ROLE_USER",
               parts: [{ text: message }],
               ...(contextId ? { contextId } : {}),
+              ...(() => {
+                const task = (
+                  result as {
+                    body?: {
+                      result?: {
+                        task?: { id?: string; status?: { state?: string } };
+                      };
+                    };
+                  } | null
+                )?.body?.result?.task;
+                return task?.id === taskId &&
+                  [
+                    "TASK_STATE_INPUT_REQUIRED",
+                    "TASK_STATE_AUTH_REQUIRED",
+                  ].includes(task?.status?.state ?? "")
+                  ? { taskId }
+                  : {};
+              })(),
             },
           }
         : method === "ListTasks"
@@ -111,6 +133,7 @@ export function useA2aGateway() {
   });
 
   return {
+    capabilities,
     agents,
     keys,
     filter,

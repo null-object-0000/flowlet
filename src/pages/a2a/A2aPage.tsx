@@ -1,4 +1,5 @@
 import { a2aStateLabel } from "../../domains/a2a/presentation";
+import { useState } from "react";
 import { newA2aId } from "../../domains/a2a/identity";
 import { useNavigate } from "react-router-dom";
 import {
@@ -10,13 +11,14 @@ import {
   Spin,
   Typography,
 } from "@douyinfe/semi-ui-19";
-import type { A2aAgentInput } from "../../domains/a2a/types";
+import type { A2aAgent, A2aAgentInput } from "../../domains/a2a/types";
 import { PageHeader } from "../../shared/ui/PageHeader";
 import { errorMessage } from "../../shared/errors/AppError";
 import { isWebHost } from "../../platform/web/mode";
 import { isDesktopHost, isDesktopClient } from "../../platform/desktop/mode";
 import { useA2aGateway } from "../../features/a2a/useA2aGateway";
 import { A2aOverlays } from "./A2aOverlays";
+import { AgentGatewayAccess } from "./AgentGatewayAccess";
 import styles from "./A2aPage.module.css";
 
 const EMPTY: A2aAgentInput = {
@@ -27,6 +29,7 @@ const EMPTY: A2aAgentInput = {
   allowPrivateNetwork: false,
   timeoutSeconds: 300,
   upstreamToken: "",
+  protocol: "a2a",
 };
 
 export function A2aPage() {
@@ -34,8 +37,8 @@ export function A2aPage() {
   if (!isWebHost && !isDesktopHost)
     return (
       <main className={styles.page}>
-        <PageHeader title="A2A 网关" />
-        <Banner description="A2A 网关需要 Electron 或 Web/Docker Node Host；当前 Rust 宿主暂不支持。" />
+        <PageHeader title="Agent 网关" />
+        <Banner description="Agent 网关需要 Electron 或 Web/Docker Node Host；当前 Rust 宿主暂不支持。" />
       </main>
     );
   return <A2aContent onBack={() => navigate("/sessions")} />;
@@ -43,6 +46,10 @@ export function A2aPage() {
 
 function A2aContent({ onBack }: { onBack: () => void }) {
   const model = useA2aGateway();
+  const [accessAgent, setAccessAgent] = useState<A2aAgent | null>(null);
+  const origin = isDesktopClient
+    ? (window.flowletDesktop?.clientBaseUrl ?? window.location.origin)
+    : window.location.origin;
   const {
     agents,
     keys,
@@ -71,8 +78,8 @@ function A2aContent({ onBack }: { onBack: () => void }) {
   return (
     <main className={styles.page}>
       <PageHeader
-        title="A2A 网关"
-        subtitle="登记外部 Agent，统一入口、调用权限与任务观测。"
+        title="Agent 网关"
+        subtitle="登记 A2A 服务或 ACP 程序，统一调用入口、权限与记录。"
       >
         <Button theme="borderless" onClick={onBack}>
           返回会话管理
@@ -97,16 +104,22 @@ function A2aContent({ onBack }: { onBack: () => void }) {
           <section className={styles.section} aria-label="已登记的 Agent">
             {!agents.data?.length && (
               <p className={styles.muted}>
-                尚未登记 Agent。填写标准 Agent Card 地址即可接入 A2A v1 JSON-RPC
-                服务。
+                尚未登记 Agent。添加 A2A 服务或宿主上的 ACP
+                程序，再获取对应的调用配置。
               </p>
             )}
             {agents.data?.map((agent) => (
               <div key={agent.id} className={styles.row}>
                 <div>
                   <strong>{agent.name}</strong> ·{" "}
+                  {(agent.protocol ?? "a2a").toUpperCase()} ·{" "}
                   {agent.enabled ? "已启用" : "已停用"}
                   <div className={styles.muted}>{agent.card.description}</div>
+                  {agent.protocol === "acp" && (
+                    <div className={styles.muted}>
+                      运行于宿主 · {agent.acp?.cwd}
+                    </div>
+                  )}
                   <Typography.Text copyable>
                     {agent.gatewayUrl ??
                       new URL(
@@ -123,6 +136,12 @@ function A2aContent({ onBack }: { onBack: () => void }) {
                     {agent.card.skills.map((s) => s.name).join("、") || "无"}
                   </div>
                 </div>
+                <Button
+                  theme="borderless"
+                  onClick={() => setAccessAgent(agent)}
+                >
+                  接入配置
+                </Button>
                 <Button
                   disabled={!agent.enabled}
                   onClick={() => {
@@ -146,6 +165,8 @@ function A2aContent({ onBack }: { onBack: () => void }) {
                       enabled: agent.enabled,
                       allowPrivateNetwork: agent.allowPrivateNetwork,
                       timeoutSeconds: agent.timeoutSeconds,
+                      protocol: agent.protocol ?? "a2a",
+                      acp: agent.acp,
                     });
                   }}
                 >
@@ -285,6 +306,11 @@ function A2aContent({ onBack }: { onBack: () => void }) {
         </section>
       </div>
       <A2aOverlays model={model} />
+      <AgentGatewayAccess
+        agent={accessAgent}
+        origin={origin}
+        onClose={() => setAccessAgent(null)}
+      />
     </main>
   );
 }

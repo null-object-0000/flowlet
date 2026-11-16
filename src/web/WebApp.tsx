@@ -300,7 +300,7 @@ function WebSession() {
         <Route path="accounts" element={<Navigate to="/" replace />} />
         <Route path="models" element={<ModelServicesPage />} />
         <Route path="credentials" element={<CredentialsPage />} />
-        <Route path="a2a" element={<Suspense fallback={<WebPageFallback title="A2A 网关" />}><A2aPage /></Suspense>} />
+        <Route path="a2a" element={<Suspense fallback={<WebPageFallback title="Agent 网关" />}><A2aPage /></Suspense>} />
         <Route path="logs" element={<RequestLogsPage />} />
         <Route
           path="sessions"

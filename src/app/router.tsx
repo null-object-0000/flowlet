@@ -31,7 +31,7 @@ export function AppRouter() {
           <Route path="logs" element={<Suspense fallback={<RequestLogsRouteFallback />}><RequestLogsPage /></Suspense>} />
           <Route path="credentials" element={<Suspense fallback={<PageRouteFallback title="服务凭据" />}><CredentialsPage /></Suspense>} />
           <Route path="sessions" element={<Suspense fallback={<PageRouteFallback title="会话管理" />}><AgentSessionsPage /></Suspense>} />
-          <Route path="a2a" element={<Suspense fallback={<PageRouteFallback title="A2A 网关" />}><A2aPage /></Suspense>} />
+          <Route path="a2a" element={<Suspense fallback={<PageRouteFallback title="Agent 网关" />}><A2aPage /></Suspense>} />
           <Route path="usage" element={<Suspense fallback={<PageRouteFallback title="用量统计" />}><UsageCostPage /></Suspense>} />
           <Route path="usage-analysis" element={<Suspense fallback={<PageRouteFallback title="用量洞察" />}><UsageAnalysisPage /></Suspense>} />
           <Route path="settings" element={<Suspense fallback={<PageRouteFallback title="应用设置" />}><SettingsPage /></Suspense>} />

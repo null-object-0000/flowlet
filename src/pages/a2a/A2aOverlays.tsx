@@ -4,8 +4,10 @@ import {
   Input,
   InputNumber,
   Modal,
+  Select,
   SideSheet,
   Switch,
+  TextArea,
   Typography,
 } from "@douyinfe/semi-ui-19";
 import type { A2aGatewayState } from "../../features/a2a/useA2aGateway";
@@ -39,7 +41,7 @@ export function A2aOverlays({ model }: { model: A2aGatewayState }) {
   return (
     <>
       <SideSheet
-        title={editing ? "编辑 A2A Agent" : "登记 A2A Agent"}
+        title={editing ? "编辑 Agent" : "登记 Agent"}
         visible={!!draft}
         width={560}
         zIndex={overlayLayers.sideSheet}
@@ -50,6 +52,36 @@ export function A2aOverlays({ model }: { model: A2aGatewayState }) {
       >
         {draft && (
           <div className={styles.form}>
+            <label className={styles.field}>
+              接入协议
+              <Select
+                aria-label="接入协议"
+                disabled={editing}
+                value={draft.protocol ?? "a2a"}
+                optionList={[
+                  { value: "a2a", label: "A2A · 远程 Agent 服务" },
+                  {
+                    value: "acp",
+                    label: "ACP · 宿主上的 Agent 程序",
+                    disabled: !model.capabilities.data?.acpRegistration,
+                  },
+                ]}
+                onChange={(value) => {
+                  setDraft({
+                    ...draft,
+                    protocol: value as "a2a" | "acp",
+                    acp: draft.acp ?? { command: "", args: [], cwd: "" },
+                  });
+                  setPreview(null);
+                }}
+              />
+            </label>
+            {!model.capabilities.data?.acpRegistration && (
+              <p className={styles.muted}>
+                当前宿主尚未启用 ACP 程序运行；仍可登记 A2A 服务，并生成供 ACP
+                客户端使用的接入配置。
+              </p>
+            )}
             <label className={styles.field}>
               Agent ID
               <Input
@@ -67,47 +99,109 @@ export function A2aOverlays({ model }: { model: A2aGatewayState }) {
                 onChange={(name) => setDraft({ ...draft, name })}
               />
             </label>
-            <label className={styles.field}>
-              Agent Card URL
-              <Input
-                aria-label="Agent Card URL"
-                placeholder="https://agent.example.com/.well-known/agent-card.json"
-                value={draft.cardUrl}
-                onChange={(cardUrl) => {
-                  setDraft({ ...draft, cardUrl });
-                  setPreview(null);
-                }}
-              />
-            </label>
-            <label className={styles.field}>
-              上游 Bearer Token
-              <Input
-                mode="password"
-                aria-label="上游 Bearer Token"
-                placeholder={editing ? "留空保留已存凭据" : "无鉴权可留空"}
-                value={draft.upstreamToken ?? ""}
-                onChange={(upstreamToken) =>
-                  setDraft({
-                    ...draft,
-                    upstreamToken: upstreamToken || undefined,
-                  })
-                }
-              />
-            </label>
-            {editing && (
-              <Button onClick={() => setDraft({ ...draft, upstreamToken: "" })}>
-                清除上游 Token
-              </Button>
+            {draft.protocol === "acp" ? (
+              <>
+                <Banner description="程序在 Flowlet 宿主机器上运行，使用该机器已有的 Agent 登录与环境。验证会启动程序进行协议协商。" />
+                <label className={styles.field}>
+                  可执行程序
+                  <Input
+                    aria-label="ACP 可执行程序"
+                    placeholder="dsh"
+                    value={draft.acp?.command ?? ""}
+                    onChange={(command) =>
+                      setDraft({
+                        ...draft,
+                        acp: { args: [], cwd: "", ...draft.acp, command },
+                      })
+                    }
+                  />
+                </label>
+                <label className={styles.field}>
+                  启动参数（每行一个参数）
+                  <TextArea
+                    aria-label="ACP 启动参数"
+                    placeholder={"--profile\nacp"}
+                    value={draft.acp?.args.join("\n") ?? ""}
+                    onChange={(value) =>
+                      setDraft({
+                        ...draft,
+                        acp: {
+                          command: "",
+                          cwd: "",
+                          ...draft.acp,
+                          args: value ? value.split("\n") : [],
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className={styles.field}>
+                  宿主工作目录
+                  <Input
+                    aria-label="ACP 工作目录"
+                    placeholder="绝对路径"
+                    value={draft.acp?.cwd ?? ""}
+                    onChange={(cwd) =>
+                      setDraft({
+                        ...draft,
+                        acp: { command: "", args: [], ...draft.acp, cwd },
+                      })
+                    }
+                  />
+                </label>
+                <p className={styles.muted}>
+                  保存或停用时会结束旧运行环境。任务与会话保留到该运行环境停止；同一
+                  Agent 的获授权调用方共享任务空间。首版通过 A2A
+                  提供文本与结构化数据调用。
+                </p>
+              </>
+            ) : (
+              <>
+                <label className={styles.field}>
+                  Agent Card URL
+                  <Input
+                    aria-label="Agent Card URL"
+                    placeholder="https://agent.example.com/.well-known/agent-card.json"
+                    value={draft.cardUrl}
+                    onChange={(cardUrl) => {
+                      setDraft({ ...draft, cardUrl });
+                      setPreview(null);
+                    }}
+                  />
+                </label>
+                <label className={styles.field}>
+                  上游 Bearer Token
+                  <Input
+                    mode="password"
+                    aria-label="上游 Bearer Token"
+                    placeholder={editing ? "留空保留已存凭据" : "无鉴权可留空"}
+                    value={draft.upstreamToken ?? ""}
+                    onChange={(upstreamToken) =>
+                      setDraft({
+                        ...draft,
+                        upstreamToken: upstreamToken || undefined,
+                      })
+                    }
+                  />
+                </label>
+                {editing && (
+                  <Button
+                    onClick={() => setDraft({ ...draft, upstreamToken: "" })}
+                  >
+                    清除上游 Token
+                  </Button>
+                )}
+                <label className={styles.row}>
+                  <span>允许访问内网 / 本机服务</span>
+                  <Switch
+                    checked={draft.allowPrivateNetwork}
+                    onChange={(allowPrivateNetwork) =>
+                      setDraft({ ...draft, allowPrivateNetwork })
+                    }
+                  />
+                </label>
+              </>
             )}
-            <label className={styles.row}>
-              <span>允许访问内网 / 本机服务</span>
-              <Switch
-                checked={draft.allowPrivateNetwork}
-                onChange={(allowPrivateNetwork) =>
-                  setDraft({ ...draft, allowPrivateNetwork })
-                }
-              />
-            </label>
             <label className={styles.row}>
               <span>启用</span>
               <Switch
@@ -131,7 +225,7 @@ export function A2aOverlays({ model }: { model: A2aGatewayState }) {
                 loading={inspect.isPending}
                 onClick={() => inspect.mutate(draft)}
               >
-                读取 Agent Card
+                {draft.protocol === "acp" ? "验证 ACP 程序" : "读取 Agent Card"}
               </Button>
               <Button
                 theme="solid"

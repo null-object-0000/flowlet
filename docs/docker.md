@@ -8,6 +8,10 @@
 > 镜像与冒烟记录见 [migration/docker-node.md](migration/docker-node.md)。
 
 Docker 版由独立服务和 React 管理界面组成，不需要 Tauri、GTK、显示服务或桌面登录会话。
+镜像附带官方 SDK 的 ACP 辅助程序；登记宿主 ACP 程序默认关闭，显式设置
+`FLOWLET_ENABLE_ACP=1` 后重启才可用。Agent 程序需另行安装、登录并配置容器可访问的工作目录，
+不会执行客户端机器上的命令。管理页也可为原生 A2A 服务生成 T3 Code / Paseo 接入配置，见
+[ACP 适配与生命周期](acp-bridge.md)。
 使用与桌面端相同的渠道适配器、模型白名单、SQLite 存储和运行时路由。管理台支持静态管理凭据（token 模式）或 GitLab OIDC 单点登录（oidc 模式，见下文）。当前支持 API Key 渠道账号的新增、编辑、启停、删除、模型列表拉取、模型及候选路由启停/优先级调整、请求日志、「会话管理」，以及与桌面端一致的「用量统计」「用量洞察」页面（设备切换、日/周/月热力图、Token 明细、费用折算和未识别 Token 请求明细）。
 
 用量统计只读取本服务自己的 SQLite：Web Host 在数据目录生成并复用与桌面端同格式的 `flowlet-device.json` 设备身份，「用量统计」中的「本机」就是该 Docker 实例，不扫描服务器上的个人数据，也不运行局域网直连或 S3 设备同步。费用展示设置（统一货币折算、目标币种、固定汇率和备注）保存在 SQLite `app_meta`，由「设置 → 费用展示」维护，不写入容器内的 `config.json`；`config.json` 的 `usage_cost` 仍只影响桌面端。

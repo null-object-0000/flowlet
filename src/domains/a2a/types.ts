@@ -6,6 +6,8 @@ export interface A2aAgentInput {
   allowPrivateNetwork: boolean;
   timeoutSeconds: number;
   upstreamToken?: string;
+  protocol?: "a2a" | "acp";
+  acp?: { command: string; args: string[]; cwd: string };
 }
 export interface A2aAgent extends Omit<A2aAgentInput, "upstreamToken"> {
   endpoint: string;

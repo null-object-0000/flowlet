@@ -492,9 +492,15 @@ Client Token 与渠道 API Key 不同，可以在客户端访问信息中展示�
 
 ## 8. Agent 接入方向
 
-### 通用 A2A 网关
+### 通用 Agent 网关（A2A / ACP）
 
-Node Host 支持登记外部 A2A v1 JSON-RPC/SSE Agent，入口为左侧「工作台 → A2A 网关」，会话管理页保留快捷入口。
+Node Host 支持登记外部 A2A v1 JSON-RPC/SSE Agent 或宿主上的 ACP v1 stdio 程序，入口为左侧「工作台 → Agent 网关」，会话管理页保留快捷入口。
+用户维护 Agent 的原生接入配置；Flowlet 提供 A2A 入口与 `flowlet acp` 客户端桥接配置。
+ACP 上游复用固定版本官方 a2a-go/a2aacp 执行器，客户端桥复用官方 ACP TypeScript SDK；
+只在共同能力内适配，不把模型协议转换、任意插件执行或 N×N 协议转换纳入范围。
+ACP 程序只在 Electron 本机 Host 或显式启用 `FLOWLET_ENABLE_ACP=1` 的 Web/Docker Host
+运行，不在 Electron client gateway 本机运行。ACP 文件/终端/MCP 能力不对客户端开放，权限询问
+必须等待用户回复，禁止默认批准。运行环境的内存任务空间与生命周期边界见 `docs/acp-bridge.md`。
 外部 A2A Agent 与下述本机客户端 Adapter、模型目录和渠道路由独立；登记外部 Agent 不应
 新增内置 Adapter 或修改 `plugin-registry.json`。专用调用密钥与管理凭据、模型 Client Token
 分开；任务、会话 ID 和消息透传，不自动重试任务。第三方的登录、换票、业务 API 或特殊

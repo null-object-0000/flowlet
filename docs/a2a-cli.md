@@ -2,7 +2,8 @@
 
 `flowlet a2a` 是 Node CLI 内置的 A2A 1.0 JSON-RPC/SSE 客户端。它通过统一凭据库调用已登记的
 Agent，无需额外 Python 脚本，不包含百晓生或其他服务的专属字段、接口、模型调用和协议转换。
-Rust legacy CLI 不增加此功能；Node CLI 运行要求仍为 Node.js 22.6+，没有新增依赖。
+Rust legacy CLI 不增加此功能；Node CLI 运行要求仍为 Node.js 22.6+。
+ACP 客户端可启动内置的 `flowlet acp` 桥接命令，复用同一份 A2A 凭据，详见 [ACP 适配](acp-bridge.md)。
 
 ## 配置与发现
 

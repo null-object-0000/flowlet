@@ -183,7 +183,7 @@ export function AgentSessionsPage({ hostMode = "desktop" }: { hostMode?: AgentSe
         )}
         subtitle={t("统一查看 Agent 会话与 Flowlet 请求观测")}
       >
-        {(webHost || isDesktopHost) && <Button theme="borderless" onClick={() => navigate("/a2a")}>A2A 网关</Button>}
+        {(webHost || isDesktopHost) && <Button theme="borderless" onClick={() => navigate("/a2a")}>Agent 网关</Button>}
         <RefreshControl
           autoRefresh={refresh.autoRefresh}
           onToggleAutoRefresh={refresh.toggleAutoRefresh}

@@ -85,6 +85,28 @@ describe("mergeDefaultRoutes", () => {
     supported_protocols: ["openai", "anthropic"],
   } as ChannelPreset;
 
+  it.each([
+    ["hy4-flash", "tencent/hy4-flash"],
+    ["qwen4-max", "qwen/qwen4-max"],
+    ["kimi-k3.1-pro", "moonshotai/kimi-k3.1-pro"],
+  ])("routes selected %s resources without exposing unsynced or unselected models", (id, upstream) => {
+    const relay = {
+      ...account,
+      channel_id: "custom",
+      base_url_override: "https://relay.example/v1",
+      exposed_models: [upstream],
+      synced_models: [upstream],
+    } as ChannelAccount;
+    const relayPreset = { id: "custom", vendor: "custom", supported_protocols: ["openai", "responses"] } as ChannelPreset;
+    const routes = mergeDefaultRoutes([], [relay], [relayPreset]);
+    expect(routes.map((route) => [route.virtual_model_id, route.upstream_model, route.client_protocol])).toEqual([
+      [id, upstream, "openai"],
+      [id, upstream, "responses"],
+    ]);
+    expect(mergeDefaultRoutes([], [{ ...relay, synced_models: [] }], [relayPreset])).toEqual([]);
+    expect(mergeDefaultRoutes([], [{ ...relay, exposed_models: [] }], [relayPreset])).toEqual([]);
+  });
+
   it("creates only direct routes for both protocols", () => {
     const routes = mergeDefaultRoutes([], [account], [preset]);
     expect(routes).toHaveLength(4);

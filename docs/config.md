@@ -579,9 +579,10 @@ Provider 固定发这个官方名），`deepseek-v4-flash-0731` → `deepseek-v4
 "default_exposed_models": {
   "longcat": ["LongCat-2.0", "LongCat-2.5"],
   "deepseek": ["deepseek-v4-flash", "deepseek-v4.1-flash", "deepseek-v4-flash-vision-exp", "deepseek-v4-pro"],
-  "kimi": ["kimi-k3", "kimi-k2.7-code"],
-  "qwen": ["qwen3.8-max", "qwen3.8-flash", "qwen3.7-max", "qwen3.7-plus", "qwen3.7-flash", "qwen3.6-plus", "qwen3.6-flash"],
+  "kimi": ["kimi-k3.1-pro", "kimi-k3", "kimi-k2.7-code"],
+  "qwen": ["qwen4-max", "qwen3.8-max", "qwen3.8-flash", "qwen3.7-max", "qwen3.7-plus", "qwen3.7-flash", "qwen3.6-plus", "qwen3.6-flash"],
   "zhipu": ["glm-5.3", "glm-5.3-flash", "glm-5.2", "glm-4.7", "glm-4.5-air"],
+  "hunyuan": ["hy4-flash"],
   "openrouter": ["ox-alpha", "nemotron-3.5-lightning", "nemotron-3-super-120b-a12b", "nemotron-3-ultra-550b-a55b"]
 }
 ```
@@ -592,6 +593,13 @@ LongCat 同时登记 `LongCat-2.0` 与 `LongCat-2.5`，两者是独立模型身�
 2.0 或 Preview 的别名。API 模型名见 [LongCat 官方文档](https://longcat.chat/platform/docs/)。
 模型规格、输入模态与基准价格继续由 models-cn 目录提供（打包前通过
 `scripts/fetch-models-cn.mjs` 刷新），不复制旧模型的参数或价格。
+
+`hy4-flash`、`qwen4-max`、`kimi-k3.1-pro` 均为独立规范模型，不作为旧型号的别名。
+官方归属分别为腾讯混元、千问、Kimi；支持目录登记不替代账号的 `/models` 同步与用户勾选。
+规格与价格继续读取 models-cn，目录缺失时不复制旧型号数据。发布参考：
+[腾讯 Hy4 flash](https://www.tencent.com/tencent-launches-hy4-flash-to-power-high-speed-cost-efficient-ai-deployment-for-everyday-workflows/)、
+[千问 Qwen4-Max](https://help.aliyun.com/en/model-studio/qwen4-max)、
+[Moonshot Kimi-K3.1-Pro](https://huggingface.co/moonshotai/Kimi-K3.1-Pro)。
 
 **行为**：
 

@@ -336,8 +336,10 @@ Flowlet 支持的模型（全局白名单，不按渠道区分）：
 - deepseek-v4.1-flash
 - deepseek-v4-flash-vision-exp
 - deepseek-v4-pro
+- kimi-k3.1-pro
 - kimi-k3
 - kimi-k2.7-code
+- qwen4-max
 - qwen3.8-max
 - qwen3.8-flash
 - qwen3.7-max
@@ -350,6 +352,7 @@ Flowlet 支持的模型（全局白名单，不按渠道区分）：
 - glm-5.2
 - glm-4.7
 - glm-4.5-air
+- hy4-flash
 - ox-alpha
 - nemotron-3.5-lightning
 - nemotron-3-super-120b-a12b

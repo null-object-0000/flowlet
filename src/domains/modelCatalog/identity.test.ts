@@ -10,8 +10,8 @@ import {
 
 describe("model identity catalog", () => {
   it("provides the complete supported-model whitelist without duplicates", () => {
-    expect(FLOWLET_SUPPORTED_MODELS).toHaveLength(29);
-    expect(new Set(FLOWLET_SUPPORTED_MODELS.map((model) => model.toLowerCase())).size).toBe(29);
+    expect(FLOWLET_SUPPORTED_MODELS).toHaveLength(32);
+    expect(new Set(FLOWLET_SUPPORTED_MODELS.map((model) => model.toLowerCase())).size).toBe(32);
     expect(FLOWLET_SUPPORTED_MODELS).toContain("LongCat-2.0");
     expect(FLOWLET_SUPPORTED_MODELS).toContain("LongCat-2.5");
     expect(FLOWLET_SUPPORTED_MODELS).toContain("deepseek-v4-flash");
@@ -38,6 +38,7 @@ describe("model identity catalog", () => {
       "deepseek-v4-pro",
     ]);
     expect(DEFAULT_EXPOSED_MODELS_BY_CHANNEL.qwen).toEqual([
+      "qwen4-max",
       "qwen3.8-max",
       "qwen3.8-flash",
       "qwen3.7-max",
@@ -65,6 +66,19 @@ describe("model identity catalog", () => {
     expect(officialChannelIdForModel("stealth/ox-alpha")).toBe("openrouter");
     expect(officialChannelIdForModel("nvidia/nemotron-3.5-lightning:free")).toBe("openrouter");
     expect(officialOwnerNameForModel("nvidia/nemotron-3.5-lightning:free")).toBe("NVIDIA");
+  });
+
+  it.each([
+    ["hy4-flash", "tencent", "hunyuan", "tencent-hunyuan"],
+    ["qwen4-max", "qwen", "qwen", "qwen-cn"],
+    ["kimi-k3.1-pro", "moonshotai", "kimi", "moonshot-cn"],
+  ])("recognizes %s as an independent model across upstream channels", (id, vendor, owner, provider) => {
+    expect(FLOWLET_SUPPORTED_MODELS).toContain(id);
+    expect(canonicalModelId(`${vendor}/${id.toUpperCase()}`)).toBe(id);
+    expect(officialChannelIdForModel(id)).toBe(owner);
+    expect(modelsCnProviderIdForModel(id)).toBe(provider);
+    expect(DEFAULT_EXPOSED_MODELS_BY_CHANNEL[owner]).toContain(id);
+    expect(canonicalModelId(`${id}-unknown`)).toBeNull();
   });
 
   it("normalizes aliases while preserving the canonical display ID", () => {

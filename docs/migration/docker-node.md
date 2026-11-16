@@ -349,3 +349,17 @@ node scripts/e2e-node-host.mjs            # 端到端冒烟（含 mock 上游流
 | 契约文档 | `AGENTS.md` §5、`docs/deepseek-harness-integration.md`、`docs/migration/proxy-core.md`（§3.11 / §4.1 第 11 行 / 附录 A）、`CHANGELOG.md` Unreleased 已同步；代码提交 `1fe1976` |
 | 并发说明 | 部署前 17:56–17:58 并行会话刚发布 `flowlet:node-20261110-multiorigin`，本镜像基于它构建、未回退其改动。若并行会话之后用早于本镜像的候选镜像再发布，会覆盖本兼容层；代码已在 git（`1fe1976`），按本记录 `build --paths proxy/http.ts,proxy/forward.ts` 即可重建 |
 | 遗留 | canary 容器仍为 `flowlet:node-20261110-multiorigin`，下次 canary 升级会自动跟进 |
+
+## 通用 AK/SK（generic-aksk）回归与恢复发布（2026-11-16 16:04）
+
+| 项 | 值 |
+| --- | --- |
+| 问题 | 周末实现的 `generic-aksk`（通用 AK/SK，SecretId + SecretKey）只存在于本地工作树、从未提交；2026-11-16 13:33 / 13:44 / 14:46 另一次会话从 `feat/channel-integration`（ef8b2a6）整树重建并连续发布 `hunyuan-sysone-mirror` / `protocol-upgrade` / `decision-ui` / `decision-ui-config`，未包含这些未提交文件，生产管理台「服务凭据」页因此看不到该 provider |
+| 证据 | 周六镜像 `flowlet:node-20261113-{aksk,cliaksk,hdrfix}-d95aefd` 的 `/app/packages/flowlet-core/src/web/credentials.ts` 与 UI 均含 `generic-aksk`；`decision-ui-config` 镜像 0 命中。当前容器在 11-13 至 11-16 13:33 之间运行 `hdrfix-d95aefd` |
+| 代码 | 提交 `ada60ed feat(credentials): 通用 AK/SK provider（SecretId + SecretKey）`（main，基于 d95aefd；OIDC provider WIP 仍未提交、未部署） |
+| 镜像 | `flowlet:node-20261116-aksk-restore`（`sha256:e238913af8a8`，262 MB）：以当时运行镜像 `flowlet:node-20261116-decision-ui-config` 为基础，overlay `packages/flowlet-core/src/web/credentials.ts` + 本地 `dist-web`（含 decision-ui 前端与 `WebApp-DZUObtVq.js`），保留当天 decision-model-preview / systemone 全部改动 |
+| 部署 | 16:04:42 蓝绿切换（新容器 `edb0db5d8219` 先过 `/health`），使用端不可用 2.6s，egress 未重建；compose 备份 `.agents/skills/flowlet-docker-deploy/.work/compose.before-20261116-160442.yaml`；回滚 `deploy --tag flowlet:node-20261116-decision-ui-config` |
+| canary 验证 | `flowlet-canary` 升级后 `/health` 200；`list_credential_providers` 含 `generic-aksk`；真实保存一条空地址凭据 200（不发起网络校验）、`export_service_credentials` 返回 username=SecretId + 明文 SecretKey、删除 200 |
+| 生产验证 | 容器镜像 = 新 tag 且 healthy；`/api/auth/config` 仍 `mode=oidc`；`/v1/models` 200；`/assets/WebApp-DZUObtVq.js` 含 `generic-aksk` 与「通用 AK/SK」；容器日志无错误 |
+| 单测 | Node `credentials.test.ts` 57 项通过（含新增 generic-aksk 元数据/保存/导出/envKeys 4 项）；CLI `node --test packages/flowlet-cred/src/__tests__/` 167 项通过；根 `tsc --noEmit`、`flowlet-core`/`flowlet-cred` tsc 通过；`npm run build:web` 通过 |
+| 遗留 | 下次从 `feat/channel-integration`（或任何不含 `ada60ed` 的分支）整树重建仍会丢掉该功能；需要把 `ada60ed` cherry-pick/合并进发布分支，或改为从含该提交的分支发布 |

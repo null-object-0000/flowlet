@@ -372,3 +372,12 @@ node scripts/e2e-node-host.mjs            # 端到端冒烟（含 mock 上游流
 - 生产：21:21 切换完成，最长健康探测成功间隔 3.40s，egress 未重建；health 200、OIDC 登录模式保留、models 200、模型流式请求 1/1 读到 DONE；Agent 网关资源哈希与 CLI 下载清单验证通过。未做实际 T3/Paseo 界面联调。
 - Web ACP 托管仍默认关闭；A2A 服务可使用页面生成的 ACP 客户端桥配置。程序托管需另行启用 `FLOWLET_ENABLE_ACP=1` 并安装目标 Agent。
 - 回滚镜像：`flowlet:node-20261116-aksk-restore`。compose 备份：部署技能 `.work/compose.before-20261116-212147.yaml`。Dockhand 正确凭据映射为 `DOCKHAND_SZ_TEST`，env=2；旧手册的凭据映射已过时。
+
+
+## Agent 网关页面与活动记录修复（2026-11-16 21:35）
+
+- 源码 `b49417b`，镜像 `flowlet:node-20261116-gateway-ui-b49417b`，隔离构建 UI 并 overlay 4 个核心文件，保留线上目录同步/存储修复与 OIDC 工作区隔离。
+- 页面分为 Agent、调用记录、调用密钥三个视图；卡片搜索、菜单、密钥弹窗、分页与结构化详情。默认隐藏成功轮询，后端筛选先于 LIMIT；请求结果/耗时与同一 Agent + taskId 的任务最新观测分开。历史记录不改写；finishedAt 可选字段，旧记录兼容。
+- 验证：25 项后端（含高频轮询挤压回归）、7 项前端领域/交互测试通过，类型检查及隔离 Web 构建通过；canary 活动筛选与 JS/CSS 哈希通过。预览缺少生产登录态，未做登录后的浏览器视觉验收。
+- 生产 health/models 200，OIDC 保持，流式 1/1 DONE；最长健康成功间隔 2.84s，egress 未重建，发布后资源哈希一致。
+- 回滚 `flowlet:node-20261116-acp-3105f66`；compose 备份 `.work/compose.before-20261116-213524.yaml`。

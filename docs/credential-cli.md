@@ -1,6 +1,9 @@
 # 全局凭据库与 `flowlet`
 
-状态：v8（新增通用 `flowlet a2a` 客户端，详见 `docs/a2a-cli.md`）。
+状态：v9（新增通用 AK/SK（`generic-aksk`）provider：SecretId + SecretKey 两段式凭据，
+地址可选、服务端不做连通性校验，`pull` 生成 `{PREFIX}_SECRET_ID` / `{PREFIX}_SECRET_KEY`，
+填了地址时额外生成 `{PREFIX}_URL`）。
+v8（新增通用 `flowlet a2a` 客户端，详见 `docs/a2a-cli.md`）。
 既有 v7（**新增 OCI 镜像仓库（registry）provider（标准 Docker Registry HTTP API V2 / OCI
 Distribution：`GET /v2/` + `WWW-Authenticate` Bearer 质询）**）；
 `flowlet registry` 子命令、`pull` 为 registry 生成 `{PREFIX}_HOST` / `{PREFIX}_USER` / `{PREFIX}_TOKEN`。
@@ -13,7 +16,8 @@ v3 起用户侧命令统一为 `flowlet`，并支持同 provider 多实例环境
 Node 版 CLI 为默认实现；Rust 版二进制名仍为 `flowlet-cred`，标为 legacy，仅用于对拍）
 日期：2026-11-10（v1：Node 移植完成；v2：新增 Dockhand provider；v3：CLI 更名 `flowlet` +
 多实例 env 前缀 + 本机接入下载；v4：`flowlet login` 浏览器授权 + 本机 `auth.json`；
-v5：Jenkins provider + 服务凭据用户名字段；v6：Beszel provider；v7：OCI 镜像仓库 provider）
+v5：Jenkins provider + 服务凭据用户名字段；v6：Beszel provider；v7：OCI 镜像仓库 provider；
+v8：`flowlet a2a` 客户端；v9：通用 AK/SK provider，2026-11-14）
 
 ## 1. 定位
 
@@ -293,11 +297,15 @@ server 的 token。三者都没有时报错：
   `{PREFIX}_USER`（用户名，kind `service`）、`{PREFIX}_TOKEN`（密码/token，kind `cli_token`）。
   地址键用 `_HOST` 而不是 `_URL`：它保存的是可以直传 `docker login` 的主机名，
   而且默认前缀本身就是 `REGISTRY`，若写成 `{PREFIX}_REGISTRY` 会得到 `REGISTRY_REGISTRY`；
+- 通用 AK/SK（`generic-aksk`，v9）是两段式密钥：SecretId 存 `username` 列、SecretKey 存
+  token 列，服务端不做连通性校验（保存即生效）。地址可留空；生成
+  `{PREFIX}_SECRET_ID`（kind `service`）/ `{PREFIX}_SECRET_KEY`（kind `cli_token`），
+  填了地址时最前面再生成 `{PREFIX}_URL`（kind `service`）。
 - Uptime Kuma（`uptime-kuma`）的 API Key 只用于 Prometheus `/metrics` 鉴权，密钥键是
   **`{PREFIX}_API_KEY`**（不是 `_TOKEN`），与公司 infra skill 已有的 `UPTIME_KUMA_API_KEY` 对齐；
 - 未填前缀用 provider 默认值：`gitlab` → `GITLAB`、`dockhand` → `DOCKHAND`、
   `jenkins` → `JENKINS`、`uptime-kuma` → `UPTIME_KUMA`、`beszel` → `BESZEL`、
-  `registry` → `REGISTRY`（与第一期兼容）；
+  `registry` → `REGISTRY`、`generic-aksk` → `GENERIC`（与第一期兼容）；
 - 前缀规则：trim 后转大写，`^[A-Z][A-Z0-9_]{0,23}$`，最长 24 个字符；
   非法时保存失败：`环境前缀只能包含字母、数字和下划线，且以字母开头` / `环境前缀不能超过 24 个字符`；
 - **唯一性**：所有已启用（`enabled=true`）凭据解析后的前缀必须唯一（不同 provider 也算冲突，

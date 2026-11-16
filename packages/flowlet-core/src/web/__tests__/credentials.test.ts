@@ -158,7 +158,7 @@ function makeCtx(storage: FakeCredentialStorage, secrets: SecretBoxLike = fakeSe
 interface GitlabMockOptions {
   username?: string;
   version?: string;
-  /** /version 返回的状态码；403/404 时 Rust `version()` 静默降级为 null。 */
+  /** /version 返回的状态码；403/404 时 Node Host `version()` 静默降级为 null。 */
   versionStatus?: number;
   /** true 时模拟旧实例没有 /version 路由（404）。 */
   hideVersion?: boolean;
@@ -732,6 +732,15 @@ describe("GitLab 客户端基础", () => {
         available: true,
       },
       {
+        id: "generic-aksk",
+        label: "通用 AK/SK",
+        baseUrlHint: "可留空；填了会额外注入 <PREFIX>_URL（例如云厂商的 endpoint）",
+        tokenLabel: "SecretKey（第二段密钥）",
+        usernameLabel: "SecretId",
+        defaultEnvPrefix: "GENERIC",
+        available: true,
+      },
+      {
         id: "http-bearer",
         label: "通用 API（Bearer）",
         baseUrlHint: "https://files.example.com/files（子路径部署要带上）",
@@ -842,7 +851,7 @@ describe("服务凭据编排", () => {
     );
     await assert.rejects(
       () => save(ctx, inputFor(mock, { provider: "github" }) as never, false),
-      /暂不支持的服务类型：github（当前支持 gitlab、dockhand、jenkins、uptime-kuma、beszel、registry、http-bearer）/,
+      /暂不支持的服务类型：github（当前支持 gitlab、dockhand、jenkins、uptime-kuma、beszel、registry、http-bearer、generic-aksk）/,
     );
     await assert.rejects(
       () => save(ctx, inputFor(mock, { baseUrl: "ftp://example.com" }) as never, false),
@@ -1074,7 +1083,7 @@ describe("服务凭据编排", () => {
     );
   });
 });
-// ─── Dockhand provider（与 Rust `check_dockhand` / save/test 分发对齐） ─────
+// ─── Dockhand provider（与 Node Host `check_dockhand` / save/test 分发对齐） ─────
 
 function dockhandInputFor(mock: MockDockhand, overrides: Partial<JsonRow> = {}): JsonRow {
   return {
@@ -1236,12 +1245,12 @@ describe("Dockhand 凭据", () => {
     );
     await assert.rejects(
       () => save(ctx, { name: "x", provider: "github", baseUrl: "http://host", token: "t" } as never, false),
-      /暂不支持的服务类型：github（当前支持 gitlab、dockhand、jenkins、uptime-kuma、beszel、registry、http-bearer）/,
+      /暂不支持的服务类型：github（当前支持 gitlab、dockhand、jenkins、uptime-kuma、beszel、registry、http-bearer、generic-aksk）/,
     );
   });
 });
 
-// ─── Jenkins provider（与 Rust `check_jenkins` / save/test 分发对齐） ──────
+// ─── Jenkins provider（与 Node Host `check_jenkins` / save/test 分发对齐） ──────
 
 function jenkinsInputFor(mock: MockJenkins, overrides: Partial<JsonRow> = {}): JsonRow {
   return {
@@ -1454,7 +1463,7 @@ describe("Jenkins 凭据", () => {
   });
 });
 
-// ─── Beszel provider（与 Rust `check_beszel` / save/test 分发对齐） ────────
+// ─── Beszel provider（与 Node Host `check_beszel` / save/test 分发对齐） ────────
 
 function beszelInputFor(mock: MockBeszel, overrides: Partial<JsonRow> = {}): JsonRow {
   return {
@@ -1720,7 +1729,7 @@ describe("Beszel 凭据", () => {
   });
 });
 
-// ─── Registry provider（OCI 镜像仓库；与 Rust `check_registry` / save/test 分发对齐） ──
+// ─── Registry provider（OCI 镜像仓库；与 Node Host `check_registry` / save/test 分发对齐） ──
 
 function registryInputFor(mock: MockRegistry, overrides: Partial<JsonRow> = {}): JsonRow {
   return {
@@ -1737,7 +1746,7 @@ describe("Registry 凭据", () => {
   it("元数据：provider 追加在 beszel 之后、supported、默认前缀 REGISTRY", () => {
     assert.deepEqual(
       providers().map((item) => item.id),
-      ["gitlab", "dockhand", "jenkins", "uptime-kuma", "beszel", "registry", "http-bearer"],
+      ["gitlab", "dockhand", "jenkins", "uptime-kuma", "beszel", "registry", "generic-aksk", "http-bearer"],
     );
     assert.equal(isSupportedProvider("registry"), true);
     assert.equal(isSupportedProvider("github"), false);
@@ -2045,7 +2054,7 @@ describe("环境前缀 / 多实例", () => {
       () => normalizeEnvPrefix("NA-SZ", "dockhand"),
       /环境前缀只能包含字母、数字和下划线，且以字母开头/,
     );
-    // Rust `to_ascii_uppercase` 不做 Unicode 上标：`ß` 不会变成 `SS`，必须报字符错误。
+    // Node Host `to_ascii_uppercase` 不做 Unicode 上标：`ß` 不会变成 `SS`，必须报字符错误。
     assert.throws(
       () => normalizeEnvPrefix("ß", "dockhand"),
       /环境前缀只能包含字母、数字和下划线，且以字母开头/,
@@ -2227,6 +2236,99 @@ describe("环境前缀 / 多实例", () => {
         ["旧 Dockhand", "DOCKHAND"],
         ["自定义", "NA"],
         ["默认 GitLab", "GITLAB"],
+      ],
+    );
+  });
+});
+
+// ─── 通用 AK/SK provider（两段式 SecretId + SecretKey，不做连通性校验） ──────────
+
+describe("通用 AK/SK 凭据", () => {
+  it("元数据：provider 在 registry 之后、supported、默认前缀 GENERIC", () => {
+    assert.deepEqual(
+      providers().map((item) => item.id),
+      ["gitlab", "dockhand", "jenkins", "uptime-kuma", "beszel", "registry", "generic-aksk", "http-bearer"],
+    );
+    assert.equal(isSupportedProvider("generic-aksk"), true);
+    assert.equal(defaultEnvPrefix("generic-aksk"), "GENERIC");
+  });
+
+  it("save：地址可留空、不发网络请求；SecretId 存 username，SecretKey 加密", async () => {
+    const storage = new FakeCredentialStorage();
+    const ctx = makeCtx(storage);
+    const view = await save(
+      ctx,
+      {
+        name: "公司云 AK",
+        provider: "generic-aksk",
+        baseUrl: "",
+        username: "  AKIDEXAMPLE  ",
+        token: "sk-live-1234",
+      } as never,
+      false,
+    );
+    assert.equal(view.provider, "generic-aksk");
+    assert.equal(view.baseUrl, "");
+    assert.equal(view.username, "AKIDEXAMPLE");
+    assert.equal(view.envPrefix, "GENERIC");
+    assert.equal(storage.upserts, 1);
+    const row = storage.getServiceCredential(view.id)!;
+    assert.equal(ctx.secrets.decrypt(String(row.secret_ciphertext)), "sk-live-1234");
+    assert.equal(row.last_error, null);
+    assert.equal(typeof row.last_verified_at, "string");
+    // 列表只给掩码；导出（供 flowlet pull）按设计给出明文。
+    const listed = list(ctx)[0]!;
+    assert.equal(listed.secretHint, "••••1234");
+    assert.ok(!JSON.stringify(listed).includes("sk-live-1234"));
+    const exported = exportCredentials(ctx);
+    assert.equal(exported[0]!.username, "AKIDEXAMPLE");
+    assert.equal(exported[0]!.token, "sk-live-1234");
+  });
+
+  it("save：SecretId 必填，缺失不落库", async () => {
+    const storage = new FakeCredentialStorage();
+    const ctx = makeCtx(storage);
+    await assert.rejects(
+      () =>
+        save(
+          ctx,
+          { name: "公司云 AK", provider: "generic-aksk", baseUrl: "", token: "sk-live-1234" } as never,
+          false,
+        ),
+      /通用 AK\/SK 需要填写 SecretId/,
+    );
+    assert.equal(storage.upserts, 0);
+  });
+
+  it("envKeys：URL 可选，随后 SECRET_ID / SECRET_KEY", () => {
+    assert.deepEqual(
+      envKeys({
+        name: "公司云",
+        provider: "generic-aksk",
+        baseUrl: "https://cloud.example.com",
+        username: "AKIDEXAMPLE",
+        envPrefix: "GENERIC",
+        token: "sk-live-1234",
+      }),
+      [
+        ["GENERIC_URL", "https://cloud.example.com", "service"],
+        ["GENERIC_SECRET_ID", "AKIDEXAMPLE", "service"],
+        ["GENERIC_SECRET_KEY", "sk-live-1234", "cli_token"],
+      ],
+    );
+    // 没填地址时不生成 URL 键，只留两段密钥。
+    assert.deepEqual(
+      envKeys({
+        name: "公司云",
+        provider: "generic-aksk",
+        baseUrl: "",
+        username: "AKIDEXAMPLE",
+        envPrefix: "GENERIC",
+        token: "sk-live-1234",
+      }),
+      [
+        ["GENERIC_SECRET_ID", "AKIDEXAMPLE", "service"],
+        ["GENERIC_SECRET_KEY", "sk-live-1234", "cli_token"],
       ],
     );
   });

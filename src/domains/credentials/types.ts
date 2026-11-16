@@ -7,7 +7,8 @@ export type CredentialProviderId =
   | "uptime-kuma"
   | "beszel"
   | "registry"
-  | "http-bearer";
+  | "http-bearer"
+  | "generic-aksk";
 
 export type CredentialProvider = {
   id: string;

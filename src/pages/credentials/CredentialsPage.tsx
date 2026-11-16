@@ -86,6 +86,7 @@ const PROVIDER_LABEL = {
   beszel: "Beszel",
   registry: "OCI 镜像仓库",
   "http-bearer": "通用 API（Bearer）",
+  "generic-aksk": "通用 AK/SK",
 } as const satisfies Record<CredentialProviderId, string>;
 
 /** 表格/表单展示用的 provider 名称；未知 id 原样返回。 */
@@ -150,6 +151,15 @@ const FALLBACK_PROVIDERS: CredentialProvider[] = [
     defaultEnvPrefix: "REGISTRY",
   },
   {
+    id: "generic-aksk",
+    label: "通用 AK/SK",
+    baseUrlHint: "可留空；填了会额外注入 <PREFIX>_URL",
+    tokenLabel: "SecretKey（第二段密钥）",
+    usernameLabel: "SecretId",
+    defaultEnvPrefix: "GENERIC",
+    available: true,
+  },
+  {
     id: "http-bearer",
     label: "通用 API（Bearer）",
     baseUrlHint: "https://files.example.com/files（子路径部署要带上）",
@@ -182,6 +192,8 @@ const CHECK_ENDPOINTS: Record<CredentialProviderId, string> = {
   registry: "镜像仓库 GET /v2/",
   // 通用 Bearer：带 token 打一次、不带 token 再打一次做对照。
   "http-bearer": "所填地址（带 token 与不带 token 各一次）",
+  // 两段式密钥，服务端不发起连通性校验。
+  "generic-aksk": "不做网络校验（保存即生效）",
 };
 
 export function checkEndpoint(provider: CredentialProviderId): string {
@@ -201,6 +213,7 @@ const KNOWN_PROVIDER_IDS = [
   "beszel",
   "registry",
   "http-bearer",
+  "generic-aksk",
 ] as const satisfies readonly CredentialProviderId[];
 
 type MissingProviderId = Exclude<CredentialProviderId, (typeof KNOWN_PROVIDER_IDS)[number]>;

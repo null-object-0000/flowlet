@@ -6,7 +6,7 @@
 // - Node 22.6–22.17：需要 `--experimental-strip-types`，用子进程透传参数与退出码；
 // - < 22.6：明确报错退出（不要静默失败）。
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const cliPath = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
 const currentVersion = process.versions.node;
@@ -22,7 +22,7 @@ const typeStrippingByDefault =
   major > 23 || (major === 23 && minor >= 6) || (major === 22 && minor >= 18);
 
 if (typeStrippingByDefault) {
-  await import(cliPath);
+  await import(pathToFileURL(cliPath).href);
 } else {
   // Node 22.6–22.17：带 flag 重新执行入口，stdio/退出码原样透传。
   const result = spawnSync(

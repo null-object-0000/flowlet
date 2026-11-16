@@ -556,8 +556,14 @@ function parseLoginTimeoutSeconds(args: string[]): number {
 /** 打开系统浏览器；失败不影响流程（授权 URL 已经打印，可手动访问）。 */
 function openBrowser(url: string): void {
   const platform = process.platform;
-  const command = platform === "win32" ? "cmd" : platform === "darwin" ? "open" : "xdg-open";
-  const args = platform === "win32" ? ["/c", "start", "", url] : [url];
+  // Windows 不能用 cmd /c start：CMD 会把 URL 里的 & 当成命令分隔符，
+  // 只打开第一个参数之前的部分（典型症状：授权页提示「state 不能为空」）。
+  // 改用 PowerShell 的单引号字符串，& 与 % 都不会被解释。
+  const command = platform === "win32" ? "powershell" : platform === "darwin" ? "open" : "xdg-open";
+  const args =
+    platform === "win32"
+      ? ["-NoProfile", "-NonInteractive", "-Command", `Start-Process '${url.replace(/'/g, "''")}'`]
+      : [url];
   try {
     const child = spawn(command, args, { detached: true, stdio: "ignore" });
     child.on("error", () => {
@@ -640,6 +646,7 @@ const PROVIDER_DEFAULT_PREFIX: Record<string, string> = {
   "uptime-kuma": "UPTIME_KUMA",
   registry: "REGISTRY",
   "http-bearer": "HTTP_BEARER",
+  "generic-aksk": "GENERIC",
 };
 
 function envKeys(entry: ServiceCredentialExport): Array<[string, string, string]> {
@@ -676,6 +683,15 @@ function envKeys(entry: ServiceCredentialExport): Array<[string, string, string]
       [`${prefix}_USER`, username, "service"],
       [`${prefix}_TOKEN`, entry.token, "cli_token"],
     ];
+  }
+  // 通用 AK/SK：两段式（SecretId 在 username、SecretKey 在 token），地址可选。
+  if (entry.provider === "generic-aksk") {
+    const secretId = typeof entry.username === "string" ? entry.username : "";
+    const keys: Array<[string, string, string]> = [];
+    if (entry.baseUrl.trim() !== "") keys.push([`${prefix}_URL`, entry.baseUrl, "service"]);
+    keys.push([`${prefix}_SECRET_ID`, secretId, "service"]);
+    keys.push([`${prefix}_SECRET_KEY`, entry.token, "cli_token"]);
+    return keys;
   }
   // Uptime Kuma 的 Key 只用于 /metrics 鉴权，沿用公司 infra skill 的 `_API_KEY` 命名。
   const tokenKey = entry.provider === "uptime-kuma" ? `${prefix}_API_KEY` : `${prefix}_TOKEN`;

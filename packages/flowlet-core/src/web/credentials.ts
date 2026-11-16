@@ -46,6 +46,8 @@ export const PROVIDER_BESZEL = "beszel";
 export const PROVIDER_UPTIME_KUMA = "uptime-kuma";
 export const PROVIDER_REGISTRY = "registry";
 export const PROVIDER_HTTP_BEARER = "http-bearer";
+/** 通用两段式凭据（SecretId + SecretKey），如云厂商 AK/SK。 */
+export const PROVIDER_GENERIC_PAIR = "generic-aksk";
 
 export interface ServiceCredentialView {
   id: string;
@@ -187,6 +189,15 @@ export function providers(): CredentialProvider[] {
       available: true,
     },
     {
+      id: PROVIDER_GENERIC_PAIR,
+      label: "通用 AK/SK",
+      baseUrlHint: "可留空；填了会额外注入 <PREFIX>_URL（例如云厂商的 endpoint）",
+      tokenLabel: "SecretKey（第二段密钥）",
+      usernameLabel: "SecretId",
+      defaultEnvPrefix: "GENERIC",
+      available: true,
+    },
+    {
       id: PROVIDER_HTTP_BEARER,
       label: "通用 API（Bearer）",
       baseUrlHint: "https://files.example.com/files（子路径部署要带上）",
@@ -206,7 +217,8 @@ export function isSupportedProvider(provider: string): boolean {
     provider === PROVIDER_UPTIME_KUMA ||
     provider === PROVIDER_BESZEL ||
     provider === PROVIDER_REGISTRY ||
-    provider === PROVIDER_HTTP_BEARER
+    provider === PROVIDER_HTTP_BEARER ||
+    provider === PROVIDER_GENERIC_PAIR
   );
 }
 
@@ -218,6 +230,7 @@ function normalizeProviderBaseUrl(provider: string, raw: string): string {
   if (provider === PROVIDER_BESZEL) return normalizeBeszelBaseUrl(raw);
   if (provider === PROVIDER_REGISTRY) return normalizeRegistryUrl(raw);
   if (provider === PROVIDER_HTTP_BEARER) return normalizeHttpBearerBaseUrl(raw);
+  if (provider === PROVIDER_GENERIC_PAIR) return raw.trim() === "" ? "" : normalizeBaseUrl(raw);
   return normalizeBaseUrl(raw);
 }
 
@@ -231,6 +244,7 @@ export function defaultEnvPrefix(provider: string): string {
   if (provider === PROVIDER_BESZEL) return "BESZEL";
   if (provider === PROVIDER_REGISTRY) return "REGISTRY";
   if (provider === PROVIDER_HTTP_BEARER) return "HTTP_BEARER";
+  if (provider === PROVIDER_GENERIC_PAIR) return "GENERIC";
   // save/test 会先做 provider 校验；这里只兜底旧库中可能存在的未知 provider 行。
   return provider.trim().toUpperCase();
 }
@@ -590,6 +604,16 @@ function normalizeUsername(
     validateBeszelEmail(trimmed);
     return trimmed;
   }
+  if (provider === PROVIDER_GENERIC_PAIR) {
+    const trimmed = (raw ?? "").trim();
+    if (trimmed === "") {
+      const previous = typeof existing?.username === "string" ? existing.username.trim() : "";
+      if (previous === "") fail("通用 AK/SK 需要填写 SecretId");
+      return previous;
+    }
+    if ([...trimmed].length > 128) fail("SecretId 不能超过 128 个字符");
+    return trimmed;
+  }
   if (provider !== PROVIDER_JENKINS) return null;
   const trimmed = (raw ?? "").trim();
   if (trimmed === "") {
@@ -628,7 +652,7 @@ export async function save(
   if ([...name].length > 64) fail("凭据名称不能超过 64 个字符");
   if (!isSupportedProvider(input.provider)) {
     fail(
-      `暂不支持的服务类型：${input.provider}（当前支持 gitlab、dockhand、jenkins、uptime-kuma、beszel、registry、http-bearer）`,
+      `暂不支持的服务类型：${input.provider}（当前支持 gitlab、dockhand、jenkins、uptime-kuma、beszel、registry、http-bearer、generic-aksk）`,
     );
   }
   let baseUrl: string;
@@ -695,6 +719,8 @@ export async function save(
             ? await checkBeszel(baseUrl, username ?? "", token, insecure)
             : input.provider === PROVIDER_REGISTRY
               ? await checkRegistry(baseUrl, username ?? "", token, insecure)
+              : input.provider === PROVIDER_GENERIC_PAIR
+                ? { ok: true, username, version: null, detail: "通用键值对，不做连通性校验", error: null }
               : input.provider === PROVIDER_HTTP_BEARER
                 ? await checkHttpBearer(baseUrl, token, insecure)
                 : await checkGitlab(baseUrl, token, insecure);
@@ -878,6 +904,14 @@ export function envKeys(item: ServiceCredentialExport): Array<[string, string, s
       [`${prefix}_USER`, item.username ?? "", "service"],
       [`${prefix}_TOKEN`, item.token, "cli_token"],
     ];
+  }
+  // 通用 AK/SK：两段式，SecretId 在 username 列、SecretKey 在 token 列。
+  if (item.provider === PROVIDER_GENERIC_PAIR) {
+    const keys: Array<[string, string, string]> = [];
+    if (item.baseUrl.trim() !== "") keys.push([`${prefix}_URL`, item.baseUrl, "service"]);
+    keys.push([`${prefix}_SECRET_ID`, item.username ?? "", "service"]);
+    keys.push([`${prefix}_SECRET_KEY`, item.token, "cli_token"]);
+    return keys;
   }
   // Uptime Kuma 的 Key 只用于 `/metrics` 鉴权，变量名沿用公司 infra skill 的
   // `UPTIME_KUMA_API_KEY`（其它 provider 仍用 `_TOKEN`）。

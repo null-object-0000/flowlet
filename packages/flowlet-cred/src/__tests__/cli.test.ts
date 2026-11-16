@@ -272,8 +272,11 @@ describe("本地凭据库", () => {
     assert.ok(text.includes("not a pair"));
     assert.ok(text.includes("KEY_ONE=value"));
     assert.ok(text.includes("KEY_TWO=v2"));
-    // Rust 行为：每次写入都会再前置一次固定文件头（历史注释因此累积）；这里 2 次写入 = 2 份。
-    assert.equal(text.split(HEADER).length - 1, 2);
+    // 固定文件头只保留一份：旧实现（以及 Rust 原版）每次写入都会再前置一次，
+    // 多次 pull/set 后文件头会累积几百遍。这里回归到「恒为 1 份」。
+    assert.equal(text.split(HEADER).length - 1, 1);
+    cli(dir, ["set", "KEY_THREE", "--value=v3"]);
+    assert.equal(envFile(dir).split(HEADER).length - 1, 1);
     assert.deepEqual(readdirSync(dir).filter((name) => name.includes(".tmp-")), []);
   });
 });

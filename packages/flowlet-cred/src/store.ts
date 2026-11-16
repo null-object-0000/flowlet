@@ -433,7 +433,11 @@ export class CredentialStore {
 
   private writeEnv(lines: EnvLine[]): void {
     let text = `${ENV_HEADER}\n`;
+    // 旧文件里的头注释会被 parseEnv 当成普通 comment 保留下来，若不过滤就会每次写入
+    // 再叠一份，几百次 pull 之后文件头会重复几百遍（真实踩过）。
+    const headerLines = new Set(ENV_HEADER.split("\n"));
     for (const line of lines) {
+      if (line.type === "comment" && headerLines.has(line.text)) continue;
       if (line.type === "blank") text += "\n";
       else if (line.type === "comment") text += `${line.text}\n`;
       else text += `${line.key}=${encodeValue(line.value)}\n`;

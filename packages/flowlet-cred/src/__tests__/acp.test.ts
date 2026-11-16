@@ -20,6 +20,7 @@ async function fixture(
     sends: any[];
     mode: (value: string) => void;
   }) => Promise<void>,
+  ignoreClientMcp = false,
 ) {
   const directory = mkdtempSync(path.join(tmpdir(), "flowlet-acp-contract-"));
   const token = "private-acp-contract-token";
@@ -146,6 +147,7 @@ async function fixture(
         prefix: "TEST",
         dir: directory,
         timeoutSeconds: 3,
+        ignoreClientMcp,
       }),
       async (peer) => {
         await peer.request(methods.agent.initialize, { protocolVersion: 1 });
@@ -181,7 +183,9 @@ it("preserves artifact append/replace, direct messages and inline data without f
     assert.equal((await prompt(peer, sessionId)).stopReason, "end_turn");
     const contents = updates
       .filter((update) => "content" in update)
-      .map((update) => JSON.stringify("content" in update ? update.content : null));
+      .map((update) =>
+        JSON.stringify("content" in update ? update.content : null),
+      );
     assert.ok(contents.some((value) => value.includes("old+append")));
     assert.ok(contents.some((value) => value.includes("最终答案")));
     const final = updates.filter(
@@ -223,3 +227,37 @@ it("does not resend a task after an unfinished stream or while the previous task
     );
     assert.equal(sends.length, 1);
   }));
+
+it("allows T3's injected MCP only with explicit remote-only opt-in and exposes an honest model option", () =>
+  fixture(async ({ peer, updates, sends }) => {
+    const session = await peer.request(methods.agent.session.new, {
+      cwd: "/remote-workspace",
+      mcpServers: [
+        { name: "t3-code", command: "must-not-run", args: [], env: [] },
+      ],
+    });
+    assert.equal(session.configOptions?.[0].currentValue, "default");
+    assert.match(JSON.stringify(session.configOptions), /上游默认/);
+    await peer.request(methods.agent.session.setConfigOption, {
+      sessionId: session.sessionId,
+      configId: "model",
+      value: "default",
+    });
+    await assert.rejects(
+      peer.request(methods.agent.session.setConfigOption, {
+        sessionId: session.sessionId,
+        configId: "model",
+        value: "invented-model",
+      }),
+      /model switching is not available/,
+    );
+    await prompt(peer, session.sessionId);
+    await prompt(peer, session.sessionId);
+    assert.equal(
+      updates.filter((update) =>
+        JSON.stringify(update).includes("客户端附带的 MCP 配置未传递给上游"),
+      ).length,
+      1,
+    );
+    assert.equal(JSON.stringify(sends).includes("must-not-run"), false);
+  }, true));

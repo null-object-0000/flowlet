@@ -73,7 +73,9 @@ export function AgentGatewayAccess({
           <p className={styles.muted}>
             ACP 桥使用
             v1，支持文本、资源链接、会话恢复和任务取消。上游产物以可更新的输出卡片展示；等待补充输入时由用户回复继续。Agent
-            执行能力由上游提供，桥接不接管客户端文件、终端或 MCP。
+            执行能力与底层模型由上游提供，当前仅可选择上游默认模型。启动参数中的
+            --ignore-client-mcp 显式忽略 T3 附带的 MCP
+            配置；桥接不执行或转发这些工具，也不接管客户端文件和终端。
           </p>
         </div>
       )}

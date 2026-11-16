@@ -17,7 +17,7 @@ export function agentAccessConfig(agent: A2aAgent, origin: string) {
   // CLI prefixes are capped at 64 characters. Long IDs use the common prefix in
   // per-provider environment, isolated by each launched bridge process.
   const effectivePrefix = prefix.length <= 64 ? prefix : "FLOWLET_A2A";
-  const args = ["acp", "--prefix=" + effectivePrefix];
+  const args = ["acp", "--prefix=" + effectivePrefix, "--ignore-client-mcp"];
   const url = agentGatewayUrl(agent, origin);
   const env = {
     [effectivePrefix + "_URL"]: url,

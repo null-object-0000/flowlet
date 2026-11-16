@@ -15,6 +15,7 @@ describe("Agent client access configuration", () => {
     );
     expect(config.url).toBe("https://remote.example/a2a/bai-xiao_sheng");
     expect(config.args[0]).toBe("acp");
+    expect(config.args).toContain("--ignore-client-mcp");
     const prefix = config.args[1].slice("--prefix=".length);
     expect(config.env[prefix + "_URL"]).toBe(config.url);
     expect(config.env[prefix + "_TOKEN"]).toContain("调用密钥");

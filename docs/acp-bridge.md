@@ -57,7 +57,9 @@ Host 最多保留 8 个运行环境，每个环境最多创建 1000 个任务；
 A2A 扩展协商头。密钥不放命令参数；页面只生成占位符，由用户填入专用调用密钥。
 
 T3 Code 的 Local ACP Provider 使用生成的 executable/args/env。Paseo 使用 `extends: "acp"`，
-`options.supportsMcpServers: false` 及禁用文件/终端能力的配置。桥接拒绝客户端附带 MCP 服务器。
+`options.supportsMcpServers: false` 及禁用文件/终端能力的配置。默认拒绝客户端附带 MCP 服务器。生成的启动参数显式添加 `--ignore-client-mcp`，兼容 T3 自动注入自带 MCP 的行为：只使用远程 Agent 能力，不执行或转发这些 MCP 配置，并在首次回复中说明。Paseo 仍应关闭 MCP 注入。
+
+模型选择显示为「Agent · 上游默认」，只暴露当前确实可用的选项；A2A 1.0 不提供通用底层模型列表或切换接口，不得将 Flowlet 的模型服务列表伪装成该远程 Agent 可选择的模型。
 
 支持文本与 resource_link 输入，明确拒绝图片、音频和嵌入资源输入，不读取或上传客户端文件。
 文本、结构化数据及链接输出展示为文本；内联文件输出完整 data URI，不下载 URL。A2A Artifact

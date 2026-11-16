@@ -21,12 +21,14 @@ export interface AcpBridgeConfig {
   dir: string;
   timeoutSeconds: number;
   extensions?: string;
+  ignoreClientMcp?: boolean;
 }
 type Session = {
   file: SessionFile;
   state: A2aSession | null;
   cwd: string;
   history: SessionUpdate[];
+  noticePending?: boolean;
   active?: { taskId?: string; cancelled: boolean; cancel?: Promise<void> };
 };
 
@@ -89,6 +91,30 @@ export function createAcpBridge(config: AcpBridgeConfig) {
   const file = (id: string) =>
     new SessionFile(config.dir, config.url, config.prefix, `acp:${id}`);
   const app = agent({ name: "flowlet" });
+  const configOptions = () => [
+    {
+      id: "model",
+      category: "model" as const,
+      name: "模型",
+      type: "select" as const,
+      currentValue: "default",
+      options: [
+        {
+          value: "default",
+          name: `${String(card.name ?? "远程 Agent")} · 上游默认`,
+          description:
+            "底层模型由远程 A2A Agent 管理，当前未提供模型切换能力。",
+        },
+      ],
+    },
+  ];
+  const checkMcp = (servers: unknown[]) => {
+    if (servers.length && !config.ignoreClientMcp)
+      throw new RequestError(
+        -32602,
+        "Remote A2A agents cannot use client MCP servers. Disable MCP injection, or explicitly use --ignore-client-mcp for remote-only operation.",
+      );
+  };
   app.onRequest(methods.agent.initialize, async ({ signal }) => {
     const api = client(AbortSignal.any([signal, AbortSignal.timeout(10_000)]));
     try {
@@ -112,10 +138,7 @@ export function createAcpBridge(config: AcpBridgeConfig) {
     };
   });
   app.onRequest(methods.agent.session.new, ({ params }) => {
-    if (params.mcpServers.length)
-      throw RequestError.invalidParams(
-        "A2A agents do not accept client-provided MCP servers",
-      );
+    checkMcp(params.mcpServers);
     if (sessions.size >= 100)
       throw RequestError.invalidRequest(
         "Session limit reached; restart the bridge",
@@ -129,16 +152,30 @@ export function createAcpBridge(config: AcpBridgeConfig) {
     } finally {
       unlock();
     }
-    const session = { file: record, state, cwd: params.cwd, history: [] };
+    const session = {
+      file: record,
+      state,
+      cwd: params.cwd,
+      history: [],
+      noticePending: params.mcpServers.length > 0,
+    };
     saveHistory(session);
     sessions.set(id, session);
-    return { sessionId: id };
+    return { sessionId: id, configOptions: configOptions() };
+  });
+  app.onRequest(methods.agent.session.setConfigOption, ({ params }) => {
+    find(params.sessionId);
+    if (params.configId !== "model" || params.value !== "default")
+      throw new RequestError(
+        -32602,
+        "This remote A2A agent exposes its upstream default only; model switching is not available.",
+      );
+    return { configOptions: configOptions() };
   });
   app.onRequest(
     methods.agent.session.load,
     async ({ params, client: peer }) => {
-      if (params.mcpServers.length)
-        throw RequestError.invalidParams("MCP servers are not supported");
+      checkMcp(params.mcpServers);
       if (!/^[a-f0-9-]{36}$/.test(params.sessionId))
         throw RequestError.sessionNotFound(params.sessionId);
       if (sessions.get(params.sessionId)?.active)
@@ -169,8 +206,9 @@ export function createAcpBridge(config: AcpBridgeConfig) {
           state,
           cwd: params.cwd,
           history: history.history,
+          noticePending: params.mcpServers.length > 0,
         });
-        return {};
+        return { configOptions: configOptions() };
       } finally {
         unlock();
       }
@@ -333,6 +371,12 @@ export function createAcpBridge(config: AcpBridgeConfig) {
           });
         }
         saveHistory(session);
+        if (session.noticePending) {
+          await say(
+            "此远程 Agent 不使用本机 MCP 工具；客户端附带的 MCP 配置未传递给上游。\n",
+          );
+          session.noticePending = false;
+        }
         const message = {
           messageId: randomUUID(),
           role: "ROLE_USER",

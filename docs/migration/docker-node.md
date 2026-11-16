@@ -381,3 +381,12 @@ node scripts/e2e-node-host.mjs            # 端到端冒烟（含 mock 上游流
 - 验证：25 项后端（含高频轮询挤压回归）、7 项前端领域/交互测试通过，类型检查及隔离 Web 构建通过；canary 活动筛选与 JS/CSS 哈希通过。预览缺少生产登录态，未做登录后的浏览器视觉验收。
 - 生产 health/models 200，OIDC 保持，流式 1/1 DONE；最长健康成功间隔 2.84s，egress 未重建，发布后资源哈希一致。
 - 回滚 `flowlet:node-20261116-acp-3105f66`；compose 备份 `.work/compose.before-20261116-213524.yaml`。
+
+
+## 调用密钥查看发布（2026-11-16 21:44）
+
+- 源码 `c7bd624`，镜像 `flowlet:node-20261116-key-view-c7bd624`。新增增量表 a2a_key_secrets 使用现有 secret.key 加密原文，鉴权继续使用原哈希；旧表列结构与旧密钥不变。
+- 管理员通过 reveal_a2a_key 显式取回，列表只返回 canReveal，原文不进入前端 Query/Mutation 缓存；弹窗关闭清除显示。旧哈希密钥无法恢复，提供按原授权创建替代密钥，旧密钥不自动撤销。
+- 32 项后端、6 项前端测试、类型检查、隔离 Web 构建通过；canary 检查创建/查看、no-store、列表无密钥、调用密钥不能访问管理面、旧密钥 409 与撤销后 404，测试密钥已撤销。
+- 生产 health/models 200、OIDC 保持、页面资源哈希一致；最长健康成功间隔 3.13s，egress 未重建。未更改配置默认值，升级重启后生效。
+- 回滚镜像 `flowlet:node-20261116-gateway-ui-b49417b`，compose 备份 `.work/compose.before-20261116-214454.yaml`。

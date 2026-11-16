@@ -877,6 +877,25 @@ describe("generic A2A gateway through real Host command and HTTP boundaries", ()
       else process.env.FLOWLET_ENABLE_ACP = previous;
     }
   });
+  it("reveals encrypted keys only through explicit management and preserves hash-only keys", async () => {
+    const created = await command("create_a2a_key", { name: "reveal-test", agentIds: ["second"] });
+    const gateway = a2aGateway(web.context);
+    assert.ok(gateway.store.keySecret(created.id)?.cipher);
+    assert.ok(!gateway.store.keySecret(created.id)!.cipher!.includes(created.token));
+    const listed = await command("list_a2a_keys");
+    assert.equal(listed.find((row: any) => row.id === created.id).canReveal, true);
+    assert.ok(!JSON.stringify(listed).includes(created.token));
+    assert.equal((await command("reveal_a2a_key", { id: created.id })).token, created.token);
+    assert.equal((await fetch(`${base}/api/commands/reveal_a2a_key`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: created.id }) })).status, 401);
+    gateway.store.createKey("legacy", "legacy", "legacy-hash", ["second"]);
+    assert.equal(gateway.store.keys().find((row) => row.id === "legacy")?.canReveal, false);
+    assert.throws(() => gateway.revealKey("legacy"), /仅保存了哈希/);
+    assert.equal(gateway.store.authorize("legacy-hash", "second"), "legacy");
+    await command("revoke_a2a_key", { id: created.id });
+    assert.equal(gateway.store.keySecret(created.id), null);
+    assert.throws(() => gateway.revealKey(created.id), /已撤销/);
+    gateway.store.revokeKey("legacy");
+  });
   it("drains aborted A2A work before the Host closes its database", async () => {
     const created = await command("create_a2a_key", {
       name: "shutdown",

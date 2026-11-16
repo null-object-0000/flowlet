@@ -182,7 +182,8 @@ function A2aContent() {
                             <Dropdown.Item
                               type="danger"
                               onClick={() =>
-                                Modal.confirm({ zIndex: APP_OVERLAY_Z_INDEX.modal,
+                                Modal.confirm({
+                                  zIndex: APP_OVERLAY_Z_INDEX.modal,
                                   title: `移除 ${agent.name}？`,
                                   content:
                                     "将停止调用入口并清除密钥授权，调用记录保留。",
@@ -470,19 +471,52 @@ function A2aContent() {
                     创建于 {time(key.createdAt)}
                   </small>
                 </div>
-                <Button
-                  type="danger"
-                  theme="borderless"
-                  onClick={() =>
-                    Modal.confirm({ zIndex: APP_OVERLAY_Z_INDEX.modal,
-                      title: `撤销 ${key.name}？`,
-                      content: "撤销后，该密钥无法再发起新请求。",
-                      onOk: () => model.revoke.mutateAsync(key.id),
-                    })
-                  }
-                >
-                  撤销
-                </Button>
+                <div className={styles.actions}>
+                  {key.canReveal ? (
+                    <Button
+                      theme="borderless"
+                      loading={
+                        model.revealKey.isPending &&
+                        model.revealKey.variables === key.id
+                      }
+                      onClick={() => model.revealKey.mutate(key.id)}
+                    >
+                      查看密钥
+                    </Button>
+                  ) : (
+                    <>
+                      <span className={styles.muted}>未保存原文</span>
+                      <Button
+                        theme="borderless"
+                        onClick={() => {
+                          model.setKeyName(`${key.name.slice(0, 90)}（替代）`);
+                          model.setGrants(
+                            key.agentIds.filter((id) =>
+                              agents.data?.some((agent) => agent.id === id),
+                            ),
+                          );
+                          setKeyEditor(true);
+                        }}
+                      >
+                        创建替代密钥
+                      </Button>
+                    </>
+                  )}
+                  <Button
+                    type="danger"
+                    theme="borderless"
+                    onClick={() =>
+                      Modal.confirm({
+                        zIndex: APP_OVERLAY_Z_INDEX.modal,
+                        title: `撤销 ${key.name}？`,
+                        content: "撤销后，该密钥无法再发起新请求。",
+                        onOk: () => model.revoke.mutateAsync(key.id),
+                      })
+                    }
+                  >
+                    撤销
+                  </Button>
+                </div>
               </div>
             ))}
             {!keys.data?.length && (
@@ -532,9 +566,7 @@ function A2aContent() {
               onChange={(value) => model.setGrants(value as string[])}
             />
           </label>
-          <p className={styles.muted}>
-            完整密钥仅在创建成功后显示一次，请及时保存。
-          </p>
+          <p className={styles.muted}>创建后可由管理员再次查看和复制密钥。</p>
         </div>
       </Modal>
       <A2aOverlays model={model} />

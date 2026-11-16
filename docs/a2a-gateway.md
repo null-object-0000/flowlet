@@ -58,13 +58,18 @@ Node CLI 原生提供 `flowlet a2a list/discover/send/tasks/session/rpc`，直�
 1. 登记 ID、名称、完整 Agent Card URL；按需要填写上游 Bearer Token。
 2. 内网或本机服务必须显式开启「允许访问内网 / 本机服务」。
 3. 「读取 Agent Card」可预览技能；「验证并保存」会重新读取并验证 Card 后保存。
-4. 创建调用密钥，显式选择允许调用的 Agent。完整密钥只在创建时返回一次。
+4. 创建调用密钥，显式选择允许调用的 Agent。新密钥加密保存，管理员可在列表中点击「查看密钥」再次查看和复制。
 5. 把客户端指向 `http(s)://<Flowlet Host>/a2a/<id>`，并配置该调用密钥。
 
 上游 Token 使用现有数据目录 `secret.key` 加密；编辑时省略 `upstreamToken` 保留，空串清除。
 跨域更换 Card 地址必须重新填写或清除 Token，不能把旧凭据自动发往新域名。
 上游调用仅注入该 Agent 的凭据，不转发调用方 Authorization、Cookie 或其他任意请求头。
-调用密钥以 `flwa2a_` 开头，数据库只保存 SHA-256；管理 Token、模型 Client Token、CLI Token
+调用密钥以 `flwa2a_` 开头，鉴权仍使用 SHA-256；新密钥原文使用 `secret.key` 加密保存在独立增量表 `a2a_key_secrets`，
+仅管理员显式调用 `reveal_a2a_key` 时解密，响应 `Cache-Control: no-store`。列表不返回明文或密文，
+关闭弹窗清除显示内容，创建/查看的原文不进入 Query/Mutation 缓存。旧密钥仅存哈希，无法还原，
+界面提供按原授权创建替代密钥的入口；替代后旧密钥保持有效，更新客户端后再手动撤销。
+撤销时同时删除加密原文。新增表不更改旧表列结构，旧版鉴权及插入继续兼容。
+管理 Token、模型 Client Token、CLI Token
 均不能用于 A2A 数据面。Agent 授权覆盖该 Agent 的消息和任务操作。
 
 **首版按 Agent 授权，不按任务所有者隔离。** 同一 Agent 的获授权调用方共享上游服务身份和任务空间。

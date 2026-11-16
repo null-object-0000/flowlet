@@ -54,6 +54,7 @@ export class A2aStore {
       CREATE TABLE IF NOT EXISTS a2a_calls (
         id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, started_at TEXT NOT NULL, value TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS a2a_key_secrets (key_id TEXT PRIMARY KEY, token_cipher TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS idx_a2a_calls_agent_time ON a2a_calls(agent_id, started_at DESC);
       CREATE INDEX IF NOT EXISTS idx_a2a_calls_time ON a2a_calls(started_at DESC);
     `);
@@ -98,7 +99,7 @@ export class A2aStore {
   keys() {
     return this.db
       .prepare(
-        "SELECT id,name,agent_ids,created_at FROM a2a_keys ORDER BY created_at DESC",
+        "SELECT k.id,k.name,k.agent_ids,k.created_at,s.key_id AS revealable FROM a2a_keys k LEFT JOIN a2a_key_secrets s ON s.key_id=k.id ORDER BY k.created_at DESC",
       )
       .all()
       .map((r) => ({
@@ -106,12 +107,46 @@ export class A2aStore {
         name: String(r.name),
         agentIds: JSON.parse(String(r.agent_ids)) as string[],
         createdAt: String(r.created_at),
+        canReveal: r.revealable !== null,
       }));
   }
-  createKey(id: string, name: string, hash: string, agentIds: string[]): void {
-    this.db
-      .prepare("INSERT INTO a2a_keys VALUES (?,?,?,?,?)")
-      .run(id, name, hash, JSON.stringify(agentIds), new Date().toISOString());
+  createKey(
+    id: string,
+    name: string,
+    hash: string,
+    agentIds: string[],
+    cipher?: string,
+  ): void {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db
+        .prepare("INSERT INTO a2a_keys VALUES (?,?,?,?,?)")
+        .run(
+          id,
+          name,
+          hash,
+          JSON.stringify(agentIds),
+          new Date().toISOString(),
+        );
+      if (cipher)
+        this.db
+          .prepare("INSERT INTO a2a_key_secrets VALUES (?,?)")
+          .run(id, cipher);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+  keySecret(id: string): { cipher: string | null } | null {
+    const row = this.db
+      .prepare(
+        "SELECT s.token_cipher FROM a2a_keys k LEFT JOIN a2a_key_secrets s ON s.key_id=k.id WHERE k.id=?",
+      )
+      .get(id);
+    return row
+      ? { cipher: row.token_cipher === null ? null : String(row.token_cipher) }
+      : null;
   }
   authorize(hash: string, agentId: string): string | null {
     const row = this.db
@@ -123,7 +158,15 @@ export class A2aStore {
       : null;
   }
   revokeKey(id: string): void {
-    this.db.prepare("DELETE FROM a2a_keys WHERE id=?").run(id);
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.prepare("DELETE FROM a2a_key_secrets WHERE key_id=?").run(id);
+      this.db.prepare("DELETE FROM a2a_keys WHERE id=?").run(id);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
   record(call: A2aCall): void {
     this.db

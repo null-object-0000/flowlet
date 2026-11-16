@@ -61,9 +61,11 @@ export function useA2aGateway() {
     onError: report,
   });
   const createKey = useMutation({
-    mutationFn: () => a2aCommands.createKey(keyName, grants),
-    onSuccess: async (value) => {
+    mutationFn: async () => {
+      const value = await a2aCommands.createKey(keyName, grants);
       setNewToken(value.token);
+    },
+    onSuccess: async () => {
       setKeyName("");
       await refresh();
     },
@@ -72,6 +74,13 @@ export function useA2aGateway() {
   const revoke = useMutation({
     mutationFn: a2aCommands.revokeKey,
     onSuccess: refresh,
+    onError: report,
+  });
+  const revealKey = useMutation({
+    mutationFn: async (id: string) => {
+      const value = await a2aCommands.revealKey(id);
+      setNewToken(value.token);
+    },
     onError: report,
   });
   const invoke = useMutation({
@@ -172,6 +181,7 @@ export function useA2aGateway() {
     remove,
     createKey,
     revoke,
+    revealKey,
     invoke,
     rpc,
   };

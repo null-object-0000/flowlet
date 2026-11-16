@@ -381,13 +381,13 @@ export function A2aOverlays({ model }: { model: A2aGatewayState }) {
         )}
       </SideSheet>
       <Modal
-        title="调用密钥（仅显示一次）"
+        title="调用密钥"
         visible={!!newToken}
         zIndex={overlayLayers.modal}
         onCancel={() => setNewToken("")}
         onOk={() => setNewToken("")}
       >
-        <p>请保存到客户端凭据中，关闭后无法再次查看。</p>
+        <p>请妥善保存。关闭后隐藏原文，管理员可从密钥列表再次查看。</p>
         <Typography.Text copyable>{newToken}</Typography.Text>
       </Modal>
     </>

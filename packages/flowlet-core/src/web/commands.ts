@@ -498,6 +498,8 @@ export async function dispatch(ctx: WebContext, command: string, rawArgs: unknow
       return a2aGateway(ctx).save(args.input);
     case "delete_a2a_agent":
       a2aGateway(ctx).store.remove(argString(args, "id")); return null;
+    case "reveal_a2a_key":
+      return a2aGateway(ctx).revealKey(argString(args, "id"));
     case "list_a2a_keys":
       return a2aGateway(ctx).store.keys();
     case "create_a2a_key":

@@ -31,6 +31,7 @@ export interface A2aKey {
   name: string;
   agentIds: string[];
   createdAt: string;
+  canReveal?: boolean;
 }
 export interface A2aCall {
   id: string;

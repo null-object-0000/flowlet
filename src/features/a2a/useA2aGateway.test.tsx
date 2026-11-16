@@ -17,6 +17,7 @@ vi.mock("../../domains/a2a/commands", () => ({
     remove: vi.fn(),
     createKey: vi.fn(),
     revokeKey: vi.fn(),
+    revealKey: vi.fn(),
     invoke: vi.fn(),
   },
 }));
@@ -66,6 +67,15 @@ beforeEach(() => {
 });
 
 describe("A2A management orchestration", () => {
+  it("reveals on demand and clears the visible token without caching it in mutation data", async () => {
+    vi.mocked(a2aCommands.revealKey).mockResolvedValue({ id: "key", token: "flwa2a_revealed" });
+    const { result } = setup();
+    await act(() => result.current.revealKey.mutateAsync("key"));
+    expect(result.current.newToken).toBe("flwa2a_revealed");
+    expect(result.current.revealKey.data).toBeUndefined();
+    act(() => result.current.setNewToken(""));
+    expect(result.current.newToken).toBe("");
+  });
   it("continues with the returned task and context IDs and sends the declared tenant", async () => {
     vi.mocked(a2aCommands.invoke).mockResolvedValue({
       status: 200,

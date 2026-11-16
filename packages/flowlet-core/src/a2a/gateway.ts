@@ -268,8 +268,14 @@ export class A2aGateway {
       throw new Error("请选择已登记的 Agent");
     const token = `flwa2a_${randomBytes(32).toString("base64url")}`;
     const id = randomUUID();
-    this.store.createKey(id, name.trim(), hash(token), [...new Set(agentIds)]);
+    this.store.createKey(id, name.trim(), hash(token), [...new Set(agentIds)], this.ctx.secrets.encrypt(token));
     return { id, token };
+  }
+  revealKey(id: string) {
+    const secret = this.store.keySecret(id);
+    if (!secret) throw new CommandError(404, "a2a_key_not_found", "调用密钥不存在或已撤销");
+    if (!secret.cipher) throw new CommandError(409, "a2a_key_original_unavailable", "旧密钥仅保存了哈希，无法还原；请创建替代密钥并更新客户端后撤销旧密钥");
+    return { id, token: this.ctx.secrets.decrypt(secret.cipher) };
   }
   private agent(id: string) {
     const agent = this.store.agent(id);

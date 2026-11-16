@@ -505,7 +505,7 @@ export async function dispatch(ctx: WebContext, command: string, rawArgs: unknow
     case "revoke_a2a_key":
       a2aGateway(ctx).store.revokeKey(argString(args, "id")); return null;
     case "list_a2a_calls":
-      return a2aGateway(ctx).calls(argOptionalString(args, "agentId") ?? undefined);
+      return a2aGateway(ctx).calls(argOptionalString(args, "agentId") ?? undefined, args.activityOnly === true);
     case "invoke_a2a_agent":
       return a2aGateway(ctx).invoke(argString(args, "id"), args.rpc);
     case "ipc_ping":

@@ -311,12 +311,12 @@ export class A2aGateway {
       throw new RpcError(-32602, "A2A params 必须为对象", rpc.id);
     return rpc;
   }
-  calls(agentId?: string): A2aCall[] {
+  calls(agentId?: string, activityOnly = false): A2aCall[] {
     this.store.pruneBodies(
       this.ctx.logCapture.body_retention_days,
       this.ctx.logCapture.body_max_size_mb,
     );
-    return this.store.calls(agentId);
+    return this.store.calls(agentId, activityOnly);
   }
   private startCall(
     agentId: string,
@@ -335,6 +335,7 @@ export class A2aGateway {
       method,
       startedAt: new Date().toISOString(),
       durationMs: 0,
+      finishedAt: null,
       httpStatus: null,
       taskId: null,
       contextId: null,
@@ -530,6 +531,7 @@ export class A2aGateway {
           contextId: observer.contextId,
           state: observer.state,
           durationMs: Date.now() - started,
+          finishedAt: new Date().toISOString(),
           error: call.error ?? observer.error,
           responseBody: this.ctx.logCapture.capture_res_body
             ? Buffer.concat(collected).toString()

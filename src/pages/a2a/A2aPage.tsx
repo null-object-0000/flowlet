@@ -1,17 +1,25 @@
-import { a2aStateLabel } from "../../domains/a2a/presentation";
 import { useState } from "react";
-import { newA2aId } from "../../domains/a2a/identity";
-import { useNavigate } from "react-router-dom";
 import {
   Banner,
   Button,
+  Dropdown,
   Input,
   Modal,
+  Pagination,
   Select,
   Spin,
-  Typography,
+  Switch,
+  Tag,
 } from "@douyinfe/semi-ui-19";
+import { IconMore, IconPlus, IconRefresh } from "@douyinfe/semi-icons";
+import {
+  a2aStateLabel,
+  callMethodLabel,
+  callOutcome,
+} from "../../domains/a2a/presentation";
+import { newA2aId } from "../../domains/a2a/identity";
 import type { A2aAgent, A2aAgentInput } from "../../domains/a2a/types";
+import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
 import { PageHeader } from "../../shared/ui/PageHeader";
 import { errorMessage } from "../../shared/errors/AppError";
 import { isWebHost } from "../../platform/web/mode";
@@ -31,9 +39,17 @@ const EMPTY: A2aAgentInput = {
   upstreamToken: "",
   protocol: "a2a",
 };
-
+type Tab = "agents" | "calls" | "keys";
+const time = (value: string) =>
+  new Date(value).toLocaleString(undefined, {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
 export function A2aPage() {
-  const navigate = useNavigate();
   if (!isWebHost && !isDesktopHost)
     return (
       <main className={styles.page}>
@@ -41,270 +57,486 @@ export function A2aPage() {
         <Banner description="Agent 网关需要 Electron 或 Web/Docker Node Host；当前 Rust 宿主暂不支持。" />
       </main>
     );
-  return <A2aContent onBack={() => navigate("/sessions")} />;
+  return <A2aContent />;
 }
-
-function A2aContent({ onBack }: { onBack: () => void }) {
+function A2aContent() {
   const model = useA2aGateway();
+  const [tab, setTab] = useState<Tab>("agents");
+  const [search, setSearch] = useState("");
+  const [keyEditor, setKeyEditor] = useState(false);
+  const [page, setPage] = useState(1);
   const [accessAgent, setAccessAgent] = useState<A2aAgent | null>(null);
   const origin = isDesktopClient
     ? (window.flowletDesktop?.clientBaseUrl ?? window.location.origin)
     : window.location.origin;
-  const {
-    agents,
-    keys,
-    filter,
-    setFilter,
-    calls,
-    setDraft,
-    setEditing,
-    setPreview,
-    keyName,
-    setKeyName,
-    grants,
-    setGrants,
-    setSelected,
-    setMessage,
-    setContextId,
-    setTaskId,
-    setResult,
-    setCallDetail,
-    refresh,
-    remove,
-    createKey,
-    revoke,
-  } = model;
+  const { agents, calls, keys } = model;
   const error = agents.error || calls.error || keys.error;
+  const agentName = (id: string) =>
+    agents.data?.find((agent) => agent.id === id)?.name ?? id;
+  const edit = (agent?: A2aAgent) => {
+    model.setEditing(!!agent);
+    model.setPreview(null);
+    model.setDraft(
+      agent
+        ? {
+            id: agent.id,
+            name: agent.name,
+            cardUrl: agent.cardUrl,
+            enabled: agent.enabled,
+            allowPrivateNetwork: agent.allowPrivateNetwork,
+            timeoutSeconds: agent.timeoutSeconds,
+            protocol: agent.protocol ?? "a2a",
+            acp: agent.acp,
+          }
+        : { ...EMPTY, id: `agent-${newA2aId().slice(0, 8)}` },
+    );
+  };
+  const visibleAgents =
+    agents.data?.filter((agent) =>
+      `${agent.name} ${agent.id} ${agent.card.description ?? ""}`
+        .toLowerCase()
+        .includes(search.toLowerCase()),
+    ) ?? [];
+  const rows = calls.data ?? [];
+  const currentPage = Math.min(page, Math.max(1, Math.ceil(rows.length / 12)));
   return (
     <main className={styles.page}>
       <PageHeader
         title="Agent 网关"
-        subtitle="登记 A2A 服务或 ACP 程序，统一调用入口、权限与记录。"
+        subtitle="连接你的 Agent，为不同客户端提供统一接入。"
       >
-        <Button theme="borderless" onClick={onBack}>
-          返回会话管理
-        </Button>
-        <Button onClick={() => void refresh()}>刷新</Button>
         <Button
-          theme="solid"
-          onClick={() => {
-            setEditing(false);
-            setPreview(null);
-            setDraft({ ...EMPTY });
-          }}
-        >
-          登记 Agent
+          aria-label="刷新网关"
+          icon={<IconRefresh />}
+          loading={agents.isFetching || calls.isFetching || keys.isFetching}
+          onClick={() => void model.refresh()}
+        />
+        <Button theme="solid" icon={<IconPlus />} onClick={() => edit()}>
+          添加 Agent
         </Button>
       </PageHeader>
+      <nav className={styles.tabs} aria-label="网关视图">
+        {(
+          [
+            ["agents", "Agent", agents.data?.length],
+            ["calls", "调用记录"],
+            ["keys", "调用密钥", keys.data?.length],
+          ] as const
+        ).map(([id, label, count]) => (
+          <button
+            key={id}
+            type="button"
+            aria-current={tab === id ? "page" : undefined}
+            onClick={() => setTab(id)}
+          >
+            {label}
+            {count !== undefined && <span>{count}</span>}
+          </button>
+        ))}
+      </nav>
+      {error && <Banner type="danger" description={errorMessage(error)} />}
       <div className={styles.content}>
-        {error && <Banner type="danger" description={errorMessage(error)} />}
-        {agents.isPending ? (
-          <Spin />
-        ) : (
-          <section className={styles.section} aria-label="已登记的 Agent">
-            {!agents.data?.length && (
-              <p className={styles.muted}>
-                尚未登记 Agent。添加 A2A 服务或宿主上的 ACP
-                程序，再获取对应的调用配置。
-              </p>
-            )}
-            {agents.data?.map((agent) => (
-              <div key={agent.id} className={styles.row}>
-                <div>
-                  <strong>{agent.name}</strong> ·{" "}
-                  {(agent.protocol ?? "a2a").toUpperCase()} ·{" "}
-                  {agent.enabled ? "已启用" : "已停用"}
-                  <div className={styles.muted}>{agent.card.description}</div>
-                  {agent.protocol === "acp" && (
-                    <div className={styles.muted}>
-                      运行于宿主 · {agent.acp?.cwd}
+        {tab === "agents" && (
+          <>
+            <div className={styles.toolbar}>
+              <div>
+                <strong>已连接的 Agent</strong>
+                <p className={styles.muted}>
+                  维护原生配置，复制 A2A 或 ACP 客户端接入方式。
+                </p>
+              </div>
+              <Input
+                showClear
+                aria-label="搜索 Agent"
+                placeholder="搜索名称或描述"
+                value={search}
+                onChange={setSearch}
+                className={styles.search}
+              />
+            </div>
+            {agents.isPending ? (
+              <Spin />
+            ) : (
+              <div className={styles.agentGrid}>
+                {visibleAgents.map((agent) => (
+                  <article className={styles.agentCard} key={agent.id}>
+                    <header className={styles.cardHeader}>
+                      <div className={styles.agentMark} aria-hidden="true">
+                        {agent.name.slice(0, 1).toUpperCase()}
+                      </div>
+                      <div className={styles.agentIdentity}>
+                        <h3>{agent.name}</h3>
+                        <span className={styles.muted}>{agent.id}</span>
+                      </div>
+                      <Tag size="small">
+                        {(agent.protocol ?? "a2a").toUpperCase()}
+                      </Tag>
+                      <Dropdown
+                        trigger="click"
+                        position="bottomRight"
+                        render={
+                          <Dropdown.Menu>
+                            <Dropdown.Item onClick={() => edit(agent)}>
+                              编辑配置
+                            </Dropdown.Item>
+                            <Dropdown.Item
+                              type="danger"
+                              onClick={() =>
+                                Modal.confirm({ zIndex: APP_OVERLAY_Z_INDEX.modal,
+                                  title: `移除 ${agent.name}？`,
+                                  content:
+                                    "将停止调用入口并清除密钥授权，调用记录保留。",
+                                  onOk: () =>
+                                    model.remove.mutateAsync(agent.id),
+                                })
+                              }
+                            >
+                              移除 Agent
+                            </Dropdown.Item>
+                          </Dropdown.Menu>
+                        }
+                      >
+                        <Button
+                          theme="borderless"
+                          aria-label={`管理 ${agent.name}`}
+                          icon={<IconMore />}
+                        />
+                      </Dropdown>
+                    </header>
+                    <p className={styles.description}>
+                      {agent.card.description || "此 Agent 暂未提供描述。"}
+                    </p>
+                    <div className={styles.skills}>
+                      {agent.card.skills.slice(0, 4).map((skill) => (
+                        <Tag key={skill.id} size="small">
+                          {skill.name}
+                        </Tag>
+                      ))}
+                      {agent.card.skills.length > 4 && (
+                        <span className={styles.muted}>
+                          +{agent.card.skills.length - 4}
+                        </span>
+                      )}
                     </div>
-                  )}
-                  <Typography.Text copyable>
-                    {agent.gatewayUrl ??
-                      new URL(
-                        agent.gatewayPath,
-                        isDesktopClient
-                          ? (window.flowletDesktop?.clientBaseUrl ??
-                            window.location.origin)
-                          : window.location.origin,
-                      ).href}
-                    /.well-known/agent-card.json
-                  </Typography.Text>
-                  <div className={styles.muted}>
-                    技能：
-                    {agent.card.skills.map((s) => s.name).join("、") || "无"}
-                  </div>
+                    <div className={styles.cardMeta}>
+                      <span
+                        className={
+                          agent.enabled ? styles.enabled : styles.muted
+                        }
+                      >
+                        {agent.enabled ? "● 已启用" : "○ 已停用"}
+                      </span>
+                      <span
+                        title={
+                          agent.protocol === "acp"
+                            ? agent.acp?.cwd
+                            : agent.endpoint
+                        }
+                      >
+                        {agent.protocol === "acp" ? "宿主程序" : "远程服务"}
+                      </span>
+                    </div>
+                    <footer className={styles.cardFooter}>
+                      <Button
+                        theme="solid"
+                        type="tertiary"
+                        onClick={() => setAccessAgent(agent)}
+                      >
+                        接入配置
+                      </Button>
+                      <Button
+                        theme="borderless"
+                        disabled={!agent.enabled}
+                        onClick={() => {
+                          model.setSelected(agent);
+                          model.setResult(null);
+                          model.setMessage("");
+                          model.setContextId(newA2aId());
+                          model.setTaskId("");
+                        }}
+                      >
+                        测试调用
+                      </Button>
+                      <Button
+                        theme="borderless"
+                        onClick={() => {
+                          model.setFilter(agent.id);
+                          setPage(1);
+                          setTab("calls");
+                        }}
+                      >
+                        调用记录
+                      </Button>
+                    </footer>
+                  </article>
+                ))}
+              </div>
+            )}
+            {!agents.isPending && !visibleAgents.length && (
+              <div className={styles.empty}>
+                <strong>
+                  {search ? "没有匹配的 Agent" : "连接第一个 Agent"}
+                </strong>
+                <p>
+                  {search
+                    ? "试试其他名称或清空搜索。"
+                    : "添加远程 A2A 服务或宿主 ACP 程序，然后为客户端生成接入配置。"}
+                </p>
+                <Button onClick={() => (search ? setSearch("") : edit())}>
+                  {search ? "清空搜索" : "添加 Agent"}
+                </Button>
+              </div>
+            )}
+          </>
+        )}
+        {tab === "calls" && (
+          <section className={styles.section} aria-label="调用记录">
+            <div className={styles.toolbar}>
+              <div>
+                <strong>调用记录</strong>
+                <p className={styles.muted}>
+                  {model.showOperations
+                    ? "包含任务查询与订阅等协议操作，最近 100 条。"
+                    : "展示消息、取消和异常请求；成功的轮询查询默认隐藏。"}
+                </p>
+              </div>
+              <div className={styles.actions}>
+                <label className={styles.inlineLabel}>
+                  <Switch
+                    size="small"
+                    checked={model.showOperations}
+                    onChange={(value) => {
+                      model.setShowOperations(value);
+                      setPage(1);
+                    }}
+                  />
+                  显示协议操作
+                </label>
+                <Select
+                  showClear
+                  aria-label="筛选 Agent"
+                  placeholder="全部 Agent"
+                  value={model.filter}
+                  optionList={agents.data?.map((agent) => ({
+                    value: agent.id,
+                    label: agent.name,
+                  }))}
+                  onChange={(value) => {
+                    model.setFilter(value as string | undefined);
+                    setPage(1);
+                  }}
+                />
+              </div>
+            </div>
+            <div className={styles.table}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>时间 / Agent</th>
+                    <th>操作 / 调用方</th>
+                    <th>请求结果</th>
+                    <th>任务最新状态</th>
+                    <th>请求耗时</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows
+                    .slice((currentPage - 1) * 12, currentPage * 12)
+                    .map((call) => {
+                      const outcome = callOutcome(call);
+                      return (
+                        <tr key={call.id}>
+                          <td>
+                            <span>{agentName(call.agentId)}</span>
+                            <small>{time(call.startedAt)}</small>
+                          </td>
+                          <td>
+                            <span title={call.method}>
+                              {callMethodLabel(call.method)}
+                            </span>
+                            <small>
+                              {call.keyId === "admin-test"
+                                ? "管理台测试"
+                                : (keys.data?.find(
+                                    (key) => key.id === call.keyId,
+                                  )?.name ?? "已撤销的调用密钥")}
+                            </small>
+                          </td>
+                          <td>
+                            <span
+                              className={styles[outcome.tone]}
+                              title={call.error ?? undefined}
+                            >
+                              {outcome.label}
+                            </span>
+                            <small>
+                              {call.httpStatus !== null
+                                ? `HTTP ${call.httpStatus}`
+                                : "未收到 HTTP 响应"}
+                            </small>
+                          </td>
+                          <td>
+                            <span
+                              title={
+                                call.latestTaskObservedAt
+                                  ? `观测于 ${time(call.latestTaskObservedAt)}`
+                                  : undefined
+                              }
+                            >
+                              {a2aStateLabel(
+                                call.latestTaskState ?? call.state,
+                              )}
+                            </span>
+                            {call.taskId && (
+                              <small title={call.taskId}>
+                                {call.taskId.slice(0, 14)}…
+                              </small>
+                            )}
+                          </td>
+                          <td className={styles.duration}>
+                            {call.finishedAt === null
+                              ? "—"
+                              : call.durationMs < 1000
+                                ? `${call.durationMs} ms`
+                                : `${(call.durationMs / 1000).toFixed(1)} s`}
+                          </td>
+                          <td>
+                            <Button
+                              theme="borderless"
+                              onClick={() => model.setCallDetail(call)}
+                            >
+                              详情
+                            </Button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+            {calls.isPending ? (
+              <Spin />
+            ) : (
+              !rows.length && (
+                <div className={styles.empty}>
+                  <strong>暂无调用记录</strong>
+                  <p>
+                    消息发出后会显示在这里；可开启「显示协议操作」查看查询记录。
+                  </p>
+                </div>
+              )
+            )}
+            <footer className={styles.listFooter}>
+              <span className={styles.muted}>
+                最近 {rows.length} 条 · 请求耗时不代表任务执行总时长
+              </span>
+              <Pagination
+                size="small"
+                total={rows.length}
+                pageSize={12}
+                currentPage={currentPage}
+                onPageChange={setPage}
+              />
+            </footer>
+          </section>
+        )}
+        {tab === "keys" && (
+          <section className={styles.section} aria-label="调用密钥">
+            <div className={styles.toolbar}>
+              <div>
+                <strong>调用密钥</strong>
+                <p className={styles.muted}>
+                  按 Agent 授权，供 A2A 入口与 ACP 客户端桥使用。
+                </p>
+              </div>
+              <Button
+                disabled={!agents.data?.length}
+                onClick={() => setKeyEditor(true)}
+              >
+                创建调用密钥
+              </Button>
+            </div>
+            <Banner description="获授权的客户端共享 Agent 的上游身份和任务空间。此密钥独立于管理凭据与模型 Client Token。" />
+            {keys.data?.map((key) => (
+              <div className={styles.keyRow} key={key.id}>
+                <div>
+                  <strong>{key.name}</strong>
+                  <p className={styles.muted}>
+                    {key.agentIds.map(agentName).join("、") ||
+                      "暂无 Agent 授权"}
+                  </p>
+                  <small className={styles.muted}>
+                    创建于 {time(key.createdAt)}
+                  </small>
                 </div>
                 <Button
-                  theme="borderless"
-                  onClick={() => setAccessAgent(agent)}
-                >
-                  接入配置
-                </Button>
-                <Button
-                  disabled={!agent.enabled}
-                  onClick={() => {
-                    setSelected(agent);
-                    setResult(null);
-                    setMessage("");
-                    setContextId(newA2aId());
-                    setTaskId("");
-                  }}
-                >
-                  调用与任务
-                </Button>
-                <Button
-                  onClick={() => {
-                    setEditing(true);
-                    setPreview(null);
-                    setDraft({
-                      id: agent.id,
-                      name: agent.name,
-                      cardUrl: agent.cardUrl,
-                      enabled: agent.enabled,
-                      allowPrivateNetwork: agent.allowPrivateNetwork,
-                      timeoutSeconds: agent.timeoutSeconds,
-                      protocol: agent.protocol ?? "a2a",
-                      acp: agent.acp,
-                    });
-                  }}
-                >
-                  编辑
-                </Button>
-                <Button
                   type="danger"
-                  loading={remove.isPending}
+                  theme="borderless"
                   onClick={() =>
-                    Modal.confirm({
-                      title: `移除 ${agent.name}？`,
-                      content: "将停止该 Agent 的网关入口，保留调用记录。",
-                      onOk: () => remove.mutateAsync(agent.id),
+                    Modal.confirm({ zIndex: APP_OVERLAY_Z_INDEX.modal,
+                      title: `撤销 ${key.name}？`,
+                      content: "撤销后，该密钥无法再发起新请求。",
+                      onOk: () => model.revoke.mutateAsync(key.id),
                     })
                   }
                 >
-                  移除
+                  撤销
                 </Button>
               </div>
             ))}
+            {!keys.data?.length && (
+              <div className={styles.empty}>
+                <strong>尚未创建调用密钥</strong>
+                <p>先添加 Agent，再为需要接入的客户端创建专用密钥。</p>
+              </div>
+            )}
           </section>
         )}
-        <section className={styles.section} aria-label="调用密钥">
-          <strong>调用密钥</strong>
-          <p className={styles.muted}>
-            仅用于 A2A 入口，按 Agent 授权。管理凭据、模型 Client Token
-            不可用于这里。获授权的调用方共享该 Agent 的上游身份与任务空间。
-          </p>
-          <div className={styles.row}>
+      </div>
+      <Modal
+        title="创建调用密钥"
+        zIndex={APP_OVERLAY_Z_INDEX.modal}
+        visible={keyEditor}
+        onCancel={() => setKeyEditor(false)}
+        confirmLoading={model.createKey.isPending}
+        okText="创建密钥"
+        okButtonProps={{
+          disabled: !model.keyName.trim() || !model.grants.length,
+        }}
+        onOk={async () => {
+          await model.createKey.mutateAsync();
+          setKeyEditor(false);
+        }}
+      >
+        <div className={styles.form}>
+          <label className={styles.field}>
+            名称
             <Input
               aria-label="密钥名称"
-              placeholder="调用方名称"
-              value={keyName}
-              onChange={setKeyName}
+              placeholder="例如：我的 Paseo"
+              value={model.keyName}
+              onChange={model.setKeyName}
             />
+          </label>
+          <label className={styles.field}>
+            允许访问的 Agent
             <Select
               multiple
               aria-label="允许调用的 Agent"
-              placeholder="允许调用的 Agent"
-              value={grants}
-              style={{ minWidth: 220 }}
-              optionList={agents.data?.map((a) => ({
-                value: a.id,
-                label: a.name,
+              value={model.grants}
+              optionList={agents.data?.map((agent) => ({
+                value: agent.id,
+                label: agent.name,
               }))}
-              onChange={(value) => setGrants(value as string[])}
+              onChange={(value) => model.setGrants(value as string[])}
             />
-            <Button
-              disabled={!keyName.trim() || !grants.length}
-              loading={createKey.isPending}
-              onClick={() => createKey.mutate()}
-            >
-              创建密钥
-            </Button>
-          </div>
-          {keys.data?.map((key) => (
-            <div className={styles.row} key={key.id}>
-              <span>
-                {key.name} · {key.agentIds.join("、")}
-              </span>
-              <Button
-                type="danger"
-                loading={revoke.isPending}
-                onClick={() =>
-                  Modal.confirm({
-                    title: `撤销 ${key.name}？`,
-                    content: "撤销后新请求立即失效。",
-                    onOk: () => revoke.mutateAsync(key.id),
-                  })
-                }
-              >
-                撤销
-              </Button>
-            </div>
-          ))}
-        </section>
-        <section className={styles.section} aria-label="调用记录">
-          <div className={styles.row}>
-            <strong>最近调用</strong>
-            <Select
-              showClear
-              placeholder="全部 Agent"
-              aria-label="筛选 Agent"
-              value={filter}
-              optionList={agents.data?.map((a) => ({
-                value: a.id,
-                label: a.name,
-              }))}
-              onChange={(value) => setFilter(value as string | undefined)}
-            />
-          </div>
-          <div className={styles.table}>
-            <table>
-              <thead>
-                <tr>
-                  <th>时间 / Agent</th>
-                  <th>方法 / 调用方</th>
-                  <th>任务状态</th>
-                  <th>耗时 / HTTP</th>
-                  <th>详情</th>
-                </tr>
-              </thead>
-              <tbody>
-                {calls.data?.map((call) => (
-                  <tr key={call.id}>
-                    <td>
-                      {new Date(call.startedAt).toLocaleString()}
-                      <br />
-                      {call.agentId}
-                    </td>
-                    <td>
-                      {call.method}
-                      <br />
-                      {keys.data?.find((k) => k.id === call.keyId)?.name ??
-                        call.keyId}
-                    </td>
-                    <td>{call.error || a2aStateLabel(call.state)}</td>
-                    <td>
-                      {call.durationMs} ms / {call.httpStatus ?? "—"}
-                    </td>
-                    <td>
-                      <Button
-                        theme="borderless"
-                        onClick={() => setCallDetail(call)}
-                      >
-                        查看
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {!calls.data?.length && (
-              <p className={styles.muted}>暂无调用记录</p>
-            )}
-          </div>
-        </section>
-      </div>
+          </label>
+          <p className={styles.muted}>
+            完整密钥仅在创建成功后显示一次，请及时保存。
+          </p>
+        </div>
+      </Modal>
       <A2aOverlays model={model} />
       <AgentGatewayAccess
         agent={accessAgent}

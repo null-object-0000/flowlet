@@ -46,4 +46,7 @@ export interface A2aCall {
   error: string | null;
   requestBody: string | null;
   responseBody: string | null;
+  finishedAt?: string | null;
+  latestTaskState?: string | null;
+  latestTaskObservedAt?: string;
 }

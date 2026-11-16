@@ -21,9 +21,10 @@ export function useA2aGateway() {
     queryFn: a2aCommands.keys,
   });
   const [filter, setFilter] = useState<string>();
+  const [showOperations, setShowOperations] = useState(false);
   const calls = useQuery({
-    queryKey: ["a2a", "calls", filter],
-    queryFn: () => a2aCommands.calls(filter),
+    queryKey: ["a2a", "calls", filter, showOperations],
+    queryFn: () => a2aCommands.calls(filter, !showOperations),
     refetchInterval: 10000,
   });
   const [draft, setDraft] = useState<A2aAgentInput | null>(null);
@@ -133,6 +134,8 @@ export function useA2aGateway() {
   });
 
   return {
+    showOperations,
+    setShowOperations,
     capabilities,
     agents,
     keys,

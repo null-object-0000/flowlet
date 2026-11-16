@@ -10,6 +10,11 @@ import {
   TextArea,
   Typography,
 } from "@douyinfe/semi-ui-19";
+import {
+  a2aStateLabel,
+  callMethodLabel,
+  callOutcome,
+} from "../../domains/a2a/presentation";
 import type { A2aGatewayState } from "../../features/a2a/useA2aGateway";
 import { APP_OVERLAY_Z_INDEX as overlayLayers } from "../../shared/ui/overlayLayers";
 import styles from "./A2aPage.module.css";
@@ -244,7 +249,7 @@ export function A2aOverlays({ model }: { model: A2aGatewayState }) {
         )}
       </SideSheet>
       <SideSheet
-        title={selected ? `调用 ${selected.name}` : "调用与任务"}
+        title={selected ? `测试调用 · ${selected.name}` : "测试调用"}
         visible={!!selected}
         width={640}
         zIndex={overlayLayers.sideSheet}
@@ -252,19 +257,24 @@ export function A2aOverlays({ model }: { model: A2aGatewayState }) {
       >
         <div className={styles.form}>
           <Banner description="这里使用管理员身份测试。外部客户端请使用专用调用密钥；流式调用使用 Agent 的 A2A 入口。" />
-          <Input
-            aria-label="Context ID"
-            placeholder="Context ID（续聊时填写）"
-            value={contextId}
-            onChange={setContextId}
-          />
-          <Input
-            aria-label="Task ID"
-            placeholder="Task ID（查询 / 取消任务时填写）"
-            value={taskId}
-            onChange={setTaskId}
-          />
-          <Input
+          <details>
+            <summary>会话与任务（续聊 / 查询）</summary>
+            <div className={styles.form}>
+              <Input
+                aria-label="Context ID"
+                placeholder="Context ID（续聊时填写）"
+                value={contextId}
+                onChange={setContextId}
+              />
+              <Input
+                aria-label="Task ID"
+                placeholder="Task ID（查询 / 取消任务时填写）"
+                value={taskId}
+                onChange={setTaskId}
+              />
+            </div>
+          </details>
+          <TextArea
             aria-label="消息"
             placeholder="发送给 Agent 的消息"
             value={message}
@@ -299,21 +309,76 @@ export function A2aOverlays({ model }: { model: A2aGatewayState }) {
             </Button>
           </div>
           {!!result && (
-            <pre className={styles.code}>{JSON.stringify(result, null, 2)}</pre>
+            <details open>
+              <summary>调用结果</summary>
+              <pre className={styles.code}>
+                {JSON.stringify(result, null, 2)}
+              </pre>
+            </details>
           )}
         </div>
       </SideSheet>
       <SideSheet
-        title="A2A 调用详情"
+        title="调用详情"
         visible={!!callDetail}
         width={640}
         zIndex={overlayLayers.sideSheet}
         onCancel={() => setCallDetail(null)}
       >
-        <pre className={styles.code}>{JSON.stringify(callDetail, null, 2)}</pre>
-        <p className={styles.muted}>
-          正文受数据捕获设置控制，每侧最多保留 64 KiB；不记录认证请求头。
-        </p>
+        {callDetail && (
+          <div className={styles.form}>
+            <dl className={styles.detailGrid}>
+              <dt>操作</dt>
+              <dd>{callMethodLabel(callDetail.method)}</dd>
+              <dt>请求结果</dt>
+              <dd>
+                {callOutcome(callDetail).label}
+                {callDetail.httpStatus !== null
+                  ? ` · HTTP ${callDetail.httpStatus}`
+                  : ""}
+              </dd>
+              <dt>请求时间</dt>
+              <dd>{new Date(callDetail.startedAt).toLocaleString()}</dd>
+              <dt>请求耗时</dt>
+              <dd>
+                {callDetail.finishedAt === null
+                  ? "尚未结束"
+                  : `${callDetail.durationMs} ms`}
+              </dd>
+              <dt>响应时任务状态</dt>
+              <dd>{a2aStateLabel(callDetail.state)}</dd>
+              <dt>任务最新状态</dt>
+              <dd>
+                {a2aStateLabel(callDetail.latestTaskState ?? callDetail.state)}
+              </dd>
+              <dt>Task ID</dt>
+              <dd>{callDetail.taskId || "—"}</dd>
+              <dt>Context ID</dt>
+              <dd>{callDetail.contextId || "—"}</dd>
+            </dl>
+            {callDetail.error && (
+              <Banner type="danger" description={callDetail.error} />
+            )}
+            <p className={styles.muted}>
+              请求成功表示协议请求已返回，不代表任务已经执行完成。任务最新状态来自最近一次成功观测。
+            </p>
+            <details>
+              <summary>请求正文</summary>
+              <pre className={styles.code}>
+                {callDetail.requestBody ?? "未捕获或已按保留策略清理"}
+              </pre>
+            </details>
+            <details>
+              <summary>响应正文</summary>
+              <pre className={styles.code}>
+                {callDetail.responseBody ?? "未捕获或已按保留策略清理"}
+              </pre>
+            </details>
+            <p className={styles.muted}>
+              正文受数据捕获设置控制，每侧最多保留 64 KiB。
+            </p>
+          </div>
+        )}
       </SideSheet>
       <Modal
         title="调用密钥（仅显示一次）"

@@ -29,7 +29,7 @@ export const a2aCommands = {
   createKey: (name: string, agentIds: string[]) =>
     call<{ id: string; token: string }>("create_a2a_key", { name, agentIds }),
   revokeKey: (id: string) => call<void>("revoke_a2a_key", { id }),
-  calls: (agentId?: string) => call<A2aCall[]>("list_a2a_calls", { agentId }),
+  calls: (agentId?: string, activityOnly = true) => call<A2aCall[]>("list_a2a_calls", { agentId, activityOnly }),
   invoke: (id: string, rpc: unknown, timeoutSeconds: number) =>
     call<{ status: number; body: unknown }>(
       "invoke_a2a_agent",

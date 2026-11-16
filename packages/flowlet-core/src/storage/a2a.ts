@@ -35,6 +35,9 @@ export interface A2aCall {
   error: string | null;
   requestBody: string | null;
   responseBody: string | null;
+  finishedAt?: string | null;
+  latestTaskState?: string | null;
+  latestTaskObservedAt?: string;
 }
 
 /** Additive Node Host tables; old Rust hosts ignore them. No model/request-log schema changes. */
@@ -133,19 +136,38 @@ export class A2aStore {
       )
       .run();
   }
-  calls(agentId?: string): A2aCall[] {
-    const rows = agentId
-      ? this.db
-          .prepare(
-            "SELECT value FROM a2a_calls WHERE agent_id=? ORDER BY started_at DESC LIMIT 100",
-          )
-          .all(agentId)
-      : this.db
-          .prepare(
-            "SELECT value FROM a2a_calls ORDER BY started_at DESC LIMIT 100",
-          )
-          .all();
-    return rows.map((r) => JSON.parse(String(r.value)));
+  calls(agentId?: string, activityOnly = false): A2aCall[] {
+    const conditions: string[] = [];
+    const params: string[] = [];
+    if (agentId) {
+      conditions.push("agent_id=?");
+      params.push(agentId);
+    }
+    if (activityOnly)
+      conditions.push(
+        `(json_extract(value,'$.method') IN ('SendMessage','SendStreamingMessage','CancelTask') OR json_extract(value,'$.error') IS NOT NULL OR json_extract(value,'$.httpStatus') >= 300)`,
+      );
+    const rows = this.db
+      .prepare(
+        `SELECT value FROM a2a_calls ${conditions.length ? "WHERE " + conditions.join(" AND ") : ""} ORDER BY started_at DESC, id DESC LIMIT 100`,
+      )
+      .all(...params);
+    const latest = this.db.prepare(
+      `SELECT json_extract(value,'$.state') state, COALESCE(json_extract(value,'$.finishedAt'), started_at) observed_at FROM a2a_calls WHERE agent_id=? AND json_extract(value,'$.taskId')=? AND json_extract(value,'$.state') IS NOT NULL AND json_extract(value,'$.error') IS NULL ORDER BY COALESCE(json_extract(value,'$.finishedAt'), started_at) DESC, id DESC LIMIT 1`,
+    );
+    return rows.map((row) => {
+      const call: A2aCall = JSON.parse(String(row.value));
+      const observation = call.taskId
+        ? latest.get(call.agentId, call.taskId)
+        : undefined;
+      return observation
+        ? {
+            ...call,
+            latestTaskState: String(observation.state),
+            latestTaskObservedAt: String(observation.observed_at),
+          }
+        : call;
+    });
   }
   pruneBodies(retentionDays: number, maxMb: number): void {
     if (retentionDays >= 0) {

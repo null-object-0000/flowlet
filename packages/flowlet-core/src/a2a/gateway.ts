@@ -1,4 +1,9 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import {
+  createHash,
+  randomBytes,
+  randomUUID,
+  timingSafeEqual,
+} from "node:crypto";
 import { once } from "node:events";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { WebContext } from "../web/context.ts";
@@ -257,6 +262,7 @@ export class A2aGateway {
     this.store.remove(id);
     await this.acp.stop(id);
   }
+  /** Legacy scoped-key management API, retained only for existing integrations. */
   createKey(name: unknown, agentIds: unknown) {
     if (typeof name !== "string" || !name.trim() || name.length > 100)
       throw new Error("请输入调用密钥名称");
@@ -268,13 +274,29 @@ export class A2aGateway {
       throw new Error("请选择已登记的 Agent");
     const token = `flwa2a_${randomBytes(32).toString("base64url")}`;
     const id = randomUUID();
-    this.store.createKey(id, name.trim(), hash(token), [...new Set(agentIds)], this.ctx.secrets.encrypt(token));
+    this.store.createKey(
+      id,
+      name.trim(),
+      hash(token),
+      [...new Set(agentIds)],
+      this.ctx.secrets.encrypt(token),
+    );
     return { id, token };
   }
   revealKey(id: string) {
     const secret = this.store.keySecret(id);
-    if (!secret) throw new CommandError(404, "a2a_key_not_found", "调用密钥不存在或已撤销");
-    if (!secret.cipher) throw new CommandError(409, "a2a_key_original_unavailable", "旧密钥仅保存了哈希，无法还原；请创建替代密钥并更新客户端后撤销旧密钥");
+    if (!secret)
+      throw new CommandError(
+        404,
+        "a2a_key_not_found",
+        "调用密钥不存在或已撤销",
+      );
+    if (!secret.cipher)
+      throw new CommandError(
+        409,
+        "a2a_key_original_unavailable",
+        "旧密钥仅保存了哈希，无法还原；请创建替代密钥并更新客户端后撤销旧密钥",
+      );
     return { id, token: this.ctx.secrets.decrypt(secret.cipher) };
   }
   private agent(id: string) {
@@ -591,7 +613,7 @@ export class A2aGateway {
     );
     return { status, body: JSON.parse(Buffer.concat(chunks).toString()) };
   }
-  /** Separate data-plane credentials: admin/model/CLI tokens never authorize A2A traffic. */
+  /** Shares the model data-plane Client Token; management/CLI credentials remain separate. */
   async handle(
     request: IncomingMessage,
     response: ServerResponse,
@@ -627,12 +649,25 @@ export class A2aGateway {
         /^Bearer (\S+)$/i.exec(
           String(request.headers.authorization ?? ""),
         )?.[1] ?? "";
-      const keyId = token.startsWith("flwa2a_")
-        ? this.store.authorize(hash(token), agent.id)
-        : null;
+      const clientToken = this.ctx.proxy.bindConfig().default_client_token;
+      const shared =
+        typeof clientToken === "string" &&
+        clientToken.length > 0 &&
+        token.length > 0 &&
+        timingSafeEqual(
+          Buffer.from(hash(token), "hex"),
+          Buffer.from(hash(clientToken), "hex"),
+        );
+      // Read the live proxy token on every request, matching model endpoint rotation.
+      // Legacy scoped keys remain valid for existing clients during migration.
+      const keyId = shared
+        ? "client-token"
+        : token.startsWith("flwa2a_")
+          ? this.store.authorize(hash(token), agent.id)
+          : null;
       if (!keyId) {
         request.resume();
-        send(401, { error: "需要具有该 Agent 权限的 Flowlet A2A 调用密钥" });
+        send(401, { error: "需要 Flowlet Client Token" });
         return;
       }
       if (cardRequest) {

@@ -1,7 +1,7 @@
 # Agent 网关：A2A 入口
 
 Flowlet Node Host（Electron 本机宿主及 Web/Docker）可登记外部 A2A Agent，统一管理调用入口、
-访问密钥和调用记录。入口位于左侧「工作台 → Agent 网关」，会话管理页也保留快捷入口。旧 Rust/Tauri/Android 宿主暂不提供此能力。
+统一 Client Token 和调用记录。入口位于左侧「工作台 → Agent 网关」，会话管理页也保留快捷入口。旧 Rust/Tauri/Android 宿主暂不提供此能力。
 也可登记 ACP stdio 程序，并生成供 ACP 客户端启动的配置，见 [ACP 适配与生命周期](acp-bridge.md)。
 Electron 客户端模式管理的是远程 Node Host 的 Agent；调用方应连接远程 Host，不能把客户端本机网关当作 A2A 入口。
 
@@ -9,7 +9,7 @@ Electron 客户端模式管理的是远程 Node Host 的 Agent；调用方应连
 
 ```text
 A2A 客户端 → Flowlet Host /a2a/<agent-id> → 已登记的外部 A2A Agent
-管理界面 → 显式管理命令 → 注册表 / 调用密钥 / 调用记录
+管理界面 → 显式管理命令 → 注册表 / 接入配置 / 调用记录
 ```
 
 这是协议级能力，不包含任何特定 Agent 的登录、换票、业务 API、提示词或响应解析。
@@ -41,7 +41,7 @@ Flowlet 不重试 A2A 请求，避免断流、超时或 5xx 后重复执行任�
 Agent Card 在验证保存时刷新；上游能力变化后应重新验证保存。配置与密钥热更新，网关代码升级需重启 Host。
 
 推送回调由上游 Agent 直接发送给调用方配置的 Webhook。Flowlet 透传配置与回调认证信息，
-不代发、不下载回调地址，也不把网关调用密钥自动附加给 Webhook；重试和通知安全由上游实现。
+不代发、不下载回调地址，也不把网关 Client Token 自动附加给 Webhook；重试和通知安全由上游实现。
 任务执行、异步处理、历史分页、取消语义、鉴权补充与会话记忆均由上游负责，网关不自建第二套任务状态机。
 文件 `raw`（base64）、文件 `url`、结构化 `data` 与 Artifact 原样透传；单次请求和 JSON 响应上限 4 MiB。
 不下载文件 URL，不将任意上游 multipart 上传接口包装进网关。需要补充输入/鉴权的状态表示本轮暂停，
@@ -58,24 +58,23 @@ Node CLI 原生提供 `flowlet a2a list/discover/send/tasks/session/rpc`，直�
 1. 登记 ID、名称、完整 Agent Card URL；按需要填写上游 Bearer Token。
 2. 内网或本机服务必须显式开启「允许访问内网 / 本机服务」。
 3. 「读取 Agent Card」可预览技能；「验证并保存」会重新读取并验证 Card 后保存。
-4. 创建调用密钥，显式选择允许调用的 Agent。新密钥加密保存，管理员可在列表中点击「查看密钥」再次查看和复制。
-5. 把客户端指向 `http(s)://<Flowlet Host>/a2a/<id>`，并配置该调用密钥。
+4. 直接复用概览页的 Flowlet Client Token；接入抽屉支持查看、复制 Token 和复制已填入 Token 的完整客户端配置，无需创建独立调用密钥。
+5. 把客户端指向 `http(s)://<Flowlet Host>/a2a/<id>`，并配置同一个 Client Token。
 
 上游 Token 使用现有数据目录 `secret.key` 加密；编辑时省略 `upstreamToken` 保留，空串清除。
 跨域更换 Card 地址必须重新填写或清除 Token，不能把旧凭据自动发往新域名。
 上游调用仅注入该 Agent 的凭据，不转发调用方 Authorization、Cookie 或其他任意请求头。
-调用密钥以 `flwa2a_` 开头，鉴权仍使用 SHA-256；新密钥原文使用 `secret.key` 加密保存在独立增量表 `a2a_key_secrets`，
-仅管理员显式调用 `reveal_a2a_key` 时解密，响应 `Cache-Control: no-store`。列表不返回明文或密文，
-关闭弹窗清除显示内容，创建/查看的原文不进入 Query/Mutation 缓存。旧密钥仅存哈希，无法还原，
-界面提供按原授权创建替代密钥的入口；替代后旧密钥保持有效，更新客户端后再手动撤销。
-撤销时同时删除加密原文。新增表不更改旧表列结构，旧版鉴权及插入继续兼容。
-管理 Token、模型 Client Token、CLI Token
-均不能用于 A2A 数据面。Agent 授权覆盖该 Agent 的消息和任务操作。
+Agent 数据面与模型数据面使用同一个 Client Token。网关每次请求读取代理的实时 `default_client_token`，
+非空才可通过鉴权；修改 Token 后下一次请求生效，旧值立即失效。该 Token 可访问所有启用的 Agent，
+调用方共享各 Agent 的上游身份与任务空间。管理凭据和 CLI 同步凭据不能用于 Agent 数据面；
+Client Token 也不能访问管理 API。上游身份仍由对应 Agent 的上游凭据决定，不把 Client Token 转发给上游。
 
-**首版按 Agent 授权，不按任务所有者隔离。** 同一 Agent 的获授权调用方共享上游服务身份和任务空间。
-网关不会把不同调用方映射成上游不同员工。需要人员隔离时应使用具备独立身份的上游实例并分别登记。
+旧 `flwa2a_` 专用调用密钥及按 Agent 授权的管理 API 保留兼容，已接入客户端不会因升级突然失效；
+新的管理页移除调用密钥页签，所有新接入配置统一使用 Client Token。旧记录与加密原文保持原样，
+不迁移、不删除历史数据。旧密钥的撤销仍由兼容管理 API 执行，Client Token 轮换不撤销旧专用密钥。
+如需停用某 Agent，使用 Agent 启停开关；如需隔离不同上游身份，分别登记对应 Agent 实例。
 
-外部 A2A Agent 的停用、修改、撤销在下一次请求生效，无需重启；不追溯中断已发送的任务。
+停用、修改、撤销在下一次请求生效，无需重启；不追溯中断已发送的任务。
 删除 Agent 会同时清除所有调用密钥对该 ID 的授权，防止同 ID 重新登记继承旧授权；保留调用记录。
 外部 A2A 服务生命周期独立，Flowlet 不安装扩展、不执行启动脚本、不接管其外部进程。
 ACP 上游程序由宿主直接启动并托管，保存、停用、移除或关闭宿主会停止旧运行环境，详见 ACP 文档。
@@ -86,8 +85,8 @@ ACP 上游程序由宿主直接启动并托管，保存、停用、移除或关�
 
 | 路径 | 用途 |
 |---|---|
-| `GET /a2a/<id>/.well-known/agent-card.json` | 带 A2A 调用密钥读取改写后的 Agent Card |
-| `POST /a2a/<id>` | 带 A2A 调用密钥发送 JSON-RPC 2.0 请求 |
+| `GET /a2a/<id>/.well-known/agent-card.json` | 带 Client Token 读取改写后的 Agent Card |
+| `POST /a2a/<id>` | 带 Client Token 发送 JSON-RPC 2.0 请求 |
 
 Card 中的接口地址和安全声明改为网关地址与 Bearer；上游签名被移除（改写后原签名不再有效）。
 只保留选中的 JSONRPC v1 接口及其 tenant 声明，不向客户端宣传不支持的传输。可选能力沿用上游声明；扩展 Card 同样改写接口、安全声明并移除签名。
@@ -114,7 +113,7 @@ curl http://localhost:8080/a2a/research \
 SQLite 新增 `a2a_agents`、`a2a_keys`、`a2a_calls` 三张独立表及索引，在首次使用 A2A 时幂等创建。
 不改变现有模型表与请求日志表，旧 Rust 宿主会忽略新表。备份时连同 `secret.key` 一起保留。
 
-调用记录包含 Agent、调用密钥 ID、方法、耗时、HTTP 状态、task/context ID、上游任务状态和错误。
+调用记录包含 Agent、Client Token 标识或旧密钥 ID、方法、耗时、HTTP 状态、task/context ID、上游任务状态和错误。
 HTTP 200 不代表任务完成：JSON-RPC error 与任务状态独立记录，未观察到终态或正常暂停状态的 SSE 会标记异常结束。
 最多保留 2000 次调用，界面读取最近 100 条，支持按 Agent 筛选。
 请求/响应正文服从现有 `log_capture.capture_req_body` / `capture_res_body`，每侧最多
@@ -192,7 +191,7 @@ node scripts/desktop-command-parity.mjs
 
 ## 管理台调用记录
 
-页面以 Agent、调用记录、调用密钥三个视图组织。调用记录默认只展示消息发送、任务取消和异常请求；
+页面以 Agent、调用记录两个视图组织。调用记录默认只展示消息发送、任务取消和异常请求；
 「显示协议操作」可查看成功的 GetTask 轮询、列表和订阅等记录。后端先按活动类型筛选再取最近 100 条，
 避免高频轮询挤掉消息发起记录，前端每页展示 12 条。历史记录不删除、不改写。
 

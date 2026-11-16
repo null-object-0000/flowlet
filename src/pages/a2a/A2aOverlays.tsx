@@ -3,12 +3,10 @@ import {
   Button,
   Input,
   InputNumber,
-  Modal,
   Select,
   SideSheet,
   Switch,
   TextArea,
-  Typography,
 } from "@douyinfe/semi-ui-19";
 import {
   a2aStateLabel,
@@ -25,8 +23,6 @@ export function A2aOverlays({ model }: { model: A2aGatewayState }) {
     editing,
     preview,
     setPreview,
-    newToken,
-    setNewToken,
     selected,
     setSelected,
     message,
@@ -256,7 +252,7 @@ export function A2aOverlays({ model }: { model: A2aGatewayState }) {
         onCancel={() => setSelected(null)}
       >
         <div className={styles.form}>
-          <Banner description="这里使用管理员身份测试。外部客户端请使用专用调用密钥；流式调用使用 Agent 的 A2A 入口。" />
+          <Banner description="这里使用管理员身份测试。外部客户端统一使用 Flowlet Client Token；流式调用使用 Agent 的 A2A 入口。" />
           <details>
             <summary>会话与任务（续聊 / 查询）</summary>
             <div className={styles.form}>
@@ -380,16 +376,6 @@ export function A2aOverlays({ model }: { model: A2aGatewayState }) {
           </div>
         )}
       </SideSheet>
-      <Modal
-        title="调用密钥"
-        visible={!!newToken}
-        zIndex={overlayLayers.modal}
-        onCancel={() => setNewToken("")}
-        onOk={() => setNewToken("")}
-      >
-        <p>请妥善保存。关闭后隐藏原文，管理员可从密钥列表再次查看。</p>
-        <Typography.Text copyable>{newToken}</Typography.Text>
-      </Modal>
     </>
   );
 }

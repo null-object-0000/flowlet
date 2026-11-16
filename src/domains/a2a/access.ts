@@ -3,7 +3,11 @@ import type { A2aAgent } from "./types";
 export function agentGatewayUrl(agent: A2aAgent, origin: string): string {
   return agent.gatewayUrl ?? new URL(agent.gatewayPath, origin).href;
 }
-export function agentAccessConfig(agent: A2aAgent, origin: string) {
+export function agentAccessConfig(
+  agent: A2aAgent,
+  origin: string,
+  clientToken = "<Flowlet Client Token>",
+) {
   // Encode separators so two distinct Agent IDs never share a credential prefix.
   const profile =
     "AGENT_" +
@@ -21,7 +25,7 @@ export function agentAccessConfig(agent: A2aAgent, origin: string) {
   const url = agentGatewayUrl(agent, origin);
   const env = {
     [effectivePrefix + "_URL"]: url,
-    [effectivePrefix + "_TOKEN"]: "<填写具有该 Agent 权限的调用密钥>",
+    [effectivePrefix + "_TOKEN"]: clientToken,
   };
   return {
     url,

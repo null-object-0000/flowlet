@@ -39,7 +39,7 @@ const EMPTY: A2aAgentInput = {
   upstreamToken: "",
   protocol: "a2a",
 };
-type Tab = "agents" | "calls" | "keys";
+type Tab = "agents" | "calls";
 const time = (value: string) =>
   new Date(value).toLocaleString(undefined, {
     month: "2-digit",
@@ -63,14 +63,13 @@ function A2aContent() {
   const model = useA2aGateway();
   const [tab, setTab] = useState<Tab>("agents");
   const [search, setSearch] = useState("");
-  const [keyEditor, setKeyEditor] = useState(false);
   const [page, setPage] = useState(1);
   const [accessAgent, setAccessAgent] = useState<A2aAgent | null>(null);
   const origin = isDesktopClient
     ? (window.flowletDesktop?.clientBaseUrl ?? window.location.origin)
     : window.location.origin;
-  const { agents, calls, keys } = model;
-  const error = agents.error || calls.error || keys.error;
+  const { agents, calls } = model;
+  const error = agents.error || calls.error;
   const agentName = (id: string) =>
     agents.data?.find((agent) => agent.id === id)?.name ?? id;
   const edit = (agent?: A2aAgent) => {
@@ -108,7 +107,7 @@ function A2aContent() {
         <Button
           aria-label="刷新网关"
           icon={<IconRefresh />}
-          loading={agents.isFetching || calls.isFetching || keys.isFetching}
+          loading={agents.isFetching || calls.isFetching}
           onClick={() => void model.refresh()}
         />
         <Button theme="solid" icon={<IconPlus />} onClick={() => edit()}>
@@ -120,7 +119,6 @@ function A2aContent() {
           [
             ["agents", "Agent", agents.data?.length],
             ["calls", "调用记录"],
-            ["keys", "调用密钥", keys.data?.length],
           ] as const
         ).map(([id, label, count]) => (
           <button
@@ -359,9 +357,9 @@ function A2aContent() {
                             <small>
                               {call.keyId === "admin-test"
                                 ? "管理台测试"
-                                : (keys.data?.find(
-                                    (key) => key.id === call.keyId,
-                                  )?.name ?? "已撤销的调用密钥")}
+                                : call.keyId === "client-token"
+                                  ? "Flowlet Client Token"
+                                  : "旧调用密钥"}
                             </small>
                           </td>
                           <td>
@@ -442,133 +440,7 @@ function A2aContent() {
             </footer>
           </section>
         )}
-        {tab === "keys" && (
-          <section className={styles.section} aria-label="调用密钥">
-            <div className={styles.toolbar}>
-              <div>
-                <strong>调用密钥</strong>
-                <p className={styles.muted}>
-                  按 Agent 授权，供 A2A 入口与 ACP 客户端桥使用。
-                </p>
-              </div>
-              <Button
-                disabled={!agents.data?.length}
-                onClick={() => setKeyEditor(true)}
-              >
-                创建调用密钥
-              </Button>
-            </div>
-            <Banner description="获授权的客户端共享 Agent 的上游身份和任务空间。此密钥独立于管理凭据与模型 Client Token。" />
-            {keys.data?.map((key) => (
-              <div className={styles.keyRow} key={key.id}>
-                <div>
-                  <strong>{key.name}</strong>
-                  <p className={styles.muted}>
-                    {key.agentIds.map(agentName).join("、") ||
-                      "暂无 Agent 授权"}
-                  </p>
-                  <small className={styles.muted}>
-                    创建于 {time(key.createdAt)}
-                  </small>
-                </div>
-                <div className={styles.actions}>
-                  {key.canReveal ? (
-                    <Button
-                      theme="borderless"
-                      loading={
-                        model.revealKey.isPending &&
-                        model.revealKey.variables === key.id
-                      }
-                      onClick={() => model.revealKey.mutate(key.id)}
-                    >
-                      查看密钥
-                    </Button>
-                  ) : (
-                    <>
-                      <span className={styles.muted}>未保存原文</span>
-                      <Button
-                        theme="borderless"
-                        onClick={() => {
-                          model.setKeyName(`${key.name.slice(0, 90)}（替代）`);
-                          model.setGrants(
-                            key.agentIds.filter((id) =>
-                              agents.data?.some((agent) => agent.id === id),
-                            ),
-                          );
-                          setKeyEditor(true);
-                        }}
-                      >
-                        创建替代密钥
-                      </Button>
-                    </>
-                  )}
-                  <Button
-                    type="danger"
-                    theme="borderless"
-                    onClick={() =>
-                      Modal.confirm({
-                        zIndex: APP_OVERLAY_Z_INDEX.modal,
-                        title: `撤销 ${key.name}？`,
-                        content: "撤销后，该密钥无法再发起新请求。",
-                        onOk: () => model.revoke.mutateAsync(key.id),
-                      })
-                    }
-                  >
-                    撤销
-                  </Button>
-                </div>
-              </div>
-            ))}
-            {!keys.data?.length && (
-              <div className={styles.empty}>
-                <strong>尚未创建调用密钥</strong>
-                <p>先添加 Agent，再为需要接入的客户端创建专用密钥。</p>
-              </div>
-            )}
-          </section>
-        )}
       </div>
-      <Modal
-        title="创建调用密钥"
-        zIndex={APP_OVERLAY_Z_INDEX.modal}
-        visible={keyEditor}
-        onCancel={() => setKeyEditor(false)}
-        confirmLoading={model.createKey.isPending}
-        okText="创建密钥"
-        okButtonProps={{
-          disabled: !model.keyName.trim() || !model.grants.length,
-        }}
-        onOk={async () => {
-          await model.createKey.mutateAsync();
-          setKeyEditor(false);
-        }}
-      >
-        <div className={styles.form}>
-          <label className={styles.field}>
-            名称
-            <Input
-              aria-label="密钥名称"
-              placeholder="例如：我的 Paseo"
-              value={model.keyName}
-              onChange={model.setKeyName}
-            />
-          </label>
-          <label className={styles.field}>
-            允许访问的 Agent
-            <Select
-              multiple
-              aria-label="允许调用的 Agent"
-              value={model.grants}
-              optionList={agents.data?.map((agent) => ({
-                value: agent.id,
-                label: agent.name,
-              }))}
-              onChange={(value) => model.setGrants(value as string[])}
-            />
-          </label>
-          <p className={styles.muted}>创建后可由管理员再次查看和复制密钥。</p>
-        </div>
-      </Modal>
       <A2aOverlays model={model} />
       <AgentGatewayAccess
         agent={accessAgent}

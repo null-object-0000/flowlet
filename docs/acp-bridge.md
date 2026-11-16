@@ -35,7 +35,7 @@ Agent 需预先安装和登录，使用宿主身份与环境，剥离 `FLOWLET_*
 这是受信任管理员托管程序的能力，不是代码沙箱。
 
 辅助 HTTP 仅监听 `127.0.0.1` 随机端口，实例随机认证 Token 经 stdin 传入，不落盘或暴露给
-渲染进程。外部请求仍使用 `flwa2a_` 专用调用密钥，与管理凭据、模型 Client Token 分开。
+渲染进程。外部请求统一使用模型服务的 Flowlet Client Token，与管理凭据分开；旧 `flwa2a_` 调用密钥只作兼容。
 同一 Agent 的获授权调用方共享其宿主身份及任务空间。
 
 ACP 上游 Card 声明文本/结构化数据、流式调用与 Structured Input 扩展；消息和工具输出转换
@@ -53,8 +53,8 @@ Host 最多保留 8 个运行环境，每个环境最多创建 1000 个任务；
 在 T3 Code / Paseo **服务端所在机器**安装 Flowlet CLI，运行 `flowlet acp`，通过 ACP v1 stdio
 提供 Agent 服务。stdout 只有协议帧，启动错误走 stderr。凭据规则与 `flowlet a2a` 一致，支持
 `--profile=NAME`、`--prefix=PREFIX`；环境覆盖必须成对提供 `<PREFIX>_URL` 与 `<PREFIX>_TOKEN`，
-也可复用全局凭据库。默认超时 900 秒，支持 `--timeout=1..3600`，`--extensions=URI,...` 传递
-A2A 扩展协商头。密钥不放命令参数；页面只生成占位符，由用户填入专用调用密钥。
+也可复用全局凭据库，TOKEN 的值与模型服务 Client Token 相同。默认超时 900 秒，支持 `--timeout=1..3600`，`--extensions=URI,...` 传递
+A2A 扩展协商头。密钥不放命令参数；页面默认预览占位符；点击复制完整配置时读取当前 Client Token 并填入，不在浏览器持久化。
 
 T3 Code 的 Local ACP Provider 使用生成的 executable/args/env。Paseo 使用 `extends: "acp"`，
 `options.supportsMcpServers: false` 及禁用文件/终端能力的配置。默认拒绝客户端附带 MCP 服务器。生成的启动参数显式添加 `--ignore-client-mcp`，兼容 T3 自动注入自带 MCP 的行为：只使用远程 Agent 能力，不执行或转发这些 MCP 配置，并在首次回复中说明。Paseo 仍应关闭 MCP 注入。

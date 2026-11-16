@@ -502,8 +502,9 @@ ACP 程序只在 Electron 本机 Host 或显式启用 `FLOWLET_ENABLE_ACP=1` 的
 运行，不在 Electron client gateway 本机运行。ACP 文件/终端/MCP 能力不对客户端开放，权限询问
 必须等待用户回复，禁止默认批准。运行环境的内存任务空间与生命周期边界见 `docs/acp-bridge.md`。
 外部 A2A Agent 与下述本机客户端 Adapter、模型目录和渠道路由独立；登记外部 Agent 不应
-新增内置 Adapter 或修改 `plugin-registry.json`。专用调用密钥与管理凭据、模型 Client Token
-分开；任务、会话 ID 和消息透传，不自动重试任务。第三方的登录、换票、业务 API 或特殊
+新增内置 Adapter 或修改 `plugin-registry.json`。Agent 调用统一复用模型 Client Token，
+与管理凭据分开；旧专用调用密钥仅保留兼容。任务、会话 ID 和消息透传，不自动重试任务。
+第三方的登录、换票、业务 API 或特殊
 响应解析必须留在它自己的封装服务中，禁止按域名或 Agent 名称把专属逻辑写入 Flowlet。
 首版范围、共享上游身份边界、存储与验证契约见 `docs/a2a-gateway.md`。
 

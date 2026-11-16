@@ -67,15 +67,6 @@ beforeEach(() => {
 });
 
 describe("A2A management orchestration", () => {
-  it("reveals on demand and clears the visible token without caching it in mutation data", async () => {
-    vi.mocked(a2aCommands.revealKey).mockResolvedValue({ id: "key", token: "flwa2a_revealed" });
-    const { result } = setup();
-    await act(() => result.current.revealKey.mutateAsync("key"));
-    expect(result.current.newToken).toBe("flwa2a_revealed");
-    expect(result.current.revealKey.data).toBeUndefined();
-    act(() => result.current.setNewToken(""));
-    expect(result.current.newToken).toBe("");
-  });
   it("continues with the returned task and context IDs and sends the declared tenant", async () => {
     vi.mocked(a2aCommands.invoke).mockResolvedValue({
       status: 200,
@@ -105,21 +96,11 @@ describe("A2A management orchestration", () => {
       message: { contextId: "context-7" },
     });
   });
-  it("passes explicit key grants and keeps the one-time token only in transient UI state", async () => {
-    vi.mocked(a2aCommands.createKey).mockResolvedValue({
-      id: "key-1",
-      token: "flwa2a_test",
-    });
+  it("does not fetch or manage separate gateway credentials", async () => {
     const { result } = setup();
-    act(() => {
-      result.current.setKeyName("Hermes");
-      result.current.setGrants(["research"]);
-    });
-    await act(() => result.current.createKey.mutateAsync());
-    expect(a2aCommands.createKey).toHaveBeenCalledWith("Hermes", ["research"]);
-    expect(result.current.newToken).toBe("flwa2a_test");
-    act(() => result.current.setNewToken(""));
-    expect(result.current.newToken).toBe("");
+    await waitFor(() => expect(result.current.agents.isSuccess).toBe(true));
+    expect(a2aCommands.keys).not.toHaveBeenCalled();
+    expect(a2aCommands.createKey).not.toHaveBeenCalled();
   });
   it("continues paused tasks but never resubmits a completed task ID", async () => {
     const { result } = setup();

@@ -453,10 +453,52 @@ describe("generic A2A gateway through real Host command and HTTP boundaries", ()
     });
     assert.equal(redirect.status, 400);
   });
-  it("requires scoped data-plane keys and never accepts admin/model tokens", async () => {
-    for (const token of ["", ADMIN, "model-token"])
+  it("accepts the model Client Token and retains legacy scoped-key compatibility", async () => {
+    for (const token of ["", ADMIN, "wrong-token"])
       assert.equal((await call("SendMessage", token)).status, 401);
     await command("save_a2a_agent", { input: input("second") });
+    assert.equal((await call("SendMessage", "model-token")).status, 200);
+    assert.equal(
+      (await call("SendMessage", "model-token", "second")).status,
+      200,
+    );
+    assert.equal(
+      (
+        await fetch(`${base}/a2a/research/.well-known/agent-card.json`, {
+          headers: { authorization: "Bearer model-token" },
+        })
+      ).status,
+      200,
+    );
+    assert.equal(
+      (
+        await fetch(`${base}/api/commands/list_a2a_agents`, {
+          method: "POST",
+          headers: { authorization: "Bearer model-token" },
+          body: "{}",
+        })
+      ).status,
+      401,
+    );
+    const live = web.context.proxy.bindConfig();
+    const previous = live.default_client_token;
+    try {
+      live.default_client_token = "rotated-client-token";
+      assert.equal((await call("SendMessage", "model-token")).status, 401);
+      assert.equal(
+        (await call("SendMessage", "rotated-client-token")).status,
+        200,
+      );
+      live.default_client_token = "";
+      assert.equal(
+        (await call("SendMessage", "rotated-client-token")).status,
+        401,
+      );
+      assert.equal((await call("SendMessage", "")).status, 401);
+    } finally {
+      live.default_client_token = previous;
+    }
+
     assert.equal((await call("SendMessage", key, "second")).status, 401);
     assert.equal(
       (
@@ -878,17 +920,40 @@ describe("generic A2A gateway through real Host command and HTTP boundaries", ()
     }
   });
   it("reveals encrypted keys only through explicit management and preserves hash-only keys", async () => {
-    const created = await command("create_a2a_key", { name: "reveal-test", agentIds: ["second"] });
+    const created = await command("create_a2a_key", {
+      name: "reveal-test",
+      agentIds: ["second"],
+    });
     const gateway = a2aGateway(web.context);
     assert.ok(gateway.store.keySecret(created.id)?.cipher);
-    assert.ok(!gateway.store.keySecret(created.id)!.cipher!.includes(created.token));
+    assert.ok(
+      !gateway.store.keySecret(created.id)!.cipher!.includes(created.token),
+    );
     const listed = await command("list_a2a_keys");
-    assert.equal(listed.find((row: any) => row.id === created.id).canReveal, true);
+    assert.equal(
+      listed.find((row: any) => row.id === created.id).canReveal,
+      true,
+    );
     assert.ok(!JSON.stringify(listed).includes(created.token));
-    assert.equal((await command("reveal_a2a_key", { id: created.id })).token, created.token);
-    assert.equal((await fetch(`${base}/api/commands/reveal_a2a_key`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: created.id }) })).status, 401);
+    assert.equal(
+      (await command("reveal_a2a_key", { id: created.id })).token,
+      created.token,
+    );
+    assert.equal(
+      (
+        await fetch(`${base}/api/commands/reveal_a2a_key`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ id: created.id }),
+        })
+      ).status,
+      401,
+    );
     gateway.store.createKey("legacy", "legacy", "legacy-hash", ["second"]);
-    assert.equal(gateway.store.keys().find((row) => row.id === "legacy")?.canReveal, false);
+    assert.equal(
+      gateway.store.keys().find((row) => row.id === "legacy")?.canReveal,
+      false,
+    );
     assert.throws(() => gateway.revealKey("legacy"), /仅保存了哈希/);
     assert.equal(gateway.store.authorize("legacy-hash", "second"), "legacy");
     await command("revoke_a2a_key", { id: created.id });

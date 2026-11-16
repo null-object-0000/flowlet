@@ -16,10 +16,6 @@ export function useA2aGateway() {
     queryKey: ["a2a", "agents"],
     queryFn: a2aCommands.list,
   });
-  const keys = useQuery({
-    queryKey: ["a2a", "keys"],
-    queryFn: a2aCommands.keys,
-  });
   const [filter, setFilter] = useState<string>();
   const [showOperations, setShowOperations] = useState(false);
   const calls = useQuery({
@@ -30,9 +26,6 @@ export function useA2aGateway() {
   const [draft, setDraft] = useState<A2aAgentInput | null>(null);
   const [editing, setEditing] = useState(false);
   const [preview, setPreview] = useState<unknown>(null);
-  const [keyName, setKeyName] = useState("");
-  const [grants, setGrants] = useState<string[]>([]);
-  const [newToken, setNewToken] = useState("");
   const [selected, setSelected] = useState<A2aAgent | null>(null);
   const [message, setMessage] = useState("");
   const [contextId, setContextId] = useState("");
@@ -58,29 +51,6 @@ export function useA2aGateway() {
   const remove = useMutation({
     mutationFn: a2aCommands.remove,
     onSuccess: refresh,
-    onError: report,
-  });
-  const createKey = useMutation({
-    mutationFn: async () => {
-      const value = await a2aCommands.createKey(keyName, grants);
-      setNewToken(value.token);
-    },
-    onSuccess: async () => {
-      setKeyName("");
-      await refresh();
-    },
-    onError: report,
-  });
-  const revoke = useMutation({
-    mutationFn: a2aCommands.revokeKey,
-    onSuccess: refresh,
-    onError: report,
-  });
-  const revealKey = useMutation({
-    mutationFn: async (id: string) => {
-      const value = await a2aCommands.revealKey(id);
-      setNewToken(value.token);
-    },
     onError: report,
   });
   const invoke = useMutation({
@@ -147,7 +117,6 @@ export function useA2aGateway() {
     setShowOperations,
     capabilities,
     agents,
-    keys,
     filter,
     setFilter,
     calls,
@@ -157,12 +126,6 @@ export function useA2aGateway() {
     setEditing,
     preview,
     setPreview,
-    keyName,
-    setKeyName,
-    grants,
-    setGrants,
-    newToken,
-    setNewToken,
     selected,
     setSelected,
     message,
@@ -179,9 +142,6 @@ export function useA2aGateway() {
     save,
     inspect,
     remove,
-    createKey,
-    revoke,
-    revealKey,
     invoke,
     rpc,
   };

@@ -18,9 +18,15 @@ describe("Agent client access configuration", () => {
     expect(config.args).toContain("--ignore-client-mcp");
     const prefix = config.args[1].slice("--prefix=".length);
     expect(config.env[prefix + "_URL"]).toBe(config.url);
-    expect(config.env[prefix + "_TOKEN"]).toContain("调用密钥");
+    expect(config.env[prefix + "_TOKEN"]).toContain("Client Token");
     const provider = Object.values(config.paseo.agents.providers)[0];
     expect(provider.options.supportsMcpServers).toBe(false);
+    const full = agentAccessConfig(
+      agent("test"),
+      "https://host.example",
+      "shared-client-token",
+    );
+    expect(Object.values(full.env)).toContain("shared-client-token");
     expect(provider.options.clientCapabilities.terminal).toBe(false);
   });
   it("bounds CLI prefixes and avoids provider ID collisions", () => {

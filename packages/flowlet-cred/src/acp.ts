@@ -9,10 +9,17 @@ import {
   type ContentBlock,
   type StopReason,
   type SessionUpdate,
+  type AgentContext,
+  type InitializeResponse,
+  type NewSessionResponse,
+  type LoadSessionResponse,
+  type SetSessionConfigOptionResponse,
+  type PromptResponse,
 } from "@agentclientprotocol/sdk";
 import { A2aClient, END_STATES, object, type A2aObject } from "./a2a.ts";
 import { SessionFile, type A2aSession } from "./a2a-session.ts";
 import { writeAtomic } from "./store.ts";
+import { ACP_SESSION_EXTENSION, RemoteAcp } from "./acp-remote.ts";
 
 export interface AcpBridgeConfig {
   url: string;
@@ -78,6 +85,58 @@ function partsText(parts: unknown): string {
 export function createAcpBridge(config: AcpBridgeConfig) {
   const sessions = new Map<string, Session>();
   let card: A2aObject = {};
+  let native: RemoteAcp | undefined;
+  const nativeNotices = new Set<string>();
+  const remote = async (
+    method: string,
+    params: A2aObject,
+    signal: AbortSignal,
+    peer?: AgentContext,
+  ) => {
+    if (!native) throw new Error("Native ACP is not available");
+    signal = AbortSignal.any([
+      signal,
+      AbortSignal.timeout(config.timeoutSeconds * 1000),
+    ]);
+    try {
+      return await native.call(method, params, signal, async (frame) => {
+        if (!peer) throw new Error("Unexpected remote ACP callback");
+        if (frame.type === "update") {
+          await peer.notify(methods.client.session.update, frame.params);
+        } else if (frame.type === "permission") {
+          let result: A2aObject;
+          try {
+            result = await peer.request<A2aObject>(
+              methods.client.session.requestPermission,
+              frame.params,
+              { cancellationSignal: signal, stopWaitingOnCancel: true },
+            );
+          } catch {
+            result = { outcome: { outcome: "cancelled" } };
+          }
+          await native!.call(
+            "permission/reply",
+            {
+              sessionId: frame.params.sessionId,
+              requestId: frame.requestId,
+              outcome: result.outcome,
+            },
+            signal,
+          );
+        }
+      });
+    } catch (error) {
+      throw new RequestError(
+        typeof object(error).code === "number"
+          ? Number(object(error).code)
+          : -32603,
+        (error instanceof Error ? error.message : "Remote ACP failed")
+          .split(config.token)
+          .join("[redacted]"),
+        object(error).data,
+      );
+    }
+  };
   const client = (signal: AbortSignal) =>
     new A2aClient(config.url, config.token, {
       signal,
@@ -119,6 +178,19 @@ export function createAcpBridge(config: AcpBridgeConfig) {
     const api = client(AbortSignal.any([signal, AbortSignal.timeout(10_000)]));
     try {
       card = await api.discover();
+      if (
+        (Array.isArray(object(card.capabilities).extensions)
+          ? (object(card.capabilities).extensions as unknown[])
+          : []
+        ).some((ext) => object(ext).uri === ACP_SESSION_EXTENSION)
+      ) {
+        native = new RemoteAcp(api.endpoint.href, config.token);
+        return (await remote(
+          "initialize",
+          {},
+          signal,
+        )) as unknown as InitializeResponse;
+      }
     } finally {
       await api.close();
     }
@@ -137,8 +209,17 @@ export function createAcpBridge(config: AcpBridgeConfig) {
       authMethods: [],
     };
   });
-  app.onRequest(methods.agent.session.new, ({ params }) => {
+  app.onRequest(methods.agent.session.new, async ({ params, signal }) => {
     checkMcp(params.mcpServers);
+    if (native) {
+      const result = (await remote(
+        "session/new",
+        {},
+        signal,
+      )) as unknown as NewSessionResponse;
+      if (params.mcpServers.length) nativeNotices.add(result.sessionId);
+      return result;
+    }
     if (sessions.size >= 100)
       throw RequestError.invalidRequest(
         "Session limit reached; restart the bridge",
@@ -163,19 +244,39 @@ export function createAcpBridge(config: AcpBridgeConfig) {
     sessions.set(id, session);
     return { sessionId: id, configOptions: configOptions() };
   });
-  app.onRequest(methods.agent.session.setConfigOption, ({ params }) => {
-    find(params.sessionId);
-    if (params.configId !== "model" || params.value !== "default")
-      throw new RequestError(
-        -32602,
-        "This remote A2A agent exposes its upstream default only; model switching is not available.",
-      );
-    return { configOptions: configOptions() };
-  });
+  app.onRequest(
+    methods.agent.session.setConfigOption,
+    async ({ params, signal, client: peer }) => {
+      if (native)
+        return (await remote(
+          "session/set_config_option",
+          { ...params },
+          signal,
+          peer,
+        )) as unknown as SetSessionConfigOptionResponse;
+      find(params.sessionId);
+      if (params.configId !== "model" || params.value !== "default")
+        throw new RequestError(
+          -32602,
+          "This remote A2A agent exposes its upstream default only; model switching is not available.",
+        );
+      return { configOptions: configOptions() };
+    },
+  );
   app.onRequest(
     methods.agent.session.load,
-    async ({ params, client: peer }) => {
+    async ({ params, signal, client: peer }) => {
       checkMcp(params.mcpServers);
+      if (native) {
+        const result = (await remote(
+          "session/load",
+          { sessionId: params.sessionId },
+          signal,
+          peer,
+        )) as unknown as LoadSessionResponse;
+        if (params.mcpServers.length) nativeNotices.add(params.sessionId);
+        return result;
+      }
       if (!/^[a-f0-9-]{36}$/.test(params.sessionId))
         throw RequestError.sessionNotFound(params.sessionId);
       if (sessions.get(params.sessionId)?.active)
@@ -229,6 +330,14 @@ export function createAcpBridge(config: AcpBridgeConfig) {
     return active.cancel;
   };
   app.onNotification(methods.agent.session.cancel, async ({ params }) => {
+    if (native) {
+      await remote(
+        "session/cancel",
+        { ...params },
+        AbortSignal.timeout(10_000),
+      );
+      return;
+    }
     const session = find(params.sessionId);
     if (!session.active) return;
     session.active.cancelled = true;
@@ -237,6 +346,29 @@ export function createAcpBridge(config: AcpBridgeConfig) {
   app.onRequest(
     methods.agent.session.prompt,
     async ({ params, signal, client: peer }) => {
+      if (native) {
+        if (params.prompt.some((block) => block.type !== "text"))
+          throw RequestError.invalidParams(
+            "Remote ACP accepts text only; local files and resources are not forwarded",
+          );
+        if (nativeNotices.delete(params.sessionId))
+          await peer.notify(methods.client.session.update, {
+            sessionId: params.sessionId,
+            update: {
+              sessionUpdate: "agent_message_chunk",
+              content: {
+                type: "text",
+                text: "此远程 Agent 不使用本机 MCP 工具；客户端附带的 MCP 配置未传递给上游。\n",
+              },
+            },
+          });
+        return (await remote(
+          "session/prompt",
+          { sessionId: params.sessionId, prompt: params.prompt },
+          signal,
+          peer,
+        )) as unknown as PromptResponse;
+      }
       const session = find(params.sessionId);
       if (session.active) throw RequestError.invalidRequest("Session is busy");
       const parts = promptParts(params.prompt);
@@ -252,7 +384,6 @@ export function createAcpBridge(config: AcpBridgeConfig) {
       );
       let state: string | undefined;
       const artifacts = new Map<string, { parts: A2aObject[]; name: string }>();
-      const turnId = randomUUID();
       let messageReceived = false;
       const notify = async (update: SessionUpdate) => {
         session.history.push(update);
@@ -316,29 +447,8 @@ export function createAcpBridge(config: AcpBridgeConfig) {
             4 * 1024 * 1024
           )
             throw new Error("A2A artifacts exceed 4 MiB");
-          // ACP tool-call updates can replace content; message chunks cannot. Preserve A2A append/replace semantics.
-          const content = [
-            {
-              type: "content" as const,
-              content: { type: "text" as const, text: partsText(value.parts) },
-            },
-          ];
-          await notify(
-            previous
-              ? {
-                  sessionUpdate: "tool_call_update",
-                  toolCallId: `artifact:${turnId}:${id}`,
-                  content,
-                }
-              : {
-                  sessionUpdate: "tool_call",
-                  toolCallId: `artifact:${turnId}:${id}`,
-                  title: value.name,
-                  kind: "other",
-                  status: "in_progress",
-                  content,
-                },
-          );
+          // An A2A artifact is output, not a client tool invocation. Accumulate
+          // replacements and appends; emit the final snapshot as a message.
         }
       };
       try {
@@ -409,12 +519,7 @@ export function createAcpBridge(config: AcpBridgeConfig) {
           throw new Error(
             "A2A stream ended without a terminal or paused task; message was not retried",
           );
-        for (const [id, value] of artifacts) {
-          await notify({
-            sessionUpdate: "tool_call_update",
-            toolCallId: `artifact:${turnId}:${id}`,
-            status: state === "TASK_STATE_FAILED" ? "failed" : "completed",
-          });
+        for (const value of artifacts.values()) {
           await say(partsText(value.parts) + "\n");
         }
         const paused =

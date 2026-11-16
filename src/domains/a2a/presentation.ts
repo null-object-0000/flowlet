@@ -25,6 +25,13 @@ export function callMethodLabel(method: string): string {
         ListTasks: "列出任务",
         CancelTask: "取消任务",
         SubscribeToTask: "订阅任务",
+        "session/prompt": "发送消息",
+        "session/cancel": "取消会话请求",
+        "session/new": "创建会话",
+        "session/load": "恢复会话",
+        "session/set_config_option": "切换模型",
+        "permission/reply": "回复远端权限询问",
+        initialize: "初始化 ACP",
       } as Record<string, string>
     )[method] ?? method
   );

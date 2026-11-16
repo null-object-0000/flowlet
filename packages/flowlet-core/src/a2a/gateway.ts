@@ -12,8 +12,10 @@ import { A2aStore, type A2aAgent, type A2aCall } from "../storage/a2a.ts";
 import { a2aRequest, parseHttpUrl, readLimited } from "./network.ts";
 import { AcpRuntimes, acpCommand, requireAcpRuntime } from "./acp-runtime.ts";
 import type { AcpCommand } from "../storage/a2a.ts";
+import type { AcpFrame } from "../../../flowlet-cred/src/acp-remote.ts";
 import {
   METHODS,
+  ACP_SESSION_EXTENSION,
   PUSH_METHODS,
   RpcError,
   gatewayCard,
@@ -614,13 +616,116 @@ export class A2aGateway {
     return { status, body: JSON.parse(Buffer.concat(chunks).toString()) };
   }
   /** Shares the model data-plane Client Token; management/CLI credentials remain separate. */
+  private async forwardNative(
+    agent: A2aAgent,
+    method: string,
+    params: ObjectValue,
+    keyId: string,
+    response: ServerResponse,
+    signal: AbortSignal,
+  ) {
+    const started = Date.now();
+    const call = this.startCall(
+      agent.id,
+      keyId,
+      method,
+      JSON.stringify({ method, params }),
+    );
+    const controller = new AbortController();
+    this.active.add(controller);
+    const combined = AbortSignal.any([
+      signal,
+      controller.signal,
+      AbortSignal.timeout(agent.timeoutSeconds * 1000),
+    ]);
+    let done!: () => void;
+    const finishing = new Promise<void>((resolve) => {
+      done = resolve;
+    });
+    this.finishing.add(finishing);
+    call.contextId =
+      typeof params.sessionId === "string" ? params.sessionId : null;
+    const limit = Math.max(
+      0,
+      Math.min(Number(this.ctx.logCapture.max_body_bytes) || 0, 64 * 1024),
+    );
+    let captured = "";
+    const emit = async (frame: AcpFrame) => {
+      const bytes = JSON.stringify(frame);
+      if (Buffer.byteLength(bytes) > 4 * 1024 * 1024)
+        throw new Error("ACP frame exceeds 4 MiB");
+      if (
+        this.ctx.logCapture.capture_res_body &&
+        Buffer.byteLength(captured) < limit
+      )
+        captured = Buffer.from(captured + bytes + "\n")
+          .subarray(0, limit)
+          .toString();
+      if (!response.write(`data: ${bytes}\n\n`))
+        await once(response, "drain", { signal: combined });
+    };
+    try {
+      const runtime = await this.acp.ensureNative(agent);
+      combined.throwIfAborted();
+      response.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-store",
+        "x-accel-buffering": "no",
+      });
+      call.httpStatus = 200;
+      const result = await runtime.call(method, params, combined, emit);
+      if (typeof result.sessionId === "string")
+        call.contextId = result.sessionId;
+      if (method === "session/prompt")
+        call.state =
+          result.stopReason === "cancelled"
+            ? "TASK_STATE_CANCELED"
+            : result.stopReason === "refusal"
+              ? "TASK_STATE_REJECTED"
+              : "TASK_STATE_COMPLETED";
+      await emit({ type: "result", result });
+    } catch (error) {
+      call.error = combined.aborted
+        ? "ACP 调用中断或超时，未自动重试"
+        : (error instanceof Error
+            ? error.message
+            : "ACP operation failed"
+          ).slice(0, 1000);
+      if (!response.headersSent) throw error;
+      if (!combined.aborted)
+        await emit({
+          type: "error",
+          code:
+            typeof object(error).code === "number"
+              ? Number(object(error).code)
+              : -32603,
+          message: call.error,
+          data: object(error).data,
+        });
+    } finally {
+      Object.assign(call, {
+        finishedAt: new Date().toISOString(),
+        durationMs: Date.now() - started,
+        responseBody: this.ctx.logCapture.capture_res_body ? captured : null,
+      });
+      try {
+        this.store.record(call);
+      } finally {
+        this.active.delete(controller);
+        this.finishing.delete(finishing);
+        done();
+      }
+    }
+    response.end();
+  }
+
   async handle(
     request: IncomingMessage,
     response: ServerResponse,
     pathname: string,
   ): Promise<void> {
     const match =
-      /^\/a2a\/([a-z0-9][a-z0-9_-]{0,63})(\/\.well-known\/agent-card\.json)?$/.exec(
+      /^\/a2a\/([a-z0-9][a-z0-9_-]{0,63})(\/\.well-known\/agent-card\.json|\/acp)?$/.exec(
         pathname,
       );
     const send = (status: number, value: unknown) => {
@@ -638,7 +743,8 @@ export class A2aGateway {
     }
     try {
       const agent = this.agent(match[1]);
-      const cardRequest = !!match[2];
+      const cardRequest = match[2] === "/.well-known/agent-card.json";
+      const nativeRequest = match[2] === "/acp";
       if (request.method !== (cardRequest ? "GET" : "POST")) {
         request.resume();
         response.setHeader("allow", cardRequest ? "GET" : "POST");
@@ -679,7 +785,18 @@ export class A2aGateway {
         if (root.pathname !== "/")
           throw new Error("FLOWLET_PUBLIC_A2A_URL 必须是根地址");
         const gatewayUrl = new URL(`/a2a/${agent.id}`, root).href;
-        send(200, gatewayCard(agent.card, gatewayUrl, this.iface(agent)));
+        const card = gatewayCard(agent.card, gatewayUrl, this.iface(agent));
+        if (agent.protocol === "acp") {
+          const caps = object(card.capabilities);
+          card.capabilities = {
+            ...caps,
+            extensions: [
+              ...(Array.isArray(caps.extensions) ? caps.extensions : []),
+              { uri: ACP_SESSION_EXTENSION },
+            ],
+          };
+        }
+        send(200, card);
         return;
       }
       let size = 0;
@@ -700,6 +817,41 @@ export class A2aGateway {
       };
       response.on("close", disconnect);
       try {
+        if (nativeRequest) {
+          if (agent.protocol !== "acp")
+            throw new CommandError(
+              404,
+              "acp_not_available",
+              "此 Agent 未提供原生 ACP 会话能力",
+            );
+          const body = object(JSON.parse(Buffer.concat(chunks).toString()));
+          const method = String(body.method);
+          if (
+            ![
+              "initialize",
+              "session/new",
+              "session/load",
+              "session/set_config_option",
+              "session/prompt",
+              "session/cancel",
+              "permission/reply",
+            ].includes(method)
+          )
+            throw new CommandError(
+              400,
+              "acp_method_denied",
+              "不支持此 ACP 操作",
+            );
+          await this.forwardNative(
+            agent,
+            method,
+            object(body.params),
+            keyId,
+            response,
+            aborted.signal,
+          );
+          return;
+        }
         await this.forward(
           agent,
           Buffer.concat(chunks).toString(),

@@ -7,6 +7,7 @@ import type { WebContext } from "../web/context.ts";
 import { CommandError } from "../types.ts";
 import { validateAgentCard } from "./protocol.ts";
 import type { AcpCommand } from "../storage/a2a.ts";
+import { startNativeAcp } from "./acp-native.ts";
 
 export function acpBridgePath(): string {
   return (
@@ -23,7 +24,7 @@ export function acpCapabilities(ctx: WebContext) {
   return {
     acpRegistration: Boolean(
       (ctx.desktop || process.env.FLOWLET_ENABLE_ACP === "1") &&
-        existsSync(acpBridgePath()),
+      existsSync(acpBridgePath()),
     ),
   };
 }
@@ -171,6 +172,10 @@ async function startRuntime(
 }
 
 export class AcpRuntimes {
+  private native = new Map<
+    string,
+    { fingerprint: string; ready: ReturnType<typeof startNativeAcp> }
+  >();
   private runtimes = new Map<
     string,
     { fingerprint: string; ready: Promise<Runtime> }
@@ -207,7 +212,7 @@ export class AcpRuntimes {
       entry = undefined;
     }
     if (!entry) {
-      if (this.runtimes.size >= 8)
+      if (this.runtimes.size + this.native.size >= 8)
         throw new Error("ACP 运行环境已达到 8 个 Agent 上限");
       entry = {
         fingerprint,
@@ -232,12 +237,50 @@ export class AcpRuntimes {
   async stop(id: string) {
     const entry = this.runtimes.get(id);
     this.runtimes.delete(id);
+    const native = this.native.get(id);
+    this.native.delete(id);
+    if (native) await (await native.ready.catch(() => null))?.close();
     if (entry) {
       const runtime = await entry.ready.catch(() => null);
       await runtime?.close();
     }
   }
   async close() {
-    await Promise.all([...this.runtimes.keys()].map((id) => this.stop(id)));
+    await Promise.all(
+      [...new Set([...this.runtimes.keys(), ...this.native.keys()])].map((id) =>
+        this.stop(id),
+      ),
+    );
+  }
+  async ensureNative(agent: {
+    id: string;
+    acp?: AcpCommand;
+    timeoutSeconds: number;
+  }) {
+    requireAcpRuntime(this.ctx);
+    if (!agent.acp) throw new Error("ACP 启动配置缺失");
+    const fingerprint = JSON.stringify([agent.acp, agent.timeoutSeconds]);
+    let entry = this.native.get(agent.id);
+    if (entry && entry.fingerprint !== fingerprint) {
+      await this.stop(agent.id);
+      entry = undefined;
+    }
+    if (!entry) {
+      if (this.runtimes.size + this.native.size >= 8)
+        throw new Error("ACP 运行环境已达到 8 个上限");
+      entry = {
+        fingerprint,
+        ready: startNativeAcp(agent.acp, agent.timeoutSeconds),
+      };
+      this.native.set(agent.id, entry);
+      const current = entry;
+      const remove = () => {
+        if (this.native.get(agent.id) === current) this.native.delete(agent.id);
+      };
+      void entry.ready
+        .then((runtime) => runtime.closed.then(remove))
+        .catch(remove);
+    }
+    return entry.ready;
   }
 }

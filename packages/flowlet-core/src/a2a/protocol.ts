@@ -1,5 +1,7 @@
 /** A2A 1.0 JSON-RPC binding. Business/task execution stays in the upstream Agent. */
 export type JsonObject = Record<string, unknown>;
+/** Versioned wire identifier also used by the standalone Flowlet CLI. */
+export const ACP_SESSION_EXTENSION = "urn:flowlet:acp-session:1";
 export const asObject = (value: unknown): JsonObject =>
   value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as JsonObject)

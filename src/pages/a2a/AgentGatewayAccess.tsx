@@ -148,10 +148,11 @@ export function AgentGatewayAccess({
             {JSON.stringify(config.paseo, null, 2)}
           </pre>
           <p className={styles.muted}>
-            ACP 桥使用
-            v1，支持文本、资源链接、会话恢复和任务取消。上游产物以可更新的输出卡片展示；等待补充输入时由用户回复继续。Agent
-            执行能力与底层模型由上游提供，当前仅可选择上游默认模型。启动参数中的
-            --ignore-client-mcp 显式忽略 T3 附带的 MCP
+            ACP 桥使用 v1，支持文本、会话恢复和取消。
+            {agent?.protocol === "acp"
+              ? "原生 ACP 上游提供模型列表时，可在客户端查看并切换。权限询问由用户明确回复。"
+              : "A2A 上游的底层模型由远端管理，当前使用上游默认模型；产物显示为消息，等待补充输入时回复继续。"}
+            启动参数中的 --ignore-client-mcp 显式忽略 T3 附带的 MCP
             配置；桥接不执行或转发这些工具，也不接管客户端文件和终端。
           </p>
         </div>

@@ -2,7 +2,8 @@
 
 Flowlet Node Host（Electron 本机宿主及 Web/Docker）可登记外部 A2A Agent，统一管理调用入口、
 统一 Client Token 和调用记录。入口位于左侧「工作台 → Agent 网关」，会话管理页也保留快捷入口。旧 Rust/Tauri/Android 宿主暂不提供此能力。
-也可登记 ACP stdio 程序，并生成供 ACP 客户端启动的配置，见 [ACP 适配与生命周期](acp-bridge.md)。
+也可登记 ACP stdio 程序，并生成供 ACP 客户端启动的配置；原生 ACP 会话保留真实模型列表与切换，
+A2A Artifact 在 ACP 客户端显示为普通消息而非工具调用，见 [ACP 适配与生命周期](acp-bridge.md)。
 Electron 客户端模式管理的是远程 Node Host 的 Agent；调用方应连接远程 Host，不能把客户端本机网关当作 A2A 入口。
 
 ## 范围与调用链

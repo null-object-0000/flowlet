@@ -188,7 +188,7 @@ export class A2aStore {
     }
     if (activityOnly)
       conditions.push(
-        `(json_extract(value,'$.method') IN ('SendMessage','SendStreamingMessage','CancelTask') OR json_extract(value,'$.error') IS NOT NULL OR json_extract(value,'$.httpStatus') >= 300)`,
+        `(json_extract(value,'$.method') IN ('SendMessage','SendStreamingMessage','CancelTask','session/prompt','session/cancel') OR json_extract(value,'$.error') IS NOT NULL OR json_extract(value,'$.httpStatus') >= 300)`,
       );
     const rows = this.db
       .prepare(

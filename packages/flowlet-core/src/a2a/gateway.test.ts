@@ -11,6 +11,14 @@ import { createWebHost, type WebHost } from "../web/index.ts";
 import { AdminAuth } from "../web/auth.ts";
 import { validateAddress } from "./network.ts";
 import { A2aObserver, a2aGateway } from "./gateway.ts";
+import {
+  client,
+  methods,
+  type SessionUpdate,
+  type RequestPermissionResponse,
+} from "@agentclientprotocol/sdk";
+import { createAcpBridge } from "../../../flowlet-cred/src/acp.ts";
+import { RemoteAcp } from "../../../flowlet-cred/src/acp-remote.ts";
 
 const ADMIN = "a2a-test-admin-credential";
 const UPSTREAM = "a2a-test-upstream-private-token";
@@ -961,6 +969,261 @@ describe("generic A2A gateway through real Host command and HTTP boundaries", ()
     assert.throws(() => gateway.revealKey(created.id), /已撤销/);
     gateway.store.revokeKey("legacy");
   });
+  it(
+    "retains real ACP models and switching without delegating local files, terminals or MCP",
+    { timeout: 30_000 },
+    async () => {
+      const previous = process.env.FLOWLET_ENABLE_ACP;
+      process.env.FLOWLET_ENABLE_ACP = "1";
+      const fixture = fileURLToPath(
+        new URL(
+          "../../../flowlet-agent-bridge/test-agent.mjs",
+          import.meta.url,
+        ),
+      );
+      try {
+        await command("save_a2a_agent", {
+          input: {
+            id: "native",
+            name: "Native",
+            protocol: "acp",
+            acp: {
+              command: process.execPath,
+              args: [fixture],
+              cwd: path.dirname(fixture),
+            },
+            enabled: true,
+            allowPrivateNetwork: false,
+            timeoutSeconds: 10,
+          },
+        });
+        const url = `${base}/a2a/native`;
+        const remote = new RemoteAcp(url, "model-token");
+        await assert.rejects(
+          new RemoteAcp(url, "wrong").call(
+            "initialize",
+            {},
+            AbortSignal.timeout(1000),
+          ),
+          /401/,
+        );
+        await assert.rejects(
+          new RemoteAcp(`${base}/a2a/research`, "model-token").call(
+            "initialize",
+            {},
+            AbortSignal.timeout(1000),
+          ),
+          /404/,
+        );
+        const updates: SessionUpdate[] = [];
+        let localTools = 0,
+          permissionRequests = 0;
+        let asked!: () => void;
+        let answer!: (value: RequestPermissionResponse) => void;
+        const permissionAsked = new Promise<void>((resolve) => {
+          asked = resolve;
+        });
+        const app = client({ name: "native-test" })
+          .onNotification(methods.client.session.update, ({ params }) => {
+            updates.push(params.update);
+          })
+          .onRequest("fs/read_text_file", () => {
+            localTools++;
+            return { content: "LOCAL SECRET" };
+          })
+          .onRequest("terminal/create", () => {
+            localTools++;
+            return { terminalId: "local" };
+          })
+          .onRequest(methods.client.session.requestPermission, () => {
+            permissionRequests++;
+            return new Promise<RequestPermissionResponse>((resolve) => {
+              answer = resolve;
+              asked();
+            });
+          });
+        await app.connectWith(
+          createAcpBridge({
+            url,
+            token: "model-token",
+            prefix: "TEST",
+            dir: directory,
+            timeoutSeconds: 10,
+            ignoreClientMcp: true,
+          }),
+          async (peer) => {
+            const init = await peer.request(methods.agent.initialize, {
+              protocolVersion: 1,
+              clientCapabilities: {
+                fs: { readTextFile: true, writeTextFile: true },
+                terminal: true,
+              },
+            });
+            assert.deepEqual(init.agentCapabilities?.mcpCapabilities, {});
+            const session = await peer.request(methods.agent.session.new, {
+              cwd: "/client/private-workspace",
+              mcpServers: [
+                {
+                  name: "must-not-run",
+                  command: "touch",
+                  args: ["/tmp/flowlet-client-mcp-executed"],
+                  env: [],
+                },
+              ],
+            });
+            assert.equal(session.configOptions?.length, 1);
+            assert.match(
+              JSON.stringify(session.configOptions),
+              /fixture-small/,
+            );
+            assert.match(
+              JSON.stringify(session.configOptions),
+              /fixture-large/,
+            );
+            assert.doesNotMatch(
+              JSON.stringify(session.configOptions),
+              /bypass/,
+            );
+            const switched = await peer.request(
+              methods.agent.session.setConfigOption,
+              {
+                sessionId: session.sessionId,
+                configId: "model",
+                value: "fixture-large",
+              },
+            );
+            assert.equal(
+              switched.configOptions[0].currentValue,
+              "fixture-large",
+            );
+            await assert.rejects(
+              peer.request(methods.agent.session.setConfigOption, {
+                sessionId: session.sessionId,
+                configId: "mode",
+                value: "bypass",
+              }),
+              { code: -32602 },
+            );
+            await assert.rejects(
+              peer.request(methods.agent.session.setConfigOption, {
+                sessionId: session.sessionId,
+                configId: "model",
+                value: "invented",
+              }),
+              { code: -32602 },
+            );
+            await peer.request(methods.agent.session.prompt, {
+              sessionId: session.sessionId,
+              prompt: [{ type: "text", text: "model" }],
+            });
+            assert.ok(
+              updates.some(
+                (update) =>
+                  update.sessionUpdate === "agent_message_chunk" &&
+                  update.content.type === "text" &&
+                  update.content.text === "fixture-large",
+              ),
+            );
+            const independent = await peer.request(methods.agent.session.new, {
+              cwd: "/client/private-workspace",
+              mcpServers: [],
+            });
+            assert.equal(
+              independent.configOptions?.[0].currentValue,
+              "fixture-small",
+            );
+            assert.doesNotMatch(JSON.stringify(updates), /bypass/);
+            await peer.request(methods.agent.session.prompt, {
+              sessionId: session.sessionId,
+              prompt: [{ type: "text", text: "client-tools" }],
+            });
+            const text = JSON.stringify(updates);
+            assert.match(text, /fs\/read_text_file/);
+            assert.match(text, /terminal\/create/);
+            assert.match(text, /mcpServers/);
+            assert.doesNotMatch(
+              text,
+              /must-not-run|LOCAL SECRET|client\/private-workspace/,
+            );
+            assert.equal(localTools, 0);
+            await assert.rejects(
+              peer.request(methods.agent.session.prompt, {
+                sessionId: session.sessionId,
+                prompt: [
+                  {
+                    type: "resource_link",
+                    uri: "file:///client/private",
+                    name: "private",
+                  },
+                ],
+              }),
+              { code: -32602 },
+            );
+            let permissionFinished = false;
+            const permission = peer
+              .request(methods.agent.session.prompt, {
+                sessionId: session.sessionId,
+                prompt: [{ type: "text", text: "permission" }],
+              })
+              .then((result) => {
+                permissionFinished = true;
+                return result;
+              });
+            await permissionAsked;
+            assert.equal(
+              permissionFinished,
+              false,
+              "must wait for the caller's explicit answer",
+            );
+            answer({ outcome: { outcome: "selected", optionId: "deny" } });
+            await permission;
+            assert.equal(permissionRequests, 1);
+            assert.match(JSON.stringify(updates), /deny/);
+            const loaded = await peer.request(methods.agent.session.load, {
+              sessionId: session.sessionId,
+              cwd: "/client/private-workspace",
+              mcpServers: [],
+            });
+            assert.equal(
+              loaded.configOptions?.[0].currentValue,
+              "fixture-large",
+            );
+            const pending = peer.request(methods.agent.session.prompt, {
+              sessionId: session.sessionId,
+              prompt: [{ type: "text", text: "hold" }],
+            });
+            for (
+              let i = 0;
+              i < 100 && !JSON.stringify(updates).includes("waiting");
+              i++
+            )
+              await new Promise((resolve) => setTimeout(resolve, 10));
+            await peer.notify(methods.agent.session.cancel, {
+              sessionId: session.sessionId,
+            });
+            assert.equal((await pending).stopReason, "cancelled");
+          },
+        );
+        const logs = a2aGateway(web.context).calls("native", true);
+        assert.ok(
+          logs.some(
+            (log) =>
+              log.method === "session/prompt" &&
+              log.state === "TASK_STATE_CANCELED",
+          ),
+        );
+        await command("delete_a2a_agent", { id: "native" });
+        await assert.rejects(
+          remote.call("initialize", {}, AbortSignal.timeout(1000)),
+          /404/,
+        );
+      } finally {
+        await a2aGateway(web.context).acp.stop("native");
+        if (previous === undefined) delete process.env.FLOWLET_ENABLE_ACP;
+        else process.env.FLOWLET_ENABLE_ACP = previous;
+      }
+    },
+  );
   it("drains aborted A2A work before the Host closes its database", async () => {
     const created = await command("create_a2a_key", {
       name: "shutdown",

@@ -186,7 +186,14 @@ it("preserves artifact append/replace, direct messages and inline data without f
       .map((update) =>
         JSON.stringify("content" in update ? update.content : null),
       );
-    assert.ok(contents.some((value) => value.includes("old+append")));
+    assert.equal(
+      updates.some(
+        (update) =>
+          update.sessionUpdate === "tool_call" ||
+          update.sessionUpdate === "tool_call_update",
+      ),
+      false,
+    );
     assert.ok(contents.some((value) => value.includes("最终答案")));
     const final = updates.filter(
       (update) => update.sessionUpdate === "agent_message_chunk",

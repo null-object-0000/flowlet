@@ -10,9 +10,8 @@ export type OidcProviderSummary = {
   configured: boolean;
   /** `stored` = 管理台里配过；`env` = 沿用了部署环境变量；`none` = 都没有。 */
   source: "stored" | "env" | "none";
-  /** 部署级 OIDC（issuer / client）是否解析成功；false 时即便打开开关也登录不了。 */
-  deployment_ready: boolean;
   issuer: string;
+  /** 留空表示按 issuer 推导标准 discovery 地址。 */
   discovery_url: string;
   client_id: string;
   display_name: string;
@@ -33,11 +32,22 @@ export type OidcProviderSummary = {
   pkce: string;
   nonce: string;
   secret_set: boolean;
+  /** 库内记录版本；用于防止两个窗口互相覆盖。 */
+  generation: number;
 };
 
 export type OidcProviderInput = {
+  issuer?: string;
+  discovery_url?: string;
+  client_id?: string;
+  /** 留空表示「沿用已保存的 secret」。 */
+  client_secret?: string;
   scopes?: string;
+  redirect_urls?: string[];
   display_name?: string;
+  email_claim?: string;
+  name_claim?: string;
+  groups_claim?: string;
   allowed_subs?: string[];
   allowed_groups?: string[];
   allowed_emails?: string[];
@@ -45,14 +55,29 @@ export type OidcProviderInput = {
   admin_subs?: string[];
   admin_emails?: string[];
   allow_any?: boolean;
+  allow_http_issuer?: boolean;
+  insecure_http?: boolean;
+  pkce?: string;
+  nonce?: string;
+  generation?: number;
+};
+
+export type OidcCheckItem = {
+  key: "issuer" | "discovery" | "endpoints" | "client" | "pkce" | "redirect";
+  status: "ok" | "warning" | "error";
+  message: string;
 };
 
 export type OidcCheckResult = {
   ok: boolean;
   message: string;
+  items: OidcCheckItem[];
+  discovery_url?: string;
   authorization_endpoint?: string;
   token_endpoint?: string;
 };
+
+export type OidcSaveResult = { generation: number; adopted_endpoints: boolean };
 
 export type LoginProviderId = "oidc" | "github";
 
@@ -73,9 +98,9 @@ export async function getOidcAuthProvider(): Promise<OidcProviderSummary> {
   }
 }
 
-export async function saveOidcAuthProvider(input: OidcProviderInput): Promise<void> {
+export async function saveOidcAuthProvider(input: OidcProviderInput): Promise<OidcSaveResult> {
   try {
-    await invokeCommand<void>("set_oidc_auth_provider", { ...input });
+    return await invokeCommand<OidcSaveResult>("set_oidc_auth_provider", { ...input });
   } catch (error) {
     throw toAppError(error, "auth_provider_save_failed");
   }
@@ -91,7 +116,7 @@ export async function deleteOidcAuthProvider(): Promise<void> {
 
 export async function checkOidcAuthProvider(input: OidcProviderInput): Promise<OidcCheckResult> {
   try {
-    return await invokeCommand<OidcCheckResult>("check_oidc_auth_provider", { ...input }, 50_000);
+    return await invokeCommand<OidcCheckResult>("check_oidc_auth_provider", { ...input });
   } catch (error) {
     throw toAppError(error, "auth_provider_check_failed");
   }

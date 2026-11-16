@@ -47,3 +47,10 @@
 @media (max-width: 1050px) {
   .strip:not(.compact) { grid-template-columns: 170px 130px minmax(260px, 1fr) 210px; }
 }
+@media (max-width: 760px) {
+  .strip:not(.compact) { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .strip:not(.compact) { height: auto; padding: 12px 16px; gap: 12px; }
+  .strip:not(.compact) .cell + .cell { padding-left: 0; padding-top: 12px; border-left: 0; border-top: 1px solid var(--flowlet-color-border); height: auto; min-height: 56px; }
+}

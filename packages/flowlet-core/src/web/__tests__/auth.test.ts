@@ -593,7 +593,7 @@ describe("OIDC 模式", () => {
     })).status, 403);
   });
 
-  it("Web Host 重建读取准入与开关，删除覆盖恢复部署默认", async () => {
+  it("Web Host 重建读取整份 OIDC 配置与开关；移除后 OIDC 关闭且不回落过期种子", async () => {
     const provider = new MockOidcProvider();
     await provider.start();
     const meta = new Map<string, string>();
@@ -601,19 +601,39 @@ describe("OIDC 模式", () => {
     const env = oidcEnv(provider, `http://127.0.0.1:${port}`, { FLOWLET_ADMIN_ALLOW_TOKEN_LOGIN: "1", FLOWLET_ADMIN_TOKEN: ADMIN_TOKEN });
     const host = await startHost(env, undefined, meta);
     const headers = { authorization: `Bearer ${ADMIN_TOKEN}`, "content-type": "application/json" };
+    // 自助接管：换 issuer（新的 mock IdP）、新准入、新显示名
+    const second = new MockOidcProvider();
+    await second.start();
     const saved = await request(host.baseUrl, "/api/commands/set_oidc_auth_provider", {
-      method: "POST", headers, body: JSON.stringify({ allowed_subs: ["user-7"], display_name: "Stored IdP" }),
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        issuer: second.issuer,
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
+        discovery_url: `${second.issuer}/.well-known/openid-configuration`,
+        allowed_subs: ["user-7"],
+        display_name: "Stored IdP",
+        allow_http_issuer: true,
+        insecure_http: true,
+      }),
     });
     assert.equal(saved.status, 200);
+    assert.equal(host.auth.config.oidc?.issuer, second.issuer);
     assert.equal((await request(host.baseUrl, "/api/commands/set_admin_login_mode", { method: "POST", headers, body: '{"enabled":[]}' })).status, 200);
     // 独立 Host 实例模拟重启，用相同 app_meta 持久化记录。
     const nextPort = await freePort();
     const next = await startHost({ ...env, FLOWLET_PUBLIC_WEB_URL: `http://127.0.0.1:${nextPort}` }, undefined, meta);
+    assert.equal(next.auth.config.oidc?.issuer, second.issuer);
     assert.deepEqual(next.auth.config.oidc?.allowedSubs, ["user-7"]);
+    assert.equal(next.auth.config.oidc?.displayName, "Stored IdP");
     assert.deepEqual((await request(next.baseUrl, "/api/auth/config")).json?.providers, []);
+    // 有静态凭据兜底，允许移除
     assert.equal((await request(next.baseUrl, "/api/commands/delete_oidc_auth_provider", { method: "POST", headers, body: "{}" })).status, 200);
-    assert.deepEqual(next.auth.config.oidc?.allowedSubs, ["user-1"]);
-    assert.deepEqual(next.auth.enabledProviders(), []);
+    // 移除后：库内记录是墓碑，重启也不会被环境变量种子拉起来
+    const after = await startHost({ ...env, FLOWLET_PUBLIC_WEB_URL: `http://127.0.0.1:${await freePort()}` }, undefined, meta);
+    assert.equal(after.auth.config.oidc, null);
+    assert.deepEqual(after.auth.enabledProviders(), []);
   });
 
   it("禁用提供方会拒绝已发起的 callback，现有会话仍可用", async () => {

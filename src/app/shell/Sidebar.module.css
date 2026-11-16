@@ -47,3 +47,14 @@
   padding-top: 10px;
   border-top: 1px solid var(--flowlet-color-border);
 }
+@media (max-width: 760px) {
+  .inner { height: auto; gap: 8px; }
+  .brand { min-height: 32px; padding: 0; border: 0; }
+  .brandCopy { display: none; }
+  .nav { flex-direction: row; overflow-x: auto; margin: 0; gap: 4px; }
+  .navGroup { display: contents; }
+  .navGroup + .navGroup { margin: 0; }
+  .navLabel { display: none; }
+  .nav a { flex: none; min-height: 44px; white-space: nowrap; }
+  .footer { padding: 0; border: 0; }
+}

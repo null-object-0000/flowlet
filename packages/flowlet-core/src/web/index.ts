@@ -24,11 +24,7 @@ import { CommandError } from "../types.ts";
 import type { SqliteStorage } from "../storage/index.ts";
 import { AdminAuth, viewerCanRunCommand, type AuthProviderId, type AuthResponse } from "./auth.ts";
 import { hasStoredGithubProvider, readGithubProvider } from "./auth-providers.ts";
-import {
-  hasStoredOidcProvider,
-  readLoginMode,
-  readOidcProviderOverride,
-} from "./auth-oidc-provider.ts";
+import { applyStoredOidcOnStartup, readLoginMode } from "./auth-oidc-provider.ts";
 import { CLI_ALLOWED_COMMANDS, createCliAuth, type CliAuthStorage } from "./cli-auth.ts";
 import {
   prepareEnvPrefixTarget,
@@ -253,15 +249,19 @@ export function createWebHost(options: WebHostOptions): WebHost {
     desktop: options.desktop,
   };
 
+  // GitHub 登录的 token 交换要跟模型请求走同一个上游代理：
+  // Node 全局 fetch 不读 HTTP(S)_PROXY，墙内机器调 github.com 会超时，登录表现为 provider_unavailable。
+  auth.setUpstreamProxy(ctx.upstreamProxy);
+
   // 库里有记录（含「已关闭」的墓碑）就以库为准，没有记录才用环境变量当种子。
   if (hasStoredGithubProvider(options.storage)) {
     auth.applyGithubConfig(readGithubProvider(options.storage, options.secrets));
   }
-  // OIDC 准入/展示覆盖：墓碑恢复部署默认，部署凭据和协议参数始终不变。
-  // 只有部署级 OIDC 解析成功时才读库——否则 oidc 为 null，没什么可覆盖的。
-  if (auth.oidcDeployed() && hasStoredOidcProvider(options.storage)) {
-    const override = readOidcProviderOverride(options.storage);
-    if (override !== null) auth.applyOidcRuntimeConfig(override);
+  // OIDC 整份配置（issuer / client / 准入 / 角色）同理：库内记录完整接管，
+  // 墓碑则关掉 OIDC 且不回落环境变量；没有记录时才继续用环境变量种子。
+  const oidcRestore = applyStoredOidcOnStartup(auth, options.storage, options.secrets);
+  if (oidcRestore.source === "invalid" || oidcRestore.source === "tombstone") {
+    console.warn(`OIDC 登录方式：库内配置状态为 ${oidcRestore.source}，当前不可用`);
   }
   // 登录方式开关：从没保存过时跟随配置（旧部署行为不变）。
   const loginMode = readLoginMode(options.storage, {

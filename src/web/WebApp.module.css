@@ -7,3 +7,45 @@
 .login > :global(.semi-card) {
   width: min(420px, 92vw);
 }
+.login { padding: 32px; box-sizing: border-box; min-height: 100svh; background: var(--flowlet-color-main-bg, var(--semi-color-bg-0)); }
+.loginLayout { width: min(100%, 1000px); display: grid; grid-template-columns: 1fr 420px; gap: 80px; align-items: center; }
+.loginIntro { display: grid; justify-items: start; gap: 22px; }
+.loginIntro > span { color: var(--semi-color-text-2); font-size: 11px; font-weight: 650; letter-spacing: .2em; }
+.loginIntro h1 { margin: 0; font-size: clamp(32px, 4vw, 48px); line-height: 1.25; letter-spacing: -.045em; }
+.loginIntro p { margin: 0; color: var(--semi-color-text-1); line-height: 1.9; }
+.loginIntro small { color: var(--semi-color-text-2); }
+.loginCard { min-width: 0; padding: 36px; border: 1px solid var(--semi-color-border); border-radius: 20px; background: var(--semi-color-bg-1); box-shadow: 0 12px 48px #00000008; }
+.loginCard h2 { margin: 0 0 10px; font-size: 26px; letter-spacing: -.03em; }
+.loginCard header p { color: var(--semi-color-text-2); margin: 0 0 30px; }
+.loginCard > :global(.semi-space), .loginCard form, .loginCard :global(.semi-space-item) { width: 100%; }
+.loginCard :global(.semi-input-wrapper) { min-height: 44px; }
+.loginCard footer { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--semi-color-border); font-size: 12px; color: var(--semi-color-text-2); }
+.users { padding: 20px; display: grid; gap: 16px; }
+.userRow { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; padding: 18px 0; border-bottom: 1px solid var(--semi-color-border); }
+.userRow > div:first-child { flex: 1; min-width: 180px; overflow-wrap: anywhere; }
+.userRow p { margin: 6px 0; color: var(--semi-color-text-1); }
+.userRow small { color: var(--semi-color-text-2); }
+@media (max-width: 760px) {
+  .login { padding: 24px 16px; }
+  .loginLayout { grid-template-columns: 1fr; gap: 28px; max-width: 440px; }
+  .loginIntro { gap: 12px; }
+  .loginIntro h1 { font-size: 30px; }
+  .loginIntro p, .loginIntro small { display: none; }
+  .loginCard { padding: 26px 22px; }
+  .webShell > div { grid-template-columns: minmax(0, 1fr); min-height: 100svh; }
+  .webShell > div > aside { height: auto; padding: 8px 12px; border-right: 0; border-bottom: 1px solid var(--semi-color-border); }
+  .webShell > div > main { height: auto; min-height: 0; padding: 16px 12px calc(24px + env(safe-area-inset-bottom)); overflow: visible; }
+  .webShell :global(.semi-table-container) { overflow-x: auto; }
+  .webShell :global(.semi-tabs-bar) { overflow-x: auto; }
+  :global(.semi-sidesheet) { max-width: 100vw; }
+  :global(.semi-modal) { max-width: calc(100vw - 24px); }
+  .userRow { align-items: flex-start; }
+}
+@media (max-width: 760px) {
+  .webShell :global(.semi-space-horizontal) { flex-wrap: wrap; }
+  .webShell :global(.semi-table-pagination) { flex-wrap: wrap; gap: 8px; }
+  .webShell :global(.semi-input-wrapper), .webShell :global(.semi-select) { max-width: 100%; }
+  .webShell pre { overflow-x: auto; max-width: 100%; }
+  .webShell button { touch-action: manipulation; }
+  .loginCard :global(.semi-input) { font-size: 16px; }
+}

@@ -49,3 +49,8 @@ button.rowMain { cursor: pointer; }
 .agentChevron { color: var(--flowlet-color-text-tertiary); }
 .agentRow:hover .agentChevron { color: var(--flowlet-color-primary); }
 @media (max-width: 900px) { .grid { grid-template-columns: 1fr; grid-template-rows: auto; overflow-y: auto; } .accounts { grid-row: auto; } .grid > div { min-height: 220px; } }
+@media (max-width: 760px) {
+  .page { height: auto; overflow: visible; display: flex; flex-direction: column; }
+  .grid { display: flex; flex-direction: column; overflow: visible; }
+  .grid > div { min-height: 240px; }
+}

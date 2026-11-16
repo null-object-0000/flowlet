@@ -50,3 +50,7 @@
   background: var(--flowlet-color-border);
   margin: 9px 6px;
 }
+@media (max-width: 760px) {
+  .nav { flex-direction: row; overflow-x: auto; padding: 6px; }
+  .button { width: auto; min-height: 44px; flex: none; }
+}

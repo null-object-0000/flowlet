@@ -228,3 +228,16 @@ cargo run --manifest-path src-tauri/Cargo.toml --no-default-features --features 
 默认监听 `127.0.0.1:8080` 和 `127.0.0.1:18640`，数据库位于 `flowlet-data/`。
 桌面构建继续使用默认 Cargo feature；`core::web` 与 `headless` 二进制只在 `legacy-server`
 下编译，不会进入桌面产物。
+
+### 管理用户与邮箱关联
+
+Web Host 将登录用户档案保存到数据库同目录下的 `users.json`（权限 0600），会话保留稳定的
+`userId`。管理员可在「设置 → 用户管理」搜索用户、调整管理员/只读角色或停用账号；停用与
+角色修改在后续请求立即生效，并至少保留一名启用的管理员。部署时请连同数据卷一起备份。
+用户仍须先通过登录提供方的准入规则；用户目录不会绕过准入。
+
+首次登录自动创建用户，不提供本地密码注册。邮箱忽略首尾空白与大小写；只有 OIDC 的
+`email_verified=true` 或 GitHub `/user/emails` 的 primary + verified 邮箱才默认关联多个
+登录身份。没有验证邮箱的身份按 issuer + subject 独立记录。换邮箱仍保留用户 ID；不会修改
+邮箱的点号或加号标签。现有配置、服务凭据、请求记录仍是实例共享资源，此功能不引入用户
+数据隔离。静态管理凭据属于实例管理员入口，不伪造为邮箱用户。

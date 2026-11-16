@@ -1,3 +1,4 @@
+import { UserDirectory } from "./web/users.ts";
 // Flowlet Node host entry point — behavioural replacement for the Rust
 // `headless` binary (src-tauri/src/bin/headless.rs). Owner: lead.
 //
@@ -172,6 +173,7 @@ export async function startHost(
   const sessionStore = openAdminSessionStore(join(dataDir, "admin-sessions.json"));
   // 与 Rust headless 顺序一致：先解析管理端鉴权配置（配置错误在打开数据库之前失败）。
   const auth = AdminAuth.fromEnv(process.env, undefined, sessionStore);
+  auth.userDirectory = new UserDirectory(join(dataDir, "users.json"));
   const deviceIdentity = loadOrCreateDeviceIdentity(dataDir);
   // 三方服务凭据的静态加密密钥：secret.key 随数据卷（Docker /data）持久化。
   const secrets = SecretBox.loadOrCreate(dataDir);

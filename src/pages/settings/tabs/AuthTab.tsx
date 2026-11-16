@@ -13,7 +13,6 @@ import {
 import {
   getAdminLoginMode,
   saveAdminLoginMode,
-  type AdminLoginMode,
   type LoginProviderId,
 } from "../../../domains/settings/oidcAuthProvider";
 import { OidcAuthSection } from "./OidcAuthSection";
@@ -60,10 +59,8 @@ const EMPTY_DRAFT: Draft = {
  */
 export function AuthTab() {
   const [summary, setSummary] = useState<GithubProviderSummary | null>(null);
-  const [loginMode, setLoginMode] = useState<AdminLoginMode | null>(null);
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
   const [loading, setLoading] = useState(true);
-  const [oidcBusy, setOidcBusy] = useState(false);
   const [busy, setBusy] = useState<"save" | "check" | "delete" | null>(null);
   const [checkResult, setCheckResult] = useState<{ ok: boolean; message: string } | null>(null);
 
@@ -72,7 +69,6 @@ export function AuthTab() {
     try {
       const [next, mode] = await Promise.all([getGithubAuthProvider(), getAdminLoginMode()]);
       setSummary(next);
-      setLoginMode(mode);
       setDraft({
         enabled: mode.enabled.includes("github"),
         clientId: next.client_id,
@@ -126,12 +122,14 @@ export function AuthTab() {
     }
   };
 
-  /** 只改 GitHub 这一个开关：另一个提供方的状态原样带上，两个开关一起保存。 */
+  /**
+   * 只改 GitHub 这一个开关：另一个提供方的状态**现取现用**，不能拿组件挂载时的快照，
+   * 否则在 OIDC 段改过开关后再保存 GitHub 会把 OIDC 改回旧值。
+   */
   const commitGithubEnabled = async (enabled: boolean) => {
-    const current = (await getAdminLoginMode()).enabled;
-    const others = current.filter((id): id is LoginProviderId => id !== "github");
+    const current = await getAdminLoginMode();
+    const others = current.enabled.filter((id): id is LoginProviderId => id !== "github");
     await saveAdminLoginMode([...others, ...(enabled ? (["github"] as LoginProviderId[]) : [])]);
-    setLoginMode(await getAdminLoginMode());
   };
 
   const onSave = async () => {
@@ -162,26 +160,30 @@ export function AuthTab() {
     }
   };
 
+  const githubStatus = loading
+    ? "读取中…"
+    : summary?.configured
+      ? draft.enabled
+        ? "已启用"
+        : "已配置，未启用"
+      : "尚未配置";
+
   return (
     <>
-      <OidcAuthSection loginMode={loginMode} disabled={busy !== null} onBusyChange={setOidcBusy} onSaved={() => void reload()} />
+      <OidcAuthSection onSaved={() => void reload()} />
       <SettingSection
         title="GitHub 登录"
-        note={
-          loading
-            ? "读取中…"
-            : (summary?.configured ? "已配置 · " : "未配置 · ") +
-              "公网域名入口默认走 GitHub。改完立即生效，不需要重启服务。"
-        }
+        note={`${githubStatus} · 公网域名入口默认走 GitHub；与 GitLab 一样，谁能登录、谁能管理都在这里设置，保存立即生效。`}
         keywords="github oauth 登录 单点登录 sso 认证 角色 只读"
       >
         <SettingRow
-          name="启用 GitHub 登录"
-          help="登录页是否出现这个入口。关掉不影响已登录的会话。"
+          name="在登录页启用 GitHub 登录"
+          help="关掉只是不再提供这个入口，已登录的会话不受影响。"
           control={
             <Switch
+              aria-label="在登录页启用 GitHub 登录"
               checked={draft.enabled}
-              disabled={loading || busy !== null || oidcBusy}
+              disabled={loading || busy !== null}
               onChange={(value) => patch({ enabled: value })}
             />
           }
@@ -252,9 +254,7 @@ export function AuthTab() {
         <SettingRow
           name="允许任何人登录"
           help="管理台能读全部服务凭据，打开前请确认后果。"
-          control={
-            <Switch checked={draft.allowAny} onChange={(value) => patch({ allowAny: value })} />
-          }
+          control={<Switch checked={draft.allowAny} onChange={(value) => patch({ allowAny: value })} />}
         />
         <SettingRow
           name="回调地址"
@@ -265,6 +265,15 @@ export function AuthTab() {
             </Typography.Text>
           }
         />
+        {checkResult ? (
+          <div style={{ padding: "0 16px 8px" }}>
+            <Banner
+              type={checkResult.ok ? "success" : "danger"}
+              description={checkResult.message}
+              closeIcon={null}
+            />
+          </div>
+        ) : null}
         <div
           style={{
             display: "flex",
@@ -274,30 +283,21 @@ export function AuthTab() {
             borderTop: "1px solid var(--semi-color-border)",
           }}
         >
-          <Button disabled={loading || busy !== null || oidcBusy} loading={busy === "check"} onClick={() => void onCheck()}>
+          <Button disabled={loading || busy !== null} loading={busy === "check"} onClick={() => void onCheck()}>
             校验凭据
           </Button>
           <Button
             type="danger"
             loading={busy === "delete"}
-            disabled={loading || busy !== null || oidcBusy || !summary?.configured}
+            disabled={loading || busy !== null || !summary?.configured}
             onClick={() => void onDelete()}
           >
             关闭
           </Button>
-          <Button disabled={loading || busy !== null || oidcBusy} theme="solid" loading={busy === "save"} onClick={() => void onSave()}>
+          <Button disabled={loading || busy !== null} theme="solid" loading={busy === "save"} onClick={() => void onSave()}>
             保存
           </Button>
         </div>
-        {checkResult && (
-          <div style={{ padding: "0 16px 12px" }}>
-            <Banner
-              type={checkResult.ok ? "success" : "danger"}
-              description={checkResult.message}
-              closeIcon={null}
-            />
-          </div>
-        )}
       </SettingSection>
     </>
   );

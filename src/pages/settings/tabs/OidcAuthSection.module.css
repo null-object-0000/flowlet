@@ -1,0 +1,396 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 0 24px;
+}
+
+/* ── 顶部状态条 ─────────────────────────────────────────────── */
+
+.hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--flowlet-color-border);
+  border-radius: var(--flowlet-radius-card);
+  background: var(--flowlet-color-surface);
+}
+
+.heroIcon {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: var(--flowlet-color-primary);
+  background: var(--flowlet-color-primary-soft);
+}
+
+.heroText {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.heroTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: var(--flowlet-font-size-body-strong);
+  line-height: var(--flowlet-line-height-body-strong);
+  font-weight: 650;
+  color: var(--flowlet-color-text);
+}
+
+.heroMeta {
+  font-size: var(--flowlet-font-size-caption);
+  line-height: var(--flowlet-line-height-caption);
+  color: var(--flowlet-color-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.heroSwitch {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--flowlet-font-size-caption);
+  color: var(--flowlet-color-text-secondary);
+}
+
+/* ── 状态徽标 ───────────────────────────────────────────────── */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: var(--flowlet-font-size-caption);
+  line-height: var(--flowlet-line-height-caption);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badgeDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.badgeOk {
+  color: var(--flowlet-color-success);
+  background: var(--semi-color-success-light-default);
+}
+
+.badgeWarn {
+  color: var(--flowlet-color-warning-text);
+  background: var(--flowlet-color-warning-surface);
+  border-color: var(--flowlet-color-warning-border);
+}
+
+.badgeOff {
+  color: var(--flowlet-color-text-secondary);
+  background: var(--flowlet-color-surface-muted);
+  border-color: var(--flowlet-color-border);
+}
+
+.badgeInfo {
+  color: var(--flowlet-color-primary);
+  background: var(--flowlet-color-primary-soft);
+}
+
+/* ── 卡片 ───────────────────────────────────────────────────── */
+
+.card {
+  border: 1px solid var(--flowlet-color-border);
+  border-radius: var(--flowlet-radius-card);
+  background: var(--flowlet-color-surface);
+  padding: 14px 16px 12px;
+}
+
+.cardHead {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 24px;
+}
+
+.cardCopy {
+  min-width: 0;
+  flex: 1;
+}
+
+.stepNo {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: var(--flowlet-font-size-caption);
+  font-weight: 700;
+  color: var(--flowlet-color-text-secondary);
+  background: var(--flowlet-color-surface-muted);
+  border: 1px solid var(--flowlet-color-border);
+}
+
+.stepNoDone {
+  color: var(--flowlet-color-success);
+  border-color: transparent;
+  background: var(--semi-color-success-light-default);
+}
+
+.cardTitle {
+  font-size: var(--flowlet-font-size-body);
+  line-height: var(--flowlet-line-height-body);
+  font-weight: 650;
+  color: var(--flowlet-color-text);
+}
+
+.cardHint {
+  font-size: var(--flowlet-font-size-caption);
+  line-height: var(--flowlet-line-height-caption);
+  color: var(--flowlet-color-text-tertiary);
+  margin-top: 2px;
+}
+
+.cardAction {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.cardBody {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ── 表单网格 ───────────────────────────────────────────────── */
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+.span2 {
+  grid-column: 1 / -1;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.label {
+  font-size: var(--flowlet-font-size-body-compact);
+  line-height: var(--flowlet-line-height-body-compact);
+  font-weight: 600;
+  color: var(--flowlet-color-text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.required {
+  color: var(--semi-color-danger);
+}
+
+.help {
+  font-size: var(--flowlet-font-size-caption);
+  line-height: var(--flowlet-line-height-caption);
+  color: var(--flowlet-color-text-tertiary);
+}
+
+.inlineError {
+  font-size: var(--flowlet-font-size-caption);
+  line-height: var(--flowlet-line-height-caption);
+  color: var(--semi-color-danger);
+}
+
+/* ── 名单：可登录 / 管理员 ─────────────────────────────────── */
+
+.roster {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+.rolePreview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--flowlet-radius-control);
+  background: var(--flowlet-color-surface-muted);
+  font-size: var(--flowlet-font-size-caption);
+  line-height: var(--flowlet-line-height-caption);
+  color: var(--flowlet-color-text-secondary);
+}
+
+.rolePreview strong {
+  color: var(--flowlet-color-text);
+}
+
+.warnNote {
+  padding: 8px 10px;
+  border-radius: var(--flowlet-radius-control);
+  border: 1px solid var(--flowlet-color-warning-border);
+  background: var(--flowlet-color-warning-surface);
+  color: var(--flowlet-color-warning-text);
+  font-size: var(--flowlet-font-size-caption);
+  line-height: var(--flowlet-line-height-caption);
+}
+
+/* ── 校验结果 ───────────────────────────────────────────────── */
+
+.checkList {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid var(--flowlet-color-border);
+  border-radius: var(--flowlet-radius-control);
+  overflow: hidden;
+}
+
+.checkItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  font-size: var(--flowlet-font-size-body-compact);
+  line-height: var(--flowlet-line-height-body-compact);
+  color: var(--flowlet-color-text);
+  background: var(--flowlet-color-surface);
+}
+
+.checkItem + .checkItem {
+  border-top: 1px solid var(--flowlet-color-border);
+}
+
+.checkIcon {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  font-weight: 800;
+  color: #fff;
+}
+
+.checkOk {
+  background: var(--flowlet-color-success);
+}
+
+.checkWarn {
+  background: var(--semi-color-warning);
+}
+
+.checkError {
+  background: var(--semi-color-danger);
+}
+
+.checkText {
+  min-width: 0;
+  flex: 1;
+  word-break: break-word;
+}
+
+/* ── 页脚操作条 ─────────────────────────────────────────────── */
+
+.footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border: 1px solid var(--flowlet-color-border);
+  border-radius: var(--flowlet-radius-card);
+  background: var(--flowlet-color-surface-strong);
+  box-shadow: var(--flowlet-shadow-card);
+}
+
+.footerStatus {
+  min-width: 0;
+  flex: 1;
+  font-size: var(--flowlet-font-size-caption);
+  line-height: var(--flowlet-line-height-caption);
+  color: var(--flowlet-color-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dirty {
+  color: var(--flowlet-color-warning-text);
+  font-weight: 600;
+}
+
+.advanced {
+  border: 1px solid var(--flowlet-color-border);
+  border-radius: var(--flowlet-radius-card);
+  background: var(--flowlet-color-surface);
+}
+
+.advancedSummary {
+  cursor: pointer;
+  list-style: none;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--flowlet-font-size-body);
+  font-weight: 600;
+  color: var(--flowlet-color-text);
+}
+
+.advancedSummary::-webkit-details-marker {
+  display: none;
+}
+
+.advancedSummary::after {
+  content: "展开";
+  margin-left: auto;
+  font-size: var(--flowlet-font-size-caption);
+  font-weight: 400;
+  color: var(--flowlet-color-text-tertiary);
+}
+
+.advanced[open] .advancedSummary::after {
+  content: "收起";
+}
+
+.advancedBody {
+  padding: 0 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+@media (max-width: 760px) {
+  .grid,
+  .roster {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

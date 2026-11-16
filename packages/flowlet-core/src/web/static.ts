@@ -33,6 +33,10 @@ const CONTENT_TYPES: Record<string, string> = {
   ".ttf": "font/ttf",
   ".otf": "font/otf",
   ".txt": "text/plain",
+  // 安装脚本必须带 charset：PowerShell 5.1 的 irm 对 application/octet-stream 按 Latin-1 解码，
+  // 会把中文打成「å®è£…」。显式 charset=utf-8 后客户端才会按 UTF-8 解析。
+  ".sh": "text/plain; charset=utf-8",
+  ".ps1": "text/plain; charset=utf-8",
   ".wasm": "application/wasm",
 };
 

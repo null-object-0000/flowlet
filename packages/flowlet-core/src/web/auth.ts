@@ -1,3 +1,4 @@
+import type { UserDirectory } from "./users.ts";
 // Web Host 管理端鉴权（token / OIDC 两种模式）。Owner: node-web.
 //
 // 权威实现：src-tauri/src/core/web/auth.rs（1430 行）逐行为等价：
@@ -13,6 +14,7 @@ import { createHash, createPublicKey, createHmac, randomUUID, timingSafeEqual, v
 import { readFileSync } from "node:fs";
 
 import type { JsonRow } from "../types.ts";
+import { httpJson, type AgentProxySettings } from "../agent/http.ts";
 import type { AdminSessionStore, PersistedAdminSession } from "./session-store.ts";
 
 const ADMIN_COOKIE = "flowlet-admin";
@@ -56,7 +58,14 @@ export interface OidcConfig {
   pkce: PkceMode;
   nonce: NonceMode;
   signingAlgs: string[];
-
+  /**
+   * 来源：`env` = 本次进程启动时由 `FLOWLET_OIDC_*` 解析出的种子；`stored` = 管理台保存后
+   * 直接生效的库内配置。
+   *
+   * 用途只有一个：`oidcDeployment` 会保存「部署种子」供界面展示来源与「移除后回落」，
+   * 库内配置生效时不能把自己当成种子（否则删除后回落到自己，等于删不掉）。
+   */
+  source?: "env" | "stored";
 }
 
 export interface AdminAuthConfig {
@@ -113,6 +122,9 @@ export interface GithubConfig {
 }
 
 export interface Identity {
+  userId?: string;
+  emailVerified?: boolean;
+  identityIssuer?: string;
   sub: string;
   email: string | null;
   username: string | null;
@@ -138,6 +150,7 @@ export type IdentityRole = "admin" | "viewer";
  * 不会误放（新加的命令默认属于管理员）。
  */
 export function viewerCanRunCommand(command: string): boolean {
+  if (command === "list_managed_users" || command === "update_managed_user") return false;
   if (!/^(get|list|read|query|describe|check)_/.test(command)) return false;
   return !/(credential|secret|token|auth|login|cli|export|key|reveal|config|setting)/i.test(
     command.replace(/^[a-z]+_/, ""),
@@ -530,6 +543,7 @@ export function adminAuthConfigFromEnv(
       pkce,
       nonce,
       signingAlgs,
+      source: "env",
     },
     github,
     enabledProviders: null,
@@ -743,22 +757,58 @@ function requestOriginOf(
 // ─── AdminAuth ──────────────────────────────────────────────────────────────
 
 export class AdminAuth {
+  userDirectory?: UserDirectory;
   readonly config: AdminAuthConfig;
   #sessions = new Map<string, Session>();
   #transactions = new Map<string, Transaction>();
   #discovery: Cached<DiscoveryDoc> | null = null;
   #jwks: Cached<Jwk[]> | null = null;
   #sessionStore: AdminSessionStore | null;
+  /** 上游代理（与模型调用同一套配置）；非空时 GitHub 请求走它，否则回落到 env 代理。 */
+  #upstreamProxy: AgentProxySettings | null = null;
+  /**
+   * 环境变量解析出的 OIDC「部署种子」（本次进程启动时捕获，不可变）。
+   *
+   * 用途：管理台展示「来源」、接管时沿用 secret、「移除库内配置」时回落。
+   * 注意这只代表**进程启动时**环境变量的样子：如果库内配置早已接管，它可能已经过期，
+   * 所以移除后是否仍可用要看它能否连上 discovery，界面会据「校验」结果提示重新配置。
+   */
   readonly oidcDeployment: OidcConfig | null;
 
   private constructor(config: AdminAuthConfig, sessionStore: AdminSessionStore | null = null) {
     this.config = config;
-    this.oidcDeployment = config.oidc === null ? null : structuredClone(config.oidc);
+    // 只在种子确实是「环境变量」时记下来：库内配置进来的不能当成种子，否则删除后回落到自己。
+    this.oidcDeployment =
+      config.oidc === null || config.oidc.source === "stored" ? null : structuredClone(config.oidc);
     this.#sessionStore = sessionStore;
   }
 
   static fromConfig(config: AdminAuthConfig, sessionStore: AdminSessionStore | null = null): AdminAuth {
     return new AdminAuth(config, sessionStore);
+  }
+
+  /**
+   * 注入上游代理（与模型请求同一份 upstreamProxy 配置）。
+   *
+   * 为什么需要：Node 全局 fetch 不吃 HTTP(S)_PROXY，墙内机器调 github.com 换 token 会超时，
+   * 表现为登录失败 provider_unavailable。这里改用 undici + dispatcher，才能复用代理。
+   */
+  setUpstreamProxy(proxy: AgentProxySettings | null): void {
+    this.#upstreamProxy = proxy;
+  }
+
+  async #httpJson(
+    url: string,
+    init: { method?: "GET" | "POST"; headers?: Record<string, string>; body?: string },
+  ): Promise<{ status: number; text: string }> {
+    const res = await httpJson(url, {
+      method: init.method ?? "GET",
+      headers: init.headers,
+      body: init.body,
+      timeoutMs: OIDC_HTTP_TIMEOUT_MS,
+      proxy: this.#upstreamProxy,
+    });
+    return { status: res.status, text: res.text };
   }
 
   /**
@@ -770,11 +820,10 @@ export class AdminAuth {
   }
 
   /**
-   * 热替换 OIDC 的**运行时**部分（准入名单、角色名单、展示名、scope）。
+   * 热替换 OIDC 的**准入 / 角色 / 展示**部分（不动 issuer 与凭据）。
    *
-   * 部署级字段（issuer / discovery / client 凭据 / 签名算法）仍然只来自环境变量：
-   * 它们要与 GitLab 应用登记的回调地址、容器网络可达性对齐，改了必须重新部署。
-   * 有没有部署级 OIDC 配置与「OIDC 是否启用」是两件事（见 `setEnabledProviders`）。
+   * 完整替换（含 issuer、client、回调白名单）请用 `applyOidcConfig`：那个会清发现缓存。
+   * 有没有可用的 OIDC 配置与「OIDC 是否启用」是两件事（见 `setEnabledProviders`）。
    */
   applyOidcRuntimeConfig(patch: Partial<Pick<OidcConfig,
     "scopes" | "displayName" | "allowedSubs" | "allowedGroups" | "allowedEmails" |
@@ -785,12 +834,29 @@ export class AdminAuth {
   }
 
   /**
+   * 整体替换 OIDC 配置（管理台保存 / 移除后调用；传 null 表示没有可用的 OIDC）。
+   *
+   * 与 `applyOidcRuntimeConfig` 的区别：这里连 issuer / client / 回调白名单一起换，
+   * 所以必须同时清掉发现文档与 JWKS 缓存，否则会继续拿旧 issuer 的端点。
+   */
+  applyOidcConfig(oidc: OidcConfig | null): void {
+    this.config.oidc = oidc;
+    this.invalidateOidcDiscovery();
+  }
+
+  /**
    * 把 OIDC 运行时字段恢复成部署默认值（管理台移除库内覆盖后调用）。
    *
    * 部署级字段（issuer / discovery / client）不动；只重设准入、角色与展示。
    */
   resetOidcRuntimeConfig(): void {
     if (this.oidcDeployment !== null) this.config.oidc = structuredClone(this.oidcDeployment);
+  }
+
+  /** ① 应用 OIDC 后把发现文档 / JWKS 缓存清空：issuer 或端点变了必须重新取。 */
+  invalidateOidcDiscovery(): void {
+    this.#discovery = null;
+    this.#jwks = null;
   }
 
   /** 当前部署有没有可用的 OIDC 配置（与开关无关）。 */
@@ -897,6 +963,20 @@ export class AdminAuth {
       this.#sessions.delete(key);
       this.#sessionStore?.remove(key);
       return null;
+    }
+    if (this.userDirectory && !session.identity.userId) {
+      try {
+        session.identity.identityIssuer ??=
+          session.identity.provider === this.config.github?.displayName ? this.config.github.apiBase :
+          session.identity.provider === this.config.oidc?.displayName ? this.config.oidc.issuer : undefined;
+        const user = this.userDirectory.login(session.identity);
+        session.identity.userId = user.id;
+      } catch { return null; }
+    }
+    if (this.userDirectory && session.identity.userId) {
+      const user = this.userDirectory.find(session.identity.userId);
+      if (!user?.enabled) return null;
+      session.identity.role = user.role;
     }
     session.lastSeenMs = now;
     this.#persistSession(key, session, now, false);
@@ -1023,6 +1103,11 @@ export class AdminAuth {
   }
 
   #createSession(identity: Identity): { raw: string; csrf: string } {
+    if (this.userDirectory) {
+      const user = this.userDirectory.login(identity);
+      identity.userId = user.id;
+      identity.role = user.role;
+    }
     const raw = randomToken();
     const key = sha256Hex(raw);
     const csrf = randomToken();
@@ -1334,22 +1419,20 @@ export class AdminAuth {
     accessToken: string,
   ): Promise<unknown> {
     try {
-      const response = await fetch(`${github.apiBase}${path}`, {
+      const response = await this.#httpJson(`${github.apiBase}${path}`, {
         method: "GET",
-        redirect: "manual",
         headers: {
           accept: "application/vnd.github+json",
           authorization: `Bearer ${accessToken}`,
           "user-agent": "flowlet-admin-auth",
           "x-github-api-version": "2022-11-28",
         },
-        signal: AbortSignal.timeout(OIDC_HTTP_TIMEOUT_MS),
       });
       if (response.status < 200 || response.status >= 300) {
         console.warn(`GitHub API ${path} -> HTTP ${response.status}`);
         return null;
       }
-      return JSON.parse(await response.text());
+      return JSON.parse(response.text);
     } catch (error) {
       console.warn(`GitHub API ${path} failed: ${errorMessage(error)}`);
       return null;
@@ -1369,22 +1452,20 @@ export class AdminAuth {
     form.append("redirect_uri", transaction.redirectUri);
     let accessToken: string | null = null;
     try {
-      const response = await fetch(github.tokenUrl, {
+      const response = await this.#httpJson(github.tokenUrl, {
         method: "POST",
-        redirect: "manual",
         headers: {
           accept: "application/json",
           "content-type": "application/x-www-form-urlencoded",
           "user-agent": "flowlet-admin-auth",
         },
         body: form.toString(),
-        signal: AbortSignal.timeout(OIDC_HTTP_TIMEOUT_MS),
       });
       if (response.status < 200 || response.status >= 300) {
         console.warn(`GitHub token endpoint rejected the code: HTTP ${response.status}`);
         return "login_failed";
       }
-      const parsed: unknown = JSON.parse(await response.text());
+      const parsed: unknown = JSON.parse(response.text);
       const value =
         parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
           ? (parsed as Record<string, unknown>).access_token
@@ -1417,12 +1498,14 @@ export class AdminAuth {
       name: stringClaim(record, "name"),
       groups: [],
       provider: github.displayName,
+      identityIssuer: github.apiBase,
     };
     const directEmail = stringClaim(record, "email");
     if (directEmail !== null) {
       identity.email = directEmail;
-    } else {
-      // 用户把邮箱设为私有时 /user 里是 null，改查 /user/emails（primary + verified）。
+    }
+    {
+      // 自动关联只接受 /user/emails 确认的 primary + verified 邮箱。
       const emails = await this.#githubJson(github, "/user/emails", accessToken);
       if (Array.isArray(emails)) {
         const primary = emails.find(
@@ -1433,7 +1516,7 @@ export class AdminAuth {
             (item as Record<string, unknown>).verified === true,
         );
         const address = primary ? stringClaim(primary, "email") : null;
-        if (address !== null) identity.email = address;
+        if (address !== null) { identity.email = address; identity.emailVerified = true; }
       }
     }
     if (github.allowedOrgs.length > 0) {
@@ -1513,6 +1596,7 @@ export class AdminAuth {
       name: null,
       groups: [],
       provider: oidc.displayName,
+      identityIssuer: oidc.issuer,
     };
     const accessToken =
       typeof tokenPayload.access_token === "string" ? tokenPayload.access_token : null;
@@ -1609,7 +1693,9 @@ export class AdminAuth {
         : this.config.oidc === null
           ? "admin"
           : roleForOidc(this.config.oidc, identity);
-    const session = this.#createSession(identity);
+    let session: { raw: string; csrf: string };
+    try { session = this.#createSession(identity); }
+    catch { return redirectResponse(303, "/?auth_error=access_denied", [...this.#clearBrowserCookie()]); }
     console.info(
       `SSO 登录成功：provider=${transaction.provider} sub=${maskSecret(identity.sub)} role=${identity.role}`,
     );
@@ -1822,6 +1908,7 @@ function parseIdTokenClaims(value: unknown): IdTokenClaims | null {
 
 function publicIdentity(identity: Identity): JsonRow {
   return {
+    userId: identity.userId ?? null,
     email: identity.email,
     username: identity.username,
     name: identity.name,
@@ -1839,7 +1926,10 @@ function stringClaim(value: unknown, key: string): string | null {
 /** Rust `apply_claims`：ID token 优先，UserInfo 只补缺失字段。 */
 function applyClaims(identity: Identity, oidc: OidcConfig, value: unknown): void {
   const email = stringClaim(value, oidc.emailClaim);
-  if (email !== null) identity.email = email;
+  if (email !== null) {
+    identity.email = email;
+    identity.emailVerified = (value as Record<string, unknown>).email_verified === true;
+  }
   for (const key of ["preferred_username", "nickname"]) {
     if (identity.username === null) {
       const username = stringClaim(value, key);

@@ -51,10 +51,13 @@ import {
 import {
   checkOidcProvider,
   deleteOidcProvider,
+  discoveryHintsFromCheck,
   readLoginMode,
   readOidcProviderSummary,
   saveLoginMode,
   saveOidcProvider,
+  type DiscoveryHints,
+  type OidcCheckResult,
   type OidcProviderInput,
 } from "./auth-oidc-provider.ts";
 import type { AuthProviderId, GithubConfig } from "./auth.ts";
@@ -170,6 +173,39 @@ function parseGithubProviderArg(args: JsonRow): GithubProviderInput {
   };
 }
 
+/** 保存/删除后确认「还能登录」：OIDC-only 部署里把最后一个方式弄没了就拒绝。 */
+function ensureSurvivingLogin(auth: NonNullable<WebContext["auth"]>): void {
+  const tokenUsable = auth.mode() === "token" || auth.config.allowTokenLogin;
+  const providerUsable = auth.enabledProviders().some((id) =>
+    id === "oidc" ? auth.oidcDeployed() : auth.config.github != null,
+  );
+  if (tokenUsable || providerUsable) return;
+  throw CommandError.badRequest(
+    "这样改动后管理台将没有任何可用的登录方式。请保留 GitLab 登录，或先启用 GitHub / 静态管理凭据兜底（FLOWLET_ADMIN_ALLOW_TOKEN_LOGIN=1）",
+  );
+}
+
+/**
+ * 只探 discovery（不验凭据），用于保存时接管 discovery 地址。
+ *
+ * 任何失败都返回 null：保存不该因为「探测超时」被挡死，账号与准入的修改比端点探测更重要；
+ * 端点有问题时「校验」会逐条报出来。
+ */
+async function probeOidcEndpoints(issuer: string): Promise<DiscoveryHints | null> {
+  try {
+    const result = await checkOidcProvider({
+      issuer,
+      discoveryUrl: "",
+      clientId: "",
+      clientSecret: "",
+      insecureHttp: true,
+    });
+    return discoveryHintsFromCheck(result, "");
+  } catch {
+    return null;
+  }
+}
+
 /** 可选的字符串数组参数：缺省 / null 视为「没传」。 */
 function optionalStringList(args: JsonRow, name: string): string[] | null {
   const value = args[name];
@@ -213,6 +249,10 @@ function parseOidcProviderArg(args: JsonRow): OidcProviderInput {
     insecure_http: bool("insecure_http") ?? bool("insecureHttp"),
     pkce: str("pkce"),
     nonce: str("nonce"),
+    generation:
+      typeof args.generation === "number" && Number.isFinite(args.generation)
+        ? Math.trunc(args.generation)
+        : null,
   };
 }
 
@@ -488,6 +528,18 @@ export async function dispatch(ctx: WebContext, command: string, rawArgs: unknow
   const s = storageOf(ctx);
 
   switch (command) {
+    case "list_managed_users":
+      return ctx.auth?.userDirectory?.list() ?? [];
+    case "update_managed_user": {
+      const input = argsObject(args);
+      try {
+        if (!ctx.auth?.userDirectory) throw new Error("用户目录未启用");
+        return ctx.auth.userDirectory.update(argString(input, "id"), input.role, input.enabled);
+      } catch (error) {
+        throw new CommandError(400, "invalid_user", error instanceof Error ? error.message : "更新失败");
+      }
+    }
+
     case "get_agent_gateway_capabilities":
       return acpCapabilities(ctx);
     case "list_a2a_agents":
@@ -497,11 +549,11 @@ export async function dispatch(ctx: WebContext, command: string, rawArgs: unknow
     case "save_a2a_agent":
       return a2aGateway(ctx).save(args.input);
     case "delete_a2a_agent":
-      a2aGateway(ctx).store.remove(argString(args, "id")); return null;
-    case "reveal_a2a_key":
-      return a2aGateway(ctx).revealKey(argString(args, "id"));
+      await a2aGateway(ctx).remove(argString(args, "id")); return null;
     case "list_a2a_keys":
       return a2aGateway(ctx).store.keys();
+    case "reveal_a2a_key":
+      return a2aGateway(ctx).revealKey(argString(args, "id"));
     case "create_a2a_key":
       return a2aGateway(ctx).createKey(args.name, args.agentIds);
     case "revoke_a2a_key":
@@ -786,43 +838,87 @@ export async function dispatch(ctx: WebContext, command: string, rawArgs: unknow
       ctx.auth?.applyGithubConfig(null);
       return null;
     }
-    // ── 管理台登录提供方（OIDC / GitLab）：准入与角色可在界面上改，改完立即生效 ──
+    // ── 管理台登录提供方（OIDC / GitLab）：部署字段 + 准入/角色全部可在界面维护 ──
+    // 保存即热替换（含 issuer / client），并从库内恢复，不需要重启容器。
     case "get_oidc_auth_provider": {
-      const summary = readOidcProviderSummary(ctx.storage, ctx.auth?.config.oidc ?? null);
-      // 部署级配置缺失时，光有库里记录也登录不了：明确告诉界面「开关无效」。
-      return { ...summary, deployment_ready: ctx.auth?.oidcDeployed() === true };
+      const summary = readOidcProviderSummary(ctx.storage, ctx.auth?.oidcDeployment ?? null);
+      // deployment_ready 保留给旧界面：现在「配置齐全」不再依赖部署环境变量。
+      return { ...summary, deployment_ready: summary.configured };
     }
     case "set_oidc_auth_provider": {
       const input = parseOidcProviderArg(args);
-      let override: ReturnType<typeof saveOidcProvider>;
+      const auth = ctx.auth;
+      // 表单只填 issuer、没填 discovery 时先探一次，把 discovery 地址接过来：否则保存后
+      // 第一次登录才发现「issuer 与 discovery 声明不一致」。探测失败不挡保存，
+      // 失败项会出现在「校验」里。
+      let discovery: DiscoveryHints | null = null;
+      if (!input.discovery_url && (input.issuer ?? "").trim() !== "") {
+        discovery = await probeOidcEndpoints((input.issuer ?? "").trim());
+      }
+      let result: ReturnType<typeof saveOidcProvider>;
       try {
-        override = saveOidcProvider(ctx.storage, input, ctx.auth?.oidcDeployment ?? null);
+        result = saveOidcProvider(ctx.storage, ctx.secrets, input, {
+          envConfig: auth?.oidcDeployment ?? null,
+          publicWebUrls: auth?.config.publicWebUrls ?? [],
+          discovery,
+        });
       } catch (error) {
         throw CommandError.badRequest(error instanceof Error ? error.message : String(error));
       }
-      ctx.auth?.applyOidcRuntimeConfig(override);
-      return null;
+      if (auth !== undefined) {
+        const previous = auth.config.oidc;
+        auth.applyOidcConfig(result.config);
+        // 「最后一个登录方式」这条安全线对 OIDC 同样适用。
+        try {
+          ensureSurvivingLogin(auth);
+        } catch (error) {
+          auth.applyOidcConfig(previous);
+          throw error;
+        }
+      }
+      return { generation: result.generation, adopted_endpoints: result.adoptedEndpoints };
     }
     case "delete_oidc_auth_provider": {
       const auth = ctx.auth;
-      if (auth === undefined || auth.config.oidc === null) {
+      if (auth !== undefined) {
+        const tokenUsable = auth.mode() === "token" || auth.config.allowTokenLogin;
+        const otherProvider = auth.config.github !== null &&
+          auth.enabledProviders().some((id) => id === "github");
+        if (!tokenUsable && !otherProvider) {
+          throw CommandError.badRequest(
+            "移除 GitLab 登录前请先启用 GitHub，或在部署环境开启静态管理凭据兜底（FLOWLET_ADMIN_ALLOW_TOKEN_LOGIN=1），否则将无法再登录",
+          );
+        }
         deleteOidcProvider(ctx.storage);
-        return null;
+        auth.applyOidcConfig(null);
+      } else {
+        deleteOidcProvider(ctx.storage);
       }
-      deleteOidcProvider(ctx.storage);
-      auth.resetOidcRuntimeConfig();
       return null;
     }
     case "check_oidc_auth_provider": {
-      const env = ctx.auth?.oidcDeployment;
-      if (!env) throw CommandError.badRequest("请先在部署环境配置 OIDC");
-      return await checkOidcProvider({
-        issuer: env.issuer,
-        discoveryUrl: env.discoveryUrl,
-        clientId: env.clientId,
-        clientSecret: env.clientSecret,
-        insecureHttp: env.insecureHttp,
+      const input = parseOidcProviderArg(args);
+      const env = ctx.auth?.oidcDeployment ?? null;
+      const stored = readOidcProviderSummary(ctx.storage, env);
+      const issuer = (input.issuer ?? "").trim() || stored.issuer;
+      if (issuer === "") throw CommandError.badRequest("校验需要 issuer");
+      // 表单不回显 secret：留空就用已存的（库内配置 > 部署环境变量）。
+      const clientSecret = (input.client_secret ?? "").trim() || env?.clientSecret || "";
+      const explicitRedirects = input.redirect_urls ?? [];
+      const redirectUrls = explicitRedirects.length > 0
+        ? explicitRedirects
+        : (ctx.auth?.config.oidc?.redirectUrls ?? []);
+      const discoveryUrl = (input.discovery_url ?? "").trim() || stored.discovery_url;
+      const result = await checkOidcProvider({
+        issuer,
+        discoveryUrl,
+        clientId: (input.client_id ?? "").trim() || stored.client_id,
+        clientSecret,
+        insecureHttp: input.insecure_http === true || stored.insecure_http,
+        redirectUrls,
+        pkce: input.pkce ?? stored.pkce,
       });
+      return { ...result, discovery_url: discoveryUrl } satisfies OidcCheckResult & { discovery_url: string };
     }
 
     // ── 启用哪些登录方式：oidc / github 可各自开关 ─────────────────────────

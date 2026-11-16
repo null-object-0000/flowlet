@@ -135,3 +135,7 @@
   font-size: 12px;
   margin: 6px 0 0;
 }
+@media (max-width: 760px) {
+  .page { height: auto; overflow: visible; }
+  .shell { grid-template-columns: minmax(0, 1fr); }
+}

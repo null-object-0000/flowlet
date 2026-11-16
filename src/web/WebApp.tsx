@@ -1,3 +1,5 @@
+import { UsersPanel } from "./UsersPanel";
+import { FlowletLogo } from "../shared/ui/FlowletLogo";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -33,6 +35,8 @@ import { SettingRow, SettingSection } from "../pages/settings/SettingRow";
 import settingsStyles from "../pages/settings/SettingsPage.module.css";
 import navStyles from "../pages/settings/SettingsNav.module.css";
 import { IconCamera, IconCloud, IconLock, IconSetting } from "@douyinfe/semi-icons";
+
+const SETTINGS_TABS: readonly WebSettingsTab[] = ["general", "capture", "cost", "network", "auth", "users"];
 import { AuthTab } from "../pages/settings/tabs/AuthTab";
 import { OverviewServiceStrip } from "../pages/overview/OverviewServiceStrip";
 import { OverviewExposedModelsCard } from "../features/exposed-models/OverviewExposedModelsCard";
@@ -102,10 +106,10 @@ export function WebApp() {
   );
 }
 const AUTH_ERROR_TEXT: Record<string, string> = {
-  access_denied: "你取消了 GitLab 授权",
-  allowlist_denied: "当前 GitLab 账号不在允许名单中",
+  access_denied: "登录未完成或账号已停用，请联系管理员",
+  allowlist_denied: "你的账号还没有被授权登录管理台，请联系管理员把你加入「可登录」名单",
   state_invalid: "登录状态已过期，请重新登录",
-  provider_unavailable: "GitLab 暂时不可用，请稍后重试",
+  provider_unavailable: "登录服务暂时不可用，请稍后重试或联系管理员检查 GitLab 连接",
   login_failed: "登录失败，请重新尝试",
   session_expired: "登录已过期，请重新登录",
 };
@@ -219,14 +223,16 @@ function WebSession() {
     };
     return (
       <main className={styles.login}>
-        <Card title="登录 Flowlet">
+        <div className={styles.loginLayout}>
+        <section className={styles.loginIntro}><FlowletLogo variant="brand" /><span>FLOWLET CONSOLE</span><h1>模型与 Agent，<br />在此连接。</h1><p>统一接入模型服务，管理你的 Agent，<br />让每一次调用清晰可见。</p><small>你的模型服务工作台</small></section>
+        <section className={styles.loginCard}><header><h2>欢迎回来</h2><p>登录以进入 Flowlet 工作台</p></header>
           <Space vertical align="start" style={{ width: "100%" }}>
             {error && <Banner type="danger" description={error} />}
             {oidc && providers.length > 1 && (
               <>
                 <Typography.Text>选择登录方式：</Typography.Text>
                 {providers.map((item) => (
-                  <Button key={item.id} theme="solid" onClick={() => loginWith(item.id)}>
+                  <Button block size="large" key={item.id} theme="solid" onClick={() => loginWith(item.id)}>
                     使用 {item.display_name} 登录
                   </Button>
                 ))}
@@ -235,7 +241,7 @@ function WebSession() {
             {oidc && providers.length === 1 && (
               <>
                 <Typography.Text>使用 {providerName} 账号登录 Flowlet 管理台。</Typography.Text>
-                <Button theme="solid" onClick={() => loginWith()}>
+                <Button block size="large" theme="solid" onClick={() => loginWith()}>
                   使用 {providerName} 登录
                 </Button>
               </>
@@ -243,7 +249,11 @@ function WebSession() {
             {noProvider && !authConfig?.token_login && (
               <Banner
                 type="warning"
-                description="当前没有启用中的登录方式。请联系部署者开启静态管理凭据兜底，或在部署环境重新启用 GitLab OIDC / GitHub 登录。"
+                description={
+                  oidc
+                    ? "当前没有启用中的登录方式。请联系管理员在 Flowlet「设置 → 登录与访问」打开 GitLab 或 GitHub 登录；应急时可在部署环境开启静态管理凭据兜底（FLOWLET_ADMIN_ALLOW_TOKEN_LOGIN=1）。"
+                    : "当前没有配置登录方式，请在部署环境设置 FLOWLET_GITHUB_CLIENT_ID / SECRET 或改用管理凭据模式。"
+                }
               />
             )}
             {(!oidc || authConfig?.token_login) && (
@@ -264,21 +274,22 @@ function WebSession() {
                     aria-label="管理凭据"
                     autoComplete="current-password"
                   />
-                  <Button htmlType="submit" theme={oidc ? "borderless" : "solid"} loading={busy}>
+                  <Button htmlType="submit" block size="large" disabled={!token.trim()} theme={oidc ? "borderless" : "solid"} loading={busy}>
                     登录
                   </Button>
                 </Space>
               </form>
             )}
           </Space>
-        </Card>
+          <footer>仅限已获授权的账号访问</footer>
+        </section></div>
       </main>
     );
   }
   return (
     <>
     {isDesktopClient ? <WindowControls /> : null}
-    <DesktopAppFrameView
+    <div className={styles.webShell}><DesktopAppFrameView
       sidebar={
         <Sidebar
           availableRoutes={[
@@ -338,12 +349,12 @@ function WebSession() {
         />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-    </DesktopAppFrameView>
+    </DesktopAppFrameView></div>
     </>
   );
 }
 
-type WebSettingsTab = "general" | "capture" | "cost" | "network" | "auth";
+type WebSettingsTab = "general" | "capture" | "cost" | "network" | "auth" | "users";
 
 function WebSettings({
   onLogout,
@@ -357,7 +368,11 @@ function WebSettings({
   const { language, setLanguage, theme, setTheme, t } = useAppPreferences();
   const label = identityLabel(identity);
   const isViewer = identity?.role === "viewer";
-  const [tab, setTab] = useState<WebSettingsTab>("general");
+  // 冒烟/截图脚本用 `/#/settings?tab=auth` 直达某个设置页签。
+  const [tab, setTab] = useState<WebSettingsTab>(() => {
+    const wanted = new URLSearchParams(window.location.hash.split("?")[1] ?? "").get("tab");
+    return SETTINGS_TABS.includes(wanted as WebSettingsTab) ? (wanted as WebSettingsTab) : "general";
+  });
 
   // 二级菜单：与桌面壳「应用设置」同一套结构（左侧分组 + 右侧面板），只保留 Web 端有意义的项。
   const items: Array<{ key: WebSettingsTab; label: string; icon: React.ReactNode }> = [
@@ -368,6 +383,7 @@ function WebSettings({
           { key: "capture" as const, label: t("数据捕获"), icon: <IconCamera /> },
           { key: "cost" as const, label: t("费用展示"), icon: <IconCloud /> },
           { key: "network" as const, label: t("网络"), icon: <IconCloud /> },
+          { key: "users" as const, label: t("用户管理"), icon: <IconLock /> },
           { key: "auth" as const, label: t("登录与访问"), icon: <IconLock /> },
         ]),
   ];
@@ -377,6 +393,7 @@ function WebSettings({
     capture: { title: t("数据捕获"), desc: t("请求 / 响应内容的捕获与保留策略") },
     cost: { title: t("费用展示"), desc: t("用量页的统一货币折算") },
     network: { title: t("网络"), desc: t("全局请求的代理出口") },
+    users: { title: t("用户管理"), desc: t("用户档案、关联邮箱和访问权限") },
     auth: { title: t("登录与访问"), desc: t("管理台登录方式、准入名单与角色") },
   };
 
@@ -486,6 +503,7 @@ function WebSettings({
             {tab === "cost" ? <UsageCostDisplaySettings /> : null}
             {tab === "network" ? <UpstreamProxySettings /> : null}
             {tab === "auth" ? <AuthTab /> : null}
+            {tab === "users" && !isViewer ? <UsersPanel /> : null}
           </div>
         </article>
       </section>

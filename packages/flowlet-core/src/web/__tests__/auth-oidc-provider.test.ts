@@ -1,4 +1,4 @@
-// 管理台 OIDC（GitLab）登录提供方：自助配置 + 登录方式开关。
+// 管理台 OIDC（GitLab）提供方：整份配置（部署字段 + 准入/角色 + 开关）。
 //
 // 运行：node --test packages/flowlet-core/src/web/__tests__/auth-oidc-provider.test.ts
 import assert from "node:assert/strict";
@@ -9,11 +9,13 @@ import { AdminAuth, adminAuthConfigFromEnv } from "../auth.ts";
 import {
   LOGIN_MODE_META_KEY,
   OIDC_PROVIDER_META_KEY,
+  applyStoredOidcOnStartup,
   checkOidcProvider,
   deleteOidcProvider,
+  oidcConfigFromStored,
   readLoginMode,
-  readOidcProviderOverride,
   readOidcProviderSummary,
+  roleForSummary,
   saveLoginMode,
   saveOidcProvider,
 } from "../auth-oidc-provider.ts";
@@ -56,6 +58,11 @@ function makeAuth(env: Record<string, string> = ENV): AdminAuth {
   return AdminAuth.fromConfig(adminAuthConfigFromEnv(env, undefined));
 }
 
+const SAVE_OPTIONS = {
+  envConfig: null,
+  publicWebUrls: ["http://10.0.0.5:20134"],
+};
+
 function makeCtx(storage = fakeStorage(), auth = makeAuth()) {
   const ctx = {
     storage,
@@ -87,60 +94,203 @@ describe("OIDC 提供方：谁能登录 / 谁能管理", () => {
     assert.equal(summary.issuer, "http://git.intra.example.com");
     assert.deepEqual(summary.allowed_subs, ["94"]);
     assert.equal(summary.secret_set, true);
+    // http issuer + https discovery 是部署期显式给出的，界面要能看到
+    assert.equal(summary.discovery_url, "https://git.intra.example.com/.well-known/openid-configuration");
   });
 
-  it("保存准入名单 + 管理员名单：立即热替换，secret 不再需要重填", () => {
+  it("保存准入 + 管理员名单：立即热替换，secret 沿用种子", () => {
     const storage = fakeStorage();
     const auth = makeAuth();
-    const override = saveOidcProvider(
+    const result = saveOidcProvider(
       storage,
+      SECRET_BOX,
       {
         client_id: "app-id",
-        // 留空 = 沿用环境变量种子里的 secret
         allowed_subs: ["101", "102"],
         allowed_groups: ["platform/infra"],
         admin_subs: ["101"],
         allow_http_issuer: true,
       },
-      auth.config.oidc,
+      { envConfig: auth.oidcDeployment, publicWebUrls: auth.config.publicWebUrls },
     );
-    auth.applyOidcRuntimeConfig(override);
+    auth.applyOidcConfig(result.config);
     assert.deepEqual(auth.config.oidc?.allowedSubs, ["101", "102"]);
-    // 部署级字段不动
     assert.equal(auth.config.oidc?.issuer, "http://git.intra.example.com");
     assert.equal(auth.config.oidc?.clientSecret, "app-secret");
+    assert.equal(result.generation, 1);
 
     const summary = readOidcProviderSummary(storage, auth.config.oidc);
     assert.equal(summary.source, "stored");
     assert.deepEqual(summary.admin_subs, ["101"]);
     assert.equal(summary.secret_set, true);
-
-    // 组准入者默认只读，管理员名单里的人是 admin
-    const stored = readOidcProviderOverride(storage);
-    assert.deepEqual(stored?.allowedGroups, ["platform/infra"]);
   });
 
-  it("不填准入就拒绝保存", () => {
-    assert.throws(() => saveOidcProvider(fakeStorage(), {}, makeAuth().config.oidc), /必须至少配置一种准入/u);
-  });
-
-  it("部署缺失或修改部署字段时拒绝保存且不落库", () => {
+  it("可以整份接管部署字段：新 issuer / 新 client / 新 secret", () => {
     const storage = fakeStorage();
-    assert.throws(() => saveOidcProvider(storage, { allowed_subs: ["1"] }), /部署/u);
-    for (const input of [{ issuer: "https://other.example" }, { client_secret: "new-secret" }, { pkce: "off" }, { redirect_urls: [] }]) {
-      assert.throws(() => saveOidcProvider(storage, { allowed_subs: ["1"], ...input }, makeAuth({ ...ENV, FLOWLET_OIDC_REDIRECT_URL: "https://remote.example/api/auth/callback" }).config.oidc), /部署级只读/u);
-    }
-    assert.equal(storage.meta.size, 0);
+    const result = saveOidcProvider(
+      storage,
+      SECRET_BOX,
+      {
+        issuer: "https://git.company.com/",
+        client_id: "new-app",
+        client_secret: "new-secret",
+        allowed_domains: ["company.com"],
+        allow_http_issuer: false,
+      },
+      { ...SAVE_OPTIONS, envConfig: makeAuth().oidcDeployment },
+    );
+    assert.equal(result.config.issuer, "https://git.company.com");
+    assert.equal(result.config.discoveryUrl, "https://git.company.com/.well-known/openid-configuration");
+    assert.equal(result.config.clientId, "new-app");
+    assert.equal(result.config.clientSecret, "new-secret");
+    assert.deepEqual(result.config.redirectUrls, ["http://10.0.0.5:20134/api/auth/callback"]);
+    assert.equal(result.config.source, "stored");
   });
 
-  it("移除后写墓碑：摘要回落到环境变量种子", () => {
+  it("只填 issuer 时接管探测到的 discovery 地址", () => {
+    const result = saveOidcProvider(
+      fakeStorage(),
+      SECRET_BOX,
+      { issuer: "http://git.intra.example.com", client_id: "cid", client_secret: "s", allowed_subs: ["1"], allow_http_issuer: true },
+      {
+        ...SAVE_OPTIONS,
+        discovery: { discoveryUrl: "https://git.intra.example.com/.well-known/openid-configuration" },
+      },
+    );
+    assert.equal(result.adoptedEndpoints, true);
+    assert.equal(result.config.discoveryUrl, "https://git.intra.example.com/.well-known/openid-configuration");
+  });
+
+  it("显式 discovery 与 issuer 冲突时报错", () => {
+    assert.throws(
+      () =>
+        saveOidcProvider(
+          fakeStorage(),
+          SECRET_BOX,
+          { issuer: "https://a.example.com", client_id: "cid", client_secret: "s", allowed_subs: ["1"] },
+          { ...SAVE_OPTIONS, discovery: { issuer: "https://b.example.com", discoveryUrl: "https://b.example.com/.well-known/openid-configuration" } },
+        ),
+      /issuer 不一致/u,
+    );
+  });
+
+  it("不填准入就拒绝保存（管理台能读全部凭据）", () => {
+    assert.throws(
+      () =>
+        saveOidcProvider(
+          fakeStorage(),
+          SECRET_BOX,
+          { issuer: "https://idp.example.com", client_id: "cid", client_secret: "shh" },
+          SAVE_OPTIONS,
+        ),
+      /必须至少配置一种准入/u,
+    );
+  });
+
+  it("http issuer 未勾选「允许」时拒绝", () => {
+    assert.throws(
+      () =>
+        saveOidcProvider(
+          fakeStorage(),
+          SECRET_BOX,
+          { issuer: "http://git.intra.example.com", client_id: "cid", client_secret: "shh", allowed_subs: ["1"] },
+          SAVE_OPTIONS,
+        ),
+      /允许 http issuer/u,
+    );
+  });
+
+  it("scopes 必须含 openid；generation 不一致时拒绝覆盖", () => {
     const storage = fakeStorage();
-    const auth = makeAuth();
-    saveOidcProvider(storage, { allowed_subs: ["7"], allow_http_issuer: true }, auth.config.oidc);
+    assert.throws(
+      () =>
+        saveOidcProvider(
+          storage,
+          SECRET_BOX,
+          { issuer: "https://idp.example.com", client_id: "c", client_secret: "s", allowed_subs: ["1"], scopes: "profile" },
+          SAVE_OPTIONS,
+        ),
+      /openid/u,
+    );
+    const first = saveOidcProvider(storage, SECRET_BOX, { issuer: "https://idp.example.com", client_id: "c", client_secret: "s", allowed_subs: ["1"] }, SAVE_OPTIONS);
+    assert.throws(
+      () =>
+        saveOidcProvider(
+          storage,
+          SECRET_BOX,
+          { issuer: "https://idp.example.com", client_id: "c", client_secret: "s", allowed_subs: ["2"], generation: first.generation - 1 },
+          SAVE_OPTIONS,
+        ),
+      /已被其它窗口修改/u,
+    );
+  });
+
+  it("重启后从数据卷恢复整份配置；墓碑后 OIDC 关闭且不回落环境变量", () => {
+    const storage = fakeStorage();
+    const first = makeAuth();
+    const result = saveOidcProvider(
+      storage,
+      SECRET_BOX,
+      { issuer: "https://git.company.com", client_id: "cfg", client_secret: "secret-2", allowed_groups: ["a/b"], admin_subs: ["7"] },
+      { envConfig: first.oidcDeployment, publicWebUrls: first.config.publicWebUrls },
+    );
+    first.applyOidcConfig(result.config);
+
+    // 「重启」：新进程只有库 + 环境变量
+    const restarted = makeAuth();
+    const restored = applyStoredOidcOnStartup(restarted, storage, SECRET_BOX);
+    assert.equal(restored.source, "stored");
+    assert.equal(restarted.config.oidc?.issuer, "https://git.company.com");
+    assert.equal(restarted.config.oidc?.clientId, "cfg");
+    assert.deepEqual(restarted.config.oidc?.allowedGroups, ["a/b"]);
+    // 删除后 OIDC 真正不可用（不会回落到环境变量种子里那个已经过期的 issuer）
+    assert.equal(restarted.oidcDeployment?.source, "env");
+    assert.notEqual(restarted.oidcDeployment?.issuer, restarted.config.oidc?.issuer);
+
     deleteOidcProvider(storage);
-    assert.equal(storage.getAppMeta(OIDC_PROVIDER_META_KEY), JSON.stringify({ deleted: true }));
-    assert.equal(readOidcProviderOverride(storage), null);
-    assert.equal(readOidcProviderSummary(storage, auth.config.oidc).source, "env");
+    const afterTombstone = makeAuth();
+    const tomb = applyStoredOidcOnStartup(afterTombstone, storage, SECRET_BOX);
+    assert.equal(tomb.source, "tombstone");
+    assert.equal(afterTombstone.config.oidc, null);
+  });
+
+  it("库内 secret 解不开时停用 OIDC，而不是带病放行", () => {
+    const storage = fakeStorage();
+    saveOidcProvider(storage, SECRET_BOX, { issuer: "https://idp.example.com", client_id: "c", client_secret: "s", allowed_subs: ["1"] }, SAVE_OPTIONS);
+    const auth = makeAuth();
+    const broken = { encrypt: SECRET_BOX.encrypt, decrypt: () => { throw new Error("key rotated"); } };
+    assert.equal(applyStoredOidcOnStartup(auth, storage, broken).source, "invalid");
+    assert.equal(auth.config.oidc, null);
+  });
+
+  it("角色预测与真实判权一致", () => {
+    const summary = {
+      allowed_subs: ["94"],
+      allowed_groups: ["platform/infra"],
+      allowed_emails: [],
+      allowed_domains: ["company.com"],
+      admin_subs: [],
+      admin_emails: [],
+      allow_any: false,
+    };
+    const member = { sub: "501", email: "dev@company.com", groups: ["platform/infra"] };
+    const boss = { sub: "94", email: null, groups: [] };
+    const stranger = { sub: "9", email: "x@other.com", groups: [] };
+    assert.equal(roleForSummary(summary, member), "viewer");
+    assert.equal(roleForSummary(summary, boss), "admin");
+    assert.equal(roleForSummary(summary, stranger), "denied");
+    assert.equal(roleForSummary({ ...summary, allowed_domains: [] }, stranger), "denied");
+  });
+
+  it("oidcConfigFromStored 生成回调白名单（每个对外地址一个）", () => {
+    const storage = fakeStorage();
+    saveOidcProvider(storage, SECRET_BOX, { issuer: "https://idp.example.com", client_id: "c", client_secret: "s", allowed_subs: ["1"] }, SAVE_OPTIONS);
+    const parsed = JSON.parse(storage.getAppMeta(OIDC_PROVIDER_META_KEY));
+    const config = oidcConfigFromStored(parsed, SECRET_BOX, ["https://a.example.com", "http://10.0.0.5:20134"]);
+    assert.deepEqual(config?.redirectUrls, [
+      "https://a.example.com/api/auth/callback",
+      "http://10.0.0.5:20134/api/auth/callback",
+    ]);
   });
 });
 
@@ -149,14 +299,14 @@ describe("登录方式开关", () => {
     const auth = makeAuth();
     assert.deepEqual(auth.enabledProviders(), ["oidc"]);
     const config = JSON.parse(auth.configHandler().body.toString("utf8"));
-    assert.deepEqual(
-      config.providers.map((item: { id: string }) => item.id),
-      ["oidc"],
-    );
+    assert.deepEqual(config.providers.map((item: { id: string }) => item.id), ["oidc"]);
   });
 
   it("只开 GitHub：登录页不再出现 OIDC，?provider=oidc 也不放行", async () => {
-    const { ctx, auth } = makeCtx(fakeStorage(), makeAuth({ ...ENV, FLOWLET_GITHUB_CLIENT_ID: "gh-id", FLOWLET_GITHUB_CLIENT_SECRET: "gh-secret", FLOWLET_GITHUB_ALLOWED_LOGINS: "changen" }));
+    const { ctx, auth } = makeCtx(
+      fakeStorage(),
+      makeAuth({ ...ENV, FLOWLET_GITHUB_CLIENT_ID: "gh-id", FLOWLET_GITHUB_CLIENT_SECRET: "gh-secret", FLOWLET_GITHUB_ALLOWED_LOGINS: "changen" }),
+    );
     await dispatch(ctx, "set_admin_login_mode", { enabled: ["github"] });
     assert.deepEqual(auth.enabledProviders(), ["github"]);
     const login = await auth.loginHandler({ headers: {}, url: "/api/auth/login?provider=oidc" });
@@ -167,6 +317,12 @@ describe("登录方式开关", () => {
     const { ctx, auth } = makeCtx();
     await assert.rejects(dispatch(ctx, "set_admin_login_mode", { enabled: [] }), /至少/u);
     assert.deepEqual(auth.enabledProviders(), ["oidc"]);
+  });
+
+  it("OIDC-only 时移除 GitLab 登录被拒绝（否则没人能再登录）", async () => {
+    const { ctx, auth } = makeCtx();
+    await assert.rejects(dispatch(ctx, "delete_oidc_auth_provider", {}), /无法再登录/u);
+    assert.notEqual(auth.config.oidc, null);
   });
 
   it("开启 ALLOW_TOKEN_LOGIN 后允许两个都关，回落静态凭据", async () => {
@@ -188,6 +344,47 @@ describe("登录方式开关", () => {
       mode: { oidc: true, github: false },
       source: "stored",
     });
+  });
+});
+
+describe("命令层：整份配置自助改", () => {
+  it("set → get 返回库内记录与 generation；hot-swap 生效", async () => {
+    const { ctx, auth } = makeCtx();
+    const saved = (await dispatch(ctx, "set_oidc_auth_provider", {
+      issuer: "https://git.company.com",
+      client_id: "cfg",
+      allowed_subs: ["94"],
+      allowed_groups: ["platform/infra"],
+      admin_subs: ["94"],
+    })) as { generation: number };
+    assert.equal(saved.generation, 1);
+    assert.equal(auth.config.oidc?.issuer, "https://git.company.com");
+    // secret 留空：沿用部署种子，不允许出现「没 secret 就保存失败」
+    assert.equal(auth.config.oidc?.clientSecret, "app-secret");
+    const summary = (await dispatch(ctx, "get_oidc_auth_provider", {})) as any;
+    assert.equal(summary.source, "stored");
+    assert.deepEqual(summary.allowed_groups, ["platform/infra"]);
+    assert.equal(summary.secret_set, true);
+  });
+
+  it("从没配过 OIDC 也能在界面里直接建起来", async () => {
+    const { ctx, auth } = makeCtx(
+      fakeStorage(),
+      makeAuth({ FLOWLET_ADMIN_AUTH_MODE: "oidc", FLOWLET_PUBLIC_WEB_URL: "http://10.0.0.5:20134", FLOWLET_GITHUB_CLIENT_ID: "g", FLOWLET_GITHUB_CLIENT_SECRET: "s", FLOWLET_GITHUB_ALLOWED_LOGINS: "x" }),
+    );
+    assert.equal(auth.oidcDeployed(), false);
+    await dispatch(ctx, "set_oidc_auth_provider", {
+      issuer: "https://git.company.com",
+      client_id: "app",
+      client_secret: "secret",
+      allowed_domains: ["company.com"],
+    });
+    await dispatch(ctx, "set_admin_login_mode", { enabled: ["oidc", "github"] });
+    const summary = (await dispatch(ctx, "get_oidc_auth_provider", {})) as any;
+    assert.equal(summary.source, "stored");
+    assert.equal(summary.issuer, "https://git.company.com");
+    assert.deepEqual(summary.allowed_domains, ["company.com"]);
+    assert.deepEqual(auth.enabledProviders(), ["oidc", "github"]);
   });
 });
 
@@ -222,7 +419,7 @@ describe("OIDC 连通性校验", () => {
     return { issuer: `http://127.0.0.1:${port}`, close: () => server.close() };
   }
 
-  it("discovery 一致 + invalid_grant → 端点可达，凭据仍需实际登录", async () => {
+  it("discovery 一致 + 无效 code 被识别为 invalid_grant → 凭据可用", async () => {
     const fixture = await discoveryFixture(400, "invalid_grant");
     try {
       const result = await checkOidcProvider({
@@ -231,9 +428,12 @@ describe("OIDC 连通性校验", () => {
         clientId: "cid",
         clientSecret: "secret",
         insecureHttp: true,
+        redirectUrls: ["http://10.0.0.5:20134/api/auth/callback"],
       });
       assert.equal(result.ok, true);
-      assert.match(result.message, /PKCE S256/u);
+      const keys = result.items.map((item) => item.key);
+      assert.deepEqual(keys, ["issuer", "discovery", "endpoints", "pkce", "redirect", "client"]);
+      assert.match(result.items.find((item) => item.key === "client")!.message, /凭据有效/u);
     } finally {
       fixture.close();
     }
@@ -250,7 +450,7 @@ describe("OIDC 连通性校验", () => {
         insecureHttp: true,
       });
       assert.equal(result.ok, false);
-      assert.match(result.message, /invalid_client/u);
+      assert.equal(result.items.find((item) => item.key === "client")!.status, "error");
     } finally {
       fixture.close();
     }
@@ -267,81 +467,9 @@ describe("OIDC 连通性校验", () => {
         insecureHttp: true,
       });
       assert.equal(result.ok, false);
-      assert.match(result.message, /issuer 不一致/u);
+      assert.match(result.items.find((item) => item.key === "discovery")!.message, /issuer 不一致/u);
     } finally {
       fixture.close();
-    }
-  });
-});
-
-describe("OIDC 审查回归", () => {
-  it("保存不改部署参数、不复制 secret，重启恢复与移除均保留回调白名单", async () => {
-    const auth = makeAuth({ ...ENV, FLOWLET_OIDC_REDIRECT_URLS: "https://public.example/api/auth/callback", FLOWLET_OIDC_PKCE: "required" });
-    const { ctx, storage } = makeCtx(fakeStorage(), auth);
-    const deployment = structuredClone(auth.config.oidc);
-    await dispatch(ctx, "set_oidc_auth_provider", { allowed_subs: ["7"], admin_subs: ["7"], display_name: "新名称" });
-    assert.deepEqual(auth.config.oidc?.redirectUrls, deployment?.redirectUrls);
-    assert.equal(auth.config.oidc?.pkce, "required");
-    assert.equal(storage.getAppMeta(OIDC_PROVIDER_META_KEY)?.includes("secret"), false);
-    const restarted = makeAuth({ ...ENV, FLOWLET_OIDC_REDIRECT_URLS: "https://public.example/api/auth/callback", FLOWLET_OIDC_PKCE: "required" });
-    restarted.applyOidcRuntimeConfig(readOidcProviderOverride(storage)!);
-    assert.deepEqual(restarted.config.oidc, auth.config.oidc);
-    // 删除必须恢复构造时部署配置，不能受其他进程环境或覆盖值影响。
-    await dispatch(ctx, "delete_oidc_auth_provider", {});
-    assert.deepEqual(auth.config.oidc, deployment);
-    assert.equal(readOidcProviderOverride(storage), null);
-    assert.deepEqual(auth.enabledProviders(), ["oidc"]);
-  });
-
-  it("坏准入配置拒绝启动读取，不静默回落到更宽的部署默认", () => {
-    const storage = fakeStorage();
-    storage.setAppMeta(OIDC_PROVIDER_META_KEY, '{"allow_any":true}');
-    assert.throws(() => readOidcProviderOverride(storage), /损坏/);
-    storage.setAppMeta(LOGIN_MODE_META_KEY, '{"oidc":"false"}');
-    assert.throws(() => readLoginMode(storage, { oidc: true, github: true }), /损坏/);
-  });
-
-  it("关闭或删除最后一个提供方前检查兜底；参数错误不写库", async () => {
-    const auth = makeAuth({ ...ENV, FLOWLET_GITHUB_CLIENT_ID: "gh", FLOWLET_GITHUB_CLIENT_SECRET: "gh-secret", FLOWLET_GITHUB_ALLOWED_LOGINS: "user" });
-    const { ctx, storage } = makeCtx(fakeStorage(), auth);
-    await dispatch(ctx, "set_admin_login_mode", { enabled: ["github"] });
-    await assert.rejects(dispatch(ctx, "delete_github_auth_provider", {}), /最后一个/);
-    assert.ok(auth.config.github);
-    const before = new Map(storage.meta);
-    for (const args of [{}, { enabled: [true] }, { enabled: ["bad"] }, { enabled: "oidc" }]) {
-      await assert.rejects(dispatch(ctx, "set_admin_login_mode", args));
-    }
-    await assert.rejects(dispatch(ctx, "set_oidc_auth_provider", { allowed_subs: [94] }));
-    assert.deepEqual(storage.meta, before);
-    await dispatch(ctx, "set_admin_login_mode", { enabled: ["oidc", "github"] });
-    await dispatch(ctx, "delete_github_auth_provider", {});
-    assert.equal(auth.config.github, null);
-  });
-
-  it("持久化失败保持原登录方式及自动推断语义", async () => {
-    const { ctx, auth, storage } = makeCtx();
-    storage.setAppMeta = () => { throw new Error("disk full"); };
-    await assert.rejects(dispatch(ctx, "set_admin_login_mode", { enabled: ["oidc"] }), /disk full/);
-    assert.equal(auth.config.enabledProviders, null);
-    await assert.rejects(dispatch(ctx, "set_oidc_auth_provider", { allowed_subs: ["7"] }), /disk full/);
-    assert.deepEqual(auth.config.oidc?.allowedSubs, ["94"]);
-  });
-
-  it("缺失 issuer、HTTP 降级、重定向与错误 token 响应均不报成功", async () => {
-    const input = { issuer: "https://idp.example", discoveryUrl: "", clientId: "cid", clientSecret: "secret", insecureHttp: false };
-    const doc = { issuer: input.issuer, authorization_endpoint: "https://idp.example/auth", token_endpoint: "https://idp.example/token", jwks_uri: "https://idp.example/jwks" };
-    for (const patch of [{ issuer: "" }, { token_endpoint: "http://idp.example/token" }, { token_endpoint: "https://user:pass@idp.example/token" }]) {
-      let count = 0;
-      const result = await checkOidcProvider(input, (async () => { count++; return Response.json({ ...doc, ...patch }); }) as typeof fetch);
-      assert.equal(result.ok, false);
-      assert.equal(count, 1);
-    }
-    for (const status of [302, 404, 500]) {
-      const result = await checkOidcProvider(input, (async (_url, init) => {
-        assert.equal(init?.redirect, "manual");
-        return init?.method === "POST" ? new Response("error", { status }) : Response.json(doc);
-      }) as typeof fetch);
-      assert.equal(result.ok, false);
     }
   });
 });

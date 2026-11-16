@@ -24,6 +24,7 @@ const FILE_SCHEMA_VERSION = 1;
 
 /** 可持久化的会话身份（与 auth.ts 的 Identity 结构一致）。 */
 export interface PersistedIdentity {
+  userId?: string;
   sub: string;
   email: string | null;
   username: string | null;
@@ -72,6 +73,7 @@ function parseIdentity(raw: unknown): PersistedIdentity | null {
   const optional = (input: unknown): string | null => (isString(input) ? input : null);
   if (!isStringArray(value.groups)) return null;
   return {
+    userId: typeof value.userId === "string" ? value.userId : undefined,
     sub: value.sub,
     email: optional(value.email),
     username: optional(value.username),

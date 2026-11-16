@@ -390,3 +390,11 @@ node scripts/e2e-node-host.mjs            # 端到端冒烟（含 mock 上游流
 - 32 项后端、6 项前端测试、类型检查、隔离 Web 构建通过；canary 检查创建/查看、no-store、列表无密钥、调用密钥不能访问管理面、旧密钥 409 与撤销后 404，测试密钥已撤销。
 - 生产 health/models 200、OIDC 保持、页面资源哈希一致；最长健康成功间隔 3.13s，egress 未重建。未更改配置默认值，升级重启后生效。
 - 回滚镜像 `flowlet:node-20261116-gateway-ui-b49417b`，compose 备份 `.work/compose.before-20261116-214454.yaml`。
+
+## 登录页、邮箱关联用户与移动端布局发布（2026-11-17 00:14）
+
+- 源码：`07d8c6f`（登录页/用户管理/响应式）、`9b47093`（新增模型目录）。镜像 `flowlet:node-20261117-users-07d8c6f`，基于生产 `flowlet:node-20261116-quiet-acp-c575cad` overlay。8 个服务端文件按 HEAD/工作区/线上三方合并，保留线上命令、静态资源与 Host 既有差异；`index.ts` 仅有文件头注释冲突，保留用户目录初始化。前端整体使用本地已通过构建的 dist-web；模型目录保留线上 hy4/decision-model-preview 并追加三个新模型。
+- Canary：health/auth config/ipc_ping 通过，list_managed_users 200、原有账号列表 200、前端 index 哈希一致。认证/目录测试 42 项、OIDC 配置 23 项、前端 10 项及类型检查/Web 构建通过。
+- 生产切换前两次确认没有进行中的 Agent 请求；旧进程 0.63s 退出，最长健康探测成功间隔 3.04s；egress 未重建。health/models 200、OIDC 模式保持，流式回归 3/3 HTTP 200 且 DONE；前端 index 哈希一致，未登录访问用户列表返回 401。
+- 用户目录为数据卷上的 users.json；新登录与已有 Cookie 会话后续访问逐步建立档案。未执行真实用户停用或角色修改。移动端 390px 登录页无横向溢出；截图工具超时，全部业务页面移动端实机验收仍未完成。
+- 回滚：`flowlet:node-20261116-quiet-acp-c575cad`；compose 备份 `.agents/skills/flowlet-docker-deploy/.work/compose.before-20261117-001450.yaml`。

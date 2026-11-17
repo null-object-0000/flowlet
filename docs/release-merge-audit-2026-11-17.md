@@ -1,19 +1,20 @@
 # 2026-11-17 发布合并完整性审计
 
-本轮结论：**还有 2 项接入/运行时代码未完整合回、2 项工程改动未合回；另外有 2 处线上默认推荐配置较旧。**
+本轮审计结论：**审计时还有 2 项接入/运行时代码未完整合回、2 项工程改动未合回；另外有 2 处线上默认推荐配置较旧。**
+A1/A2 已在审计后回填 main（见「审计后的回填结果」），尚未重新发布；A3/A4、内置配置漂移和架构分叉仍未处理。
 HY4 与决策模型的恢复不代表整个历史分支已经合齐。
 
-本报告固定证据版本，避免把并发开发误认成历史发布丢失。本轮只审计并增加可重复执行的审计工具，未合并业务代码、未发布或重启生产、未改账号/路由。
+本报告固定证据版本，避免把并发开发误认成历史发布丢失。审计轮次只审计并增加可重复执行的审计工具；A1/A2 的回填在审计之后单独完成，均未发布或重启生产、未改账号/路由。
 
 ## 审计范围与版本
 
 - 起点源码：`9336f96`，包含 HY4 和决策模型恢复。
 - 终点源码：`6f910f9`。审计过程中新增 ACP 图片透传与修复，已单独追踪至发布完成。
 - 最终生产：`flowlet:node-20261117-acp-images-6f910f9`，镜像 ID `sha256:078d44377b56b7fe23280b8adab989af03aa5744c0313eca13b98765ec87f151`。起点决策模型恢复镜像与本次终点镜像均保存了只读快照。
-- 生产镜像由部署脚本以「当前运行镜像 + 覆盖改动文件」的 overlay 链构建；tag `6f910f9` 是发布标签，不代表容器内 `/app` 等于该提交。实测 `/app` 含 `packages/flowlet-core/src/catalog/sources.ts` 等 `6f910f9` 中不存在的文件（即 A1/A2 的线上实现）。因此按本地 HEAD 整树重建**不会**得到与线上一致的镜像，必须先回填这两项。
+- 生产镜像由部署脚本以「当前运行镜像 + 覆盖改动文件」的 overlay 链构建；tag `6f910f9` 是发布标签，不代表容器内 `/app` 等于该提交。实测 `/app` 含 `packages/flowlet-core/src/catalog/sources.ts` 等 `6f910f9` 中不存在的文件（即 A1/A2 的线上实现）。A1/A2 回填后（`3f316a2`、`29c522b`），运行时代码已与 `/app` 对齐；但内置 `config.json` 仍是旧层带入的版本。
 - 已 fetch origin；核对全部现存本地分支和远端跟踪分支，共 **21 个去重后的分支独有非 merge 提交**。
 - 从运行容器取得 `/app` 内的业务源码、内置配置、插件/模型登记与实际静态资源；未读取或导出 `/data` 中的凭据。
-- 比较 **128 个 Node 业务模块**：保留类型的 AST 比较用来识别纯注释差异，TS 去类型转译比较用来识别实际执行差异；不凭提交祖先关系判断功能缺失。
+- 比较 **128 个 Node 业务模块**（回填 `catalog/sources.ts` 后为 129）：保留类型的 AST 比较用来识别纯注释差异，TS 去类型转译比较用来识别实际执行差异；不凭提交祖先关系判断功能缺失。
 - 核对模型身份、渠道协议、插件声明、Node 包依赖，以及线上 CLI 下载包内的 **19 个运行源文件**（另核对 Host 复用的 2 个 CLI 源文件）。
 - 起点与终点均核对 **66 个静态/下载产物**，分别与对应版本构建一致；生产保留了旧 hash 资源，另追踪当前 index 的 39 个 JS/CSS 依赖，避免把旧文件里出现的功能字符串当成正在使用的功能。
 
@@ -21,12 +22,12 @@ HY4 与决策模型的恢复不代表整个历史分支已经合齐。
 
 | 编号 | 内容 | 已确认状态与影响 | 来源与证据 |
 | --- | --- | --- | --- |
-| A1 | models-cn 主站优先与双源容灾 | 线上后端保留了主站/镜像回退；本地源码缺失。Electron/本地运行、构建预取缺少同样容灾；当前前端手动同步仍优先传旧 GitHub 地址。从本地整树重建会覆盖线上已有容灾。 | `8c2a586`；缺 `packages/flowlet-core/src/catalog/sources.ts`、`src/domains/modelCatalog/sources.ts`，scheduler、web command、ModelServicesPage、fetch 脚本及原回归测试未完整合入。 |
-| A2 | 桌面维护命令接受 `systemone` | Node 桌面参数校验仍只接受三种旧协议。含决策协议的渠道预设保存、配置导入、路由规则保存均会被拒。Web Host 的常规账号/模型管理不走这个桌面命令边界。 | `8c2a586`；`packages/flowlet-core/src/desktop/maintenance.ts` 的 `PROTOCOL_VARIANTS` 漏项。已用临时真实 SQLite 上下文逐一复现三个命令返回 400。 |
+| A1 | models-cn 主站优先与双源容灾 | **已回填（`29c522b`）**。审计时线上后端已有主站/镜像回退，本地 main 缺失；Electron、构建预取和前端手动同步仍走旧 GitHub 地址。回填后按 HEAD 重建不再丢容灾。 | `8c2a586`；已补 `packages/flowlet-core/src/catalog/sources.ts`（含契约测试）、`src/domains/modelCatalog/sources.ts`，并改回 scheduler、web command、ModelServicesPage、fetch 脚本。 |
+| A2 | 桌面维护命令接受 `systemone` | **已回填（`3f316a2`）**。审计时 Node 桌面参数校验只接受三种旧协议，含决策协议的渠道预设保存、配置导入、路由规则保存均会被拒；Web Host 不受影响。回填后转译代码与线上 `maintenance.ts` 完全一致。 | `8c2a586`；`packages/flowlet-core/src/desktop/maintenance.ts` 的 `PROTOCOL_VARIANTS` 漏项。回填前已用临时真实 SQLite 上下文逐一复现三个命令返回 400。 |
 | A3 | 官网 EdgeOne 自动发布流程与部署 SDK 依赖修补 | 代码已在远端 main / 官网分支，本地 main 未合入；本地官网说明仍为 Cloudflare Pages。影响官网构建发布，不能称为 20134 管理台功能丢失。 | `b74899a`、`6a93c7b`：缺 workflow、`scripts/edgeone/`、官网 edgeone 配置和说明。合入时应采用最终移除验证文件的状态，不恢复临时 DNS 验证文件。 |
 | A4 | Windows CLI SIGINT 回归与测试发现命令 | 缺的是测试覆盖，不是 CLI 取消/中断运行逻辑。现有测试在 Windows 使用 `child.kill("SIGINT")`，不能验证正常中断清理。 | `b611a83`：缺 test-only `signal-cli.ts`、相应测试改写和 `cred:test` glob 修正；已发布 CLI 运行代码与终点 main 一致。 |
 
-### A2 的真实复现结果
+### A2 的复现结果（回填前）
 
 对临时数据库调用真实桌面命令分发器，没有修改生产配置：
 
@@ -104,6 +105,16 @@ import_config        -> 400 参数 channels: unknown variant `systemone`
 - 最终 canary 只读验证：`list_credential_providers`、`list_channel_presets`、`list_a2a_agents` 均 200，分别返回 8 种 provider、10 个渠道、1 个已登记 Agent；provider 包含 generic-aksk 与 http-bearer。
 - 这项新功能现已上线，不再列入待发布缺口。本轮未代替另一任务重新做真实图片上游推理验收。
 
+## 审计后的回填结果（2026-11-17）
+
+A1/A2 已回填 main，未改动生产、未重启容器：
+
+- `3f316a2`：`PROTOCOL_VARIANTS` 补 `systemone`，并新增桌面预设接受决策协议的回归测试。
+- `29c522b`：新增 `catalog/sources.ts` 与契约测试；`host/scheduler.ts`、`web/commands.ts` 按候选源同步、记录实际来源并在写入前校验 JSON；前端手动同步改送主站地址（由 Host 回退）；`scripts/fetch-models-cn.mjs` 同样支持双源，保留 Tauri 打包目标路径。
+- 转译后 `sources.ts`、`scheduler.ts`、`commands.ts`、`maintenance.ts` 与线上 `/app` 实现完全一致；以 HEAD 重跑本脚本，`onlineOnly`、`runtimeDifferences`、`typeDifferences` 均为空，只剩预期的 `server.mjs` 和内置 `config.json` 的两项默认推荐差异。
+- 测试通过：数据源契约 3 项、scheduler 13 项、桌面维护 24 项、Web 命令 313 项；`npm run node:typecheck`、`npm run check`、`vite build --mode web` 通过。
+- **未重新发布**：线上已在运行等价实现，回填只是补齐源码；前端改动尚未进入线上构建。下次发布应重建 Web UI，并决定是否把 `kimi-k3.1-pro`、`qwen4-max` 的内置默认推荐一并带上。
+
 ## 可重复核对与验收边界
 
 新增只读脚本 [audit-release-parity.mjs](../scripts/audit-release-parity.mjs)，固定某个 git ref，比较提取的运行镜像源码/配置/下载包。它不联系服务、不写业务数据；发现差异返回退出码 **2**，不会把 type-only 差异直接当成注释，也不会把线上保留的旧 hash 文件当作新构建。
@@ -114,6 +125,8 @@ node scripts/audit-release-parity.mjs \
   --ref 6f910f9 --ui-dir dist-web --report /tmp/flowlet-release-audit.json
 ```
 
-原始生产快照、分支提交清单、结构化差异与测试输出保留在该私有 `.work` 目录，未提交镜像源码副本或任何运行凭据。本次脚本语法检查通过，已对起点 `9336f96`、中间态 `7d527fa` 和最终 `6f910f9` 实际执行并正确返回 2。
+回填后用 `--ref 29c522b` 重跑，`onlineOnly`、`runtimeDifferences`、`typeDifferences` 为空；注意 `dist-web` 仍是发布时的旧构建，前端改动重建后该目录会与线上不同，直到重新发布。
 
-本轮未做生产浏览器登录后的逐页交互验收；因此结论是“列明审计范围内的合并/发布缺口”，不是承诺现有产品没有其他 bug。下一轮应先完成 A1/A2 及对应测试，单独处理 A3/A4 和架构分叉；发布前再次固定 source ref、镜像 ID、模型/协议集合和下载包。
+原始生产快照、分支提交清单、结构化差异与测试输出保留在该私有 `.work` 目录，未提交镜像源码副本或任何运行凭据。本次脚本语法检查通过，已对起点 `9336f96`、中间态 `7d527fa`、最终 `6f910f9` 和回填后的 `29c522b` 实际执行并正确返回 2。
+
+本轮未做生产浏览器登录后的逐页交互验收；因此结论是“列明审计范围内的合并/发布缺口”，不是承诺现有产品没有其他 bug。剩余工作是 A3/A4、发布时的内置配置合并，以及 `36b235d` 的架构分叉决策；发布前再次固定 source ref、镜像 ID、模型/协议集合和下载包。

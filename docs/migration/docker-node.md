@@ -473,3 +473,31 @@ node scripts/e2e-node-host.mjs            # 端到端冒烟（含 mock 上游流
 - 回滚为 `flowlet:node-20261117-hy4-restore-f089d1a`，compose 备份见部署技能
   `.work/compose.before-20261117-141936.yaml`。未声称浏览器登录后的视觉验收或真实决策
   上游推理验收；决策协议透传使用本地 mock 验证，线上只做普通流式冒烟。
+
+
+## 发布合并回填与内置配置对齐（2026-11-17 15:18）
+
+- 背景：全量审计发现 A1（models-cn 主站/镜像双源）、A2（桌面协议接受 `systemone`）的
+  实现只存在于线上镜像的 overlay 层，仓库 main 缺失；A3（EdgeOne 官网发布）、A4
+  （Windows CLI SIGINT 测试）只在 origin/main。审计结论与证据见
+  [release-merge-audit-2026-11-17.md](../release-merge-audit-2026-11-17.md)。
+- 回填：`3f316a2`（A2）、`29c522b`（A1，含数据源/调度/命令/前端/fetch 脚本与契约测试）、
+  `fbf0846`（A4）、`7b193cd`（A3）。回填后 TS 转译的 `catalog/sources.ts`、
+  `host/scheduler.ts`、`web/commands.ts`、`desktop/maintenance.ts` 与线上 `/app`
+  完全一致；审计脚本以当时 HEAD 重跑，`onlineOnly`、`runtimeDifferences`、
+  `typeDifferences` 均为 0。
+- 镜像 `flowlet:node-20261117-parity-a1a4-98f2577`，基于
+  `flowlet:node-20261117-acp-images-6f910f9`。本次只覆盖重建的 Web UI（手动目录同步
+  改送主站，失败由 Host 回退镜像）与内置 `config.json`（补齐 `kimi-k3.1-pro`、
+  `qwen4-max` 两条默认推荐）；没有覆盖后端源码，线上已有等价的 A1/A2 实现。
+- 校验：镜像内 `/app/config.json` 与仓库 sha256 一致，`/app/ui/index.html` 与
+  `dist-web` 一致；canary health/auth/ipc_ping 通过；切换前两次活动检查均无在途
+  Agent 调用。切换 3.7 秒，健康探测最长成功间隔 3.04 秒，egress 未重建；
+  health、`/v1/models` 200，流式 3/3 读到 `[DONE]`，OIDC 登录保留。
+- 发布后 `/v1/models` 返回 8 个模型，包含 `hy4`、`hy4-flash`、`kimi-k3.1-pro`、
+  `qwen4-max`；`hy4` 真实推理冒烟 HTTP 200（1.13 秒、23 tokens）。这些路由在发布前
+  已由用户启用，本次启动未新增任何路由行，也未修改账号、路由或用户数据。
+- 回滚 `flowlet:node-20261117-acp-images-6f910f9`；compose 备份
+  `.work/compose.before-20261117-151835.yaml`。A3 的 EdgeOne 工作流需仓库 Secrets
+  `TENCENT_CLOUD_SECRET_ID` / `TENCENT_CLOUD_SECRET_KEY` 后才在 CI 生效；A4 仅测试，
+  不改变 CLI 运行代码。

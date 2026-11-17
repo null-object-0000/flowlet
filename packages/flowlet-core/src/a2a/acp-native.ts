@@ -304,7 +304,10 @@ export async function startNativeAcp(
               method === "authenticate"
                 ? await peer.request(
                     methods.agent.authenticate,
-                    { methodId: String(raw.methodId) },
+                    {
+                      methodId: String(raw.methodId),
+                      ...(raw._meta ? { _meta: object(raw._meta) } : {}),
+                    },
                     { cancellationSignal: signal, stopWaitingOnCancel: true },
                   )
                 : await peer.request(

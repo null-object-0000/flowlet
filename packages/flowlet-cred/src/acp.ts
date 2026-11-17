@@ -272,7 +272,10 @@ export function createAcpBridge(config: AcpBridgeConfig) {
       if (!native) throw RequestError.methodNotFound("authenticate");
       await remote(
         "authenticate",
-        { methodId: params.methodId },
+        {
+          methodId: params.methodId,
+          ...(params._meta ? { _meta: params._meta } : {}),
+        },
         signal,
         peer,
         requestId ?? undefined,

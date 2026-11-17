@@ -1,10 +1,10 @@
 # 2026-11-17 发布合并完整性审计
 
 本轮审计结论：**审计时还有 2 项接入/运行时代码未完整合回、2 项工程改动未合回；另外有 2 处线上默认推荐配置较旧。**
-A1/A2 已在审计后回填 main（见「审计后的回填结果」），尚未重新发布；A3/A4、内置配置漂移和架构分叉仍未处理。
+A1–A4 已在审计后全部回填 main（见「审计后的回填结果」），尚未重新发布；只剩发布时的内置配置合并和架构分叉决策。
 HY4 与决策模型的恢复不代表整个历史分支已经合齐。
 
-本报告固定证据版本，避免把并发开发误认成历史发布丢失。审计轮次只审计并增加可重复执行的审计工具；A1/A2 的回填在审计之后单独完成，均未发布或重启生产、未改账号/路由。
+本报告固定证据版本，避免把并发开发误认成历史发布丢失。审计轮次只审计并增加可重复执行的审计工具；A1–A4 的回填在审计之后单独完成，均未发布或重启生产、未改账号/路由。
 
 ## 审计范围与版本
 
@@ -24,8 +24,8 @@ HY4 与决策模型的恢复不代表整个历史分支已经合齐。
 | --- | --- | --- | --- |
 | A1 | models-cn 主站优先与双源容灾 | **已回填（`29c522b`）**。审计时线上后端已有主站/镜像回退，本地 main 缺失；Electron、构建预取和前端手动同步仍走旧 GitHub 地址。回填后按 HEAD 重建不再丢容灾。 | `8c2a586`；已补 `packages/flowlet-core/src/catalog/sources.ts`（含契约测试）、`src/domains/modelCatalog/sources.ts`，并改回 scheduler、web command、ModelServicesPage、fetch 脚本。 |
 | A2 | 桌面维护命令接受 `systemone` | **已回填（`3f316a2`）**。审计时 Node 桌面参数校验只接受三种旧协议，含决策协议的渠道预设保存、配置导入、路由规则保存均会被拒；Web Host 不受影响。回填后转译代码与线上 `maintenance.ts` 完全一致。 | `8c2a586`；`packages/flowlet-core/src/desktop/maintenance.ts` 的 `PROTOCOL_VARIANTS` 漏项。回填前已用临时真实 SQLite 上下文逐一复现三个命令返回 400。 |
-| A3 | 官网 EdgeOne 自动发布流程与部署 SDK 依赖修补 | 代码已在远端 main / 官网分支，本地 main 未合入；本地官网说明仍为 Cloudflare Pages。影响官网构建发布，不能称为 20134 管理台功能丢失。 | `b74899a`、`6a93c7b`：缺 workflow、`scripts/edgeone/`、官网 edgeone 配置和说明。合入时应采用最终移除验证文件的状态，不恢复临时 DNS 验证文件。 |
-| A4 | Windows CLI SIGINT 回归与测试发现命令 | 缺的是测试覆盖，不是 CLI 取消/中断运行逻辑。现有测试在 Windows 使用 `child.kill("SIGINT")`，不能验证正常中断清理。 | `b611a83`：缺 test-only `signal-cli.ts`、相应测试改写和 `cred:test` glob 修正；已发布 CLI 运行代码与终点 main 一致。 |
+| A3 | 官网 EdgeOne 自动发布流程与部署 SDK 依赖修补 | **已回填（`7b193cd`）**。审计时只在远端 main / 官网分支，本地 main 缺 workflow 与部署工具，官网说明仍是 Cloudflare Pages；不影响 20134 管理台。回填采用最终状态：固定 `minimatch 11.0.1`，不恢复临时 DNS 验证文件。 | `b74899a`、`6a93c7b`：已补 workflow、`scripts/edgeone/`、`website/public/edgeone.json` 与官网说明。`website:check`、`website:build` 通过。 |
+| A4 | Windows CLI SIGINT 回归与测试发现命令 | **已回填（`fbf0846`）**。审计时缺的是测试覆盖，不是 CLI 取消/中断运行逻辑；`child.kill("SIGINT")` 在 Windows 是强杀，无法验证正常清理。回填后 `cred:test` 改为显式 glob，测试驱动不进入分发包。 | `b611a83`：已补 test-only `signal-cli.ts`、测试改写和 glob；`npm run cred:test` 171 项通过，`cred:typecheck` 通过。 |
 
 ### A2 的复现结果（回填前）
 
@@ -113,7 +113,8 @@ A1/A2 已回填 main，未改动生产、未重启容器：
 - `29c522b`：新增 `catalog/sources.ts` 与契约测试；`host/scheduler.ts`、`web/commands.ts` 按候选源同步、记录实际来源并在写入前校验 JSON；前端手动同步改送主站地址（由 Host 回退）；`scripts/fetch-models-cn.mjs` 同样支持双源，保留 Tauri 打包目标路径。
 - 转译后 `sources.ts`、`scheduler.ts`、`commands.ts`、`maintenance.ts` 与线上 `/app` 实现完全一致；以 HEAD 重跑本脚本，`onlineOnly`、`runtimeDifferences`、`typeDifferences` 均为空，只剩预期的 `server.mjs` 和内置 `config.json` 的两项默认推荐差异。
 - 测试通过：数据源契约 3 项、scheduler 13 项、桌面维护 24 项、Web 命令 313 项；`npm run node:typecheck`、`npm run check`、`vite build --mode web` 通过。
-- **未重新发布**：线上已在运行等价实现，回填只是补齐源码；前端改动尚未进入线上构建。下次发布应重建 Web UI，并决定是否把 `kimi-k3.1-pro`、`qwen4-max` 的内置默认推荐一并带上。
+- `fbf0846`：Windows CLI SIGINT 回归与 `cred:test` glob；`7b193cd`：EdgeOne 官网自动发布与固定版部署工具。
+- **未重新发布**：线上已在运行等价的 A1/A2 实现，回填只是补齐源码；前端改动尚未进入线上构建。下次发布应重建 Web UI，并决定是否把 `kimi-k3.1-pro`、`qwen4-max` 的内置默认推荐一并带上。
 
 ## 可重复核对与验收边界
 
@@ -129,4 +130,4 @@ node scripts/audit-release-parity.mjs \
 
 原始生产快照、分支提交清单、结构化差异与测试输出保留在该私有 `.work` 目录，未提交镜像源码副本或任何运行凭据。本次脚本语法检查通过，已对起点 `9336f96`、中间态 `7d527fa`、最终 `6f910f9` 和回填后的 `29c522b` 实际执行并正确返回 2。
 
-本轮未做生产浏览器登录后的逐页交互验收；因此结论是“列明审计范围内的合并/发布缺口”，不是承诺现有产品没有其他 bug。剩余工作是 A3/A4、发布时的内置配置合并，以及 `36b235d` 的架构分叉决策；发布前再次固定 source ref、镜像 ID、模型/协议集合和下载包。
+本轮未做生产浏览器登录后的逐页交互验收；因此结论是“列明审计范围内的合并/发布缺口”，不是承诺现有产品没有其他 bug。剩余工作是发布时的内置配置合并和 `36b235d` 的架构分叉决策；发布前再次固定 source ref、镜像 ID、模型/协议集合和下载包。

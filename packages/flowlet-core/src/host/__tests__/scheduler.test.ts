@@ -21,11 +21,13 @@ import {
   MODELS_CN_URL,
   MODELS_DEV_URL,
 } from "../scheduler.ts";
+import { MODELS_CN_MIRROR_URL, MODELS_CN_PRIMARY_URL } from "../../catalog/sources.ts";
 
 function makeContext(overrides: JsonRow = {}): { ctx: WebContext; storage: SqliteStorage; dir: string } {
   const dir = mkdtempSync(path.join(tmpdir(), "flowlet-scheduler-"));
   const storage = new SqliteStorage(path.join(dir, "flowlet.sqlite"));
   const config: JsonRow = {
+    channels_config: { channels: [], default_exposed_models: {}, endpoints: {} },
     log_capture: { body_retention_days: 30, body_max_size_mb: 0, body_prune_ratio: 0.1 },
     usage_retention: { balance_snapshot_retention_days: 30, balance_snapshot_max_per_account: 2 },
     ...overrides,
@@ -241,6 +243,61 @@ test("catalog sync writes models-cn/dev files atomically and survives one failed
     assert.deepEqual(modelsCn, { providers: {} });
     assert.equal(pathExists(path.join(dir, "models-dev.json")), false, "失败源不得写入错误内容");
     assert.ok(MODELS_DEV_URL.length > 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    storage.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("models-cn 主站失败时回退 GitHub Pages 镜像，并记录实际来源", async () => {
+  const { ctx, storage, dir } = makeContext();
+  const originalFetch = globalThis.fetch;
+  const logs: JsonRow[] = [];
+  try {
+    assert.equal(MODELS_CN_URL, MODELS_CN_PRIMARY_URL, "默认同步源应是主站");
+    globalThis.fetch = (async (input: string | URL) => {
+      const url = String(input);
+      if (url === MODELS_CN_PRIMARY_URL) {
+        return new Response("main site down", { status: 503 });
+      }
+      if (url === MODELS_CN_MIRROR_URL) {
+        return new Response(JSON.stringify({ providers: [{ id: "deepseek", models: [] }] }), { status: 200 });
+      }
+      return new Response("upstream error", { status: 502 });
+    }) as typeof fetch;
+    const scheduler = createHostScheduler({ context: ctx, log: (entry) => logs.push(entry as JsonRow) });
+    await scheduler.runCatalogSyncOnce();
+    const modelsCn = JSON.parse(readFileSync(path.join(dir, "models-cn.json"), "utf8"));
+    assert.equal(modelsCn.providers[0].id, "deepseek");
+    const catalogLog = logs.find((entry) => entry.task === "catalog-sync" && entry.file === "models-cn.json");
+    assert.equal(catalogLog?.source, MODELS_CN_MIRROR_URL, "日志应记录回退后的实际来源");
+  } finally {
+    globalThis.fetch = originalFetch;
+    storage.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("models-cn 两个来源都失败时不写入文件，也不影响 models.dev", async () => {
+  const { ctx, storage, dir } = makeContext();
+  const originalFetch = globalThis.fetch;
+  const logs: JsonRow[] = [];
+  try {
+    globalThis.fetch = (async (input: string | URL) => {
+      const url = String(input);
+      if (url === MODELS_DEV_URL) {
+        return new Response(JSON.stringify({ openai: { models: {} } }), { status: 200 });
+      }
+      return new Response("upstream error", { status: 502 });
+    }) as typeof fetch;
+    const scheduler = createHostScheduler({ context: ctx, log: (entry) => logs.push(entry as JsonRow) });
+    await scheduler.runCatalogSyncOnce();
+    assert.equal(pathExists(path.join(dir, "models-cn.json")), false, "全部失败时不得写入目录");
+    const failed = logs.find((entry) => entry.task === "catalog-sync" && entry.file === "models-cn.json");
+    assert.ok(String(failed?.error ?? "").includes(MODELS_CN_PRIMARY_URL), "错误应包含尝试过的来源");
+    assert.ok(String(failed?.error ?? "").includes(MODELS_CN_MIRROR_URL));
+    assert.deepEqual(JSON.parse(readFileSync(path.join(dir, "models-dev.json"), "utf8")), { openai: { models: {} } });
   } finally {
     globalThis.fetch = originalFetch;
     storage.close();

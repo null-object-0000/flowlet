@@ -1,6 +1,9 @@
 // 打包前从 models-cn 官方拉取最新的 api.json，写入 src-tauri/models-cn.json，
 // 随 Tauri bundle.resources 打包进安装包，让用户开箱即用。
 //
+// models-cn 同时发布两个内容一致的入口：主站（EdgeOne，含中国大陆节点）优先，
+// GitHub Pages 作为备用镜像；任一可用即完成拉取。
+//
 // 用法：node scripts/fetch-models-cn.mjs
 
 import { writeFileSync, existsSync, mkdirSync, copyFileSync, unlinkSync } from "node:fs";
@@ -13,20 +16,19 @@ const SRC_TAURI = join(PROJECT_ROOT, "src-tauri");
 const DEST = join(SRC_TAURI, "models-cn.json");
 const BACKUP = join(SRC_TAURI, "models-cn.json.bak");
 
-const SOURCE_URL = "https://null-object-0000.github.io/models-cn/api.json";
+const SOURCE_URLS = [
+  "https://models.devtrends.site/api.json",
+  "https://null-object-0000.github.io/models-cn/api.json",
+];
 
-async function main() {
-  console.log("=== 拉取 models-cn 目录 ===");
-  console.log(`  来源：${SOURCE_URL}`);
-
+async function fetchCatalog(url) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30_000);
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30_000);
-    const response = await fetch(SOURCE_URL, {
+    const response = await fetch(url, {
       headers: { Accept: "application/json" },
       signal: controller.signal,
     });
-    clearTimeout(timeout);
 
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
@@ -44,6 +46,33 @@ async function main() {
     if (!parsed || !Array.isArray(parsed.providers)) {
       throw new Error("响应缺少 providers 字段");
     }
+    return { body, parsed, url };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function main() {
+  console.log("=== 拉取 models-cn 目录 ===");
+
+  const failures = [];
+  let result = null;
+  for (const url of SOURCE_URLS) {
+    try {
+      result = await fetchCatalog(url);
+      console.log(`  来源：${url}`);
+      break;
+    } catch (error) {
+      failures.push(`${url}：${error.message}`);
+      console.warn(`  来源不可用：${url}（${error.message}）`);
+    }
+  }
+
+  try {
+    if (result === null) {
+      throw new Error(`所有来源均失败：${failures.join("；")}`);
+    }
+    const { body, parsed } = result;
 
     // 备份当前文件以便回滚
     if (existsSync(DEST)) {

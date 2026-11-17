@@ -8,6 +8,7 @@ import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 import { CommandError } from "../types.ts";
+import { modelsCnSourceCandidates } from "../catalog/sources.ts";
 import { a2aGateway } from "../a2a/gateway.ts";
 import { acpCapabilities } from "../a2a/acp-runtime.ts";
 import type { JsonRow } from "../types.ts";
@@ -409,16 +410,26 @@ async function syncCatalog(
   const fileName = source === "models-cn" ? "models-cn.json" : "models-dev.json";
   const title = source === "models-cn" ? "models-cn 目录同步" : "models.dev 目录同步";
   void title;
-  let body: string;
-  try {
-    const response = await getUpstream(sourceUrl, { timeoutMs: 30_000, proxy: ctx.upstreamProxy });
-    if (response.status < 200 || response.status >= 300) {
-      throw CommandError.badRequest(`${source} 返回 HTTP ${response.status}`);
+  // models-cn 有主站与 GitHub Pages 镜像两个入口；显式自定义地址不参与回退。
+  const candidates = source === "models-cn" ? modelsCnSourceCandidates(sourceUrl) : [sourceUrl];
+  let body: string | null = null;
+  const failures: string[] = [];
+  for (const candidate of candidates) {
+    try {
+      const response = await getUpstream(candidate, { timeoutMs: 30_000, proxy: ctx.upstreamProxy });
+      if (response.status < 200 || response.status >= 300) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      // 先校验 JSON 再接受该来源，避免把错误页写入目录后才发现。
+      JSON.parse(response.body);
+      body = response.body;
+      break;
+    } catch (error) {
+      failures.push(`${candidate}：${requestErrorDetail(error)}`);
     }
-    body = response.body;
-  } catch (error) {
-    if (error instanceof CommandError) throw error;
-    throw CommandError.badRequest(`请求 ${source} 失败：${requestErrorDetail(error)}`);
+  }
+  if (body === null) {
+    throw CommandError.badRequest(`请求 ${source} 失败：${failures.join("；")}`);
   }
   const contentHash = `sha256:${createHash("sha256").update(body, "utf8").digest("hex")}`;
   const filePath = path.join(ctx.catalogDir, fileName);

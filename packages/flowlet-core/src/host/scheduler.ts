@@ -20,6 +20,7 @@ import { queryBalance } from "../web/balance.ts";
 import { resolveAccountCredentials, syncAccount } from "../web/qwen-platform.ts";
 import { presetSupportsBalance } from "../web/config-state.ts";
 import { loadLogCaptureConfig } from "../config/index.ts";
+import { MODELS_CN_URL, modelsCnSourceCandidates } from "../catalog/sources.ts";
 import { cleanupScheduledBodies } from "../storage/maintenance.ts";
 import { cleanupA2aBodies } from "../storage/a2a.ts";
 import type { CaptureRewrite, CaptureRewriteJob } from "../storage/capture-compaction.ts";
@@ -31,8 +32,8 @@ export const CATALOG_SYNC_INTERVAL_MS = 60 * 60_000;
 export const BALANCE_SYNC_FIRST_DELAY_MS = 30_000;
 export const BALANCE_SYNC_INTERVAL_MS = 5 * 60_000;
 
-/** 与 Rust host_scheduler.rs 一致。 */
-export const MODELS_CN_URL = "https://null-object-0000.github.io/models-cn/api.json";
+/** models-cn 默认同步主站；GitHub Pages 作为回退镜像，候选顺序见 `catalog/sources.ts`。 */
+export { MODELS_CN_URL };
 export const MODELS_DEV_URL = "https://models.dev/api.json";
 
 /** 提供官方余额接口、可在无桌面环境自动同步的渠道（Rust supports_official_balance）。 */
@@ -185,22 +186,35 @@ export function createHostScheduler(options: HostSchedulerOptions): HostSchedule
     return text;
   }
 
+  /** 按候选顺序请求目录源；全部失败时抛出聚合错误（多个源各自失败原因可见）。 */
+  async function fetchCatalogWithFallback(urls: readonly string[]): Promise<{ text: string; url: string }> {
+    const failures: string[] = [];
+    for (const url of urls) {
+      try {
+        return { text: await fetchCatalog(url), url };
+      } catch (error) {
+        failures.push(error instanceof Error ? error.message : String(error));
+      }
+    }
+    throw new Error(failures.join("；") || "目录同步失败：没有可用的数据源");
+  }
+
   async function runCatalogSyncOnce(): Promise<void> {
     // 与 Rust 一致：两个目录相互独立，单个失败不影响另一个。
-    const targets: Array<[string, string]> = [
-      ["models-cn.json", MODELS_CN_URL],
-      ["models-dev.json", MODELS_DEV_URL],
+    const targets: Array<{ file: string; urls: string[] }> = [
+      { file: "models-cn.json", urls: modelsCnSourceCandidates() },
+      { file: "models-dev.json", urls: [MODELS_DEV_URL] },
     ];
-    for (const [file, url] of targets) {
+    for (const { file, urls } of targets) {
       try {
-        const text = await fetchCatalog(url);
+        const { text, url } = await fetchCatalogWithFallback(urls);
         const target = path.join(context.catalogDir, file);
         const temporary = `${target}.tmp-${process.pid}`;
         writeFileSync(temporary, text, { mode: 0o644 });
         renameSync(temporary, target);
         // 与 Rust sync_catalog_file 一致：目录更新后重建价格表（两个来源独立重建无害）。
         const priceCount = context.storage.rebuildPriceTable(context.catalogDir, context.config);
-        log({ task: "catalog-sync", file, bytes: text.length, prices: priceCount });
+        log({ task: "catalog-sync", file, source: url, bytes: text.length, prices: priceCount });
       } catch (error) {
         log({
           task: "catalog-sync",

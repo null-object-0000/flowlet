@@ -23,6 +23,7 @@ import {
   reorderModelRouteGroups,
 } from "./modelServiceInteractions";
 import type { ChannelAccount } from "../../domains/account/types";
+import { MODELS_CN_PRIMARY_URL, MODELS_DEV_CATALOG_URL } from "../../domains/modelCatalog/sources";
 import type { ChannelPreset } from "../../domains/channel/types";
 import { formatTokenCapacity, type NumberLanguage } from "../../shared/formatters/number";
 import { formatCostAmount } from "../../shared/formatters/cost";
@@ -216,7 +217,7 @@ export function ModelServicesPage() {
   const [syncApplying, setSyncApplying] = useState(false);
 
   const refresh = () => void Promise.all([accounts.refetch(), routes.refetch(), catalogEntry.refetch()]);
-  const syncCatalogs = () => syncModelCatalogs.mutate({ modelsCnUrl: "https://null-object-0000.github.io/models-cn/api.json", modelsDevUrl: "https://models.dev/api.json", triggerSource: "manual" });
+  const syncCatalogs = () => syncModelCatalogs.mutate({ modelsCnUrl: MODELS_CN_PRIMARY_URL, modelsDevUrl: MODELS_DEV_CATALOG_URL, triggerSource: "manual" });
   const openSyncPresets = async () => {
     setSyncPending(true);
     try {

@@ -1060,6 +1060,37 @@ describe("generic A2A gateway through real Host command and HTTP boundaries", ()
               },
             });
             assert.deepEqual(init.agentCapabilities?.mcpCapabilities, {});
+            assert.deepEqual(
+              init.agentCapabilities?.sessionCapabilities?.list,
+              {},
+            );
+            const archived = "archived-fixture";
+            const listed = await peer.request(methods.agent.session.list, {});
+            assert.ok(listed.sessions.some((s) => s.sessionId === archived));
+            await peer.request(methods.agent.session.load, {
+              sessionId: archived,
+              cwd: "/private",
+              mcpServers: [],
+            });
+            await peer.request(methods.agent.session.close, {
+              sessionId: archived,
+            });
+            await peer.request(methods.agent.session.resume, {
+              sessionId: archived,
+              cwd: "/private",
+              mcpServers: [],
+            });
+            await peer.request(methods.agent.session.delete, {
+              sessionId: archived,
+            });
+            await assert.rejects(
+              peer.request(methods.agent.session.load, {
+                sessionId: archived,
+                cwd: "/private",
+                mcpServers: [],
+              }),
+            );
+
             const session = await peer.request(methods.agent.session.new, {
               cwd: "/client/private-workspace",
               mcpServers: [

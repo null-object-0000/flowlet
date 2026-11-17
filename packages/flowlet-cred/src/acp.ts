@@ -207,6 +207,43 @@ export function createAcpBridge(config: AcpBridgeConfig) {
       authMethods: [],
     };
   });
+  app.onRequest(methods.agent.session.list, async ({ params, signal }) => {
+    if (!native) throw RequestError.methodNotFound("session/list");
+    return (await remote(
+      "session/list",
+      { cursor: params.cursor },
+      signal,
+    )) as unknown as import("@agentclientprotocol/sdk").ListSessionsResponse;
+  });
+  app.onRequest(
+    methods.agent.session.resume,
+    async ({ params, signal, client: peer }) => {
+      checkMcp(params.mcpServers ?? []);
+      if (!native) throw RequestError.methodNotFound("session/resume");
+      return (await remote(
+        "session/resume",
+        { sessionId: params.sessionId },
+        signal,
+        peer,
+      )) as unknown as import("@agentclientprotocol/sdk").ResumeSessionResponse;
+    },
+  );
+  app.onRequest(methods.agent.session.close, async ({ params, signal }) => {
+    if (!native) throw RequestError.methodNotFound("session/close");
+    return await remote(
+      "session/close",
+      { sessionId: params.sessionId },
+      signal,
+    );
+  });
+  app.onRequest(methods.agent.session.delete, async ({ params, signal }) => {
+    if (!native) throw RequestError.methodNotFound("session/delete");
+    return await remote(
+      "session/delete",
+      { sessionId: params.sessionId },
+      signal,
+    );
+  });
   app.onRequest(methods.agent.session.new, async ({ params, signal }) => {
     checkMcp(params.mcpServers);
     if (native) {

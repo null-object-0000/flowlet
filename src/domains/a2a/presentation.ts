@@ -29,7 +29,11 @@ export function callMethodLabel(method: string): string {
         "session/cancel": "取消会话请求",
         "session/new": "创建会话",
         "session/load": "恢复会话",
-        "session/set_config_option": "切换模型",
+        "session/set_config_option": "修改会话配置",
+        "session/list": "列出会话",
+        "session/resume": "继续会话",
+        "session/close": "关闭会话",
+        "session/delete": "删除会话",
         "permission/reply": "回复远端权限询问",
         initialize: "初始化 ACP",
       } as Record<string, string>

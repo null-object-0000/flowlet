@@ -8,7 +8,12 @@ import {
   RequestError,
 } from "@agentclientprotocol/sdk";
 
-const sessions = new Map();
+const sessions = new Map([
+  [
+    "archived-fixture",
+    { count: 0, model: "fixture-small", params: { mcpServers: [] } },
+  ],
+]);
 const app = agent({ name: "fixture" });
 let clientCapabilities;
 const options = (session) => [
@@ -39,7 +44,11 @@ app.onRequest(methods.agent.initialize, ({ params }) => {
   clientCapabilities = params.clientCapabilities;
   return {
     protocolVersion: 1,
-    agentCapabilities: { loadSession: true, promptCapabilities: {} },
+    agentCapabilities: {
+      loadSession: true,
+      sessionCapabilities: { list: {}, resume: {}, close: {}, delete: {} },
+      promptCapabilities: {},
+    },
   };
 });
 app.onRequest(methods.agent.session.new, ({ params }) => {
@@ -50,6 +59,22 @@ app.onRequest(methods.agent.session.new, ({ params }) => {
 app.onRequest(methods.agent.session.load, ({ params }) => {
   if (!sessions.has(params.sessionId)) throw new Error("session missing");
   return { configOptions: options(sessions.get(params.sessionId)) };
+});
+app.onRequest(methods.agent.session.list, () => ({
+  sessions: [...sessions.keys()].map((sessionId) => ({
+    sessionId,
+    cwd: process.cwd(),
+  })),
+}));
+app.onRequest(methods.agent.session.resume, ({ params }) => {
+  if (!sessions.has(params.sessionId))
+    throw RequestError.sessionNotFound(params.sessionId);
+  return { configOptions: options(sessions.get(params.sessionId)) };
+});
+app.onRequest(methods.agent.session.close, () => ({}));
+app.onRequest(methods.agent.session.delete, ({ params }) => {
+  sessions.delete(params.sessionId);
+  return {};
 });
 app.onRequest(
   methods.agent.session.setConfigOption,

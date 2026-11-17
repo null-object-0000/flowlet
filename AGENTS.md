@@ -500,7 +500,8 @@ Client Token 与渠道 API Key 不同，可以在客户端访问信息中展示�
 Node Host 支持登记外部 A2A v1 JSON-RPC/SSE Agent 或宿主上的 ACP v1 stdio 程序，入口为左侧「工作台 → Agent 网关」，会话管理页保留快捷入口。
 用户维护 Agent 的原生接入配置；Flowlet 提供 A2A 入口与 `flowlet acp` 客户端桥接配置。
 ACP 的 A2A 入口复用固定版本官方 a2a-go/a2aacp 执行器；原生 ACP 会话与客户端桥复用官方 ACP TypeScript SDK，
-仅透传上游真实模型选项与切换，不开放权限模式修改。A2A Artifact 作为普通消息展示，不伪造工具调用；
+仅透传上游真实模型与 thought_level 配置选项和切换，不开放权限模式修改。
+原生 ACP 生命周期按上游声明开放 list/load/resume/close/delete；持久会话可在 Host 重启后交回上游恢复，禁止自动重发业务请求。A2A Artifact 作为普通消息展示，不伪造工具调用；
 只在共同能力内适配，不把模型协议转换、任意插件执行或 N×N 协议转换纳入范围。
 ACP 程序只在 Electron 本机 Host 或显式启用 `FLOWLET_ENABLE_ACP=1` 的 Web/Docker Host
 运行，不在 Electron client gateway 本机运行。ACP 文件/终端/MCP 能力不对客户端开放，权限询问

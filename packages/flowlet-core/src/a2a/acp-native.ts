@@ -15,6 +15,7 @@ import type { AcpFrame } from "../../../flowlet-cred/src/acp-remote.ts";
 
 type Session = {
   busy: boolean;
+  closing?: boolean;
   models: Set<string>;
   emit?: (frame: AcpFrame) => Promise<void>;
 };
@@ -23,7 +24,11 @@ function modelOptions(result: JsonObject, session: Session): JsonObject {
     Array.isArray(result.configOptions) ? result.configOptions : []
   )
     .map(object)
-    .filter((o) => o.category === "model" && o.type === "select");
+    .filter(
+      (o) =>
+        ["model", "thought_level"].includes(String(o.category)) &&
+        o.type === "select",
+    );
   session.models = new Set(configOptions.map((o) => String(o.id)));
   return { ...result, modes: undefined, configOptions };
 }
@@ -176,6 +181,14 @@ export async function startNativeAcp(
             agentInfo: init.agentInfo,
             agentCapabilities: {
               loadSession: init.agentCapabilities?.loadSession === true,
+              sessionCapabilities: Object.fromEntries(
+                (["list", "resume", "close", "delete"] as const)
+                  .filter(
+                    (name) =>
+                      init.agentCapabilities?.sessionCapabilities?.[name],
+                  )
+                  .map((name) => [name, {}]),
+              ),
               promptCapabilities: {},
               mcpCapabilities: {},
             },
@@ -201,8 +214,50 @@ export async function startNativeAcp(
             if (signal.aborted) await close();
           }
         }
+        if (method === "session/list") {
+          if (!init.agentCapabilities?.sessionCapabilities?.list)
+            throw RequestError.methodNotFound(method);
+          return (await peer.request(
+            methods.agent.session.list,
+            {
+              cwd: config.cwd,
+              ...(typeof raw.cursor === "string" ? { cursor: raw.cursor } : {}),
+            },
+            { cancellationSignal: signal, stopWaitingOnCancel: true },
+          )) as unknown as JsonObject;
+        }
         const id = typeof raw.sessionId === "string" ? raw.sessionId : "";
+        const lifecycle =
+          method === "session/load" || method === "session/resume";
+        if (method === "session/load" && !init.agentCapabilities?.loadSession)
+          throw RequestError.methodNotFound(method);
+        for (const name of ["resume", "close", "delete"] as const)
+          if (
+            method === `session/${name}` &&
+            !init.agentCapabilities?.sessionCapabilities?.[name]
+          )
+            throw RequestError.methodNotFound(method);
+        const restored = !sessions.has(id) && lifecycle;
+        if (restored) {
+          if (!id || id.length > 512)
+            throw RequestError.invalidParams("Invalid session ID");
+          if (sessions.size + creating >= 100)
+            throw RequestError.invalidRequest("Session limit reached");
+          sessions.set(id, { busy: false, models: new Set() });
+        }
         const session = sessions.get(id);
+        if (
+          !session &&
+          (method === "session/delete" || method === "session/close")
+        ) {
+          return (await peer.request(
+            method === "session/delete"
+              ? methods.agent.session.delete
+              : methods.agent.session.close,
+            { sessionId: id },
+            { cancellationSignal: signal, stopWaitingOnCancel: true },
+          )) as unknown as JsonObject;
+        }
         if (!session) throw RequestError.sessionNotFound(id);
         if (method === "session/cancel") {
           for (const item of pending.values())
@@ -234,6 +289,27 @@ export async function startNativeAcp(
             );
           return {};
         }
+        if (method === "session/close") {
+          if (session.closing)
+            throw RequestError.invalidRequest("Session is closing");
+          session.closing = true;
+          try {
+            for (const item of pending.values())
+              if (item.sessionId === id)
+                item.resolve({ outcome: { outcome: "cancelled" } });
+            const result = await peer.request(
+              methods.agent.session.close,
+              { sessionId: id },
+              { cancellationSignal: signal, stopWaitingOnCancel: true },
+            );
+            sessions.delete(id);
+            return result as unknown as JsonObject;
+          } finally {
+            session.closing = false;
+          }
+        }
+        if (session.closing)
+          throw RequestError.invalidRequest("Session is closing");
         if (session.busy) throw RequestError.invalidRequest("Session is busy");
         session.busy = true;
         session.emit = emit;
@@ -246,24 +322,39 @@ export async function startNativeAcp(
             .catch(() => {});
         };
         signal.addEventListener("abort", cancel, { once: true });
+        let succeeded = false;
         try {
-          if (method === "session/load")
-            return modelOptions(
+          if (method === "session/delete") {
+            const result = await peer.request(
+              methods.agent.session.delete,
+              { sessionId: id },
+              { cancellationSignal: signal, stopWaitingOnCancel: true },
+            );
+            sessions.delete(id);
+            return result as unknown as JsonObject;
+          }
+          if (lifecycle) {
+            const result = modelOptions(
               (await peer.request(
-                methods.agent.session.load,
+                method === "session/load"
+                  ? methods.agent.session.load
+                  : methods.agent.session.resume,
                 { sessionId: id, cwd: config.cwd, mcpServers: [] },
                 { cancellationSignal: signal, stopWaitingOnCancel: true },
               )) as unknown as JsonObject,
               session,
             );
+            succeeded = true;
+            return result;
+          }
           if (method === "session/set_config_option") {
-            // Only model selectors may be changed remotely. Never expose mode/permission settings.
+            // Only standard model/thought-level selectors; permission modes stay private.
             if (
               !session.models.has(String(raw.configId)) ||
               typeof raw.value !== "string"
             )
               throw RequestError.invalidParams(
-                "Only upstream model selectors may be changed",
+                "Only upstream model or thought-level selectors may be changed",
               );
             return modelOptions(
               (await peer.request(
@@ -297,6 +388,7 @@ export async function startNativeAcp(
           }
           throw RequestError.methodNotFound(method);
         } finally {
+          if (restored && !succeeded) sessions.delete(id);
           signal.removeEventListener("abort", cancel);
           if (signal.aborted) await close();
           session.busy = false;

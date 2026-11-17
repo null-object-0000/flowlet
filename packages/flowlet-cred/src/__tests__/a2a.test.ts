@@ -17,6 +17,9 @@ import { after, before, beforeEach, afterEach, describe, it } from "node:test";
 import { CredentialStore } from "../store.ts";
 
 const CLI = fileURLToPath(new URL("../cli.ts", import.meta.url));
+const SIGNAL_CLI = fileURLToPath(
+  new URL("./fixtures/signal-cli.ts", import.meta.url),
+);
 const TOKEN = "generic-a2a-test-secret-value";
 let http: Server,
   base = "",
@@ -30,6 +33,7 @@ function child(
   args: string[],
   input?: string,
   extraEnv: NodeJS.ProcessEnv = {},
+  signalEvents = false,
 ) {
   const env: NodeJS.ProcessEnv = { ...process.env, FLOWLET_CRED_DIR: dir };
   for (const key of ["FLOWLET_A2A_TEST_URL", "FLOWLET_A2A_TEST_TOKEN"])
@@ -45,25 +49,45 @@ function child(
     ) || args[0] === "list"
       ? []
       : ["--profile=TEST"];
-  const processHandle = spawn(
-    process.execPath,
-    [CLI, "a2a", ...args, ...selection],
-    { env, stdio: ["pipe", "pipe", "pipe"] },
-  );
+  const ipcSignals = signalEvents && process.platform === "win32";
+  const processHandle = ipcSignals
+    ? spawn(process.execPath, [SIGNAL_CLI, "a2a", ...args, ...selection], {
+        env,
+        stdio: ["pipe", "pipe", "pipe", "ipc"],
+      })
+    : spawn(process.execPath, [CLI, "a2a", ...args, ...selection], {
+        env,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
   let stdout = "",
     stderr = "";
+  assert.ok(processHandle.stdout && processHandle.stderr && processHandle.stdin);
   processHandle.stdout.on("data", (b) => (stdout += b));
   processHandle.stderr.on("data", (b) => (stderr += b));
   processHandle.stdin.end(input);
   const result = new Promise<{
     code: number | null;
+    signal: NodeJS.Signals | null;
     stdout: string;
     stderr: string;
   }>((resolve, reject) => {
     processHandle.on("error", reject);
-    processHandle.on("close", (code) => resolve({ code, stdout, stderr }));
+    processHandle.on("close", (code, signal) =>
+      resolve({ code, signal, stdout, stderr }),
+    );
   });
-  return { process: processHandle, result };
+  const interrupt = () => {
+    if (ipcSignals) {
+      return new Promise<void>((resolve, reject) => {
+        processHandle.send("SIGINT", (error: Error | null) =>
+          error ? reject(error) : resolve(),
+        );
+      });
+    }
+    assert.ok(processHandle.kill("SIGINT"));
+    return Promise.resolve();
+  };
+  return { process: processHandle, result, interrupt };
 }
 const run = async (args: string[], input?: string) => child(args, input).result;
 function task(text: string, context?: string) {
@@ -628,20 +652,41 @@ describe("generic A2A CLI through actual subprocess and HTTP boundaries", () => 
     assert.equal(requests.filter((r) => r.method === "SendMessage").length, 1);
     assert.equal(existsSync(state + ".lock"), false);
   });
-  it("interrupts only the local wait, releases locks and leaves the remote task running", async () => {
+  it("interrupts only the local wait, releases locks and leaves the remote task running", { timeout: 10_000 }, async (t) => {
     const state = path.join(dir, "interrupt.json");
-    const active = child(["send", "hold", "--state=" + state]);
-    await until(() => existsSync(state));
-    active.process.kill("SIGINT");
+    const active = child(["send", "hold", "--state=" + state, "--poll-ms=50"], undefined, {}, true);
+    t.after(async () => {
+      if (active.process.exitCode === null && active.process.signalCode === null) {
+        active.process.kill("SIGKILL");
+      }
+      await active.result;
+    });
+    await until(() => existsSync(state) && requests.some((r) => r.method === "GetTask"));
+    const saved = JSON.parse(readFileSync(state, "utf8"));
+    assert.equal(tasks.get(saved.taskId).status.state, "TASK_STATE_WORKING");
+    await active.interrupt();
     const result = await active.result;
     assert.equal(result.code, 130, result.stderr);
+    assert.equal(result.signal, null);
+    assert.match(result.stderr, /上游任务未自动取消/);
+    assert.match(result.stderr, new RegExp(`taskId=${saved.taskId}`));
     assert.equal(existsSync(state + ".lock"), false);
     assert.equal(
       requests.some((r) => r.method === "CancelTask"),
       false,
     );
+    assert.equal(requests.filter((r) => r.method === "SendMessage").length, 1);
+    assert.equal(JSON.parse(readFileSync(state, "utf8")).taskId, saved.taskId);
     const queried = await run(["tasks", "get", "--state=" + state]);
+    assert.equal(queried.code, 0, queried.stderr);
+    assert.equal(JSON.parse(queried.stdout).id, saved.taskId);
     assert.equal(JSON.parse(queried.stdout).status.state, "TASK_STATE_WORKING");
+    const continued = await run(["send", "follow-up", "--state=" + state, "--async"]);
+    assert.equal(continued.code, 0, continued.stderr);
+    assert.equal(requests.at(-1).params.message.contextId, saved.contextId);
+    assert.equal(existsSync(state + ".lock"), false);
+    assert.equal(tasks.get(saved.taskId).status.state, "TASK_STATE_WORKING");
+    assert.equal(requests.some((r) => r.method === "CancelTask"), false);
   });
   it("binds explicit state to target and prefix, with an explicit new-session escape", async () => {
     const state = path.join(dir, "wrong.json");

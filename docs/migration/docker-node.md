@@ -405,3 +405,9 @@ node scripts/e2e-node-host.mjs            # 端到端冒烟（含 mock 上游流
 - 修复提交 `aecefbb`：仅识别完整且有效的旧准入记录，用原部署协议配置与加密后的 client secret 补全；准入/管理员列表保持不变；墓碑、无部署种子、损坏或不完整的新记录继续拒绝启用。迁移落库且重复启动幂等。
 - 25 项 OIDC 测试（含旧记录迁移/重复应用/墓碑/损坏完整配置）与 Node 类型检查通过；以当前生产镜像 overlay 单文件，镜像 `flowlet:node-20261117-oidc-legacy-fix`。Canary 冒烟通过后切生产，两次 Agent 活动检查均空；最长健康探测成功间隔 2.94s，egress 未重建。
 - 生产 auth/config 已同时返回 oidc（GitLab）和 github；OIDC 登录入口重定向正常，health/models 200，流式 1/1 DONE。未代用户完成 SSO 授权登录。回滚镜像 `flowlet:node-20261117-users-07d8c6f`；迁移后的完整配置兼容该镜像。
+
+## 登录入口卡片样式更新（2026-11-17 09:51）
+
+- 源码 `d8dd039`，镜像 `flowlet:node-20261117-login-cards-d8dd039`。两条实心蓝色登录按钮替换为带品牌图标、说明与箭头的描边卡片；单/多登录方式使用同一渲染路径，保留键盘焦点与减少动态效果支持。
+- 类型检查/Web 构建、桌面浏览器 DOM 尺寸与样式检查通过；预览 resize 未实际改变 viewport，未声称完成本次移动端浏览器验收。Canary health/config/ipc_ping 通过。
+- 生产前端哈希与构建一致，GitLab/GitHub 均启用；health/models 200、流式 1/1 DONE。两次 Agent 活动检查均空，最长健康探测成功间隔 2.77s，egress 未重建。回滚 `flowlet:node-20261117-oidc-legacy-fix`。

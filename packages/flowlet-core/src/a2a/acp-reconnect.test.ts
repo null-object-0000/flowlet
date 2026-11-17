@@ -5,7 +5,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { client, methods } from "@agentclientprotocol/sdk/experimental/v2";
+import {
+  client,
+  methods,
+  agentProtocolRouter,
+} from "@agentclientprotocol/sdk/experimental/v2";
 import { createAcpBridge } from "../../../flowlet-cred/src/acp.ts";
 import { createAcpV2Bridge } from "../../../flowlet-cred/src/acp-v2.ts";
 import { startNativeAcp } from "./acp-native.ts";
@@ -115,14 +119,22 @@ it(
           permission(params),
         );
       try {
-        await app.connectWith(bridge.app, async (peer) => {
-          await peer.request(methods.agent.initialize, {
-            protocolVersion: 2,
-            info: { name: "test", version: "1" },
-            capabilities: {},
-          });
-          await fn(peer);
-        });
+        const a = new TransformStream<any>(),
+          b = new TransformStream<any>();
+        agentProtocolRouter()
+          .withV2(bridge.app)
+          .connect({ writable: a.writable, readable: b.readable });
+        await app.connectWith(
+          { readable: a.readable, writable: b.writable },
+          async (peer) => {
+            await peer.request(methods.agent.initialize, {
+              protocolVersion: 2,
+              info: { name: "test", version: "1" },
+              capabilities: {},
+            });
+            await fn(peer);
+          },
+        );
       } finally {
         bridge.close();
       }
@@ -135,6 +147,12 @@ it(
           cwd: dir,
           mcpServers: [],
         }));
+        const changed = await peer.request(
+          methods.agent.session.setConfigOption,
+          { sessionId, configId: "model", type: "id", value: "fixture-large" },
+        );
+        assert.equal(changed.configOptions[0].configId, "model");
+        assert.equal(changed.configOptions[0].currentValue, "fixture-large");
         const result = await peer.request(methods.agent.session.prompt, {
           sessionId,
           prompt: [{ type: "text", text: "background-count" }],

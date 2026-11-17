@@ -87,10 +87,26 @@ export class ManagedAcp {
     cache.history.push(frame);
     cache.bytes += size;
   }
+  private retainedBytes() {
+    return [...this.sessions.values()].reduce(
+      (n, c) => n + c.bytes + (c.run?.bytes ?? 0),
+      0,
+    );
+  }
+  private trim(keep: Cache) {
+    for (const [key, c] of this.sessions) {
+      if (this.retainedBytes() <= 32 * 1024 * 1024) break;
+      if (c !== keep && (!c.run || c.run.done)) this.sessions.delete(key);
+    }
+  }
   private push(cache: Cache, run: Turn, frame: AcpFrame) {
     if (run.done) return;
     const size = Buffer.byteLength(JSON.stringify(frame));
-    if (run.bytes + size > 8 * 1024 * 1024 || run.events.length >= 20000) {
+    if (
+      run.bytes + size > 8 * 1024 * 1024 ||
+      run.events.length >= 20000 ||
+      this.retainedBytes() + size * 2 > 32 * 1024 * 1024
+    ) {
       run.controller.abort(new Error("ACP retained event limit reached"));
       return;
     }
@@ -270,32 +286,25 @@ export class ManagedAcp {
       this.starting.add(id);
       try {
         if (!cache?.complete) {
-          const history: AcpFrame[] = [];
-          const result = await this.direct(
+          const snapshot: Cache = {
+            config: {},
+            history: [],
+            bytes: 0,
+            complete: true,
+          };
+          snapshot.config = await this.direct(
             "session/load",
             { sessionId: id },
             signal,
-            async (f) => {
-              history.push(f);
+            async (frame) => {
+              this.history(snapshot, frame);
             },
           );
-          cache = { config: result, history: [], bytes: 0, complete: true };
-          for (const f of history) this.history(cache, f);
+          cache = snapshot;
           this.sessions.set(id, cache);
         }
-        // Prune only inactive retained caches, never active work.
-        let retained = [...this.sessions.values()].reduce(
-          (n, c) => n + c.bytes + (c.run?.bytes ?? 0),
-          0,
-        );
-        for (const [key, c] of this.sessions) {
-          if (retained <= 32 * 1024 * 1024) break;
-          if (key !== id && (!c.run || c.run.done)) {
-            retained -= c.bytes + (c.run?.bytes ?? 0);
-            this.sessions.delete(key);
-          }
-        }
-        if (retained > 32 * 1024 * 1024)
+        this.trim(cache);
+        if (this.retainedBytes() > 32 * 1024 * 1024)
           throw new Error("Managed ACP memory limit reached");
         const run: Turn = {
           id: randomUUID(),
@@ -397,9 +406,14 @@ export class ManagedAcp {
         this.starting.delete(id);
       }
     }
-    const history: AcpFrame[] = [];
+    const snapshot: Cache = {
+      config: {},
+      history: [],
+      bytes: 0,
+      complete: true,
+    };
     const result = await this.direct(method, raw, signal, async (frame) => {
-      history.push(frame);
+      if (method === "session/load") this.history(snapshot, frame);
       await emit(frame);
     });
     if (method === "authenticate" || method === "logout") this.sessions.clear();
@@ -411,9 +425,10 @@ export class ManagedAcp {
         complete: true,
       });
     if (method === "session/load") {
-      cache = { config: result, history: [], bytes: 0, complete: true };
-      for (const f of history) this.history(cache, f);
+      snapshot.config = result;
+      cache = snapshot;
       this.sessions.set(id, cache);
+      this.trim(cache);
     } else if (
       method === "session/resume" ||
       method === "session/set_config_option"

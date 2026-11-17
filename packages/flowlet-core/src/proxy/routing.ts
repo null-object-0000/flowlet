@@ -76,7 +76,7 @@ export interface CandidateSelection {
 export const ACCOUNT_CREDENTIAL_HEALTHY = "healthy";
 export const ACCOUNT_CREDENTIAL_INVALID_KEY = "invalid_key";
 
-const PROTOCOLS: Protocol[] = ["openai", "anthropic", "responses"];
+const PROTOCOLS: Protocol[] = ["openai", "anthropic", "responses", "systemone"];
 
 /** 宽松把快照里的 JSON 行解析成强类型（缺失字段落 Rust serde 默认值）。 */
 export function asChannel(raw: unknown): ChannelRow {
@@ -130,7 +130,9 @@ export function asRoute(raw: unknown): RouteRow {
     account_id: str(row.account_id) ?? "",
     upstream_model: str(row.upstream_model) ?? "",
     client_protocol:
-      protocol === "anthropic" || protocol === "responses" ? protocol : "openai",
+      protocol === "anthropic" || protocol === "responses" || protocol === "systemone"
+        ? protocol
+        : "openai",
     priority: num(row.priority) ?? 0,
     enabled: bool(row.enabled) ?? true,
     created_at: str(row.created_at) ?? "",
@@ -149,7 +151,10 @@ export function asRule(raw: unknown): RuleRow {
     match_client_id: str(row.match_client_id) ?? null,
     match_model: str(row.match_model) ?? null,
     match_protocol:
-      protocol === "openai" || protocol === "anthropic" || protocol === "responses"
+      protocol === "openai" ||
+      protocol === "anthropic" ||
+      protocol === "responses" ||
+      protocol === "systemone"
         ? protocol
         : null,
     target_channel_id: str(row.target_channel_id) ?? "",
@@ -434,6 +439,8 @@ export function enrichUpstreamErrorLog(log: JsonRow, status: number): void {
 
 /** 请求是否包含图片输入（`model_input_capabilities.rs::request_uses_image`）。 */
 export function requestUsesImage(body: Buffer, protocol: Protocol): boolean {
+  // 决策模型请求体没有 chat 语义的图片输入（state / questions）。
+  if (protocol === "systemone") return false;
   const parsed = safeJson(body);
   if (parsed === null) return false;
   const types =

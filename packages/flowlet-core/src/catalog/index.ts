@@ -14,13 +14,26 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { JsonRow } from "../types.ts";
 
-/** model-catalog.json 的单个模型身份（camelCase，与 Rust serde 反序列化一致）。 */
+/** 模型的协议族。`chat` 是缺省值；`decision` 只走 TypeSafe System One。 */
+export type ModelKind = "chat" | "decision";
+
+export type ModelProtocol = "openai" | "anthropic" | "responses" | "systemone";
+
+/** 每种模型类型允许生成的候选协议。缺省（chat）保持既有三种对话协议。 */
+const MODEL_KIND_PROTOCOLS: Record<ModelKind, readonly ModelProtocol[]> = {
+  chat: ["openai", "anthropic", "responses"],
+  decision: ["systemone"],
+};
+
+/** model-catalog.json 的单个模型身份（camelCase，与 Node Host serde 反序列化一致）。 */
 export interface ModelIdentity {
   id: string;
   ownerChannelId: string;
   officialOwnerName?: string | null;
   modelsCnProviderId: string;
   aliases: string[];
+  /** 缺省 `chat`；`decision` 为结构化决策模型（不生成对话文本）。 */
+  kind?: ModelKind;
 }
 
 export interface ModelCatalog {
@@ -36,6 +49,10 @@ export interface ModelCatalog {
   ownerChannelForModel(name: string): string | null;
   /** 全局白名单（目录顺序，原始大小写）。 */
   supportedModels(): string[];
+  /** 模型类型；目录未登记时按 `chat` 处理。 */
+  kindFor(name: string): ModelKind;
+  /** 该模型身份是否允许生成指定协议的候选；目录未登记时不额外收紧。 */
+  supportsProtocol(name: string, protocol: string): boolean;
   /** 目录原始数据（品牌/别名/价格归属等）。 */
   raw(): JsonRow;
   /** models-cn.json 解析结果（不存在时 null）。 */
@@ -70,6 +87,9 @@ export class ModelCatalogImpl implements ModelCatalog {
       const canonicalKey = model.id.trim().toLowerCase();
       if (this.#canonicalIndex.has(canonicalKey)) {
         throw new Error(`model-catalog.json 存在重复模型：${model.id}`);
+      }
+      if (model.kind !== undefined && model.kind !== "chat" && model.kind !== "decision") {
+        throw new Error(`model-catalog.json 模型 ${model.id} 的 kind 无效：${String(model.kind)}`);
       }
       this.#canonicalIndex.set(canonicalKey, index);
       for (const alias of model.aliases ?? []) {
@@ -113,6 +133,17 @@ export class ModelCatalogImpl implements ModelCatalog {
 
   supportedModels(): string[] {
     return this.#models.map((model) => model.id);
+  }
+
+  kindFor(name: string): ModelKind {
+    return this.find(name)?.kind ?? "chat";
+  }
+
+  supportsProtocol(name: string, protocol: string): boolean {
+    const identity = this.find(name);
+    // 历史路由引用了目录外模型时不做额外收紧，保持原有匹配行为。
+    if (identity === null) return true;
+    return MODEL_KIND_PROTOCOLS[identity.kind ?? "chat"].includes(protocol as ModelProtocol);
   }
 
   raw(): JsonRow {

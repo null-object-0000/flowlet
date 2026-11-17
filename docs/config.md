@@ -360,7 +360,7 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 | `name` | `string` | 是 | — | 前端展示名称 |
 | `vendor` | `string` | 是 | — | 厂商标识，用于内部匹配 |
 | `platform_url` | `string?` | 否 | `null` | 渠道控制台跳转地址，前端"获取 API Key"按钮链接 |
-| `supported_protocols` | `string[]` | 否 | `[]` | 支持的协议，可选 `"openai"` / `"anthropic"` / `"responses"`（OpenAI Responses API，仅无状态透传） |
+| `supported_protocols` | `string[]` | 否 | `[]` | 支持的协议，可选 `"openai"` / `"anthropic"` / `"responses"` / `"systemone"`（OpenAI Responses API，仅无状态透传） |
 | `openai_base_url` | `string` | 否 | `""` | OpenAI 协议的上游 Base URL |
 | `anthropic_base_url` | `string` | 否 | `""` | Anthropic 协议的上游 Base URL |
 | `openai_auth` | `string` | 否 | `"bearer"` | OpenAI 协议鉴权方式：`"bearer"` 或 `"x_api_key"` |
@@ -878,3 +878,17 @@ failed to parse model_catalog_json path `...` as JSON: missing field `shell_type
 旧外部配置及 SQLite 由已有的内置配置合并和预设迁移在重启时幂等补齐；不改变数据库结构，
 保留账号、Key、地址覆盖、路由启停及优先级。模型选择与路由保存继续热更新。
 协议和端点依据：[TokenHub 官方语言模型调用概览](https://cloud.tencent.cn/document/product/1823/130079)。
+
+
+### 决策模型 System One 恢复（2026-11-17）
+
+`model-catalog.json` 的 `decision-model-preview` 声明 `kind: "decision"`，只生成
+`systemone` 候选；缺省 `kind: "chat"` 的模型只生成 OpenAI/Anthropic/Responses 候选。
+`qwen` 和 `custom` 模板声明 `systemone`，该协议复用账号级 OpenAI Base URL 和 Bearer 鉴权，
+仅透传 `POST /v1/systemone`（兼容 `/systemone`），非 POST 返回 405。
+Qwen 必须配置 Token Plan 或业务空间网关；custom 必须填写 OpenAI Base URL，且模型须来自
+真实 `/models`。Qwen 成功拉取列表后可按官方决策模型目录补入候选，仍由用户明确勾选。
+
+旧外部配置的协议声明和旧 SQLite 预设在启动时幂等补齐，保留账号、Key、地址覆盖和路由
+启停/优先级。无数据库结构变更；更新并重启后生效，后续模型勾选和路由保存继续热更新。
+模型管理页可管理决策模型，它不出现在普通对话 `/models` 或 Agent 默认模型列表。

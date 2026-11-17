@@ -586,3 +586,19 @@ Token Plan 账号通过账号级 Base URL 覆盖接入（与 Qwen Token Plan 的
 [语言模型调用概览（模型协议表）](https://cloud.tencent.cn/document/product/1823/130079)、
 [Responses API 兼容模式说明](https://cloud.tencent.cn/document/product/1823/133813)、
 [模型列表](https://cloud.tencent.cn/document/product/1823/130051)。
+
+
+## 阿里云百炼决策模型（TypeSafe System One）
+
+`decision-model-preview` 是独立的结构化决策模型，模型目录登记 `kind: "decision"`。
+它使用 `POST /v1/systemone`（上游百炼网关为 `/compatible-mode/v1/systemone`），
+请求与响应原样透传，仅按候选替换 `model`；记录上游真实输入 Token，不虚构输出 Token。
+协议隔离由目录、前端候选对账、Node 与 Rust 路由共同保证；它不进入对话模型池或 Agent 接入。
+
+Qwen 需要账号级 Token Plan 或业务空间网关地址，缺失时禁用选择并不生成候选。
+自定义网关使用其 OpenAI Base URL，模型只接受该账号实际 `/models` 返回结果。
+账户显式勾选、取消勾选后的路由对账、地址覆盖与热更新均沿用既有账号流程。
+旧外部配置与 SQLite 预设通过内置协议升级补齐，不重置已有账号和路由状态。
+联合发布回归见 `src/pages/models/modelReleaseContract.test.ts`，同时验证 HY4、Flash、决策模型。
+
+官方来源：[决策模型 API](https://help.aliyun.com/zh/model-studio/decision-model-api)。

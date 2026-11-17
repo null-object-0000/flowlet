@@ -206,6 +206,7 @@ pub(crate) fn request_uses_image(body: &[u8], protocol: &ProtocolType) -> bool {
         ProtocolType::OpenAi => contains_content_type(&value, &["image_url", "input_image"]),
         ProtocolType::Responses => contains_content_type(&value, &["input_image"]),
         ProtocolType::Anthropic => contains_content_type(&value, &["image"]),
+        ProtocolType::Systemone => false,
     }
 }
 

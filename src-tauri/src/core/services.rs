@@ -331,11 +331,17 @@ pub fn merge_builtin_config(mut external: ChannelsConfig) -> ChannelsConfig {
         return external;
     };
     for preset in builtin.presets {
-        if !external
+        if let Some(current) = external
             .presets
-            .iter()
-            .any(|current| current.id == preset.id)
+            .iter_mut()
+            .find(|current| current.id == preset.id)
         {
+            for protocol in preset.supported_protocols {
+                if !current.supported_protocols.contains(&protocol) {
+                    current.supported_protocols.push(protocol);
+                }
+            }
+        } else {
             external.presets.push(preset);
         }
     }
@@ -482,5 +488,37 @@ mod tests {
         for channel in ["longcat", "deepseek", "kimi", "qwen"] {
             assert!(config.presets.iter().any(|preset| preset.id == channel));
         }
+    }
+}
+
+#[cfg(test)]
+mod decision_protocol_tests {
+    use super::*;
+    use crate::core::config::ProtocolType;
+
+    #[test]
+    fn systemone_upgrade_retains_custom_endpoints_and_existing_protocols() {
+        let mut raw: serde_json::Value = serde_json::from_str(DEFAULT_CONFIG_JSON).unwrap();
+        let qwen = raw["channels_config"]["channels"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|c| c["id"] == "qwen")
+            .unwrap();
+        qwen["supported_protocols"] = serde_json::json!(["openai", "anthropic", "responses"]);
+        qwen["openai_base_url"] = serde_json::json!("https://existing.example/v1");
+        let config = ChannelsConfig::from_config_json(&raw).unwrap();
+        let merged = merge_builtin_config(merge_builtin_config(config));
+        let preset = merged.presets.iter().find(|c| c.id == "qwen").unwrap();
+        assert_eq!(preset.openai_base_url, "https://existing.example/v1");
+        assert_eq!(
+            preset.supported_protocols,
+            vec![
+                ProtocolType::OpenAi,
+                ProtocolType::Anthropic,
+                ProtocolType::Responses,
+                ProtocolType::Systemone
+            ]
+        );
     }
 }

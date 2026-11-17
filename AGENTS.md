@@ -216,6 +216,7 @@ Flowlet 当前支持：
 * OpenAI-compatible
 * Anthropic-compatible
 * OpenAI Responses API（仅无状态透传）
+* TypeSafe System One（`systemone`，仅结构化决策模型的无状态 POST 透传）
 
 默认原则：
 
@@ -352,6 +353,7 @@ Flowlet 支持的模型（全局白名单，不按渠道区分）：
 - glm-5.2
 - glm-4.7
 - glm-4.5-air
+- decision-model-preview
 - hy4
 - hy4-flash
 - ox-alpha
@@ -921,3 +923,12 @@ src/
 | `docs/agent-session-metadata.md` | Web Host 会话标题/项目目录的服务端派生规则与存储契约 | 派生规则、`agent_session_metadata` 表结构或会话聚合口径变化时 |
 
 修改代码前先检查对应文档是否仍然准确；若已过时，一并更新。
+
+
+### 决策模型协议约束
+
+`decision-model-preview` 的 `kind` 为 `decision`，仅走 `systemone`（`POST /v1/systemone`，
+兼容 `/systemone`），复用 OpenAI Base URL 与鉴权。不进入 Chat/Responses/Anthropic 模型池或
+Agent 默认模型选择器。Qwen 需要账号级网关地址，custom 需要 OpenAI Base URL；均需用户显式选择。
+Qwen 的决策模型可在成功拉取上游列表后按官方目录补入候选；custom 仅接受真实 `/models` 返回。
+发布前必须联合验证 HY4、Flash 与决策模型的 UI、目录、候选生成及协议隔离，避免只保留后端差异。

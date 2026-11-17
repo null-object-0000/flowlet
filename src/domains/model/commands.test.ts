@@ -848,3 +848,80 @@ describe("VibeToken aggregation", () => {
     expect(reconciled.find((r) => r.id === existing.id)).toMatchObject({ enabled: false, priority: 17 });
   });
 });
+
+describe("decision model (systemone) routing", () => {
+  const preset = {
+    id: "qwen",
+    supported_protocols: ["openai", "anthropic", "responses", "systemone"],
+  } as ChannelPreset;
+
+  const tokenPlanAccount = {
+    id: "account-qwen-token-plan",
+    channel_id: "qwen",
+    api_key: "sk-sp-test",
+    enabled: true,
+    resource_mode: "token_plan",
+    base_url_override: "https://token-plan.example/compatible-mode/v1",
+    exposed_models: ["decision-model-preview", "qwen3.8-max"],
+    synced_models: ["decision-model-preview", "qwen3.8-max"],
+  } as ChannelAccount;
+
+  // 同一账号从 Token Plan 切回按量付费：id 不变，只清空资源模式与网关地址。
+  const paygAccount = {
+    ...tokenPlanAccount,
+    resource_mode: "pay_as_you_go",
+    base_url_override: null,
+    workspace_default_base_url: null,
+  } as ChannelAccount;
+
+  it("creates only a systemone route for the decision model", () => {
+    const routes = mergeDefaultRoutes([], [tokenPlanAccount], [preset]);
+    expect(
+      routes
+        .filter((route) => route.virtual_model_id === "decision-model-preview")
+        .map((route) => [route.client_protocol, route.upstream_model]),
+    ).toEqual([["systemone", "decision-model-preview"]]);
+    // 同一账号的对话模型不进 systemone，决策模型也不进对话协议。
+    expect(
+      routes
+        .filter((route) => route.virtual_model_id === "qwen3.8-max")
+        .map((route) => route.client_protocol),
+    ).toEqual(["openai", "anthropic", "responses"]);
+  });
+
+  it("does not create a systemone route without an account-level gateway URL", () => {
+    const routes = mergeDefaultRoutes([], [paygAccount], [preset]);
+    expect(routes.some((route) => route.client_protocol === "systemone")).toBe(false);
+    expect(routes.some((route) => route.virtual_model_id === "decision-model-preview")).toBe(false);
+  });
+
+  it("routes the decision model on a custom channel whose Base URL serves /systemone", () => {
+    const customPreset = {
+      id: "custom",
+      supported_protocols: ["openai", "systemone"],
+    } as ChannelPreset;
+    const customAccount = {
+      id: "account-friday",
+      channel_id: "custom",
+      api_key: "sk-test",
+      enabled: true,
+      base_url_override: "https://oneai.example/v1",
+      exposed_models: ["decision-model-preview"],
+      synced_models: ["decision-model-preview"],
+    } as ChannelAccount;
+    const routes = mergeDefaultRoutes([], [customAccount], [customPreset]);
+    expect(routes.map((route) => [route.virtual_model_id, route.client_protocol])).toEqual([
+      ["decision-model-preview", "systemone"],
+    ]);
+  });
+
+  it("drops a stale systemone route after switching back to pay-as-you-go", () => {
+    const existing = mergeDefaultRoutes([], [tokenPlanAccount], [preset]).filter(
+      (route) => route.client_protocol === "systemone",
+    );
+    expect(existing).toHaveLength(1);
+    const reconciled = reconcileAccountRoutes(existing, [paygAccount], [preset]);
+    expect(reconciled.some((route) => route.client_protocol === "systemone")).toBe(false);
+    expect(reconciled.some((route) => route.virtual_model_id === "decision-model-preview")).toBe(false);
+  });
+});

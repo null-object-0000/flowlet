@@ -106,6 +106,12 @@ export function isResponsesPath(rawUrl: string): boolean {
   );
 }
 
+/** `TypeSafe System One` 决策入口（`/systemone` 与 `/v1/systemone`）。 */
+export function isSystemOnePath(rawUrl: string): boolean {
+  const p = pathWithoutQuery(rawUrl).replace(/^\/+/, "");
+  return p === "systemone" || p === "v1/systemone" || p === "openai/v1/systemone";
+}
+
 export function isModelListRequest(method: string, rawUrl: string): boolean {
   if (method.toUpperCase() !== "GET") return false;
   const path = pathWithoutQuery(rawUrl);
@@ -179,7 +185,7 @@ function stripDuplicateV1(base: string, path: string): string {
 export function buildUpstreamUrl(baseUrl: string, rawUrl: string, protocol: Protocol): string {
   const base = baseUrl.replace(/\/+$/, "");
   const path = rawUrl === "" ? "/" : rawUrl;
-  if (protocol === "openai" || protocol === "responses") {
+  if (protocol === "openai" || protocol === "responses" || protocol === "systemone") {
     // 保留 /v1 与 /openai/v1 前缀：base_url 已包含 /openai 或 /v1 的入口前缀。
     const stripped = trimPrefixAll(path, "/openai");
     return stripDuplicateV1(base, stripped) + stripped;
@@ -520,7 +526,14 @@ export function isStreamingResponse(headers: HeaderMapLike): boolean {
 
 // ─── Request classification ─────────────────────────────────────────────────
 
-export type RequestType = "chat" | "code" | "reasoning" | "long_context" | "tool_use" | "unknown";
+export type RequestType =
+  | "chat"
+  | "code"
+  | "reasoning"
+  | "long_context"
+  | "tool_use"
+  | "decision"
+  | "unknown";
 
 function hasToolUseContent(json: JsonRow): boolean {
   for (const message of asArray(json.messages)) {
@@ -533,8 +546,9 @@ function hasToolUseContent(json: JsonRow): boolean {
   return false;
 }
 
-/** `config.rs::classify_request` 的等价实现。 */
-export function classifyRequest(body: Buffer, _protocol: Protocol): RequestType {
+/** `packages/flowlet-core/src/storage/scrape.ts::classify_request` 的等价实现。 */
+export function classifyRequest(body: Buffer, protocol: Protocol): RequestType {
+  if (protocol === "systemone") return "decision";
   const parsed = parseJson(body);
   if (!isRecord(parsed)) return "unknown";
   if (parsed.tools !== undefined || parsed.tool_choice !== undefined || hasToolUseContent(parsed)) {

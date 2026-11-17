@@ -4,11 +4,13 @@
 // unit-test. Behaviour mirrors `src-tauri/src/core/**`.
 
 export type JsonRow = Record<string, any>;
-export type Protocol = "openai" | "anthropic" | "responses";
+/** 客户端/上游协议。`systemone` 是阿里云百炼决策模型的 TypeSafe System One。 */
+export type Protocol = "openai" | "anthropic" | "responses" | "systemone";
 
 export const PROTOCOL_OPENAI: Protocol = "openai";
 export const PROTOCOL_ANTHROPIC: Protocol = "anthropic";
 export const PROTOCOL_RESPONSES: Protocol = "responses";
+export const PROTOCOL_SYSTEMONE: Protocol = "systemone";
 
 export function isRecord(value: unknown): value is JsonRow {
   return typeof value === "object" && value !== null && !Array.isArray(value);

@@ -24,6 +24,7 @@
     { "id": "qwen3.7-flash", "ownerChannelId": "qwen", "modelsCnProviderId": "qwen-cn", "aliases": [] },
     { "id": "qwen3.6-plus", "ownerChannelId": "qwen", "modelsCnProviderId": "qwen-cn", "aliases": [] },
     { "id": "qwen3.6-flash", "ownerChannelId": "qwen", "modelsCnProviderId": "qwen-cn", "aliases": [] },
+    { "id": "decision-model-preview", "ownerChannelId": "qwen", "officialOwnerName": "阿里云百炼", "modelsCnProviderId": "qwen-cn", "aliases": [], "kind": "decision" },
     { "id": "glm-5.3", "ownerChannelId": "zhipu", "modelsCnProviderId": "zhipu-cn", "aliases": [] },
     { "id": "glm-5.3-flash", "ownerChannelId": "zhipu", "modelsCnProviderId": "zhipu-cn", "aliases": [] },
     { "id": "glm-5.2", "ownerChannelId": "zhipu", "modelsCnProviderId": "zhipu-cn", "aliases": [] },

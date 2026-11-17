@@ -24,6 +24,8 @@ pub struct ModelIdentity {
     pub models_cn_provider_id: String,
     #[serde(default)]
     pub aliases: Vec<String>,
+    #[serde(default)]
+    pub kind: Option<String>,
 }
 
 #[derive(Debug)]
@@ -47,6 +49,14 @@ impl ModelCatalog {
         let mut canonical_index = HashMap::new();
         let mut alias_index = HashMap::new();
         for (index, model) in parsed.models.iter().enumerate() {
+            if model
+                .kind
+                .as_deref()
+                .is_some_and(|kind| kind != "chat" && kind != "decision")
+            {
+                return Err(format!("不支持的模型类型：{}", model.id));
+            }
+
             if model.id.trim().is_empty()
                 || model.owner_channel_id.trim().is_empty()
                 || model.models_cn_provider_id.trim().is_empty()
@@ -105,6 +115,17 @@ impl ModelCatalog {
         self.canonical_index
             .get(&key)
             .map(|index| &self.models[*index])
+    }
+
+    pub fn supports_protocol(
+        &self,
+        model_id: &str,
+        protocol: &super::config::ProtocolType,
+    ) -> bool {
+        self.find(model_id).is_none_or(|model| {
+            (model.kind.as_deref() == Some("decision"))
+                == (*protocol == super::config::ProtocolType::Systemone)
+        })
     }
 
     pub fn supported_models(&self) -> Vec<String> {
@@ -171,7 +192,7 @@ mod tests {
     #[test]
     fn embedded_catalog_is_valid_and_has_expected_models() {
         let catalog = model_catalog();
-        assert_eq!(catalog.supported_models().len(), 33);
+        assert_eq!(catalog.supported_models().len(), 34);
         assert_eq!(
             catalog.find("LongCat-2.5").unwrap().owner_channel_id,
             "longcat"
@@ -263,6 +284,9 @@ mod tests {
             .as_object()
             .unwrap();
         for model in &model_catalog().models {
+            if model.kind.as_deref() == Some("decision") {
+                continue;
+            }
             let owner_models = defaults[&model.owner_channel_id].as_array().unwrap();
             assert!(
                 owner_models
@@ -277,7 +301,14 @@ mod tests {
             .values()
             .map(|models| models.as_array().unwrap().len())
             .sum();
-        assert_eq!(configured_count, model_catalog().models.len());
+        assert_eq!(
+            configured_count,
+            model_catalog()
+                .models
+                .iter()
+                .filter(|m| m.kind.as_deref() != Some("decision"))
+                .count()
+        );
     }
 
     #[test]

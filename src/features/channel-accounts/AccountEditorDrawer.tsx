@@ -27,6 +27,7 @@ import {
   isZhipuPayAsYouGoAccount,
   resolveSelectedUpstreamModelIds,
 } from "../../domains/channel/types";
+import { decisionModelIdsForChannel, modelKindFor } from "../../domains/modelCatalog/identity";
 import {
   parseStoredLongCatPacks,
   summarizeLongCatPacks,
@@ -303,7 +304,21 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
         base_url_override: effectiveOpenAiBaseUrl(currentDraft),
         use_upstream_proxy: currentDraft.use_upstream_proxy,
       });
-      const models = result.models.filter((item) => item.model.trim());
+      const upstreamModels = result.models.filter((item) => item.model.trim());
+      // 决策模型是目录声明的固定资源，标准对话 /models 列表可能不返回它；
+      // 渠道声明 systemone 且账号有网关地址时补进候选，仍由用户显式勾选。
+      const catalogDecisionModels =
+        result.errors.length === 0
+        && channel?.supported_protocols.includes("systemone") === true
+        && Boolean(effectiveOpenAiBaseUrl(currentDraft))
+          ? decisionModelIdsForChannel(currentDraft.channel_id)
+          : [];
+      const models = [
+        ...upstreamModels,
+        ...catalogDecisionModels
+          .filter((id) => !upstreamModels.some((item) => item.model.trim().toLowerCase() === id.toLowerCase()))
+          .map((id) => ({ model: id, display_name: null })),
+      ];
       if (models.length === 0 && result.errors.length > 0) {
         Toast.error(t("拉取模型列表失败：{message}", { message: result.errors[0] }));
         return;
@@ -326,7 +341,7 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
       if (result.errors.length > 0) {
         Toast.warning(t("模型列表已获取，但部分请求失败：{message}", { message: result.errors[0] }));
       } else {
-        Toast.success(t("已获取 {count} 个上游模型", { count: models.length }));
+        Toast.success(t("已获取 {count} 个可用模型", { count: models.length }));
       }
     } catch (error) {
       Toast.error(t("拉取模型列表失败：{message}", { message: toAppError(error, "account_sync_failed").message }));
@@ -736,6 +751,16 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
                           // 同一规范模型下的独立额度资源分别开启。
                           const key = canonicalModelKey(candidate.model);
                           const supported = whitelistSet.has(key);
+                          // 决策模型只能落在声明 systemone 的渠道，且只存在于账号级网关
+                          // （Token Plan / 业务空间）；按量付费账号即使 /models 返回它也无法调用。
+                          const decision = supported && modelKindFor(candidate.model) === "decision";
+                          const decisionProtocolSupported =
+                            decision && (channel?.supported_protocols.includes("systemone") ?? false);
+                          const decisionRequiresGateway =
+                            decisionProtocolSupported && !effectiveOpenAiBaseUrl(currentDraft);
+                          const selectable =
+                            supported && (!decision || (decisionProtocolSupported && !decisionRequiresGateway));
+                          const unsupportedHere = !supported || (decision && !decisionProtocolSupported);
                           // 千问按量付费：免费额度实例（valid 且有剩余）优先展示；
                           // 免费仅提示与排序，不改变白名单可勾选约束。
                           const qwenQuota = isQwenPayAsYouGo
@@ -756,13 +781,15 @@ export function AccountEditorDrawer({ mode, accounts, presets, snapshot, onClose
                             >
                               <Checkbox
                                 checked={checked}
-                                disabled={!supported}
+                                disabled={!selectable}
                                 onChange={(event) => toggleExposedModel(candidate.model, event.target.checked === true)}
                               />
                               <span className={styles.modelIdentity}>
                                 <span className={styles.modelName}>{candidate.model}</span>
                                 {free ? <Tag className={styles.modelTag} size="small" color="green">{t("免费")}</Tag> : null}
-                                {supported ? null : <Tag className={styles.modelTag} size="small" color="grey">{t("不支持")}</Tag>}
+                                {decision ? <Tag className={styles.modelTag} size="small" color="violet">{t("决策")}</Tag> : null}
+                                {decisionRequiresGateway ? <Tag className={styles.modelTag} size="small" color="orange">{t("需网关地址")}</Tag> : null}
+                                {unsupportedHere ? <Tag className={styles.modelTag} size="small" color="grey">{t("不支持")}</Tag> : null}
                               </span>
                               <span className={styles.modelMeta}>
                                 {isAliasVariant && canonical ? (

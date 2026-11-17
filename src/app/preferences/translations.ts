@@ -1700,6 +1700,8 @@ const english: Record<string, string> = {
   "已登录": "Signed in",
   "已复制到剪贴板": "Copied to clipboard",
   "已获取 {count} 个上游模型": "Fetched {count} upstream models",
+  "已获取 {count} 个可用模型": "Fetched {count} available models",
+  "需网关地址": "Gateway URL required",
   "已结束": "Ended",
   "已用": "Used",
   "用量剩余 {percent}%": "{percent}% usage left",

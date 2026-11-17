@@ -413,6 +413,7 @@ impl ProxyController {
             // 裸根路径入口兼容 base_url 不带 /v1 的客户端（DeepSeek SDK 风格）。
             // forward_request 内通过 is_responses_path 将协议重标为 Responses。
             .route("/responses", any(forward_openai_compatible))
+            .route("/systemone", any(forward_openai_compatible))
             .route("/responses/{*path}", any(forward_openai_compatible))
             .route("/anthropic/v1/{*path}", any(forward_anthropic_compatible))
             .with_state(ProxyAppState {
@@ -812,7 +813,9 @@ async fn forward_request(
     // OpenAI 兼容入口命中的 `/v1/responses[...]`、`/openai/v1/responses[...]`
     // 以及裸根路径 `/responses[...]` 属于 Responses 协议（路由候选、日志归属
     // 与 Chat Completions 独立）。Anthropic 入口路径永不命中，无需额外防护。
-    let detected_protocol = if ProtocolType::is_responses_path(&path) {
+    let detected_protocol = if ProtocolType::is_systemone_path(&path) {
+        ProtocolType::Systemone
+    } else if ProtocolType::is_responses_path(&path) {
         ProtocolType::Responses
     } else {
         detected_protocol
@@ -830,6 +833,21 @@ async fn forward_request(
             }
         });
         let mut response = Response::new(Body::from(payload.to_string()));
+        *response.status_mut() = StatusCode::METHOD_NOT_ALLOWED;
+        response
+            .headers_mut()
+            .insert("Content-Type", "application/json".parse().unwrap());
+        return Ok(response);
+    }
+
+    if detected_protocol == ProtocolType::Systemone && parts.method != Method::POST {
+        let mut response = Response::new(Body::from(
+            serde_json::json!({"error": {
+                "message": "Flowlet only supports POST /v1/systemone passthrough",
+                "code": "systemone_unsupported_method", "type": "systemone_unsupported_method"
+            }})
+            .to_string(),
+        ));
         *response.status_mut() = StatusCode::METHOD_NOT_ALLOWED;
         response
             .headers_mut()
@@ -887,6 +905,22 @@ async fn forward_request(
     // （virtual_model_id）。这里按 model-catalog.json 归一一次，规则与路由都用它匹配；
     // 目录里未登记的名字原样透传（仍走 model_not_exposed）。日志保留客户端原始名。
     let routing_model = public_model.as_deref().map(routing_model_id);
+    if routing_model.as_deref().is_some_and(|model| {
+        !crate::core::model_catalog::model_catalog().supports_protocol(model, &detected_protocol)
+    }) {
+        let mut response = Response::new(Body::from(
+            serde_json::json!({"error": {
+                "message": "The requested model does not support this protocol",
+                "code": "model_protocol_unsupported", "type": "model_protocol_unsupported"
+            }})
+            .to_string(),
+        ));
+        *response.status_mut() = StatusCode::NOT_FOUND;
+        response
+            .headers_mut()
+            .insert("Content-Type", "application/json".parse().unwrap());
+        return Ok(response);
+    }
 
     // token 身份：仅用于鉴权、路由匹配、限流 key，不再写日志/用量
     let token_client = identify_client(&parts.headers, &default_client_token);
@@ -1062,9 +1096,11 @@ async fn forward_request(
             )
         };
         let payload = match detected_protocol {
-            ProtocolType::OpenAi | ProtocolType::Responses => serde_json::json!({
-                "error": { "message": error_message, "type": error_code, "code": error_code }
-            }),
+            ProtocolType::OpenAi | ProtocolType::Responses | ProtocolType::Systemone => {
+                serde_json::json!({
+                    "error": { "message": error_message, "type": error_code, "code": error_code }
+                })
+            }
             ProtocolType::Anthropic => serde_json::json!({
                 "type": "error",
                 "error": { "type": error_code, "message": error_message }
@@ -1169,7 +1205,9 @@ async fn forward_request(
         // 账号级 Base URL 按协议分别覆盖，未配置时回退到渠道默认地址。
         // Responses 复用 OpenAI 的覆盖地址（两者共享上游 Base URL）。
         let account_base_url = match &detected_protocol {
-            ProtocolType::OpenAi | ProtocolType::Responses => account.effective_openai_base_url(),
+            ProtocolType::OpenAi | ProtocolType::Responses | ProtocolType::Systemone => {
+                account.effective_openai_base_url()
+            }
             ProtocolType::Anthropic => account.effective_anthropic_base_url(),
         };
         let base_url = account_base_url

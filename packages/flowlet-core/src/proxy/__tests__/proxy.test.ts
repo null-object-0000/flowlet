@@ -2124,3 +2124,125 @@ test("personal model credentials attribute requests, revoke immediately, and ret
     assert.equal(owners.length,1);
   } finally { await proxy.controller.stop();await upstream.close(); }
 });
+
+test("System One 决策协议：非 POST 返回 405 systemone_unsupported_method", async () => {
+  const upstream = await startMockUpstream((_req, res) => jsonResponse(res, 200, {}));
+  const proxy = await startProxy({ upstreamPort: upstream.port });
+  cleanups.push(async () => {
+    await proxy.controller.stop();
+    await upstream.close();
+  });
+
+  for (const path of ["/v1/systemone", "/systemone"]) {
+    const response = await request(proxy.port, { method: "GET", path });
+    assert.equal(response.status, 405);
+    assert.equal(
+      (JSON.parse(response.body.toString("utf8")) as JsonRow).error.code,
+      "systemone_unsupported_method",
+    );
+  }
+  assert.equal(upstream.requests.length, 0);
+});
+
+test("System One 决策协议：透传 /v1/systemone，改写 model 并记录 input tokens", async () => {
+  const upstream = await startMockUpstream((_req, res) =>
+    jsonResponse(res, 200, {
+      model: "decision-model-preview",
+      request_id: "req-1",
+      answers: {
+        department: { type: "choice", choice: "billing", confidence: 0.88, probabilities: { billing: 0.94, technical: 0.06 } },
+        escalate: { type: "noul", noul: 0.99 },
+        severity: { type: "score", score: 2.25, confidence: 0.91, legend: { "0": "low", "1": "high" }, probabilities: { "0": 0.1, "1": 0.9 } },
+      },
+      usage: { input_tokens: 125 },
+      latency_ms: 52.9,
+    }),
+  );
+  const proxy = await startProxy({
+    upstreamPort: upstream.port,
+    routes: [
+      routeRow({
+        virtual_model_id: "decision-model-preview",
+        upstream_model: "decision-model-preview",
+        client_protocol: "systemone",
+      }),
+    ],
+  });
+  cleanups.push(async () => {
+    await proxy.controller.stop();
+    await upstream.close();
+  });
+
+  const body = JSON.stringify({
+    model: "decision-model-preview",
+    state: { ticket_id: "T-1001", content: "支付后 24 小时未到账" },
+    questions: {
+      department: { type: "choice", instructions: "由哪个团队处理？", criteria: { billing: "账单", technical: "技术" } },
+      escalate: { type: "noul", instructions: "是否需要升级？" },
+      severity: { type: "score", instructions: "严重程度？", criteria: ["轻微", "严重"] },
+    },
+  });
+  const response = await request(proxy.port, {
+    method: "POST",
+    path: "/v1/systemone",
+    headers: { "content-type": "application/json" },
+    body,
+  });
+  assert.equal(response.status, 200);
+  assert.equal((JSON.parse(response.body.toString("utf8")) as JsonRow).answers.escalate.noul, 0.99);
+  assert.equal(upstream.requests.length, 1);
+  assert.equal(upstream.requests[0].url, "/v1/systemone");
+  assert.equal(upstream.requests[0].headers.authorization, "Bearer upstream-key");
+  assert.deepEqual(
+    JSON.parse(upstream.requests[0].body.toString("utf8")),
+    JSON.parse(body),
+  );
+
+  await waitFor(() => proxy.storage.usage.length > 0);
+  const usage = proxy.storage.usage[0];
+  assert.equal(usage.client_protocol, "systemone");
+  assert.equal(usage.upstream_protocol, "systemone");
+  assert.equal(usage.input_tokens, 125);
+  assert.equal(usage.output_tokens, null);
+  const log = proxy.storage.logs.find((row) => row.request_type === "decision");
+  assert.ok(log, "request_type 应记录为 decision");
+  assert.equal(log.client_protocol, "systemone");
+
+  // 决策模型不进入对话模型池：/v1/models 为空，详情 404。
+  const models = await request(proxy.port, { path: "/v1/models" });
+  assert.deepEqual((JSON.parse(models.body.toString("utf8")) as JsonRow).data, []);
+  const detail = await request(proxy.port, { path: "/v1/models/decision-model-preview" });
+  assert.equal(detail.status, 404);
+});
+
+test("System One 决策协议：仅有对话协议候选时返回 model_protocol_unsupported", async () => {
+  const upstream = await startMockUpstream((_req, res) => jsonResponse(res, 200, {}));
+  const proxy = await startProxy({
+    upstreamPort: upstream.port,
+    // 旧逻辑可能给决策模型生成过对话路由；systemone 请求必须被按协议拒绝。
+    routes: [
+      routeRow({
+        virtual_model_id: "decision-model-preview",
+        upstream_model: "decision-model-preview",
+        client_protocol: "openai",
+      }),
+    ],
+  });
+  cleanups.push(async () => {
+    await proxy.controller.stop();
+    await upstream.close();
+  });
+
+  const response = await request(proxy.port, {
+    method: "POST",
+    path: "/v1/systemone",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model: "decision-model-preview", state: "x", questions: {} }),
+  });
+  assert.equal(response.status, 404);
+  assert.equal(
+    (JSON.parse(response.body.toString("utf8")) as JsonRow).error.code,
+    "model_protocol_unsupported",
+  );
+  assert.equal(upstream.requests.length, 0);
+});

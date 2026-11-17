@@ -222,6 +222,20 @@ export function syncPresetMaintainedConfig(db: DatabaseSync, presets: JsonRow[])
   }
 }
 
+/**
+ * 把内置渠道模板声明的 `supported_protocols` 写入既有预设行。
+ *
+ * 与 `ensurePresetBalanceQuery` / `ensurePresetFilesApi` 同属「能力声明由代码维护」的迁移：
+ * 旧外部 `config.json` 不会自动获得新增协议（例如 qwen 的 `systemone`），只补齐缺失渠道
+ * 不够；这里按内置模板覆盖协议字段，账号、Key、Base URL 覆盖和路由状态都不受影响。
+ */
+export function ensurePresetSupportedProtocols(db: DatabaseSync, presets: JsonRow[]): void {
+  const update = db.prepare("UPDATE channel_presets SET supported_protocols = ?1, updated_at = ?2 WHERE id = ?3");
+  for (const preset of presets) {
+    update.run(presetProtocolsJson(preset), now(), String(preset.id));
+  }
+}
+
 export function ensurePresetBalanceQuery(db: DatabaseSync, presets: JsonRow[]): void {
   const update = db.prepare("UPDATE channel_presets SET supports_balance_query = ?1 WHERE id = ?2");
   for (const preset of presets) {
@@ -534,7 +548,9 @@ export function listVirtualModels(db: DatabaseSync): JsonRow[] {
         ? "anthropic"
         : row.protocol_type === "responses"
           ? "responses"
-          : "openai",
+          : row.protocol_type === "systemone"
+            ? "systemone"
+            : "openai",
     routing_strategy: String(row.routing_strategy),
     enabled: toBool(row.enabled),
     created_at: String(row.created_at),
@@ -589,7 +605,9 @@ export function listRouteCandidates(db: DatabaseSync): JsonRow[] {
         ? "anthropic"
         : row.client_protocol === "responses"
           ? "responses"
-          : "openai",
+          : row.client_protocol === "systemone"
+            ? "systemone"
+            : "openai",
     priority: toInt(row.priority),
     enabled: toBool(row.enabled),
     created_at: String(row.created_at),

@@ -42,6 +42,7 @@ import {
   ensurePresetBalanceQuery,
   ensurePresetFilesApi,
   ensurePresetPlatformUrls,
+  ensurePresetSupportedProtocols,
   ensurePresetScrapeBalance,
   getAppMeta,
   latestBalanceSnapshots,
@@ -288,7 +289,11 @@ export class SqliteStorage {
     ensurePresetFilesApi(this.#db, presets);
   }
 
-  /** 返回规范化后的账号列表（Rust save_channel_accounts 之后由 web 回读）。 */
+  ensurePresetSupportedProtocols(presets: JsonRow[]): void {
+    ensurePresetSupportedProtocols(this.#db, presets);
+  }
+
+  /** 返回规范化后的账号列表（Node Host save_channel_accounts 之后由 web 回读）。 */
   saveChannelAccounts(accounts: JsonRow[]): JsonRow[] {
     saveChannelAccounts(this.#db, accounts);
     return this.listChannelAccounts();

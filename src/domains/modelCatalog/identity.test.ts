@@ -3,6 +3,9 @@ import {
   DEFAULT_EXPOSED_MODELS_BY_CHANNEL,
   FLOWLET_SUPPORTED_MODELS,
   canonicalModelId,
+  decisionModelIdsForChannel,
+  modelKindFor,
+  modelSupportsProtocol,
   modelsCnProviderIdForModel,
   officialChannelIdForModel,
   officialOwnerNameForModel,
@@ -10,8 +13,8 @@ import {
 
 describe("model identity catalog", () => {
   it("provides the complete supported-model whitelist without duplicates", () => {
-    expect(FLOWLET_SUPPORTED_MODELS).toHaveLength(33);
-    expect(new Set(FLOWLET_SUPPORTED_MODELS.map((model) => model.toLowerCase())).size).toBe(33);
+    expect(FLOWLET_SUPPORTED_MODELS).toHaveLength(34);
+    expect(new Set(FLOWLET_SUPPORTED_MODELS.map((model) => model.toLowerCase())).size).toBe(34);
     expect(FLOWLET_SUPPORTED_MODELS).toContain("LongCat-2.0");
     expect(FLOWLET_SUPPORTED_MODELS).toContain("LongCat-2.5");
     expect(FLOWLET_SUPPORTED_MODELS).toContain("deepseek-v4-flash");
@@ -80,6 +83,22 @@ describe("model identity catalog", () => {
     expect(modelsCnProviderIdForModel(id)).toBe(provider);
     expect(DEFAULT_EXPOSED_MODELS_BY_CHANNEL[owner]).toContain(id);
     expect(canonicalModelId(`${id}-unknown`)).toBeNull();
+  });
+
+  it("keeps decision models out of the chat protocol pool", () => {
+    expect(modelKindFor("decision-model-preview")).toBe("decision");
+    expect(modelKindFor("qwen3.8-max")).toBe("chat");
+    expect(modelSupportsProtocol("decision-model-preview", "systemone")).toBe(true);
+    expect(modelSupportsProtocol("decision-model-preview", "openai")).toBe(false);
+    expect(modelSupportsProtocol("decision-model-preview", "anthropic")).toBe(false);
+    expect(modelSupportsProtocol("decision-model-preview", "responses")).toBe(false);
+    expect(modelSupportsProtocol("qwen3.8-max", "openai")).toBe(true);
+    expect(modelSupportsProtocol("qwen3.8-max", "systemone")).toBe(false);
+    // 目录外模型保持原有行为，不做额外收紧。
+    expect(modelSupportsProtocol("unknown/model", "systemone")).toBe(true);
+    expect(DEFAULT_EXPOSED_MODELS_BY_CHANNEL.qwen).not.toContain("decision-model-preview");
+    expect(decisionModelIdsForChannel("qwen")).toEqual(["decision-model-preview"]);
+    expect(decisionModelIdsForChannel("deepseek")).toEqual([]);
   });
 
   it("normalizes aliases while preserving the canonical display ID", () => {

@@ -28,6 +28,8 @@ pub(super) fn is_retired_aggregate_model_id(model: &str) -> bool {
 /// 视为无效数据，既不参与路由，也不对外暴露。
 pub(super) fn route_identity_is_consistent(route: &RouteCandidate) -> bool {
     canonical_model_key(&route.virtual_model_id) == canonical_model_key(&route.upstream_model)
+        && crate::core::model_catalog::model_catalog()
+            .supports_protocol(&route.virtual_model_id, &route.client_protocol)
 }
 
 // `public_model` 期望是**规范模型 ID**：调用方（proxy.rs）已把入站模型名按

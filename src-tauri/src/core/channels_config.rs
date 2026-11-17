@@ -2,6 +2,7 @@ use super::config::{
     AuthStrategy, ChannelAccount, ChannelPreset, ModelPrice, ModelPriceTier, ProtocolType,
     RouteCandidate,
 };
+use super::model_catalog::model_catalog;
 pub(crate) use super::model_catalog::{canonical_model_key, official_channel_id_for_model};
 use serde::Deserialize;
 
@@ -456,7 +457,9 @@ impl ChannelsConfig {
                     let protocol_has_endpoint = if preset.vendor == "custom" {
                         match protocol {
                             // Responses 从 OpenAI Base URL 派生，共用同一覆盖地址。
-                            ProtocolType::OpenAi | ProtocolType::Responses => account
+                            ProtocolType::OpenAi
+                            | ProtocolType::Responses
+                            | ProtocolType::Systemone => account
                                 .effective_openai_base_url()
                                 .is_some_and(|url| !url.trim().is_empty()),
                             ProtocolType::Anthropic => account
@@ -528,6 +531,12 @@ impl ChannelsConfig {
                     for (model_index, (canonical_model, upstream_model)) in
                         exposed_models.iter().enumerate()
                     {
+                        if !model_catalog().supports_protocol(canonical_model, protocol)
+                            || (*protocol == ProtocolType::Systemone
+                                && account.effective_openai_base_url().is_none())
+                        {
+                            continue;
+                        }
                         let route = RouteCandidate {
                             id: format!(
                                 "route-{}-{}-{}-{}-{}",
@@ -613,6 +622,7 @@ fn parse_protocols(raw: &[String]) -> Vec<ProtocolType> {
         .map(|p| match p.as_str() {
             "anthropic" => ProtocolType::Anthropic,
             "responses" => ProtocolType::Responses,
+            "systemone" => ProtocolType::Systemone,
             _ => ProtocolType::OpenAi,
         })
         .collect()

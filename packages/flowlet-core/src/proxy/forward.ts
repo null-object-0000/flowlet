@@ -28,6 +28,7 @@ import {
   isModelListRequest,
   isResponsesPath,
   isStreamingResponse,
+  isSystemOnePath,
   modelDetailRequestId,
   normalizeResponsesInputItems,
   requestReferencesFilesApi,
@@ -538,6 +539,17 @@ function responsesUnsupportedMethodPayload(): unknown {
   };
 }
 
+function systemOneUnsupportedMethodPayload(): unknown {
+  return {
+    error: {
+      message:
+        "Flowlet only supports stateless POST /v1/systemone passthrough for the decision model",
+      type: "systemone_unsupported_method",
+      code: "systemone_unsupported_method",
+    },
+  };
+}
+
 function anthropicErrorPayload(errorCode: string, message: string): unknown {
   return { type: "error", error: { type: errorCode, message } };
 }
@@ -652,9 +664,14 @@ async function forwardModelRequest(
 
   let protocol: Protocol = initialProtocol;
   if (isResponsesPath(path)) protocol = "responses";
+  else if (isSystemOnePath(path)) protocol = "systemone";
 
   if (protocol === "responses" && method !== "POST") {
     sendJson(res, 405, responsesUnsupportedMethodPayload());
+    return;
+  }
+  if (protocol === "systemone" && method !== "POST") {
+    sendJson(res, 405, systemOneUnsupportedMethodPayload());
     return;
   }
 

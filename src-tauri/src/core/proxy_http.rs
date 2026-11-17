@@ -445,7 +445,9 @@ pub(super) fn build_model_list_response(
     match protocol {
         // Responses 没有独立模型列表端点（/v1/models 归属 OpenAI 协议），
         // 此分支仅为穷尽匹配兜底，形状沿用 OpenAI。
-        ProtocolType::OpenAi | ProtocolType::Responses => build_openai_model_list(&entries),
+        ProtocolType::OpenAi | ProtocolType::Responses | ProtocolType::Systemone => {
+            build_openai_model_list(&entries)
+        }
         ProtocolType::Anthropic => build_anthropic_model_list(&entries),
     }
 }
@@ -489,6 +491,8 @@ fn collect_model_entries(
 
     for route in routes {
         if !route.enabled
+            || !crate::core::model_catalog::model_catalog()
+                .supports_protocol(&route.virtual_model_id, protocol)
             || route.client_protocol != *protocol
             || !healthy_accounts.contains(route.account_id.as_str())
         {
@@ -606,8 +610,19 @@ pub(super) fn build_upstream_url(
         .map(|value| value.as_str())
         .unwrap_or("/");
 
+    if *protocol == ProtocolType::Systemone {
+        let path = path.trim_start_matches("/openai");
+        let normalized = if path.starts_with("/systemone") {
+            format!("/v1{path}")
+        } else {
+            path.to_string()
+        };
+        let base = strip_duplicate_v1(base, &normalized);
+        return format!("{base}{normalized}");
+    }
+
     match protocol {
-        ProtocolType::OpenAi | ProtocolType::Responses => {
+        ProtocolType::OpenAi | ProtocolType::Responses | ProtocolType::Systemone => {
             // 保留 /v1 和 /openai/v1 前缀，因为 base_url 已经包含了 /openai 或 /v1 的入口前缀。
             // Responses 与 OpenAI 共享 Base URL：`/v1/responses` 拼出 `{base}/v1/responses`
             //（dashscope 等自带 /v1 后缀的 base 经 strip_duplicate_v1 去重后同样正确）。
@@ -926,7 +941,7 @@ pub(super) fn extract_model(body: &[u8], protocol: &ProtocolType) -> Option<Stri
     let value: serde_json::Value = serde_json::from_slice(body).ok()?;
     let model = match protocol {
         // Responses 请求体同样在顶层携带 model 字段。
-        ProtocolType::OpenAi | ProtocolType::Responses => {
+        ProtocolType::OpenAi | ProtocolType::Responses | ProtocolType::Systemone => {
             value.get("model").and_then(|v| v.as_str())
         }
         ProtocolType::Anthropic => value.get("model").and_then(|v| v.as_str()),

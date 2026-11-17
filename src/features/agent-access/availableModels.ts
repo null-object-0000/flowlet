@@ -7,7 +7,7 @@
 import type { ChannelAccount } from "../../domains/account/types";
 import type { ChannelPreset } from "../../domains/channel/types";
 import type { RouteCandidate } from "../../domains/model/types";
-import { canonicalModelId } from "../../domains/modelCatalog/identity";
+import { canonicalModelId, modelKindFor } from "../../domains/modelCatalog/identity";
 import type { AgentAvailableModel, AgentModelProtocol } from "./agentAccessAdapters";
 
 const PROTOCOL_ORDER: AgentModelProtocol[] = ["openai", "anthropic", "responses"];
@@ -38,7 +38,13 @@ export function computeAvailableModels(
     if (!channel || !channelEnabled || !channel.supported_protocols.includes(route.client_protocol)) continue;
     const model = canonicalModelId(route.virtual_model_id);
     // 对外模型与上游模型必须归一到同一规范模型，否则该路由不参与代理。
-    if (!model || model !== canonicalModelId(route.upstream_model)) continue;
+    if (!model || modelKindFor(model) === "decision" || model !== canonicalModelId(route.upstream_model)) continue;
+    // 决策模型（systemone）不是 Agent 对话模型，不能出现在接入抽屉的默认模型池。
+    if (
+      route.client_protocol !== "openai" &&
+      route.client_protocol !== "anthropic" &&
+      route.client_protocol !== "responses"
+    ) continue;
     const protocols = protocolsByModel.get(model) ?? new Set<AgentModelProtocol>();
     protocols.add(route.client_protocol);
     protocolsByModel.set(model, protocols);

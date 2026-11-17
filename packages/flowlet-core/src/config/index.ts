@@ -54,10 +54,15 @@ function asStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
+const KNOWN_PROTOCOLS = new Set(["openai", "anthropic", "responses", "systemone"]);
+
 function parseProtocols(raw: unknown): string[] {
-  return asStringArray(raw).map((protocol) =>
-    protocol === "anthropic" ? "anthropic" : protocol === "responses" ? "responses" : "openai",
-  );
+  const protocols: string[] = [];
+  for (const protocol of asStringArray(raw)) {
+    if (!KNOWN_PROTOCOLS.has(protocol) || protocols.includes(protocol)) continue;
+    protocols.push(protocol);
+  }
+  return protocols;
 }
 
 function parseAuthStrategy(raw: unknown): string {
@@ -237,6 +242,14 @@ function routeSignature(route: JsonRow): string {
   ].join("\0");
 }
 
+/** 账号是否显式指定了 OpenAI 网关地址（Token Plan 或业务空间 Base URL）。 */
+function hasAccountGatewayBaseUrl(account: JsonRow): boolean {
+  return (
+    String(account.base_url_override ?? "").trim() !== "" ||
+    String(account.workspace_default_base_url ?? "").trim() !== ""
+  );
+}
+
 /**
  * 为现有账号补齐「用户已勾选开放」的直连模型路由（只追加，不覆盖已有状态）。
  *
@@ -304,6 +317,11 @@ export function mergeDefaultRoutes(
           chosen.push([canonical, upstream]);
         }
         chosen.forEach(([canonicalModel, upstreamModel], modelIndex) => {
+          // 模型身份决定可生成的协议族：决策模型只生成 systemone 候选，不进入对话协议池。
+          if (!modelCatalog().supportsProtocol(canonicalModel, protocol)) return;
+          // systemone 需要账号级网关地址（Token Plan / 业务空间）；渠道默认的
+          // dashscope 全局端点不提供 /systemone，不能生成必然 404 的候选。
+          if (protocol === "systemone" && !hasAccountGatewayBaseUrl(account)) return;
           const route: JsonRow = {
             id: `route-${account.id}-${upstreamModel}-${protocol}-${modelIndex}-${accountIndex}`,
             virtual_model_id: canonicalModel,
@@ -420,6 +438,7 @@ export interface PresetStorage {
   ensurePresetBalanceQuery(presets: JsonRow[]): void;
   ensurePresetScrapeBalance(presets: JsonRow[]): void;
   ensurePresetFilesApi(presets: JsonRow[]): void;
+  ensurePresetSupportedProtocols(presets: JsonRow[]): void;
 }
 
 /** Rust services.rs::initialize_channel_presets 的等价步骤（幂等）。 */
@@ -437,6 +456,8 @@ export function initializeChannelPresets(
   }
   storage.ensureMissingPresets(migrationPresets);
   storage.syncPresetMaintainedConfig(migrationPresets);
+  // 内置模板新增的协议必须进入既有安装（旧外部 config.json 不会自动带 `systemone` 等新协议）。
+  storage.ensurePresetSupportedProtocols(builtinPresets);
   storage.ensurePresetBalanceQuery(migrationPresets);
   storage.ensurePresetScrapeBalance(migrationPresets);
   storage.ensurePresetFilesApi(migrationPresets);

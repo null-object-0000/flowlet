@@ -6524,3 +6524,65 @@ async fn e2e_gzip_streaming_sse_records_usage_and_keeps_wire_bytes_raw() {
 
     server.abort();
 }
+
+#[tokio::test]
+async fn systemone_protocol_passthrough_and_chat_isolation() {
+    let app = Router::new().route("/v1/systemone", post(|headers: axum::http::HeaderMap, body: String| async move {
+        assert_eq!(headers[header::AUTHORIZATION], "Bearer decision-key");
+        let body: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(body["model"], "decision-model-preview");
+        assert_eq!(body["state"], "ticket");
+        ([("content-type", "application/json")], r#"{"model":"decision-model-preview","answers":{"ok":{"noul":0.9}},"usage":{"input_tokens":7}}"#)
+    }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let mut channel = ChannelPreset::custom();
+    channel.supported_protocols = vec![ProtocolType::OpenAi, ProtocolType::Systemone];
+    let mut account = test_account("account", "custom", "decision-key", 0);
+    account.base_url_override = Some(format!("http://{addr}/v1"));
+    let routes = vec![test_route(
+        "decision",
+        "decision-model-preview",
+        "custom",
+        "account",
+        "decision-model-preview",
+        ProtocolType::Systemone,
+        0,
+    )];
+    for path in ["/v1/systemone", "/systemone"] {
+        let state = build_test_state(vec![channel.clone()], vec![account.clone()], routes.clone());
+        let request = Request::builder().method("POST").uri(path).header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"model":"decision-model-preview","state":"ticket","questions":{"ok":{"type":"noul"}}}"#)).unwrap();
+        let response = forward_request(state, request, ProtocolType::OpenAi)
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert!(String::from_utf8_lossy(&body).contains("answers"));
+    }
+    for (method, path, status) in [
+        ("GET", "/systemone", StatusCode::METHOD_NOT_ALLOWED),
+        ("POST", "/v1/chat/completions", StatusCode::NOT_FOUND),
+    ] {
+        let state = build_test_state(vec![channel.clone()], vec![account.clone()], routes.clone());
+        let request = Request::builder()
+            .method(method)
+            .uri(path)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                r#"{"model":"decision-model-preview","state":"ticket","questions":{}}"#,
+            ))
+            .unwrap();
+        assert_eq!(
+            forward_request(state, request, ProtocolType::OpenAi)
+                .await
+                .unwrap()
+                .status(),
+            status
+        );
+    }
+    server.abort();
+}

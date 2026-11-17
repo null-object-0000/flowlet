@@ -19,9 +19,11 @@ export {
   stripAggregateVendorPrefix,
 } from "../modelCatalog/identity";
 
-/** 客户端协议。`responses`（OpenAI Responses API）复用渠道的 OpenAI Base URL
- *  与鉴权，仅路由归属独立；当前仅无状态透传（POST /v1/responses）。 */
-export type ProtocolType = "openai" | "anthropic" | "responses";
+/** 客户端协议。`responses`（OpenAI Responses API）与 `systemone`（阿里云百炼
+ *  TypeSafe System One 决策模型）都复用渠道的 OpenAI Base URL 与鉴权，路由归属独立：
+ *  `responses` 仅无状态透传（POST /v1/responses），`systemone` 仅透传
+ *  POST /v1/systemone，且需要账号级网关地址（Token Plan / 业务空间）。 */
+export type ProtocolType = "openai" | "anthropic" | "responses" | "systemone";
 
 export type AuthStrategy = "bearer" | "x_api_key";
 

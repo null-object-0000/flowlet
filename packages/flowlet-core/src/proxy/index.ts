@@ -228,7 +228,8 @@ class ProxyControllerImpl implements ProxyController {
         : path.startsWith("/v1/") ||
             path.startsWith("/openai/v1/") ||
             path === "/responses" ||
-            path.startsWith("/responses/")
+            path.startsWith("/responses/") ||
+            path === "/systemone"
           ? ("openai" as const)
           : null;
     if (initialProtocol === null) {

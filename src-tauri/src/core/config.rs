@@ -11,6 +11,7 @@ pub enum RequestType {
     Reasoning,
     LongContext,
     ToolUse,
+    Decision,
     Unknown,
 }
 
@@ -22,6 +23,7 @@ impl RequestType {
             Self::Reasoning => "reasoning",
             Self::LongContext => "long_context",
             Self::ToolUse => "tool_use",
+            Self::Decision => "decision",
             Self::Unknown => "unknown",
         }
     }
@@ -29,6 +31,9 @@ impl RequestType {
 
 /// 从请求体中识别请求类型
 pub fn classify_request(body_bytes: &[u8], protocol: &ProtocolType) -> RequestType {
+    if *protocol == ProtocolType::Systemone {
+        return RequestType::Decision;
+    }
     // 尝试解析 JSON
     let json: serde_json::Value = match serde_json::from_slice(body_bytes) {
         Ok(v) => v,
@@ -177,7 +182,7 @@ fn has_tool_use_content(json: &serde_json::Value, _protocol: &ProtocolType) -> b
 }
 
 // ─── Protocol Type ──────────────────────────────────────────────────────────
-// 序列化必须与 TypeScript 的 ProtocolType ("openai" | "anthropic" | "responses")
+// 序列化必须与 TypeScript 的 ProtocolType ("openai" | "anthropic" | "responses" | "systemone")
 // 完全一致（全小写），前端直接比较字符串。反序列化用 alias 兼容旧数据库的 "open-ai"。
 // Responses（OpenAI Responses API）复用渠道的 OpenAI Base URL 与鉴权策略，
 // 仅入站探测与路由协议归属独立。
@@ -191,9 +196,18 @@ pub enum ProtocolType {
     Anthropic,
     #[serde(rename = "responses")]
     Responses,
+    #[serde(rename = "systemone")]
+    Systemone,
 }
 
 impl ProtocolType {
+    pub fn is_systemone_path(path: &str) -> bool {
+        matches!(
+            path.split('?').next().unwrap_or(path),
+            "/v1/systemone" | "/openai/v1/systemone" | "/systemone"
+        )
+    }
+
     pub fn from_path(path: &str) -> Option<Self> {
         let p = path.trim_start_matches('/');
         if p.starts_with("anthropic/") {
@@ -227,6 +241,7 @@ impl ProtocolType {
             Self::OpenAi => "openai",
             Self::Anthropic => "anthropic",
             Self::Responses => "responses",
+            Self::Systemone => "systemone",
         }
     }
 }
@@ -388,7 +403,12 @@ impl ChannelPreset {
             vendor: "qwen".to_string(),
             platform_url: Some("https://platform.qianwenai.com/home/api-keys".to_string()),
             enabled: true,
-            supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
+            supported_protocols: vec![
+                ProtocolType::OpenAi,
+                ProtocolType::Anthropic,
+                ProtocolType::Responses,
+                ProtocolType::Systemone,
+            ],
             openai_base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".to_string(),
             anthropic_base_url: "https://dashscope.aliyuncs.com/apps/anthropic".to_string(),
             openai_auth: AuthStrategy::Bearer,
@@ -414,7 +434,12 @@ impl ChannelPreset {
             vendor: "custom".to_string(),
             platform_url: None,
             enabled: true,
-            supported_protocols: vec![ProtocolType::OpenAi, ProtocolType::Anthropic],
+            supported_protocols: vec![
+                ProtocolType::OpenAi,
+                ProtocolType::Anthropic,
+                ProtocolType::Responses,
+                ProtocolType::Systemone,
+            ],
             openai_base_url: String::new(),
             anthropic_base_url: String::new(),
             openai_auth: AuthStrategy::Bearer,
@@ -556,14 +581,18 @@ impl ChannelPreset {
         match protocol {
             // Responses API 端点统一从 OpenAI Base URL 派生（`{base}/responses`，
             // 路径拼接时沿用 build_upstream_url 的 /v1 去重规则）。
-            ProtocolType::OpenAi | ProtocolType::Responses => &self.openai_base_url,
+            ProtocolType::OpenAi | ProtocolType::Responses | ProtocolType::Systemone => {
+                &self.openai_base_url
+            }
             ProtocolType::Anthropic => &self.anthropic_base_url,
         }
     }
 
     pub fn auth_strategy_for(&self, protocol: &ProtocolType) -> &AuthStrategy {
         match protocol {
-            ProtocolType::OpenAi | ProtocolType::Responses => &self.openai_auth,
+            ProtocolType::OpenAi | ProtocolType::Responses | ProtocolType::Systemone => {
+                &self.openai_auth
+            }
             ProtocolType::Anthropic => &self.anthropic_auth,
         }
     }

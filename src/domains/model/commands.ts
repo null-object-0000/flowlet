@@ -6,6 +6,7 @@ import {
   resolveSelectedUpstreamModelIds,
 } from "../channel/types";
 import { effectiveAnthropicBaseUrl, effectiveOpenAiBaseUrl, type ChannelAccount } from "../account/types";
+import { modelSupportsProtocol } from "../modelCatalog/identity";
 import type { ChannelPreset, ProtocolType } from "../channel/types";
 import type { ChannelModel, ModelExposureMode, RouteCandidate } from "./types";
 
@@ -58,6 +59,8 @@ export function buildDefaultRoutes(
     ?.id;
   const usable = accounts.filter((a) => {
     if (a.channel_id !== channelId || !a.enabled || !a.api_key.trim()) return false;
+    // systemone 只存在于账号级网关（Token Plan / 业务空间），渠道默认端点不提供。
+    if (protocol === "systemone") return Boolean(effectiveOpenAiBaseUrl(a));
     // Responses 端点从 OpenAI Base URL 派生，自定义渠道门禁与 openai 相同。
     return protocol === "openai" || protocol === "responses"
       ? Boolean(effectiveOpenAiBaseUrl(a)) || channelId !== "custom"
@@ -68,6 +71,8 @@ export function buildDefaultRoutes(
   usable.forEach((acc, j) => {
     const exposedModels = defaultModelsForAccount(channelId, acc);
     exposedModels.forEach(({ canonical: up, upstream }, i) => {
+      // 模型类型决定可生成的协议族：决策模型只生成 systemone 候选。
+      if (!modelSupportsProtocol(up, protocol)) return;
       out.push({
         id: `route-${acc.id}-${upstream}-${protocol}-${i}-${j}`,
         virtual_model_id: up,
@@ -162,9 +167,15 @@ export function reconcileAccountRoutes(
     const exposed = account?.exposed_models ?? null;
     if (exposed == null) return true; // 未配置的账号保持现状
     if (!account.enabled || !account.api_key.trim()) return false;
+    // 协议与模型身份不匹配的路由（例如决策模型被旧逻辑生成了 chat 路由）必须清掉。
+    if (!modelSupportsProtocol(route.virtual_model_id, route.client_protocol)) return false;
+    // 切回按量付费会清空账号级网关地址，此时 systemone 候选必须一并移除。
+    if (route.client_protocol === "systemone" && !effectiveOpenAiBaseUrl(account)) return false;
     if (account && isCustomChannel(presetById.get(account.channel_id))) {
       const hasEndpoint =
-        route.client_protocol === "openai" || route.client_protocol === "responses"
+        route.client_protocol === "openai" ||
+        route.client_protocol === "responses" ||
+        route.client_protocol === "systemone"
           ? Boolean(effectiveOpenAiBaseUrl(account))
           : Boolean(effectiveAnthropicBaseUrl(account));
       if (!hasEndpoint) return false;

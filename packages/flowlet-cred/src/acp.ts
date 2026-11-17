@@ -164,7 +164,10 @@ export function createAcpBridge(config: AcpBridgeConfig) {
               frame.params,
               { cancellationSignal: signal, stopWaitingOnCancel: true },
             );
-          } catch {
+          } catch (error) {
+            // A disconnected observer leaves the hosted question pending for reconnection.
+            if (signal.aborted) return;
+            if (object(error).code !== -32601) throw error;
             result = { outcome: { outcome: "cancelled" } };
           }
           await native!.call(
@@ -203,6 +206,18 @@ export function createAcpBridge(config: AcpBridgeConfig) {
   const file = (id: string) =>
     new SessionFile(config.dir, config.url, config.prefix, `acp:${id}`);
   const app = agent({ name: "flowlet" });
+  for (const [local, method] of [
+    ["_flowlet/start", "session/start"],
+    ["_flowlet/status", "session/status"],
+    ["_flowlet/subscribe", "session/subscribe"],
+  ]) {
+    app.onRequest(
+      local!,
+      (value: unknown) => object(value),
+      async ({ params, signal, client: peer }) =>
+        await remote(method!, params, signal, peer),
+    );
+  }
   const configOptions = () => [
     {
       id: "model",
@@ -249,7 +264,8 @@ export function createAcpBridge(config: AcpBridgeConfig) {
           {},
           signal,
         )) as unknown as InitializeResponse;
-        nativeImages = initialized.agentCapabilities?.promptCapabilities?.image === true;
+        nativeImages =
+          initialized.agentCapabilities?.promptCapabilities?.image === true;
         return initialized;
       }
     } finally {
@@ -464,8 +480,16 @@ export function createAcpBridge(config: AcpBridgeConfig) {
     async ({ params, signal, client: peer }) => {
       if (native) {
         let prompt: ContentBlock[];
-        try { prompt = nativePrompt(params.prompt, nativeImages); }
-        catch (error) { throw new RequestError(-32602, error instanceof Error ? error.message : "Invalid native ACP prompt"); }
+        try {
+          prompt = nativePrompt(params.prompt, nativeImages);
+        } catch (error) {
+          throw new RequestError(
+            -32602,
+            error instanceof Error
+              ? error.message
+              : "Invalid native ACP prompt",
+          );
+        }
         return (await remote(
           "session/prompt",
           { sessionId: params.sessionId, prompt },

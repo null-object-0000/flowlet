@@ -127,6 +127,16 @@ app.onRequest(methods.agent.session.prompt, async ({ params, client }) => {
     ]) await client.notify(methods.client.session.update,{sessionId:params.sessionId,update});
     return {stopReason:'end_turn'};
   }
+  if(text==='background-count'){
+    let cancelled=false;session.cancel=()=>{cancelled=true;};
+    await client.notify(methods.client.session.update,{sessionId:params.sessionId,update:{sessionUpdate:'tool_call',toolCallId:'fixture-background',title:'Fixture work',kind:'other',status:'in_progress'}});
+    for(let i=1;i<=8&&!cancelled;i++){
+      await client.notify(methods.client.session.update,{sessionId:params.sessionId,update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:`turn=${session.count},step=${i};`}}});
+      await new Promise(resolve=>setTimeout(resolve,80));
+    }
+    await client.notify(methods.client.session.update,{sessionId:params.sessionId,update:{sessionUpdate:'tool_call_update',toolCallId:'fixture-background',status:cancelled?'failed':'completed'}});
+    return {stopReason:cancelled?'cancelled':'end_turn'};
+  }
   if (text === "client-tools") {
     const denied = [];
     for (const [method, extra] of [

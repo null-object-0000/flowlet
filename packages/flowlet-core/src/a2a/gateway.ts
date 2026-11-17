@@ -10,6 +10,7 @@ import type { WebContext } from "../web/context.ts";
 import { CommandError } from "../types.ts";
 import { A2aStore, type A2aAgent, type A2aCall } from "../storage/a2a.ts";
 import { a2aRequest, parseHttpUrl, readLimited } from "./network.ts";
+import { ManagedAcp } from "./acp-managed.ts";
 import { AcpRuntimes, acpCommand, requireAcpRuntime } from "./acp-runtime.ts";
 import type { AcpCommand } from "../storage/a2a.ts";
 import type { AcpFrame } from "../../../flowlet-cred/src/acp-remote.ts";
@@ -164,6 +165,7 @@ export class A2aGateway {
   readonly acp: AcpRuntimes;
   private active = new Set<AbortController>();
   private finishing = new Set<Promise<void>>();
+  private managed = new WeakMap<object, ManagedAcp>();
   private ctx: WebContext;
   constructor(ctx: WebContext) {
     if (process.env.FLOWLET_PUBLIC_A2A_URL) {
@@ -672,6 +674,52 @@ export class A2aGateway {
     };
     try {
       const runtime = await this.acp.ensureNative(agent, contextId);
+      let managed = this.managed.get(runtime);
+      if (!managed) {
+        managed = new ManagedAcp(
+          runtime.call.bind(runtime),
+          agent.timeoutSeconds,
+          (sessionId, controller, execution) => {
+            const background = this.startCall(
+              agent.id,
+              keyId,
+              "session/prompt",
+              "",
+            );
+            background.contextId = sessionId;
+            background.state = "TASK_STATE_WORKING";
+            background.httpStatus = 200;
+            this.store.record(background);
+            this.active.add(controller);
+            const finished = execution
+              .then(
+                (result) => {
+                  background.state =
+                    result.stopReason === "cancelled"
+                      ? "TASK_STATE_CANCELED"
+                      : "TASK_STATE_COMPLETED";
+                },
+                (error) => {
+                  background.state = "TASK_STATE_FAILED";
+                  background.error =
+                    error instanceof Error
+                      ? error.message.slice(0, 1000)
+                      : "Background ACP failed";
+                },
+              )
+              .finally(() => {
+                background.finishedAt = new Date().toISOString();
+                background.durationMs =
+                  Date.now() - Date.parse(background.startedAt);
+                this.store.record(background);
+                this.active.delete(controller);
+                this.finishing.delete(finished);
+              });
+            this.finishing.add(finished);
+          },
+        );
+        this.managed.set(runtime, managed);
+      }
       combined.throwIfAborted();
       response.writeHead(200, {
         "content-type": "text/event-stream",
@@ -679,7 +727,7 @@ export class A2aGateway {
         "x-accel-buffering": "no",
       });
       call.httpStatus = 200;
-      const result = await runtime.call(method, params, combined, emit);
+      const result = await managed.call(method, params, combined, emit);
       if (typeof result.sessionId === "string")
         call.contextId = result.sessionId;
       if (method === "session/prompt")
@@ -849,6 +897,9 @@ export class A2aGateway {
               "session/delete",
               "session/set_config_option",
               "session/prompt",
+              "session/start",
+              "session/status",
+              "session/subscribe",
               "session/cancel",
               "permission/reply",
             ].includes(method)

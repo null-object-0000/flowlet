@@ -69,10 +69,12 @@ T3 Code 的 Local ACP Provider 使用生成的 executable/args/env。Paseo 使�
 或切换接口，不得将 Flowlet 的模型服务列表伪装成该远程 Agent 可选择的模型。
 
 原生会话入口仅允许 initialize、session/new、session/load、session/list、session/resume、session/close、session/delete、session/set_config_option、session/prompt、
-session/cancel 和 permission/reply。外部请求沿用网关的 Client Token/旧 scoped key 鉴权与启停校验，
-管理 API 不开放；每帧与请求均限 4 MiB。通知通过有界 SSE 传回，断开或超时不重试；超时/断开会取消
-上游调用并终止该原生运行环境，避免已失联的操作继续执行。权限请求转给客户端，只有返回有效选项
-才提交；缺少处理器、取消或超时均返回 cancelled，Flowlet 不默认批准。原生 prompt 接受文本，
+session/cancel、permission/reply，以及 Flowlet 的 session/start、session/status、session/subscribe 托管传输操作。
+外部请求沿用网关的 Client Token/旧 scoped key 鉴权与启停校验，管理 API 不开放；每帧与请求均限 4 MiB。
+原生任务属于 Host 上的私有运行环境，客户端退出或 SSE 断开仅移除订阅，任务继续执行；不自动重发 prompt。
+重连先回放一致的历史快照，再从快照游标订阅新增事件，避免历史与实时内容间丢失或重复。
+权限请求必须有明确有效的选项回复才提交；客户端离线时保留等待状态，重连后重新呈现待答问题；
+缺少权限处理器或用户明确取消时返回 cancelled，Flowlet 不默认批准。原生 prompt 接受文本，
 并仅在上游声明 `promptCapabilities.image` 时接受客户端直接提交的 Base64 内联图片；
 能力声明贯穿 Host 和 CLI，两层均校验输入。单次请求仍受 4 MiB（含 Base64 与 JSON）限制。
 文件路径、resource_link、音频、嵌入资源和图片 URL 不作为原生输入转发，不读取本机文件或抓取 URL；
@@ -82,8 +84,20 @@ session/cancel 和 permission/reply。外部请求沿用网关的 Client Token/�
 
 原生 session/new 的模型列表、切换结果与 prompt 期间的 config_option_update 使用上游真实值。
 生命周期能力仅在上游声明支持时开放。session/load 可向新运行环境恢复持久会话并回放历史；
-session/resume 恢复但不回放，session/close 释放活动会话但保留上游历史，session/delete 明确删除上游会话。
-是否跨 Host 重启保留会话由上游实现决定；Flowlet 不凭空保存上游状态，也不自动重放业务请求。
+session/resume 恢复但不回放。托管任务执行中，两者读取 Host 缓存快照，不重复调用上游恢复操作；
+session/close 此时仅释放客户端连接，显式 session/cancel 才停止任务。空闲后的 close/delete 仍转交上游。
+执行中不允许切换认证身份或改变模型；相同模型配置可幂等重设。后台执行记录独立于订阅连接，发布前的活跃任务检查也会阻止重启正在工作的 Host。
+
+`flowlet acp --managed` 为支持该能力的 Host 启用固定版本官方 SDK（2.7.0）的 ACP v2 **草案**入口，
+通过 state_update、replay_complete 与稳定 messageId 让 T3 恢复正在执行的会话；同时保留 v1 协商。
+默认 CLI 仍走 v1，纯 A2A 上游不伪造托管能力；独立认证封装可复用 `createAcpV2Bridge`。
+这里的 session/start/status/subscribe 是 Flowlet 内部传输扩展，不是 ACP 官方方法。
+
+缓存按原生运行环境及私有客户端上下文隔离：每轮事件最多 8 MiB / 20,000 帧、会话历史最多 8 MiB、
+每轮最多 8 个观察连接；运行环境累计保留约 32 MiB 后回收空闲缓存，不回收活跃任务。
+超限或任务达到管理员配置的 timeoutSeconds 时停止执行，不无限续命；历史缓存溢出时拒绝不完整的 load，仍可 resume 观察当前任务。
+Flowlet Host 必须保持运行。Host 退出、运行环境故障、Agent 被禁用或更新配置仍会停止任务；
+跨 Host 重启的历史恢复由上游持久会话决定，内存中的在途事件不保证保留，也不会自动重放业务请求。
 调用记录复用现有表，记录 ACP 操作、会话 ID、取消/失败状态，最近调用默认隐藏成功的初始化与配置查询。
 
 纯 A2A 客户端桥支持文本与 resource_link 输入，明确拒绝图片、音频和嵌入资源输入，不读取或上传客户端文件。

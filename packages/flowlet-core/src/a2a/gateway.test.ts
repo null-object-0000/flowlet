@@ -1273,6 +1273,112 @@ describe("generic A2A gateway through real Host command and HTTP boundaries", ()
     },
   );
   it(
+    "hosts a detached native turn through the real HTTP boundary and records background completion",
+    { timeout: 15000 },
+    async () => {
+      const previous = process.env.FLOWLET_ENABLE_ACP;
+      process.env.FLOWLET_ENABLE_ACP = "1";
+      const fixture = fileURLToPath(
+        new URL(
+          "../../../flowlet-agent-bridge/test-agent.mjs",
+          import.meta.url,
+        ),
+      );
+      try {
+        await command("save_a2a_agent", {
+          input: {
+            id: "managed",
+            name: "Managed",
+            protocol: "acp",
+            acp: {
+              command: process.execPath,
+              args: [fixture],
+              cwd: path.dirname(fixture),
+            },
+            enabled: true,
+            allowPrivateNetwork: false,
+            timeoutSeconds: 10,
+          },
+        });
+        const remote = new RemoteAcp(`${base}/a2a/managed`, "model-token"),
+          signal = AbortSignal.timeout(10000);
+        await remote.call("initialize", {}, signal);
+        const { sessionId } = await remote.call("session/new", {}, signal);
+        const result = await remote.call(
+          "session/start",
+          { sessionId, prompt: [{ type: "text", text: "background-count" }] },
+          signal,
+        );
+        const meta = (result._meta as any)["urn:flowlet:managed-acp:1"];
+        const abort = new AbortController();
+        await assert.rejects(
+          remote.call(
+            "session/subscribe",
+            { sessionId, runId: meta.runId, cursor: 0 },
+            abort.signal,
+            async () => {
+              abort.abort();
+            },
+          ),
+        );
+        const logs = await command("list_a2a_calls", { agentId: "managed" });
+        assert.ok(
+          logs.some(
+            (c: any) =>
+              c.method === "session/prompt" &&
+              !c.finishedAt &&
+              c.state === "TASK_STATE_WORKING",
+          ),
+        );
+        const updates: any[] = [];
+        const restored = await remote.call(
+          "session/load",
+          { sessionId },
+          signal,
+          async (f) => {
+            updates.push(f);
+          },
+        );
+        const snapshot = (restored._meta as any)["urn:flowlet:managed-acp:1"];
+        assert.equal(snapshot.state, "running");
+        await remote.call(
+          "session/subscribe",
+          { sessionId, runId: snapshot.runId, cursor: snapshot.cursor },
+          signal,
+          async (f) => {
+            updates.push(f);
+          },
+        );
+        const text = updates
+          .filter(
+            (f) =>
+              f.type === "update" &&
+              f.params.update.sessionUpdate === "agent_message_chunk",
+          )
+          .map((f) => f.params.update.content.text)
+          .join("");
+        assert.equal(
+          text,
+          Array.from({ length: 8 }, (_, i) => `turn=1,step=${i + 1};`).join(""),
+        );
+        const completed = await command("list_a2a_calls", {
+          agentId: "managed",
+        });
+        assert.ok(
+          completed.some(
+            (c: any) =>
+              c.method === "session/prompt" &&
+              c.finishedAt &&
+              c.state === "TASK_STATE_COMPLETED",
+          ),
+        );
+      } finally {
+        if (previous === undefined) delete process.env.FLOWLET_ENABLE_ACP;
+        else process.env.FLOWLET_ENABLE_ACP = previous;
+      }
+    },
+  );
+  it(
     "isolates ACP account authentication, requires URL consent and excludes authentication content from logs",
     { timeout: 30000 },
     async () => {

@@ -209,6 +209,13 @@ describe("渠道预设与路由规则", () => {
     assert.deepEqual(t.runtimeConfig.snapshot().channels, presets);
   });
 
+  it("save_channel_presets 接受决策协议 systemone", async () => {
+    const t = makeContext();
+    const preset = { ...samplePreset("decision-preview"), supported_protocols: ["openai", "systemone"] };
+    assert.equal(await dispatchDesktop(t.ctx, "save_channel_presets", { presets: [preset] }), null);
+    assert.deepEqual(t.runtimeConfig.snapshot().channels, [preset]);
+  });
+
   it("save_channel_presets 缺少必填字段时报 400", async () => {
     const t = makeContext();
     const broken = [{ id: "x", name: "X" }];

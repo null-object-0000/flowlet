@@ -123,7 +123,7 @@ const CONFIG_BUNDLE_REQUIRED = [
   "virtual_models",
 ];
 
-const PROTOCOL_VARIANTS = ["openai", "anthropic", "responses"] as const;
+const PROTOCOL_VARIANTS = ["openai", "anthropic", "responses", "systemone"] as const;
 const AUTH_VARIANTS = ["bearer", "x_api_key"] as const;
 
 function fieldTypeError(name: string, field: string, value: unknown, expected: string): CommandError {

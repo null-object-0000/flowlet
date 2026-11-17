@@ -463,7 +463,9 @@ export function createAcpBridge(config: AcpBridgeConfig) {
     methods.agent.session.prompt,
     async ({ params, signal, client: peer }) => {
       if (native) {
-        const prompt = nativePrompt(params.prompt, nativeImages);
+        let prompt: ContentBlock[];
+        try { prompt = nativePrompt(params.prompt, nativeImages); }
+        catch (error) { throw new RequestError(-32602, error instanceof Error ? error.message : "Invalid native ACP prompt"); }
         return (await remote(
           "session/prompt",
           { sessionId: params.sessionId, prompt },

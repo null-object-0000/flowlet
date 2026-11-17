@@ -623,14 +623,19 @@ export class A2aGateway {
     keyId: string,
     response: ServerResponse,
     signal: AbortSignal,
+    contextId?: string,
   ) {
+    const sensitive = ["authenticate", "logout", "elicitation/reply"].includes(
+      method,
+    );
     const started = Date.now();
     const call = this.startCall(
       agent.id,
       keyId,
       method,
-      JSON.stringify({ method, params }),
+      sensitive ? "" : JSON.stringify({ method, params }),
     );
+    if (sensitive) call.requestBody = null;
     const controller = new AbortController();
     this.active.add(controller);
     const combined = AbortSignal.any([
@@ -655,6 +660,7 @@ export class A2aGateway {
       if (Buffer.byteLength(bytes) > 4 * 1024 * 1024)
         throw new Error("ACP frame exceeds 4 MiB");
       if (
+        !sensitive &&
         this.ctx.logCapture.capture_res_body &&
         Buffer.byteLength(captured) < limit
       )
@@ -665,7 +671,7 @@ export class A2aGateway {
         await once(response, "drain", { signal: combined });
     };
     try {
-      const runtime = await this.acp.ensureNative(agent);
+      const runtime = await this.acp.ensureNative(agent, contextId);
       combined.throwIfAborted();
       response.writeHead(200, {
         "content-type": "text/event-stream",
@@ -687,9 +693,11 @@ export class A2aGateway {
     } catch (error) {
       call.error = combined.aborted
         ? "ACP 调用中断或超时，未自动重试"
-        : (error instanceof Error
-            ? error.message
-            : "ACP operation failed"
+        : (sensitive
+            ? "ACP authentication operation failed"
+            : error instanceof Error
+              ? error.message
+              : "ACP operation failed"
           ).slice(0, 1000);
       if (!response.headersSent) throw error;
       if (!combined.aborted)
@@ -700,13 +708,14 @@ export class A2aGateway {
               ? Number(object(error).code)
               : -32603,
           message: call.error,
-          data: object(error).data,
+          data: sensitive ? undefined : object(error).data,
         });
     } finally {
       Object.assign(call, {
         finishedAt: new Date().toISOString(),
         durationMs: Date.now() - started,
-        responseBody: this.ctx.logCapture.capture_res_body ? captured : null,
+        responseBody:
+          !sensitive && this.ctx.logCapture.capture_res_body ? captured : null,
       });
       try {
         this.store.record(call);
@@ -829,6 +838,9 @@ export class A2aGateway {
           if (
             ![
               "initialize",
+              "authenticate",
+              "logout",
+              "elicitation/reply",
               "session/new",
               "session/load",
               "session/list",
@@ -846,6 +858,20 @@ export class A2aGateway {
               "acp_method_denied",
               "不支持此 ACP 操作",
             );
+          const context = request.headers["x-flowlet-acp-context"];
+          if (
+            context !== undefined &&
+            (typeof context !== "string" || !/^[a-f0-9]{64}$/.test(context))
+          )
+            throw new CommandError(
+              400,
+              "invalid_acp_context",
+              "Invalid ACP client context",
+            );
+          const contextId =
+            typeof context === "string"
+              ? createHash("sha256").update(context).digest("hex")
+              : undefined;
           await this.forwardNative(
             agent,
             method,
@@ -853,6 +879,7 @@ export class A2aGateway {
             keyId,
             response,
             aborted.signal,
+            contextId,
           );
           return;
         }

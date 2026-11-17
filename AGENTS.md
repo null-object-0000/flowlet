@@ -504,7 +504,10 @@ ACP 的 A2A 入口复用固定版本官方 a2a-go/a2aacp 执行器；原生 ACP 
 原生 ACP 生命周期按上游声明开放 list/load/resume/close/delete；持久会话可在 Host 重启后交回上游恢复，禁止自动重发业务请求。A2A Artifact 作为普通消息展示，不伪造工具调用；
 只在共同能力内适配，不把模型协议转换、任意插件执行或 N×N 协议转换纳入范围。
 ACP 程序只在 Electron 本机 Host 或显式启用 `FLOWLET_ENABLE_ACP=1` 的 Web/Docker Host
-运行，不在 Electron client gateway 本机运行。ACP 文件/终端/MCP 能力不对客户端开放，权限询问
+运行，不在 Electron client gateway 本机运行。个人认证仅转发上游声明的 agent authMethods/authenticate/logout 与经用户同意的 URL elicitation；
+认证型上游按私有客户端上下文隔离进程，封装必须自行验证用户并隔离票据与会话，不得将上下文当成已验证身份。
+认证过程不捕获正文和上游错误详情，不透传终端登录指令或用表单收集凭据。
+ACP 文件/终端/MCP 能力不对客户端开放，权限询问
 必须等待用户回复，禁止默认批准。运行环境的内存任务空间与生命周期边界见 `docs/acp-bridge.md`。
 外部 A2A Agent 与下述本机客户端 Adapter、模型目录和渠道路由独立；登记外部 Agent 不应
 新增内置 Adapter 或修改 `plugin-registry.json`。Agent 调用统一复用模型 Client Token，

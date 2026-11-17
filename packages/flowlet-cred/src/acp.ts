@@ -1,6 +1,6 @@
 // ACP v1 agent backed by a standard A2A 1.0 endpoint. No agent-specific APIs.
-import { randomUUID } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
+import { randomUUID, randomBytes, createHash } from "node:crypto";
+import { readFileSync, statSync, mkdirSync, writeFileSync } from "node:fs";
 import {
   agent,
   methods,
@@ -18,6 +18,7 @@ import {
 } from "@agentclientprotocol/sdk";
 import { A2aClient, END_STATES, object, type A2aObject } from "./a2a.ts";
 import { SessionFile, type A2aSession } from "./a2a-session.ts";
+import path from "node:path";
 import { writeAtomic } from "./store.ts";
 import { ACP_SESSION_EXTENSION, RemoteAcp } from "./acp-remote.ts";
 
@@ -85,11 +86,35 @@ export function createAcpBridge(config: AcpBridgeConfig) {
   const sessions = new Map<string, Session>();
   let card: A2aObject = {};
   let native: RemoteAcp | undefined;
+  let supportsAuthUrl = false;
+  const contextFor = (url: string) => {
+    const dir = path.join(config.dir, "acp-identities");
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const file = path.join(
+      dir,
+      createHash("sha256")
+        .update(JSON.stringify([url, config.prefix]))
+        .digest("hex") + ".key",
+    );
+    try {
+      writeFileSync(file, randomBytes(32).toString("hex"), {
+        mode: 0o600,
+        flag: "wx",
+      });
+    } catch (error) {
+      if (object(error).code !== "EEXIST") throw error;
+    }
+    const value = readFileSync(file, "utf8");
+    if (!/^[a-f0-9]{64}$/.test(value))
+      throw new Error("Invalid private ACP identity file");
+    return value;
+  };
   const remote = async (
     method: string,
     params: A2aObject,
     signal: AbortSignal,
     peer?: AgentContext,
+    authRequestId?: string | number,
   ) => {
     if (!native) throw new Error("Native ACP is not available");
     signal = AbortSignal.any([
@@ -101,6 +126,34 @@ export function createAcpBridge(config: AcpBridgeConfig) {
         if (!peer) throw new Error("Unexpected remote ACP callback");
         if (frame.type === "update") {
           await peer.notify(methods.client.session.update, frame.params);
+        } else if (frame.type === "elicitation") {
+          let result: A2aObject = { action: "cancel" };
+          if (
+            supportsAuthUrl &&
+            frame.params.mode === "url" &&
+            authRequestId !== undefined
+          ) {
+            try {
+              const response = await peer.request<A2aObject>(
+                methods.client.elicitation.create,
+                { ...frame.params, requestId: authRequestId },
+                { cancellationSignal: signal, stopWaitingOnCancel: true },
+              );
+              if (
+                ["accept", "decline", "cancel"].includes(
+                  String(response.action),
+                )
+              )
+                result = { action: response.action };
+            } catch {
+              /* cancellation remains a cancellation, never implicit consent */
+            }
+          }
+          await native!.call(
+            "elicitation/reply",
+            { requestId: frame.requestId, result },
+            signal,
+          );
         } else if (frame.type === "permission") {
           let result: A2aObject;
           try {
@@ -172,7 +225,9 @@ export function createAcpBridge(config: AcpBridgeConfig) {
         "Remote A2A agents cannot use client MCP servers. Disable MCP injection, or explicitly use --ignore-client-mcp for remote-only operation.",
       );
   };
-  app.onRequest(methods.agent.initialize, async ({ signal }) => {
+  app.onRequest(methods.agent.initialize, async ({ params, signal }) => {
+    supportsAuthUrl =
+      object(object(params.clientCapabilities).elicitation).url != null;
     const api = client(AbortSignal.any([signal, AbortSignal.timeout(10_000)]));
     try {
       card = await api.discover();
@@ -182,7 +237,11 @@ export function createAcpBridge(config: AcpBridgeConfig) {
           : []
         ).some((ext) => object(ext).uri === ACP_SESSION_EXTENSION)
       ) {
-        native = new RemoteAcp(api.endpoint.href, config.token);
+        native = new RemoteAcp(
+          api.endpoint.href,
+          config.token,
+          contextFor(api.endpoint.href),
+        );
         return (await remote(
           "initialize",
           {},
@@ -206,6 +265,25 @@ export function createAcpBridge(config: AcpBridgeConfig) {
       },
       authMethods: [],
     };
+  });
+  app.onRequest(
+    methods.agent.authenticate,
+    async ({ params, signal, client: peer, requestId }) => {
+      if (!native) throw RequestError.methodNotFound("authenticate");
+      await remote(
+        "authenticate",
+        { methodId: params.methodId },
+        signal,
+        peer,
+        requestId ?? undefined,
+      );
+      return {};
+    },
+  );
+  app.onRequest(methods.agent.logout, async ({ signal }) => {
+    if (!native) throw RequestError.methodNotFound("logout");
+    await remote("logout", {}, signal);
+    return {};
   });
   app.onRequest(methods.agent.session.list, async ({ params, signal }) => {
     if (!native) throw RequestError.methodNotFound("session/list");

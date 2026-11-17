@@ -1272,6 +1272,173 @@ describe("generic A2A gateway through real Host command and HTTP boundaries", ()
       }
     },
   );
+  it(
+    "isolates ACP account authentication, requires URL consent and excludes authentication content from logs",
+    { timeout: 30000 },
+    async () => {
+      const previous = process.env.FLOWLET_ENABLE_ACP;
+      process.env.FLOWLET_ENABLE_ACP = "1";
+      const fixture = fileURLToPath(
+        new URL(
+          "../../../flowlet-agent-bridge/test-auth-agent.mjs",
+          import.meta.url,
+        ),
+      );
+      try {
+        await command("save_a2a_agent", {
+          input: {
+            id: "auth-native",
+            name: "Auth",
+            protocol: "acp",
+            acp: {
+              command: process.execPath,
+              args: [fixture],
+              cwd: path.dirname(fixture),
+            },
+            enabled: true,
+            allowPrivateNetwork: false,
+            timeoutSeconds: 15,
+          },
+        });
+        const make = (dir: string) =>
+          createAcpBridge({
+            url: `${base}/a2a/auth-native`,
+            token: "model-token",
+            prefix: "TEST",
+            dir,
+            timeoutSeconds: 15,
+          });
+        let consent = true,
+          interactions = 0;
+        const a = client({ name: "account-a" }).onRequest(
+          methods.client.elicitation.create,
+          ({ params }) => {
+            assert.equal(params.mode, "url");
+            assert.equal(params.url, "https://fixture.example/login");
+            assert.ok("requestId" in params);
+            interactions++;
+            return { action: consent ? "accept" : "decline" };
+          },
+        );
+        const b = client({ name: "account-b" }).onRequest(
+          methods.client.elicitation.create,
+          () => ({ action: "accept" }),
+        );
+        const init: import("@agentclientprotocol/sdk").InitializeRequest = {
+          protocolVersion: 1,
+          clientCapabilities: { elicitation: { url: {} } },
+        };
+        const newParams: import("@agentclientprotocol/sdk").NewSessionRequest =
+          { cwd: "/client", mcpServers: [] };
+        await a.connectWith(
+          make(path.join(directory, "auth-a")),
+          async (pa) => {
+            const advertised = await pa.request(methods.agent.initialize, init);
+            assert.equal(advertised.authMethods?.[0].id, "personal");
+            assert.deepEqual(advertised.agentCapabilities?.auth?.logout, {});
+            await assert.rejects(
+              pa.request(methods.agent.session.new, newParams),
+              { code: -32000 },
+            );
+            consent = false;
+            await assert.rejects(
+              pa.request(methods.agent.authenticate, { methodId: "personal" }),
+              { code: -32000 },
+            );
+            await assert.rejects(
+              pa.request(methods.agent.session.new, newParams),
+              { code: -32000 },
+            );
+            consent = true;
+            assert.deepEqual(
+              await pa.request(methods.agent.authenticate, {
+                methodId: "personal",
+              }),
+              {},
+            );
+            const sa = await pa.request(methods.agent.session.new, newParams);
+            await b.connectWith(
+              make(path.join(directory, "auth-b")),
+              async (pb) => {
+                await pb.request(methods.agent.initialize, init);
+                await assert.rejects(
+                  pb.request(methods.agent.session.new, newParams),
+                  { code: -32000 },
+                );
+                await pb.request(methods.agent.authenticate, {
+                  methodId: "personal",
+                });
+                await assert.rejects(
+                  pb.request(methods.agent.session.load, {
+                    ...newParams,
+                    sessionId: sa.sessionId,
+                  }),
+                );
+                await pa.request(methods.agent.logout, {});
+                await assert.rejects(
+                  pa.request(methods.agent.session.new, newParams),
+                  { code: -32000 },
+                );
+                assert.ok(
+                  (await pb.request(methods.agent.session.new, newParams))
+                    .sessionId,
+                );
+              },
+            );
+          },
+        );
+        await b.connectWith(
+          make(path.join(directory, "auth-b")),
+          async (pb) => {
+            await pb.request(methods.agent.initialize, init);
+            assert.ok(
+              (await pb.request(methods.agent.session.new, newParams))
+                .sessionId,
+            );
+            await pb.request(methods.agent.logout, {});
+          },
+        );
+        assert.equal(interactions, 2);
+        const logs = a2aGateway(web.context).calls("auth-native", true);
+        for (const log of logs.filter((l) =>
+          ["authenticate", "logout", "elicitation/reply"].includes(l.method),
+        )) {
+          assert.equal(log.requestBody, null);
+          assert.equal(log.responseBody, null);
+          assert.doesNotMatch(
+            JSON.stringify(log),
+            /PRIVATE_AUTH_ERROR|DO_NOT_CAPTURE|fixture.example/,
+          );
+        }
+        const publicRuntime = new RemoteAcp(
+          `${base}/a2a/auth-native`,
+          "model-token",
+        );
+        assert.deepEqual(
+          (
+            await publicRuntime.call(
+              "initialize",
+              {},
+              AbortSignal.timeout(5000),
+            )
+          ).authMethods,
+          [],
+        );
+        await assert.rejects(
+          publicRuntime.call(
+            "authenticate",
+            { methodId: "personal" },
+            AbortSignal.timeout(5000),
+          ),
+          { code: -32601 },
+        );
+      } finally {
+        await command("delete_a2a_agent", { id: "auth-native" });
+        if (previous === undefined) delete process.env.FLOWLET_ENABLE_ACP;
+        else process.env.FLOWLET_ENABLE_ACP = previous;
+      }
+    },
+  );
   it("drains aborted A2A work before the Host closes its database", async () => {
     const created = await command("create_a2a_key", {
       name: "shutdown",

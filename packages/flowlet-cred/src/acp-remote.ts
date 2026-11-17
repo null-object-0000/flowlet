@@ -5,15 +5,18 @@ export const ACP_SESSION_EXTENSION = "urn:flowlet:acp-session:1";
 export type AcpFrame =
   | { type: "update"; params: A2aObject }
   | { type: "permission"; requestId: string; params: A2aObject }
+  | { type: "elicitation"; requestId: string; params: A2aObject }
   | { type: "result"; result: A2aObject }
   | { type: "error"; code: number; message: string; data?: unknown };
 
 export class RemoteAcp {
   private url: string;
   private token: string;
-  constructor(endpoint: string, token: string) {
+  private readonly context?: string;
+  constructor(endpoint: string, token: string, context?: string) {
     this.url = a2aUrl(endpoint).href.replace(/\/$/, "") + "/acp";
     this.token = token;
+    this.context = context;
   }
   async call(
     method: string,
@@ -26,6 +29,7 @@ export class RemoteAcp {
       redirect: "error",
       headers: {
         authorization: `Bearer ${this.token}`,
+        ...(this.context ? { "x-flowlet-acp-context": this.context } : {}),
         "content-type": "application/json",
       },
       body: JSON.stringify({ method, params }),
@@ -47,7 +51,11 @@ export class RemoteAcp {
         error.data = frame.data;
         throw error;
       }
-      if (frame.type !== "update" && frame.type !== "permission")
+      if (
+        frame.type !== "update" &&
+        frame.type !== "permission" &&
+        frame.type !== "elicitation"
+      )
         throw new Error("Invalid remote ACP frame");
       await receive(frame);
     }

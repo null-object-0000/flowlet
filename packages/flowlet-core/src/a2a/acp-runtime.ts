@@ -237,9 +237,15 @@ export class AcpRuntimes {
   async stop(id: string) {
     const entry = this.runtimes.get(id);
     this.runtimes.delete(id);
-    const native = this.native.get(id);
-    this.native.delete(id);
-    if (native) await (await native.ready.catch(() => null))?.close();
+    const native = [...this.native.entries()].filter(
+      ([key]) => key === id || key.startsWith(id + "@"),
+    );
+    for (const [key] of native) this.native.delete(key);
+    await Promise.all(
+      native.map(async ([, entry]) =>
+        (await entry.ready.catch(() => null))?.close(),
+      ),
+    );
     if (entry) {
       const runtime = await entry.ready.catch(() => null);
       await runtime?.close();
@@ -247,20 +253,32 @@ export class AcpRuntimes {
   }
   async close() {
     await Promise.all(
-      [...new Set([...this.runtimes.keys(), ...this.native.keys()])].map((id) =>
-        this.stop(id),
-      ),
+      [
+        ...new Set([
+          ...this.runtimes.keys(),
+          ...[...this.native.keys()].map((key) => key.split("@")[0]),
+        ]),
+      ].map((id) => this.stop(id)),
     );
   }
-  async ensureNative(agent: {
-    id: string;
-    acp?: AcpCommand;
-    timeoutSeconds: number;
-  }) {
+  async ensureNative(
+    agent: {
+      id: string;
+      acp?: AcpCommand;
+      timeoutSeconds: number;
+    },
+    contextId?: string,
+  ): Promise<Awaited<ReturnType<typeof startNativeAcp>>> {
     requireAcpRuntime(this.ctx);
     if (!agent.acp) throw new Error("ACP 启动配置缺失");
+    // Agents without authentication retain one shared runtime; do not duplicate their state files.
+    if (contextId) {
+      const shared = await this.ensureNative(agent);
+      if (!shared.requiresClientContext) return shared;
+    }
+    const runtimeKey = contextId ? `${agent.id}@${contextId}` : agent.id;
     const fingerprint = JSON.stringify([agent.acp, agent.timeoutSeconds]);
-    let entry = this.native.get(agent.id);
+    let entry = this.native.get(runtimeKey);
     if (entry && entry.fingerprint !== fingerprint) {
       await this.stop(agent.id);
       entry = undefined;
@@ -270,12 +288,13 @@ export class AcpRuntimes {
         throw new Error("ACP 运行环境已达到 8 个上限");
       entry = {
         fingerprint,
-        ready: startNativeAcp(agent.acp, agent.timeoutSeconds),
+        ready: startNativeAcp(agent.acp, agent.timeoutSeconds, contextId),
       };
-      this.native.set(agent.id, entry);
+      this.native.set(runtimeKey, entry);
       const current = entry;
       const remove = () => {
-        if (this.native.get(agent.id) === current) this.native.delete(agent.id);
+        if (this.native.get(runtimeKey) === current)
+          this.native.delete(runtimeKey);
       };
       void entry.ready
         .then((runtime) => runtime.closed.then(remove))

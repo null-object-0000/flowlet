@@ -8,6 +8,7 @@ import {
   ndJsonStream,
   RequestError,
   type RequestPermissionResponse,
+  type CreateElicitationResponse,
 } from "@agentclientprotocol/sdk";
 import type { AcpCommand } from "../storage/a2a.ts";
 import { asObject as object, type JsonObject } from "./protocol.ts";
@@ -36,16 +37,20 @@ function modelOptions(result: JsonObject, session: Session): JsonObject {
 export async function startNativeAcp(
   config: AcpCommand,
   timeoutSeconds: number,
+  contextId?: string,
 ) {
   const child = spawn(config.command, config.args, {
     cwd: config.cwd,
     windowsHide: true,
     detached: process.platform !== "win32",
-    env: Object.fromEntries(
-      Object.entries(process.env).filter(
-        ([key]) => !key.startsWith("FLOWLET_"),
+    env: {
+      ...Object.fromEntries(
+        Object.entries(process.env).filter(
+          ([key]) => !key.startsWith("FLOWLET_"),
+        ),
       ),
-    ),
+      ...(contextId ? { FLOWLET_ACP_CONTEXT_ID: contextId } : {}),
+    },
     stdio: "pipe",
   });
   child.stderr.resume();
@@ -64,7 +69,56 @@ export async function startNativeAcp(
       resolve: (result: RequestPermissionResponse) => void;
     }
   >();
+  let authEmit: ((frame: AcpFrame) => Promise<void>) | undefined;
+  const elicitations = new Map<
+    string,
+    (result: CreateElicitationResponse) => void
+  >();
   const app = client({ name: "flowlet-remote" });
+  app.onRequest(
+    methods.client.elicitation.create,
+    async ({ params, signal }) => {
+      // Authentication uses consented, out-of-band URLs only. Never collect secrets in forms.
+      if (
+        !contextId ||
+        !authEmit ||
+        params.mode !== "url" ||
+        typeof params.url !== "string" ||
+        elicitations.size >= 8
+      )
+        return { action: "cancel" };
+      const url = new URL(params.url);
+      if (
+        url.username ||
+        url.password ||
+        (url.protocol !== "https:" &&
+          !(
+            url.protocol === "http:" &&
+            ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
+          ))
+      )
+        throw RequestError.invalidParams(
+          "Authentication requires HTTPS or loopback URL",
+        );
+      const id = randomUUID();
+      return await new Promise<CreateElicitationResponse>((resolve) => {
+        const done = (result: CreateElicitationResponse) => {
+          signal.removeEventListener("abort", cancel);
+          elicitations.delete(id);
+          resolve(result);
+        };
+        const cancel = () => done({ action: "cancel" });
+        elicitations.set(id, done);
+        signal.addEventListener("abort", cancel, { once: true });
+        if (signal.aborted) return cancel();
+        void authEmit!({
+          type: "elicitation",
+          requestId: id,
+          params: params as unknown as JsonObject,
+        }).catch(cancel);
+      });
+    },
+  );
   app.onNotification(methods.client.session.update, async ({ params }) => {
     const session = sessions.get(params.sessionId);
     const update =
@@ -134,6 +188,7 @@ export async function startNativeAcp(
   const close = async () => {
     for (const item of pending.values())
       item.resolve({ outcome: { outcome: "cancelled" } });
+    for (const resolve of elicitations.values()) resolve({ action: "cancel" });
     connection.close();
     child.stdin.end();
     kill("SIGTERM");
@@ -155,7 +210,10 @@ export async function startNativeAcp(
   try {
     const init = await peer.request(
       methods.agent.initialize,
-      { protocolVersion: 1, clientCapabilities: {} },
+      {
+        protocolVersion: 1,
+        clientCapabilities: contextId ? { elicitation: { url: {} } } : {},
+      },
       {
         cancellationSignal: AbortSignal.timeout(10_000),
         stopWaitingOnCancel: true,
@@ -164,6 +222,7 @@ export async function startNativeAcp(
     return {
       closed,
       close,
+      requiresClientContext: Boolean(init.authMethods?.length),
       async call(
         method: string,
         raw: JsonObject,
@@ -189,11 +248,82 @@ export async function startNativeAcp(
                   )
                   .map((name) => [name, {}]),
               ),
+              ...(contextId && init.agentCapabilities?.auth?.logout
+                ? { auth: { logout: {} } }
+                : {}),
               promptCapabilities: {},
               mcpCapabilities: {},
             },
-            authMethods: [],
+            authMethods: contextId
+              ? (init.authMethods ?? []).filter(
+                  (m) => !("type" in m && m.type === "terminal"),
+                )
+              : [],
           };
+        if (method === "elicitation/reply") {
+          const resolve = elicitations.get(String(raw.requestId));
+          if (!contextId || !resolve)
+            throw RequestError.invalidParams(
+              "Authentication interaction is no longer pending",
+            );
+          const action = object(raw.result).action;
+          if (!["accept", "decline", "cancel"].includes(String(action)))
+            throw RequestError.invalidParams(
+              "Invalid authentication interaction response",
+            );
+          resolve({ action: String(action) });
+          return {};
+        }
+        if (method === "authenticate" || method === "logout") {
+          const offered = (init.authMethods ?? []).filter(
+            (m) => !("type" in m && m.type === "terminal"),
+          );
+          if (
+            !contextId ||
+            !offered.length ||
+            (method === "logout" && !init.agentCapabilities?.auth?.logout)
+          )
+            throw RequestError.methodNotFound(method);
+          if (
+            authEmit ||
+            [...sessions.values()].some((s) => s.busy || s.closing)
+          )
+            throw RequestError.invalidRequest(
+              "Finish active operations before changing account",
+            );
+          if (
+            method === "authenticate" &&
+            !offered.some((m) => m.id === raw.methodId)
+          )
+            throw RequestError.invalidParams(
+              "Authentication method was not advertised",
+            );
+          authEmit = emit;
+          try {
+            const result =
+              method === "authenticate"
+                ? await peer.request(
+                    methods.agent.authenticate,
+                    { methodId: String(raw.methodId) },
+                    { cancellationSignal: signal, stopWaitingOnCancel: true },
+                  )
+                : await peer.request(
+                    methods.agent.logout,
+                    {},
+                    { cancellationSignal: signal, stopWaitingOnCancel: true },
+                  );
+            sessions.clear();
+            // Auth state is private to the upstream process; never return credentials or metadata.
+            return {};
+          } finally {
+            for (const resolve of elicitations.values())
+              resolve({ action: "cancel" });
+            authEmit = undefined;
+            if (signal.aborted) await close();
+          }
+        }
+        if (authEmit)
+          throw RequestError.invalidRequest("Authentication is in progress");
         if (method === "session/new") {
           if (sessions.size + creating >= 100)
             throw RequestError.invalidRequest(

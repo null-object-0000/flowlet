@@ -58,7 +58,7 @@ app.onRequest(methods.agent.initialize, ({ params }) => {
     agentCapabilities: {
       loadSession: true,
       sessionCapabilities: { list: {}, resume: {}, close: {}, delete: {} },
-      promptCapabilities: {},
+      promptCapabilities: { image: process.argv.includes('--images') },
     },
   };
 });
@@ -120,6 +120,13 @@ app.onRequest(methods.agent.session.prompt, async ({ params, client }) => {
     .filter((part) => part.type === "text")
     .map((part) => part.text)
     .join(" ");
+  if (text === 'image-check') {
+    for (const update of [
+      { sessionUpdate:'tool_call',toolCallId:'fixture-image-tool',title:'Inspect image',kind:'other',status:'in_progress',rawInput:{images:params.prompt.filter(p=>p.type==='image').length} },
+      { sessionUpdate:'tool_call_update',toolCallId:'fixture-image-tool',status:'completed',rawOutput:{ok:true},content:[{type:'content',content:{type:'text',text:'Image accepted'}}] },
+    ]) await client.notify(methods.client.session.update,{sessionId:params.sessionId,update});
+    return {stopReason:'end_turn'};
+  }
   if (text === "client-tools") {
     const denied = [];
     for (const [method, extra] of [

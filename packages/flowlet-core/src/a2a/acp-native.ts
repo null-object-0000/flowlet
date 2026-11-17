@@ -13,6 +13,7 @@ import {
 import type { AcpCommand } from "../storage/a2a.ts";
 import { asObject as object, type JsonObject } from "./protocol.ts";
 import type { AcpFrame } from "../../../flowlet-cred/src/acp-remote.ts";
+import { nativePrompt } from "../../../flowlet-cred/src/acp-prompt.ts";
 
 type Session = {
   busy: boolean;
@@ -251,7 +252,7 @@ export async function startNativeAcp(
               ...(contextId && init.agentCapabilities?.auth?.logout
                 ? { auth: { logout: {} } }
                 : {}),
-              promptCapabilities: {},
+              promptCapabilities: { image: init.agentCapabilities?.promptCapabilities?.image === true },
               mcpCapabilities: {},
             },
             authMethods: contextId
@@ -503,18 +504,12 @@ export async function startNativeAcp(
             );
           }
           if (method === "session/prompt") {
-            if (
-              !Array.isArray(raw.prompt) ||
-              raw.prompt.some((p) => object(p).type !== "text")
-            )
-              throw RequestError.invalidParams(
-                "Remote ACP accepts text prompts only; local resources are not forwarded",
-              );
+            const prompt = nativePrompt(raw.prompt, init.agentCapabilities?.promptCapabilities?.image === true);
             return (await peer.request(
               methods.agent.session.prompt,
               {
                 sessionId: id,
-                prompt: raw.prompt as { type: "text"; text: string }[],
+                prompt,
               },
               { cancellationSignal: signal, stopWaitingOnCancel: true },
             )) as unknown as JsonObject;

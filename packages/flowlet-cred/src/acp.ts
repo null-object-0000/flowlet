@@ -21,6 +21,7 @@ import { SessionFile, type A2aSession } from "./a2a-session.ts";
 import path from "node:path";
 import { writeAtomic } from "./store.ts";
 import { ACP_SESSION_EXTENSION, RemoteAcp } from "./acp-remote.ts";
+import { nativePrompt } from "./acp-prompt.ts";
 
 export interface AcpBridgeConfig {
   url: string;
@@ -87,6 +88,7 @@ export function createAcpBridge(config: AcpBridgeConfig) {
   let card: A2aObject = {};
   let native: RemoteAcp | undefined;
   let supportsAuthUrl = false;
+  let nativeImages = false;
   const contextFor = (url: string) => {
     const dir = path.join(config.dir, "acp-identities");
     mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -242,11 +244,13 @@ export function createAcpBridge(config: AcpBridgeConfig) {
           config.token,
           contextFor(api.endpoint.href),
         );
-        return (await remote(
+        const initialized = (await remote(
           "initialize",
           {},
           signal,
         )) as unknown as InitializeResponse;
+        nativeImages = initialized.agentCapabilities?.promptCapabilities?.image === true;
+        return initialized;
       }
     } finally {
       await api.close();
@@ -459,13 +463,10 @@ export function createAcpBridge(config: AcpBridgeConfig) {
     methods.agent.session.prompt,
     async ({ params, signal, client: peer }) => {
       if (native) {
-        if (params.prompt.some((block) => block.type !== "text"))
-          throw RequestError.invalidParams(
-            "Remote ACP accepts text only; local files and resources are not forwarded",
-          );
+        const prompt = nativePrompt(params.prompt, nativeImages);
         return (await remote(
           "session/prompt",
-          { sessionId: params.sessionId, prompt: params.prompt },
+          { sessionId: params.sessionId, prompt },
           signal,
           peer,
         )) as unknown as PromptResponse;

@@ -72,7 +72,10 @@ T3 Code 的 Local ACP Provider 使用生成的 executable/args/env。Paseo 使�
 session/cancel 和 permission/reply。外部请求沿用网关的 Client Token/旧 scoped key 鉴权与启停校验，
 管理 API 不开放；每帧与请求均限 4 MiB。通知通过有界 SSE 传回，断开或超时不重试；超时/断开会取消
 上游调用并终止该原生运行环境，避免已失联的操作继续执行。权限请求转给客户端，只有返回有效选项
-才提交；缺少处理器、取消或超时均返回 cancelled，Flowlet 不默认批准。原生 prompt 仅接受文本，
+才提交；缺少处理器、取消或超时均返回 cancelled，Flowlet 不默认批准。原生 prompt 接受文本，
+并仅在上游声明 `promptCapabilities.image` 时接受客户端直接提交的 Base64 内联图片；
+能力声明贯穿 Host 和 CLI，两层均校验输入。单次请求仍受 4 MiB（含 Base64 与 JSON）限制。
+文件路径、resource_link、音频、嵌入资源和图片 URL 不作为原生输入转发，不读取本机文件或抓取 URL；
 创建/恢复时固定使用管理员配置的宿主 cwd 和空 MCP 列表，忽略客户端 cwd；上游协商的客户端能力为
 空，文件系统和终端请求没有处理器，绝不转发到客户端。该边界不限制受托管 Agent 自己在宿主上的
 原有工具能力，宿主程序仍是受信任代码而非沙箱。
@@ -83,7 +86,7 @@ session/resume 恢复但不回放，session/close 释放活动会话但保留上
 是否跨 Host 重启保留会话由上游实现决定；Flowlet 不凭空保存上游状态，也不自动重放业务请求。
 调用记录复用现有表，记录 ACP 操作、会话 ID、取消/失败状态，最近调用默认隐藏成功的初始化与配置查询。
 
-A2A 客户端桥支持文本与 resource_link 输入，明确拒绝图片、音频和嵌入资源输入，不读取或上传客户端文件。
+纯 A2A 客户端桥支持文本与 resource_link 输入，明确拒绝图片、音频和嵌入资源输入，不读取或上传客户端文件。
 文本、结构化数据及链接输出展示为文本；内联文件输出完整 data URI，不下载 URL。A2A Artifact
 追加/替换先按 Artifact ID 合并，最终快照输出为普通消息；Artifact 不是工具执行，
 不再生成 tool_call / tool_call_update 卡片。原生 ACP 的真实上游工具状态仍按通知显示，不执行本机工具。

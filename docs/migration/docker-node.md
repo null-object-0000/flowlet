@@ -398,3 +398,10 @@ node scripts/e2e-node-host.mjs            # 端到端冒烟（含 mock 上游流
 - 生产切换前两次确认没有进行中的 Agent 请求；旧进程 0.63s 退出，最长健康探测成功间隔 3.04s；egress 未重建。health/models 200、OIDC 模式保持，流式回归 3/3 HTTP 200 且 DONE；前端 index 哈希一致，未登录访问用户列表返回 401。
 - 用户目录为数据卷上的 users.json；新登录与已有 Cookie 会话后续访问逐步建立档案。未执行真实用户停用或角色修改。移动端 390px 登录页无横向溢出；截图工具超时，全部业务页面移动端实机验收仍未完成。
 - 回滚：`flowlet:node-20261116-quiet-acp-c575cad`；compose 备份 `.agents/skills/flowlet-docker-deploy/.work/compose.before-20261117-001450.yaml`。
+
+## 旧版 OIDC 准入覆盖记录升级修复（2026-11-17 09:48）
+
+- `07d8c6f` 发布引入的完整 OIDC 配置读取逻辑误把旧 `auth_provider_oidc_v1` 纯准入覆盖记录判为损坏，导致 GitLab 登录入口消失；环境凭据及 `auth_login_mode_v1.oidc=true` 均正常。
+- 修复提交 `aecefbb`：仅识别完整且有效的旧准入记录，用原部署协议配置与加密后的 client secret 补全；准入/管理员列表保持不变；墓碑、无部署种子、损坏或不完整的新记录继续拒绝启用。迁移落库且重复启动幂等。
+- 25 项 OIDC 测试（含旧记录迁移/重复应用/墓碑/损坏完整配置）与 Node 类型检查通过；以当前生产镜像 overlay 单文件，镜像 `flowlet:node-20261117-oidc-legacy-fix`。Canary 冒烟通过后切生产，两次 Agent 活动检查均空；最长健康探测成功间隔 2.94s，egress 未重建。
+- 生产 auth/config 已同时返回 oidc（GitLab）和 github；OIDC 登录入口重定向正常，health/models 200，流式 1/1 DONE。未代用户完成 SSO 授权登录。回滚镜像 `flowlet:node-20261117-users-07d8c6f`；迁移后的完整配置兼容该镜像。

@@ -4,6 +4,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppPreferencesProvider } from "../../app/preferences/AppPreferences";
 import { CredentialsPage, asCredentialProviderId, checkEndpoint } from "./CredentialsPage";
 
+// Semi 的受控 Select 要等退出动画结束才触发 onChange。jsdom 不验证动画，
+// 关闭这一层动画以避免并发运行时把动画帧调度当成业务交互的完成条件；保留真实 Select。
+vi.mock("@douyinfe/semi-ui-19", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@douyinfe/semi-ui-19")>();
+  return {
+    ...actual,
+    Select: (props: React.ComponentProps<typeof actual.Select>) => <actual.Select {...props} motion={false} />,
+  };
+});
+
 const commands = vi.hoisted(() => ({
   listProviders: vi.fn(),
   list: vi.fn(),

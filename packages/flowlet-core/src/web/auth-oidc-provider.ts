@@ -346,6 +346,32 @@ export function applyStoredOidcOnStartup(
   storage: AuthProviderStorage,
   secrets: AuthProviderSecrets,
 ): { source: "stored" | "env" | "tombstone" | "invalid" } {
+  // v1 originally held only policy overrides; migrate that exact legacy shape
+  // using deployment credentials, without falling back for malformed full records.
+  const raw = storage.getAppMeta(OIDC_PROVIDER_META_KEY);
+  let legacy: Record<string, unknown> | null = null;
+  try {
+    const value = raw === null ? null : JSON.parse(raw);
+    if (value && typeof value === "object" && !Array.isArray(value)) legacy = value;
+  } catch { /* parseStored handles invalid JSON below */ }
+  const lists = ["allowed_subs", "allowed_groups", "allowed_emails", "allowed_domains", "admin_subs", "admin_emails"];
+  const keys = [...lists, "scopes", "display_name", "allow_any"];
+  const env = auth.config.oidc;
+  if (env && legacy && Object.keys(legacy).every(key => keys.includes(key)) &&
+      typeof legacy.scopes === "string" && legacy.scopes.split(/\s+/).includes("openid") &&
+      typeof legacy.display_name === "string" && typeof legacy.allow_any === "boolean" &&
+      lists.every(key => Array.isArray(legacy![key]) && (legacy![key] as unknown[]).every(item => typeof item === "string")) &&
+      (legacy.allow_any || lists.slice(0, 4).some(key => (legacy![key] as string[]).some(item => item.trim())))) {
+    const migrated = {
+      ...legacy, generation: 1, issuer: env.issuer, discovery_url: env.discoveryUrl,
+      redirect_urls: env.redirectUrls, client_id: env.clientId,
+      client_secret_ciphertext: secrets.encrypt(env.clientSecret),
+      email_claim: env.emailClaim, name_claim: env.nameClaim, groups_claim: env.groupsClaim,
+      allow_http_issuer: env.allowHttpIssuer, insecure_http: env.insecureHttp,
+      pkce: env.pkce, nonce: env.nonce,
+    };
+    storage.setAppMeta(OIDC_PROVIDER_META_KEY, JSON.stringify(migrated));
+  }
   const parsed = parseStored(storage.getAppMeta(OIDC_PROVIDER_META_KEY));
   if (parsed.kind === "none") return { source: "env" };
   if (parsed.kind === "tombstone") {

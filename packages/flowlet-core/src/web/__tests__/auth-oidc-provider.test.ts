@@ -473,3 +473,34 @@ describe("OIDC 连通性校验", () => {
     }
   });
 });
+
+
+describe("legacy OIDC policy upgrade", () => {
+  it("migrates policy overrides with deployment credentials and survives reapply", () => {
+    const storage = fakeStorage();
+    const legacy = { scopes: "openid email", display_name: "Company GitLab",
+      allowed_subs: ["legacy-user"], allowed_groups: [], allowed_emails: [], allowed_domains: [],
+      admin_subs: ["legacy-admin"], admin_emails: [], allow_any: false };
+    storage.setAppMeta(OIDC_PROVIDER_META_KEY, JSON.stringify(legacy));
+    const auth = AdminAuth.fromConfig(adminAuthConfigFromEnv(ENV));
+    const secret = auth.config.oidc!.clientSecret;
+    assert.equal(applyStoredOidcOnStartup(auth, storage, SECRET_BOX).source, "stored");
+    assert.deepEqual(auth.config.oidc!.allowedSubs, legacy.allowed_subs);
+    assert.deepEqual(auth.config.oidc!.adminSubs, legacy.admin_subs);
+    assert.equal(auth.config.oidc!.clientSecret, secret);
+    const saved = storage.getAppMeta(OIDC_PROVIDER_META_KEY);
+    assert.equal(JSON.parse(saved).client_secret_ciphertext, SECRET_BOX.encrypt(secret));
+    assert.equal(applyStoredOidcOnStartup(auth, storage, SECRET_BOX).source, "stored");
+    assert.equal(storage.getAppMeta(OIDC_PROVIDER_META_KEY), saved);
+    storage.setAppMeta(OIDC_PROVIDER_META_KEY, JSON.stringify({ deleted: true }));
+    assert.equal(applyStoredOidcOnStartup(auth, storage, SECRET_BOX).source, "tombstone");
+    assert.equal(auth.config.oidc, null);
+  });
+  it("does not use deployment credentials for an incomplete full configuration", () => {
+    const storage = fakeStorage();
+    storage.setAppMeta(OIDC_PROVIDER_META_KEY, JSON.stringify({issuer:"https://bad.example", allowed_subs:[]}));
+    const auth = AdminAuth.fromConfig(adminAuthConfigFromEnv(ENV));
+    assert.equal(applyStoredOidcOnStartup(auth, storage, SECRET_BOX).source, "invalid");
+    assert.equal(auth.config.oidc, null);
+  });
+});

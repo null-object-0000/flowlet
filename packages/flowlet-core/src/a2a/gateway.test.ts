@@ -1102,7 +1102,7 @@ describe("generic A2A gateway through real Host command and HTTP boundaries", ()
                 },
               ],
             });
-            assert.equal(session.configOptions?.length, 1);
+            assert.equal(session.configOptions?.length, 2);
             assert.match(
               JSON.stringify(session.configOptions),
               /fixture-small/,
@@ -1114,6 +1114,19 @@ describe("generic A2A gateway through real Host command and HTTP boundaries", ()
             assert.doesNotMatch(
               JSON.stringify(session.configOptions),
               /bypass/,
+            );
+            const thought = await peer.request(
+              methods.agent.session.setConfigOption,
+              {
+                sessionId: session.sessionId,
+                configId: "thinking",
+                value: "deep",
+              },
+            );
+            assert.equal(
+              thought.configOptions.find((o) => o.id === "thinking")
+                ?.currentValue,
+              "deep",
             );
             const switched = await peer.request(
               methods.agent.session.setConfigOption,

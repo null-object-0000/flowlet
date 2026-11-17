@@ -29,6 +29,17 @@ const options = (session) => [
     ],
   },
   {
+    id: "thinking",
+    category: "thought_level",
+    name: "Response",
+    type: "select",
+    currentValue: session.thinking ?? "balanced",
+    options: [
+      { value: "balanced", name: "Balanced" },
+      { value: "deep", name: "Deep" },
+    ],
+  },
+  {
     id: "mode",
     category: "mode",
     name: "Mode",
@@ -80,12 +91,15 @@ app.onRequest(
   methods.agent.session.setConfigOption,
   async ({ params, client }) => {
     const session = sessions.get(params.sessionId);
-    if (
-      params.configId !== "model" ||
-      !["fixture-small", "fixture-large"].includes(params.value)
-    )
+    if (!(
+      (params.configId === "model" &&
+        ["fixture-small", "fixture-large"].includes(params.value)) ||
+      (params.configId === "thinking" &&
+        ["balanced", "deep"].includes(params.value))
+    ))
       throw RequestError.invalidParams("unknown model");
-    session.model = params.value;
+    if (params.configId === "model") session.model = params.value;
+    else session.thinking = params.value;
     await client.notify(methods.client.session.update, {
       sessionId: params.sessionId,
       update: {

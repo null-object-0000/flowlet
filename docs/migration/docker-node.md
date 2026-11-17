@@ -411,3 +411,12 @@ node scripts/e2e-node-host.mjs            # 端到端冒烟（含 mock 上游流
 - 源码 `d8dd039`，镜像 `flowlet:node-20261117-login-cards-d8dd039`。两条实心蓝色登录按钮替换为带品牌图标、说明与箭头的描边卡片；单/多登录方式使用同一渲染路径，保留键盘焦点与减少动态效果支持。
 - 类型检查/Web 构建、桌面浏览器 DOM 尺寸与样式检查通过；预览 resize 未实际改变 viewport，未声称完成本次移动端浏览器验收。Canary health/config/ipc_ping 通过。
 - 生产前端哈希与构建一致，GitLab/GitHub 均启用；health/models 200、流式 1/1 DONE。两次 Agent 活动检查均空，最长健康探测成功间隔 2.77s，egress 未重建。回滚 `flowlet:node-20261117-oidc-legacy-fix`。
+
+
+### 2026-11-17：统一用户、会话与实例访问策略
+
+- 发布 `flowlet:node-20261117-access-8a864ac`，基于当前线上 `flowlet:node-20261117-acp-lifecycle-c6af8a0` 合并 19 个服务端文件与 Web UI，保留线上目录和已有运行时差异。
+- 生产数据库先以 `VACUUM INTO` 取得一致性副本，旧用户、会话与配置同时私有备份；canary 冒烟及访问策略、用户、审计命令均通过。
+- 生产迁移保留原用户 ID：1 个用户、1 个身份、1 个会话，1 名启用管理员；两组旧登录规则迁入实例策略，GitLab / GitHub 登录入口保持启用。
+- 发布前 Node 回归 444 项通过、1 项跳过；前端 899 项通过；Web 构建与类型检查通过。生产 `/health`、`/v1/models` 与 1 次流式 `[DONE]` 验证通过。
+- 切换总耗时 3.5 秒，探测最长成功间隔 2.97 秒；egress 未重建。授权状态开始变更后，不得直接回滚到仅认旧 JSON 的镜像，详见 `docs/docker.md` 的 SQLite 用户体系契约。

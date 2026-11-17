@@ -420,3 +420,28 @@ node scripts/e2e-node-host.mjs            # 端到端冒烟（含 mock 上游流
 - 生产迁移保留原用户 ID：1 个用户、1 个身份、1 个会话，1 名启用管理员；两组旧登录规则迁入实例策略，GitLab / GitHub 登录入口保持启用。
 - 发布前 Node 回归 444 项通过、1 项跳过；前端 899 项通过；Web 构建与类型检查通过。生产 `/health`、`/v1/models` 与 1 次流式 `[DONE]` 验证通过。
 - 切换总耗时 3.5 秒，探测最长成功间隔 2.97 秒；egress 未重建。授权状态开始变更后，不得直接回滚到仅认旧 JSON 的镜像，详见 `docs/docker.md` 的 SQLite 用户体系契约。
+
+
+## 混元 HY4 界面支持恢复发布（2026-11-17 14:01）
+
+- 源码 `f089d1a` 将 `8c2a586` 的混元渠道/HY4 接入部分合回 main：注册表、内置预设、
+  HY4 身份、离线图标、概览添加入口；保留独立 `hy4-flash`，补齐 Rust 回滚宿主 Adapter。
+  腾讯最新官方协议文档明确 Anthropic 使用 `x-api-key`，同步校正预设与测试。
+- 镜像 `flowlet:node-20261117-hy4-restore-f089d1a` 以当前生产
+  `flowlet:node-20261117-112230-manual-735062e` 为基础，仅覆盖通过构建的 Web UI，
+  并合并内置配置中的混元预设/默认模型；保留线上模型目录、systemone 和其他服务端差异。
+- 相关前端 140 项、Node 接入/旧库升级 6 项、代理 37 项、Rust 混元/插件契约/模型目录
+  20 项测试通过；前端与 Node 类型检查、Web 构建、`cargo check` 通过。
+  全库 `cargo fmt --check` 仍报已有 `http_bearer.rs`、`mod.rs`、`service_credentials.rs`
+  格式差异，本次新增 Rust 文件已单独格式化，未修改这些无关文件。
+- Canary health/auth/ipc_ping 通过；混元三协议与 x_api_key 预设、HY4/Flash 的六个真实
+  Node 路由生成候选、模型身份归一及 UI/index/图标字节匹配通过。
+- 生产切换前两次 Agent 活动检查均无进行中的调用；切换总耗时 4.0 秒，健康探测最长成功
+  间隔 3.37 秒，egress 未重建。health/models 200，流式 1/1 HTTP 200 且 DONE；
+  OIDC 登录保留，线上 index、含 HY4/Flash 的资源块与图标匹配构建。
+- 发布前后 14 个账号、63 条路由的配置摘要一致（含账号 Key、地址覆盖、模型选择和路由
+  启停/优先级）；未改变数据库结构或替用户开放模型，生产目前无已配置的 HY4 路由。
+  更新并重启后渠道模板生效，后续模型选择和路由保存继续热更新。
+- 回滚镜像 `flowlet:node-20261117-112230-manual-735062e`；compose 备份为部署技能
+  `.work/compose.before-20261117-140140.yaml`。OIDC-only 管理日志接口仍要求浏览器登录，
+  未声称完成登录后的浏览器视觉验收或实际 HY4 上游推理验收。

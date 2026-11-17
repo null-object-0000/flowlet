@@ -4,7 +4,7 @@
 > **Node Host**（`packages/flowlet-core`，Node 26 直接执行 TypeScript）。迁移目标是行为等价替换：
 > 镜像不再包含 Rust 工具链与编译产物，环境变量、端口、`/data` 数据卷、SQLite schema、管理端
 > 鉴权（token / GitLab OIDC）全部保持相同契约。当前线上实例（10.100.217.60）于 **2026-11-17 更新统一用户与访问策略**，
-> 镜像 `flowlet:node-20261117-access-8a864ac`（前版本 `flowlet:node-20261117-acp-lifecycle-c6af8a0`；
+> 镜像 `flowlet:node-20261117-hy4-restore-f089d1a`（前版本 `flowlet:node-20261117-112230-manual-735062e`；
 > 涉及权限或撤销后的回滚限制见下文用户体系说明）。Node Host 于 2026-11-10 首次上线。实现契约见 [migration/node-host.md](migration/node-host.md)，
 > 镜像与冒烟记录见 [migration/docker-node.md](migration/docker-node.md)。
 

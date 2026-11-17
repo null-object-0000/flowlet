@@ -1,3 +1,4 @@
+import { commandPermission } from "./permissions.ts";
 import type { UserDirectory } from "./users.ts";
 // Web Host 管理端鉴权（token / OIDC 两种模式）。Owner: node-web.
 //
@@ -7,7 +8,7 @@ import type { UserDirectory } from "./users.ts";
 //   可选 ALLOW_TOKEN_LOGIN 兜底 Bearer。
 //
 // 只使用 node:crypto / 全局 fetch，不引入第三方依赖。会话默认在内存中；Node Host
-// （Docker / headless）会注入文件型 AdminSessionStore，把会话落到 `/data`，
+// （Docker / headless）会注入 SQLite AdminSessionStore，并迁移旧文件会话，
 // 这样容器重启/升级不再把管理台登录态全部踢掉（见 web/session-store.ts）。
 // Rust 桌面/headless 仍为纯内存实现，行为差异只在「重启后是否重新登录」。
 import { createHash, createPublicKey, createHmac, randomUUID, timingSafeEqual, verify as cryptoVerify } from "node:crypto";
@@ -143,18 +144,9 @@ export interface Identity {
  */
 export type IdentityRole = "admin" | "viewer";
 
-/**
- * 只读角色能跑哪些命令：读类动词开头、且名字里不含敏感字样。
- *
- * 白名单式放宽 + 关键字兜底，比枚举几百条命令更可控；漏放最多是功能受限，
- * 不会误放（新加的命令默认属于管理员）。
- */
+/** Explicit command declarations; unknown commands never inherit viewer access. */
 export function viewerCanRunCommand(command: string): boolean {
-  if (command === "list_managed_users" || command === "update_managed_user") return false;
-  if (!/^(get|list|read|query|describe|check)_/.test(command)) return false;
-  return !/(credential|secret|token|auth|login|cli|export|key|reveal|config|setting)/i.test(
-    command.replace(/^[a-z]+_/, ""),
-  );
+  return commandPermission(command) === "observe" || commandPermission(command) === "self";
 }
 
 export interface AuthContext {
@@ -162,6 +154,8 @@ export interface AuthContext {
   csrfToken: string | null;
   identity: Identity | null;
   sessionKey: string | null;
+  credentialId?: string;
+  credentialScope?: string;
 }
 
 /** 与 axum handler 对齐的响应形状；由 web/index.ts 负责写回。 */
@@ -758,6 +752,22 @@ function requestOriginOf(
 
 export class AdminAuth {
   userDirectory?: UserDirectory;
+  setSessionStore(store: AdminSessionStore) { this.#sessionStore = store; }
+  listSessions(userId: string, currentKey: string | null) {
+    const now = nowMs();
+    return (this.#sessionStore?.list?.() ?? []).filter(s => s.identity.userId === userId && !this.#sessionExpired(s, now))
+      .map(s => ({ id:s.key, provider:s.identity.provider, createdAt:new Date(s.createdMs).toISOString(), lastSeenAt:new Date(s.lastSeenMs).toISOString(), expiresAt:new Date(s.absoluteExpireMs).toISOString(), current:s.key===currentKey }));
+  }
+  revokeSession(userId: string, id: string) {
+    const session = this.#sessionStore?.load(id);
+    if (!session || session.identity.userId !== userId) return;
+    this.#sessionStore?.remove(id); this.#sessions.delete(id);
+  }
+  revokeOtherSessions(userId: string, currentKey: string | null) {
+    for (const session of this.#sessionStore?.list?.() ?? []) {
+      if (session.identity.userId === userId && session.key !== currentKey) this.revokeSession(userId,session.key);
+    }
+  }
   readonly config: AdminAuthConfig;
   #sessions = new Map<string, Session>();
   #transactions = new Map<string, Transaction>();
@@ -943,6 +953,13 @@ export class AdminAuth {
 
   authenticate(headers: Record<string, string | string[] | undefined>): AuthContext | null {
     const authorization = headerValue(headers, "authorization");
+    if (authorization?.startsWith("Bearer flwpat_")) {
+      const row = this.userDirectory?.security.authenticateToken(authorization.slice(7));
+      if (!row || row.scope === "models:invoke") return null;
+      return { viaCookie:false, csrfToken:null, sessionKey:null, credentialId:row.id, credentialScope:row.scope,
+        identity:{userId:row.user.id,sub:row.user.id,email:row.user.email,username:null,name:row.user.name,groups:[],provider:"personal-token",role:row.user.role} };
+    }
+
     if (authorization !== null && authorization.startsWith("Bearer ")) {
       const token = authorization.slice("Bearer ".length);
       const bearerAllowed =
@@ -969,6 +986,7 @@ export class AdminAuth {
         session.identity.identityIssuer ??=
           session.identity.provider === this.config.github?.displayName ? this.config.github.apiBase :
           session.identity.provider === this.config.oidc?.displayName ? this.config.oidc.issuer : undefined;
+        if (!session.identity.identityIssuer) return null;
         const user = this.userDirectory.login(session.identity);
         session.identity.userId = user.id;
       } catch { return null; }
@@ -991,10 +1009,14 @@ export class AdminAuth {
   /** 内存优先；缺失时尝试从持久化存储恢复（容器重启后的第一次请求）。 */
   #loadSession(key: string): Session | null {
     const inMemory = this.#sessions.get(key);
-    if (inMemory !== undefined) return inMemory;
     const store = this.#sessionStore;
-    if (store === null) return null;
-    const persisted = store.load(key);
+    const persisted = store?.load(key) ?? null;
+    if (inMemory !== undefined && (store === null || persisted !== null)) {
+      // A second Host may have refreshed or revoked this session.
+      if (persisted) inMemory.lastSeenMs = Math.max(inMemory.lastSeenMs, persisted.lastSeenMs);
+      return inMemory;
+    }
+    this.#sessions.delete(key);
     if (persisted === null) return null;
     const restored: Session = {
       identity: {
@@ -1131,6 +1153,7 @@ export class AdminAuth {
     };
     this.#sessions.set(key, session);
     this.#persistSession(key, session, now, true);
+    this.userDirectory?.security.audit(identity.userId??null,null,"auth.login",null,"success");
     return { raw, csrf };
   }
 
@@ -1708,6 +1731,7 @@ export class AdminAuth {
 
   logoutHandler(context: AuthContext): AuthResponse {
     this.#destroySession(context);
+    this.userDirectory?.security.audit(context.identity?.userId??null,context.credentialId??null,"auth.logout",null,"success");
     return {
       status: 204,
       headers: { "set-cookie": this.#clearSessionCookie(), "content-length": "0" },

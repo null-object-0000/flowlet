@@ -1,3 +1,4 @@
+import { commandPermission } from "./permissions.ts";
 // Web Host（管理界面 + 命令 API）。Owner: node-web.
 //
 // 契约：docs/migration/node-host.md §2、docs/admin-sso-design.md §6/§9；权威 Rust 实现：
@@ -227,7 +228,12 @@ function writeAuthResponse(
 export function createWebHost(options: WebHostOptions): WebHost {
   const config = readConfigJson(options.configPath);
   const auth = options.auth ?? AdminAuth.fromEnv(process.env, options.adminToken);
-  const cliAuth = createCliAuth(options.storage as unknown as CliAuthStorage);
+  const userAllowed = (id: string) => { const user=auth.userDirectory?.find(id); return Boolean(user?.enabled && user.role === "admin"); };
+  const cliAuth = createCliAuth(options.storage as unknown as CliAuthStorage, Date.now, {
+    bindOwner: (id, userId) => { if (userId) auth.userDirectory!.security.bindCli(id, userId); },
+    userAllowed,
+    ownerAllowed: id => { const userId=auth.userDirectory?.security.cliOwner(id); return !userId || userAllowed(userId); },
+  });
   const ctx: WebContext = {
     storage: options.storage,
     proxy: options.proxy,
@@ -358,6 +364,10 @@ export function createWebHost(options: WebHostOptions): WebHost {
         request.resume();
         return unauthorized(response);
       }
+      if (context.credentialScope || context.identity?.role === "viewer") {
+        request.resume();
+        return sendJson(response,403,{code:"forbidden",message:"当前身份无权调用 AI 生成功能"},{noStore:true,head:false});
+      }
       if (!auth.verifyCsrf(request.headers, context)) {
         request.resume();
         return sendJson(
@@ -486,6 +496,19 @@ export function createWebHost(options: WebHostOptions): WebHost {
         return writeAuthResponse(response, auth.logoutHandler(context), head, true);
       }
 
+      const permission = commandPermission(command);
+      if (!permission && !(ctx.desktop !== undefined && hasDesktopCommand(command))) {
+        request.resume();
+        return sendJson(response, 404, { code:"unknown_command",message:"未登记的命令" }, {noStore:true,head:false});
+      }
+      if (context?.credentialScope) {
+        const allowed = context.credentialScope === "observe" ? permission === "observe" : context.credentialScope === "credentials:read" && command === "export_service_credentials";
+        if (!allowed) {
+          request.resume();
+          auth.userDirectory?.security.audit(context.identity?.userId??null,context.credentialId??null,command,null,"denied");
+          return sendJson(response,403,{code:"forbidden",message:"个人凭据作用域不允许此操作"},{noStore:true,head:false});
+        }
+      }
       // CLI 凭据只读服务凭据：其它命令一律 403（不能改配置、不能读日志）。
       if (cliToken !== null && !CLI_ALLOWED_COMMANDS.has(command)) {
         request.resume();
@@ -504,6 +527,7 @@ export function createWebHost(options: WebHostOptions): WebHost {
         (context.identity.role ?? "admin") === "viewer" &&
         !viewerCanRunCommand(command)
       ) {
+        auth.userDirectory?.security.audit(context.identity.userId??null,context.credentialId??null,command,null,"denied");
         request.resume();
         return sendJson(
           response,
@@ -518,13 +542,19 @@ export function createWebHost(options: WebHostOptions): WebHost {
       if (!body.ok) {
         return sendText(response, body.status, body.text, { noStore: true, head: false });
       }
+      const actor = { userId:context?.identity?.userId ?? (cliToken ? auth.userDirectory?.security.cliOwner(String(cliToken.id)) ?? null : null), sessionKey:context?.sessionKey??null, credentialId:context?.credentialId??(cliToken ? String(cliToken.id) : null) };
+      const requestArgs = body.value && typeof body.value === "object" && !Array.isArray(body.value) ? body.value as JsonRow : {};
+      const audit = permission !== "observe" && command !== "list_security_audit" && !["list_my_sessions","list_my_tokens","list_my_cli_tokens"].includes(command)
+        ? auth.userDirectory?.security.audit(actor.userId,actor.credentialId,command,typeof requestArgs.id === "string" ? String(requestArgs.id) : null,"pending") : undefined;
       try {
         const result =
           ctx.desktop !== undefined && hasDesktopCommand(command)
             ? await dispatchDesktop(ctx, command, body.value as JsonRow)
-            : await dispatch(ctx, command, body.value);
+            : await dispatch(ctx, command, body.value, actor);
+        if (audit) auth.userDirectory?.security.finishAudit(audit,"success");
         return sendJson(response, 200, result, { noStore: true, head: false });
       } catch (error) {
+        if (audit) auth.userDirectory?.security.finishAudit(audit,"failed");
         if (error instanceof CommandError) {
           return sendJson(
             response,

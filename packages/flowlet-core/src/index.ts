@@ -22,7 +22,7 @@ import { SqliteStorage } from "./storage/index.ts";
 import { createProxyController } from "./proxy/index.ts";
 import { createWebHost } from "./web/index.ts";
 import { AdminAuth } from "./web/auth.ts";
-import { openAdminSessionStore } from "./web/session-store.ts";
+import { SqliteAdminSessionStore } from "./web/session-store.ts";
 import { createHostScheduler } from "./host/scheduler.ts";
 import { SecretBox } from "./storage/secret-box.ts";
 import {
@@ -170,10 +170,8 @@ export async function startHost(
 ): Promise<{ close(): Promise<void>; webAddr: string }> {
   const dataDir = dirname(options.dbPath);
   // 管理端 OIDC 会话持久化：容器重启/升级不再让所有管理台登录失效（token 模式不产生会话）。
-  const sessionStore = openAdminSessionStore(join(dataDir, "admin-sessions.json"));
   // 与 Rust headless 顺序一致：先解析管理端鉴权配置（配置错误在打开数据库之前失败）。
-  const auth = AdminAuth.fromEnv(process.env, undefined, sessionStore);
-  auth.userDirectory = new UserDirectory(join(dataDir, "users.json"));
+  const auth = AdminAuth.fromEnv(process.env);
   const deviceIdentity = loadOrCreateDeviceIdentity(dataDir);
   // 三方服务凭据的静态加密密钥：secret.key 随数据卷（Docker /data）持久化。
   const secrets = SecretBox.loadOrCreate(dataDir);
@@ -184,6 +182,8 @@ export async function startHost(
   const webChannelsConfig = channelsConfigToJson(channelsConfig);
 
   const storage = new SqliteStorage(options.dbPath);
+  auth.userDirectory = new UserDirectory(join(dataDir, "users.json"), storage);
+  auth.setSessionStore(new SqliteAdminSessionStore(auth.userDirectory.security, join(dataDir, "admin-sessions.json")));
   // 上游代理配置必须在构建运行时快照之前读取：账号 use_upstream_proxy 的迁移依赖它。
   const upstreamProxy = loadUpstreamProxyConfig(storage, configJson);
   const runtimeConfig = loadRuntimeSnapshot(storage, channelsConfig, {
@@ -215,6 +215,11 @@ export async function startHost(
   // 重建价格表，供 proxy 的 usage 成本估算与 Web 用量页使用。
   storage.rebuildPriceTable(options.catalogDir, configJson);
   const proxy = createProxyController({
+    authenticatePersonalToken: token => {
+      const row = auth.userDirectory!.security.authenticateToken(token);
+      return row?.scope === "models:invoke" ? {userId:row.userId,credentialId:row.id} : null;
+    },
+    recordRequestOwner: (requestId,userId,credentialId) => auth.userDirectory!.security.recordModelOwner(requestId,userId,credentialId),
     storage,
     catalog,
     runtimeConfig,

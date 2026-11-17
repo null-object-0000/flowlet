@@ -84,6 +84,8 @@ export function RequestLogDetailSideSheet({ requestId, onClose, onNavigate }: { 
                     <MetaItem label={t("客户端协议")} value={selectedRow.client_protocol || "-"} />
                     <MetaItem label={t("HTTP 状态")} value={selectedRowIsLocalSkip ? t("未请求") : selectedRow.status?.toString() || t("失败")} />
                   </div>
+                  {selectedRow.user_id ? <DetailItem label={t("调用用户 ID")} value={selectedRow.user_id} copyable wide /> : null}
+                  {selectedRow.credential_id ? <DetailItem label={t("个人凭据 ID")} value={selectedRow.credential_id} copyable wide /> : null}
                   <DetailItem
                     label={t("会话 ID")}
                     value={sessionId || "-"}

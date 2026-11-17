@@ -11,7 +11,7 @@ import { CommandError } from "../types.ts";
 import { a2aGateway } from "../a2a/gateway.ts";
 import { acpCapabilities } from "../a2a/acp-runtime.ts";
 import type { JsonRow } from "../types.ts";
-import type { WebContext } from "./context.ts";
+import type { WebContext, RequestActor } from "./context.ts";
 import {
   LOG_CAPTURE_META_KEY,
   UPSTREAM_PROXY_META_KEY,
@@ -523,11 +523,52 @@ function parseServiceCredentialInput(args: JsonRow): ServiceCredentialInput {
 
 // ─── dispatch ───────────────────────────────────────────────────────────────
 
-export async function dispatch(ctx: WebContext, command: string, rawArgs: unknown): Promise<unknown> {
+export async function dispatch(ctx: WebContext, command: string, rawArgs: unknown, actor?: RequestActor): Promise<unknown> {
   const args = argsObject(rawArgs);
   const s = storageOf(ctx);
 
+  const userId = actor?.userId ?? null;
+  const security = ctx.auth?.userDirectory?.security;
+  const requireUser = () => {
+    if (!userId || !security) throw new CommandError(403, "user_required", "请使用个人账号登录后操作");
+    return userId;
+  };
+  const attachOwners = (rows: JsonRow[]) => {
+    if (!security) return rows;
+    const owners = security?.modelOwners(rows.map(row=>String(row.request_id))) ?? {};
+    return rows.map(row=>({...row, user_id:owners[String(row.request_id)]?.userId??null, credential_id:owners[String(row.request_id)]?.credentialId??null}));
+  };
   switch (command) {
+    case "list_my_sessions": {
+      const id = requireUser(); return ctx.auth!.listSessions(id, actor?.sessionKey ?? null);
+    }
+    case "revoke_my_other_sessions": {
+      const id = requireUser(); ctx.auth!.revokeOtherSessions(id, actor?.sessionKey ?? null); return null;
+    }
+    case "revoke_my_session": {
+      const id = requireUser(); ctx.auth!.revokeSession(id, argString(args, "id")); return null;
+    }
+    case "list_my_tokens": {
+      const id = requireUser(); return security!.tokens(id);
+    }
+    case "create_personal_token": {
+      const id = requireUser(); return security!.createToken(id, argString(args, "name"), argString(args, "scope"), argInteger(args, "days"));
+    }
+    case "revoke_personal_token": {
+      const id = requireUser(); security!.revokeToken(id, argString(args, "id")); return null;
+    }
+    case "list_my_cli_tokens": {
+      const id = requireUser();
+      return ctx.cliAuth.list().filter(row => security!.cliOwner(String(row.id)) === id);
+    }
+    case "revoke_my_cli_token": {
+      const user = requireUser(), id = argString(args, "id");
+      if (security!.cliOwner(id) === user) ctx.cliAuth.revoke(id);
+      return null;
+    }
+    case "list_security_audit":
+      return security?.auditEntries() ?? [];
+
     case "list_managed_users":
       return ctx.auth?.userDirectory?.list() ?? [];
     case "update_managed_user": {
@@ -676,6 +717,7 @@ export async function dispatch(ctx: WebContext, command: string, rawArgs: unknow
       // Rust LogsPageResult 是 camelCase 结构体：page/pageSize。storage 层曾用
       // page_size（历史 stub 契约），这里做一次字段归一，保证 Web 输出与 Rust 逐字段一致。
       const page = s.listRequestLogsPage(parseLogsFilter(args));
+      if (Array.isArray(page.rows)) page.rows = attachOwners(page.rows as JsonRow[]);
       if (page && typeof page === "object" && !("pageSize" in page) && "page_size" in page) {
         const { page_size: pageSize, ...rest } = page as JsonRow;
         return { ...rest, pageSize };
@@ -699,7 +741,7 @@ export async function dispatch(ctx: WebContext, command: string, rawArgs: unknow
     case "list_request_log_channel_accounts":
       return s.listRequestLogChannelAccounts();
     case "get_request_log_detail":
-      return s.listRequestLogsByRequestId(argString(args, "requestId"));
+      return attachOwners(s.listRequestLogsByRequestId(argString(args, "requestId")) as JsonRow[]);
 
     case "list_agent_sessions":
       return s.listObservedAgentSessionsPage(parseAgentSessionsFilter(args));
@@ -791,7 +833,7 @@ export async function dispatch(ctx: WebContext, command: string, rawArgs: unknow
         state: argString(args, "state"),
         codeChallenge: argString(args, "codeChallenge"),
         name: argOptionalString(args, "name"),
-      });
+      }, actor?.userId ?? null);
     case "list_cli_auth_tokens":
       return ctx.cliAuth.list();
     case "revoke_cli_auth_token":

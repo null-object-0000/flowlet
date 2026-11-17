@@ -17,6 +17,8 @@ export interface SecretBoxLike {
   decrypt(encoded: string): string;
 }
 
+export interface RequestActor { userId: string | null; sessionKey: string | null; credentialId: string | null }
+
 export interface WebContext {
   storage: SqliteStorage;
   proxy: ProxyController;

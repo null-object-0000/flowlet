@@ -70,3 +70,7 @@
 .providerArrow { flex: none; color: var(--semi-color-text-2); font-size: 16px; }
 @media (max-width: 760px) { .providerButton { padding: 14px; gap: 12px; } }
 @media (prefers-reduced-motion: reduce) { .providerButton { transition: none; } }
+.accessForm { display: flex; flex-wrap: wrap; gap: 10px; }
+.accessForm > :global(.semi-input-wrapper) { flex: 1 1 220px; }
+.newSecret { min-width: 0; display: grid; gap: 12px; padding: 16px; border: 1px solid var(--semi-color-border); border-radius: 10px; }
+.newSecret code { overflow-wrap: anywhere; user-select: all; }

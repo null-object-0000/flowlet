@@ -8,7 +8,7 @@ import net from "node:net";
 import zlib from "node:zlib";
 import { after, before, test } from "node:test";
 import type { AddressInfo } from "node:net";
-import { createProxyController, type ProxyController } from "../index.ts";
+import { createProxyController, type ProxyController, type ProxyControllerOptions } from "../index.ts";
 import type { ModelCatalog } from "../../catalog/index.ts";
 import type { SqliteStorage } from "../../storage/index.ts";
 import type { JsonRow, ProxyBindConfig } from "../../types.ts";
@@ -250,6 +250,8 @@ async function startProxy(options: {
   rules?: JsonRow[];
   channelOverrides?: JsonRow;
   token?: string;
+  authenticatePersonalToken?: ProxyControllerOptions["authenticatePersonalToken"];
+  recordRequestOwner?: ProxyControllerOptions["recordRequestOwner"];
 }): Promise<ProxyFixture> {
   const token = options.token ?? "client-token";
   const snapshot: JsonRow = {
@@ -268,6 +270,8 @@ async function startProxy(options: {
     default_client_token: token,
   };
   const controller = createProxyController({
+    authenticatePersonalToken: options.authenticatePersonalToken,
+    recordRequestOwner: options.recordRequestOwner,
     storage: storage as unknown as SqliteStorage,
     catalog: fakeCatalog(),
     runtimeConfig: runtime,
@@ -2094,4 +2098,29 @@ test("P0-15g: 标成 deflate 的原始 deflate（无 zlib 头）流也能解析 
   assert.equal(usage.input_tokens, 2);
   assert.equal(usage.output_tokens, 3);
   assert.equal(usage.total_tokens, 5);
+});
+
+
+test("personal model credentials attribute requests, revoke immediately, and retain shared-key compatibility", async () => {
+  let enabled = true;
+  const owners: Array<{requestId:string;userId:string;credentialId:string}> = [];
+  const upstream = await startMockUpstream((_req,res) => jsonResponse(res,200,{id:"chat-ok",choices:[{message:{role:"assistant",content:"ok"}}],usage:{prompt_tokens:1,completion_tokens:1,total_tokens:2}}));
+  const proxy = await startProxy({upstreamPort:upstream.port,
+    authenticatePersonalToken: token => enabled && token === "personal-model-key" ? {userId:"user-one",credentialId:"credential-one"} : null,
+    recordRequestOwner:(requestId,userId,credentialId)=>owners.push({requestId,userId,credentialId}),
+  });
+  try {
+    const response = await request(proxy.port,{method:"POST",path:"/v1/chat/completions",token:"personal-model-key",headers:{"content-type":"application/json"},body:baseChatBody()});
+    assert.equal(response.status,200);
+    await waitFor(()=>proxy.storage.logs.length>0);
+    assert.equal(owners.length,1);
+    assert.equal(owners[0].requestId,proxy.storage.logs[0].request_id);
+    assert.equal(owners[0].userId,"user-one");
+    assert.equal(upstream.requests[0].headers.authorization,"Bearer upstream-key");
+    assert.ok(!JSON.stringify(proxy.storage.logs).includes("personal-model-key"));
+    enabled=false;
+    assert.equal((await request(proxy.port,{path:"/v1/models",token:"personal-model-key"})).status,401);
+    assert.equal((await request(proxy.port,{path:"/v1/models"})).status,200);
+    assert.equal(owners.length,1);
+  } finally { await proxy.controller.stop();await upstream.close(); }
 });

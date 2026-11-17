@@ -20,6 +20,8 @@ import { RateLimiter } from "./util.ts";
 import { UpstreamTransport } from "./upstream.ts";
 
 export interface ProxyControllerOptions {
+  authenticatePersonalToken?: (token: string) => { userId: string; credentialId: string } | null;
+  recordRequestOwner?: (requestId: string, userId: string, credentialId: string) => void;
   storage: SqliteStorage;
   catalog: ModelCatalog;
   runtimeConfig: ProxyRuntimeConfigSource;
@@ -197,7 +199,10 @@ class ProxyControllerImpl implements ProxyController {
 
     // Host 模式：除 /health 外所有模型入口都要求合法 client token。
     const token = this.#bind.default_client_token;
-    const authorized = token !== "" && identifyClient(headers, token) !== null;
+    const sharedAuthorized = token !== "" && identifyClient(headers, token) !== null;
+    const bearer = getHeader(headers,"authorization");
+    const personal = sharedAuthorized ? null : this.#options.authenticatePersonalToken?.(bearer?.startsWith("Bearer ") ? bearer.slice(7) : getHeader(headers,"x-api-key") ?? "") ?? null;
+    const authorized = sharedAuthorized || personal !== null;
     if (!authorized) {
       const body = Buffer.from(
         JSON.stringify({
@@ -234,6 +239,8 @@ class ProxyControllerImpl implements ProxyController {
 
     await handleModelRequest(
       {
+        authenticatedClient: personal ? {id:personal.userId,name:"Personal user"} : undefined,
+        recordRequestOwner: personal ? requestId => this.#options.recordRequestOwner?.(requestId,personal.userId,personal.credentialId) : undefined,
         storage: this.#options.storage,
         identity: this.#identity,
         runtimeConfig: this.#options.runtimeConfig,

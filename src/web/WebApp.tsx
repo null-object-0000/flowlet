@@ -1,3 +1,5 @@
+import { PersonalAccessPanel } from "./PersonalAccessPanel";
+import { SecurityAuditPanel } from "./SecurityAuditPanel";
 import { UsersPanel } from "./UsersPanel";
 import { FlowletLogo } from "../shared/ui/FlowletLogo";
 import { lazy, Suspense, useEffect, useState } from "react";
@@ -36,7 +38,7 @@ import settingsStyles from "../pages/settings/SettingsPage.module.css";
 import navStyles from "../pages/settings/SettingsNav.module.css";
 import { IconCamera, IconCloud, IconLock, IconSetting, IconGithubLogo, IconGitlabLogo, IconChevronRight } from "@douyinfe/semi-icons";
 
-const SETTINGS_TABS: readonly WebSettingsTab[] = ["general", "capture", "cost", "network", "auth", "users"];
+const SETTINGS_TABS: readonly WebSettingsTab[] = ["general", "capture", "cost", "network", "auth", "users", "personal", "audit"];
 import { AuthTab } from "../pages/settings/tabs/AuthTab";
 import { OverviewServiceStrip } from "../pages/overview/OverviewServiceStrip";
 import { OverviewExposedModelsCard } from "../features/exposed-models/OverviewExposedModelsCard";
@@ -357,7 +359,7 @@ function WebSession() {
   );
 }
 
-type WebSettingsTab = "general" | "capture" | "cost" | "network" | "auth" | "users";
+type WebSettingsTab = "general" | "capture" | "cost" | "network" | "auth" | "users" | "personal" | "audit";
 
 function WebSettings({
   onLogout,
@@ -380,12 +382,14 @@ function WebSettings({
   // 二级菜单：与桌面壳「应用设置」同一套结构（左侧分组 + 右侧面板），只保留 Web 端有意义的项。
   const items: Array<{ key: WebSettingsTab; label: string; icon: React.ReactNode }> = [
     { key: "general", label: t("通用"), icon: <IconSetting /> },
+    { key: "personal", label: t("个人访问"), icon: <IconLock /> },
     ...(isViewer
       ? []
       : [
           { key: "capture" as const, label: t("数据捕获"), icon: <IconCamera /> },
           { key: "cost" as const, label: t("费用展示"), icon: <IconCloud /> },
           { key: "network" as const, label: t("网络"), icon: <IconCloud /> },
+          { key: "audit" as const, label: t("操作审计"), icon: <IconLock /> },
           { key: "users" as const, label: t("用户管理"), icon: <IconLock /> },
           { key: "auth" as const, label: t("登录与访问"), icon: <IconLock /> },
         ]),
@@ -396,6 +400,8 @@ function WebSettings({
     capture: { title: t("数据捕获"), desc: t("请求 / 响应内容的捕获与保留策略") },
     cost: { title: t("费用展示"), desc: t("用量页的统一货币折算") },
     network: { title: t("网络"), desc: t("全局请求的代理出口") },
+    personal: { title: t("个人访问"), desc: t("个人 API 凭据、CLI 授权与登录会话") },
+    audit: { title: t("操作审计"), desc: t("查看用户与凭据的安全操作记录") },
     users: { title: t("用户管理"), desc: t("用户档案、关联邮箱和访问权限") },
     auth: { title: t("登录与访问"), desc: t("管理台登录方式、准入名单与角色") },
   };
@@ -507,6 +513,8 @@ function WebSettings({
             {tab === "network" ? <UpstreamProxySettings /> : null}
             {tab === "auth" ? <AuthTab /> : null}
             {tab === "users" && !isViewer ? <UsersPanel /> : null}
+            {tab === "personal" ? <PersonalAccessPanel identity={identity} /> : null}
+            {tab === "audit" && !isViewer ? <SecurityAuditPanel /> : null}
           </div>
         </article>
       </section>

@@ -134,6 +134,8 @@ export interface ActivityTrackerLike {
 }
 
 export interface ProxyDeps {
+  authenticatedClient?: {id:string;name:string};
+  recordRequestOwner?: (requestId:string) => void;
   storage: ProxyStorage;
   identity: ModelIdentityIndex;
   runtimeConfig: ProxyRuntimeConfigSource;
@@ -685,13 +687,14 @@ async function forwardModelRequest(
     return;
   }
 
+  deps.recordRequestOwner?.(requestId);
   const publicModel = extractModel(bodyBytes, protocol);
   const routingModel = publicModel === null ? null : deps.identity.routingModelId(publicModel);
   const requestType = classifyRequest(bodyBytes, protocol);
 
   const { id: clientId, name: clientName } = identifyClientFromHeaders(headers, deps.configPath);
   const defaultClientToken = deps.bindConfig().default_client_token;
-  const tokenClient = identifyClient(headers, defaultClientToken);
+  const tokenClient = deps.authenticatedClient ?? identifyClient(headers, defaultClientToken);
 
   if (
     tokenClient !== null &&

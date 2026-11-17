@@ -24,6 +24,8 @@ export type RequestLogFilter = {
 };
 
 export type RequestLogRow = {
+  user_id?: string | null;
+  credential_id?: string | null;
   id: string;
   request_id: string;
   client_id: string | null;

@@ -111,7 +111,7 @@ describe("OIDC 角色", () => {
 
 describe("只读命令闸门", () => {
   it("读类命令放行", () => {
-    for (const command of ["list_models", "get_proxy_status", "query_usage", "read_app_meta"]) {
+    for (const command of ["list_virtual_models", "proxy_status", "usage_summary", "get_models_cn_catalog"]) {
       assert.equal(viewerCanRunCommand(command), true, command);
     }
   });

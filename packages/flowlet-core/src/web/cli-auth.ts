@@ -37,6 +37,7 @@ const BASE64URL = /^[A-Za-z0-9_-]+$/;
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
 interface PendingCode {
+  userId?: string | null;
   codeChallenge: string;
   redirectUri: string;
   name: string;
@@ -70,7 +71,7 @@ export interface CliAuth {
   /** `GET /api/auth/cli/start` 的返回值：HTML 授权页（参数不合法时 400）。 */
   startPage(params: URLSearchParams): { status: number; html: string };
   /** 已登录管理会话调用：登记授权码并返回 302 目标。 */
-  authorize(input: CliAuthCodeRequest): { redirectUrl: string };
+  authorize(input: CliAuthCodeRequest, userId?: string | null): { redirectUrl: string };
   /** `POST /api/auth/cli/exchange`：PKCE 校验 + 签发 token。 */
   exchange(body: unknown): { token: string; expiresAt: string };
   /** 受保护路由兜底：`Authorization: Bearer flwcli_*` 校验，返回 token 行或 null。 */
@@ -238,6 +239,7 @@ ${detail === "" ? "" : `<p class="muted">${escapeHtml(detail)}</p>`}
 export function createCliAuth(
   storage: CliAuthStorage,
   now: () => number = Date.now,
+  options: { bindOwner?: (id: string, userId: string | null) => void; ownerAllowed?: (id: string) => boolean; userAllowed?: (userId: string) => boolean } = {},
 ): CliAuth {
   const pending = new Map<string, PendingCode>();
 
@@ -393,7 +395,7 @@ export function createCliAuth(
       return { status: 200, html: renderPage("授权 flowlet CLI", body, script) };
     },
 
-    authorize(input: CliAuthCodeRequest): { redirectUrl: string } {
+    authorize(input: CliAuthCodeRequest, userId?: string | null): { redirectUrl: string } {
       const current = now();
       prunePending(current);
       const redirectUri = validateCliRedirectUri(input.redirectUri);
@@ -402,6 +404,7 @@ export function createCliAuth(
       const name = validateName(input.name);
       const code = base64url(randomBytes(32));
       pending.set(code, {
+        userId,
         codeChallenge,
         redirectUri,
         name,
@@ -439,6 +442,7 @@ export function createCliAuth(
       if (sha256Base64url(verifier) !== entry.codeChallenge) {
         throw new CommandError(400, "invalid_grant", "授权码无效或已过期");
       }
+      if (entry.userId && options.userAllowed && !options.userAllowed(entry.userId)) throw new CommandError(403, "forbidden", "授权用户已停用或失去凭据权限");
       const token = `${CLI_TOKEN_PREFIX}${base64url(randomBytes(32))}`;
       const expiresAt = rfc3339Seconds(new Date(current + CLI_TOKEN_TTL_MS));
       try {
@@ -456,6 +460,8 @@ export function createCliAuth(
       if (row.id === undefined || row.id === null) {
         throw new CommandError(500, "command_failed", "签发 CLI 凭据失败");
       }
+      try { options.bindOwner?.(String(row.id), entry.userId ?? null); }
+      catch (error) { storage.deleteCliAuthToken(String(row.id)); throw error; }
       return { token, expiresAt };
     },
 
@@ -464,6 +470,7 @@ export function createCliAuth(
       if (raw === null || !raw.startsWith(CLI_TOKEN_PREFIX)) return null;
       const row = storage.findCliAuthTokenByHash(hashCliAuthToken(raw));
       if (row === null) return null;
+      if (options.ownerAllowed && !options.ownerAllowed(String(row.id))) return null;
       const expiresAt = Date.parse(String(row.expires_at));
       if (!Number.isFinite(expiresAt) || expiresAt <= now()) {
         // 过期即删，避免死行累积。

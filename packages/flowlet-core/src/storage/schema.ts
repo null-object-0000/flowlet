@@ -6,6 +6,8 @@
 // 例外：`agent_session_metadata`（docs/agent-session-metadata.md §2）当前仅由 Node Host
 // 写入（服务端从请求体派生标题/项目路径）。表结构仍按同一契约维护、只增不改，桌面 Rust
 // 旧版本读到未知表会忽略；后续 Rust 侧补建时字段必须与本文件完全一致。
+// `security_*` 为 Node Host 用户与授权表，旧 Rust Host 忽略这些新增表。
+import { migrateSecuritySchema } from "./security.ts";
 import type { DatabaseSync } from "node:sqlite";
 import { modelCatalog, type ModelIdentity } from "../catalog/index.ts";
 
@@ -881,6 +883,7 @@ export interface MigrateOptions {
 /** 完整迁移：建表/索引 → 补列 → 重建表 → 数据归一 → 一次性修复 → 清理过期任务。 */
 export function migrate(db: DatabaseSync, options: MigrateOptions = {}): void {
   db.exec(BASE_SCHEMA);
+  migrateSecuritySchema(db);
 
   addColumnIfMissing(db, "device_usage_breakdowns", "estimated_cost_currency", "TEXT");
   addColumnIfMissing(db, "device_usage_breakdowns", "native_event_count", "INTEGER NOT NULL DEFAULT 0");

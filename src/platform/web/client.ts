@@ -17,6 +17,7 @@ export type WebAuthConfig = {
 };
 
 export type WebIdentity = {
+  userId?: string | null;
   email?: string | null;
   username?: string | null;
   name?: string | null;

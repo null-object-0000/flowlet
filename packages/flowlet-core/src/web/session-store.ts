@@ -46,6 +46,7 @@ export interface PersistedAdminSession {
 }
 
 export interface AdminSessionStore {
+  list?(): PersistedAdminSession[];
   load(key: string): PersistedAdminSession | null;
   save(session: PersistedAdminSession): void;
   remove(key: string): void;
@@ -158,6 +159,8 @@ export class FileAdminSessionStore implements AdminSessionStore {
     }
   }
 
+  list(): PersistedAdminSession[] { return structuredClone([...this.#sessions.values()]); }
+
   load(key: string): PersistedAdminSession | null {
     const session = this.#sessions.get(key);
     return session === undefined ? null : { ...session, identity: { ...session.identity, groups: [...session.identity.groups] } };
@@ -197,5 +200,28 @@ export function openAdminSessionStore(file: string): AdminSessionStore | null {
       `[session-store] 会话持久化不可用（${file}）：${error instanceof Error ? error.message : String(error)}`,
     );
     return null;
+  }
+}
+/** SQLite sessions are read on every authentication, so revocation spans Host instances. */
+export class SqliteAdminSessionStore implements AdminSessionStore {
+  private security: import("../storage/security.ts").SecurityStorage;
+  constructor(security: import("../storage/security.ts").SecurityStorage, legacyFile: string) {
+    this.security = security;
+    if (!security.migrated("security_sessions_migrated_v1")) {
+      let sessions: PersistedAdminSession[] = [];
+      if (existsSync(legacyFile)) {
+        const raw = JSON.parse(readFileSync(legacyFile, "utf8"));
+        if (raw?.schemaVersion !== 1 || !Array.isArray(raw.sessions)) throw new Error("旧会话文件格式无效，迁移已停止");
+        sessions = raw.sessions.map((value:unknown) => { const session=parseSession(value); if (!session) throw new Error("旧会话记录无效，迁移已停止"); return session; });
+      }
+      security.migrateSessions(sessions);
+    }
+  }
+  load(key: string) { return this.security.session(key); }
+  save(session: PersistedAdminSession) { this.security.saveSession(session); }
+  remove(key: string) { this.security.removeSession(key); }
+  list() { return this.security.sessions(); }
+  prune(isExpired: (session: PersistedAdminSession) => boolean) {
+    for (const session of this.list()) if (isExpired(session)) this.remove(session.key);
   }
 }

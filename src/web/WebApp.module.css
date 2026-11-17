@@ -49,3 +49,24 @@
   .webShell button { touch-action: manipulation; }
   .loginCard :global(.semi-input) { font-size: 16px; }
 }
+
+.loginProviders { display: grid; width: 100%; gap: 12px; }
+.providerButton {
+  appearance: none; width: 100%; min-height: 76px; box-sizing: border-box;
+  display: flex; align-items: center; gap: 14px; padding: 16px;
+  border: 1px solid var(--semi-color-border); border-radius: 12px;
+  color: var(--semi-color-text-0); background: var(--semi-color-bg-1);
+  font: inherit; text-align: left; cursor: pointer; touch-action: manipulation;
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+.providerButton:hover { border-color: var(--semi-color-primary); background: var(--semi-color-fill-0); box-shadow: 0 3px 12px #00000006; }
+.providerButton:active { background: var(--semi-color-fill-1); }
+.providerButton:focus-visible { outline: 3px solid var(--semi-color-primary-light-active); outline-offset: 3px; border-color: var(--semi-color-primary); }
+.providerIcon { display: grid; place-items: center; flex: none; width: 40px; height: 40px; border-radius: 10px; background: var(--semi-color-fill-0); font-size: 25px; }
+.organizationIcon { color: #d35c28; background: rgba(237, 126, 63, .09); }
+.providerCopy { display: grid; gap: 5px; flex: 1; min-width: 0; }
+.providerCopy strong { font-size: 14px; line-height: 20px; font-weight: 600; overflow-wrap: anywhere; }
+.providerCopy small { color: var(--semi-color-text-2); font-size: 12px; line-height: 17px; }
+.providerArrow { flex: none; color: var(--semi-color-text-2); font-size: 16px; }
+@media (max-width: 760px) { .providerButton { padding: 14px; gap: 12px; } }
+@media (prefers-reduced-motion: reduce) { .providerButton { transition: none; } }

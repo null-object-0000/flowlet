@@ -34,7 +34,7 @@ import { UsageCostDisplaySettings } from "../pages/settings/UsageCostDisplaySett
 import { SettingRow, SettingSection } from "../pages/settings/SettingRow";
 import settingsStyles from "../pages/settings/SettingsPage.module.css";
 import navStyles from "../pages/settings/SettingsNav.module.css";
-import { IconCamera, IconCloud, IconLock, IconSetting } from "@douyinfe/semi-icons";
+import { IconCamera, IconCloud, IconLock, IconSetting, IconGithubLogo, IconGitlabLogo, IconChevronRight } from "@douyinfe/semi-icons";
 
 const SETTINGS_TABS: readonly WebSettingsTab[] = ["general", "capture", "cost", "network", "auth", "users"];
 import { AuthTab } from "../pages/settings/tabs/AuthTab";
@@ -211,7 +211,6 @@ function WebSession() {
     // 配了多个提供方（内网 OIDC + 公网 GitHub）就逐个给按钮，不再猜。
     // 提供方开关由管理台自助设置：关掉之后这里就不再有对应入口。
     const providers = authConfig?.providers ?? [];
-    const providerName = providers[0]?.display_name ?? authConfig?.provider.display_name ?? "GitLab";
     const noProvider = providers.length === 0;
     const loginWith = (id?: string) => {
       if (!authConfig) return;
@@ -228,23 +227,27 @@ function WebSession() {
         <section className={styles.loginCard}><header><h2>欢迎回来</h2><p>登录以进入 Flowlet 工作台</p></header>
           <Space vertical align="start" style={{ width: "100%" }}>
             {error && <Banner type="danger" description={error} />}
-            {oidc && providers.length > 1 && (
-              <>
-                <Typography.Text>选择登录方式：</Typography.Text>
+            {oidc && providers.length > 0 && (
+              <div className={styles.loginProviders} aria-label="登录方式">
                 {providers.map((item) => (
-                  <Button block size="large" key={item.id} theme="solid" onClick={() => loginWith(item.id)}>
-                    使用 {item.display_name} 登录
-                  </Button>
+                  <button
+                    className={styles.providerButton}
+                    type="button"
+                    key={item.id}
+                    onClick={() => loginWith(item.id)}
+                    aria-label={`使用 ${item.display_name} 登录`}
+                  >
+                    <span className={`${styles.providerIcon} ${item.id === "oidc" ? styles.organizationIcon : ""}`} aria-hidden="true">
+                      {item.id === "github" ? <IconGithubLogo /> : item.display_name.toLowerCase().includes("gitlab") ? <IconGitlabLogo /> : <IconLock />}
+                    </span>
+                    <span className={styles.providerCopy}>
+                      <strong>使用 {item.display_name} 登录</strong>
+                      <small>{item.id === "github" ? "通过 GitHub 账号继续" : "组织账号 · 单点登录"}</small>
+                    </span>
+                    <IconChevronRight className={styles.providerArrow} aria-hidden="true" />
+                  </button>
                 ))}
-              </>
-            )}
-            {oidc && providers.length === 1 && (
-              <>
-                <Typography.Text>使用 {providerName} 账号登录 Flowlet 管理台。</Typography.Text>
-                <Button block size="large" theme="solid" onClick={() => loginWith()}>
-                  使用 {providerName} 登录
-                </Button>
-              </>
+              </div>
             )}
             {noProvider && !authConfig?.token_login && (
               <Banner

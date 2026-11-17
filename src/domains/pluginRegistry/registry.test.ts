@@ -4,7 +4,7 @@ import { AGENT_PLUGINS, AGENT_SESSION_OPTIONS, CHANNEL_PLUGIN_IDS, agentPlugin }
 describe("plugin registry", () => {
   it("registers builtin channels in stable display order", () => {
     expect(CHANNEL_PLUGIN_IDS).toEqual([
-      "openai-api", "longcat", "deepseek", "kimi", "qwen", "custom", "zhipu", "openrouter", "vibetoken",
+      "openai-api", "longcat", "deepseek", "kimi", "qwen", "custom", "zhipu", "hunyuan", "openrouter", "vibetoken",
     ]);
   });
 

@@ -14,6 +14,9 @@ describe("ChannelBrandLogoView", () => {
     expect(container.querySelector("span > i")).toBeTruthy();
     expect(container.querySelector("img")).toBeNull();
 
+    rerender(<ChannelBrandLogoView channelId="hunyuan" name="腾讯混元" />);
+    expect(container.querySelector('span > img[src="/icons/lobe/hunyuan-color.svg"]')).toBeTruthy();
+
     rerender(<ChannelBrandLogoView channelId="openrouter" name="OpenRouter" />);
     expect(container.querySelector("span > i")).toBeTruthy();
     expect(container.querySelector("img")).toBeNull();

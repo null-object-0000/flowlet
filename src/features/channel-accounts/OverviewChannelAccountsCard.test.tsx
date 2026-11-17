@@ -79,6 +79,7 @@ describe("OverviewChannelAccountsCard", () => {
     expect(screen.getByRole("button", { name: "添加 Kimi" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "添加 Qwen" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "添加 Z.AI" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "添加 腾讯混元" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "添加 OpenRouter" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "添加 VibeToken" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "添加 VibeToken" }));

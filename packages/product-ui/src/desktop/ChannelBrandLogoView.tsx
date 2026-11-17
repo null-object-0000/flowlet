@@ -22,6 +22,9 @@ export function ChannelBrandLogoView({ channelId, name }: { channelId: string; n
   if (channelId === "zhipu") {
     return <span className={`${styles.logo} ${styles.zhipu}`} aria-hidden="true"><img src="/icons/lobe/zhipu-color.svg" alt="" /></span>;
   }
+  if (channelId === "hunyuan") {
+    return <span className={`${styles.logo} ${styles.hunyuan}`} aria-hidden="true"><img src="/icons/lobe/hunyuan-color.svg" alt="" /></span>;
+  }
   if (channelId === "vibetoken") {
     return <span className={`${styles.logo} ${styles.vibetoken}`} aria-hidden="true"><i /></span>;
   }

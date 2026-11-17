@@ -10,8 +10,8 @@ import {
 
 describe("model identity catalog", () => {
   it("provides the complete supported-model whitelist without duplicates", () => {
-    expect(FLOWLET_SUPPORTED_MODELS).toHaveLength(32);
-    expect(new Set(FLOWLET_SUPPORTED_MODELS.map((model) => model.toLowerCase())).size).toBe(32);
+    expect(FLOWLET_SUPPORTED_MODELS).toHaveLength(33);
+    expect(new Set(FLOWLET_SUPPORTED_MODELS.map((model) => model.toLowerCase())).size).toBe(33);
     expect(FLOWLET_SUPPORTED_MODELS).toContain("LongCat-2.0");
     expect(FLOWLET_SUPPORTED_MODELS).toContain("LongCat-2.5");
     expect(FLOWLET_SUPPORTED_MODELS).toContain("deepseek-v4-flash");
@@ -69,6 +69,7 @@ describe("model identity catalog", () => {
   });
 
   it.each([
+    ["hy4", "tencent", "hunyuan", "tencent-hunyuan"],
     ["hy4-flash", "tencent", "hunyuan", "tencent-hunyuan"],
     ["qwen4-max", "qwen", "qwen", "qwen-cn"],
     ["kimi-k3.1-pro", "moonshotai", "kimi", "moonshot-cn"],

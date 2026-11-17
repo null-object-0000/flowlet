@@ -458,6 +458,29 @@ impl ChannelPreset {
         }
     }
 
+    /// 腾讯混元 TokenHub：OpenAI/Responses 使用 Bearer，Anthropic 使用 x-api-key。
+    pub fn hunyuan() -> Self {
+        Self {
+            id: "hunyuan".into(),
+            name: "腾讯混元".into(),
+            vendor: "tencent".into(),
+            platform_url: Some("https://console.cloud.tencent.com/tokenhub/apikey".into()),
+            enabled: true,
+            supported_protocols: vec![
+                ProtocolType::OpenAi,
+                ProtocolType::Anthropic,
+                ProtocolType::Responses,
+            ],
+            openai_base_url: "https://tokenhub.tencentmaas.com/v1".into(),
+            anthropic_base_url: "https://tokenhub.tencentmaas.com".into(),
+            openai_auth: AuthStrategy::Bearer,
+            anthropic_auth: AuthStrategy::XApiKey,
+            default_model: "hy4".into(),
+            supports_model_list: true,
+            ..Default::default()
+        }
+    }
+
     /// OpenRouter 聚合渠道。OpenAI-compatible 端点为 `/api/v1`，Anthropic
     /// 兼容端点（Anthropic Skin）为 `/api`，均使用 Bearer 鉴权。Responses 协议
     /// 从 OpenAI Base URL 派生（`/api/v1/responses`，仅无状态透传）。模型列表走

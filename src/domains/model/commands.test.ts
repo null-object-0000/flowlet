@@ -86,6 +86,7 @@ describe("mergeDefaultRoutes", () => {
   } as ChannelPreset;
 
   it.each([
+    ["hy4", "tencent/hy4"],
     ["hy4-flash", "tencent/hy4-flash"],
     ["qwen4-max", "qwen/qwen4-max"],
     ["kimi-k3.1-pro", "moonshotai/kimi-k3.1-pro"],

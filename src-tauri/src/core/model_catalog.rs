@@ -171,7 +171,7 @@ mod tests {
     #[test]
     fn embedded_catalog_is_valid_and_has_expected_models() {
         let catalog = model_catalog();
-        assert_eq!(catalog.supported_models().len(), 32);
+        assert_eq!(catalog.supported_models().len(), 33);
         assert_eq!(
             catalog.find("LongCat-2.5").unwrap().owner_channel_id,
             "longcat"

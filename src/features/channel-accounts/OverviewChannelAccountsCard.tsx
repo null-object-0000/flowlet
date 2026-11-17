@@ -242,6 +242,7 @@ const EMPTY_CHANNEL_OPTIONS = [
   { id: "kimi", name: "Kimi", actionLabel: "添加 Kimi" },
   { id: "qwen", name: "Qwen", actionLabel: "添加 Qwen" },
   { id: "zhipu", name: "Z.AI", actionLabel: "添加 Z.AI" },
+  { id: "hunyuan", name: "腾讯混元", actionLabel: "添加 腾讯混元" },
   { id: "openrouter", name: "OpenRouter", actionLabel: "添加 OpenRouter" },
   { id: "vibetoken", name: "VibeToken", actionLabel: "添加 VibeToken" },
   { id: "antigravity", name: "Antigravity", actionLabel: "添加 Antigravity" },

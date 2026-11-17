@@ -245,6 +245,33 @@
         }
       },
       {
+        "id": "hunyuan",
+        "name": "腾讯混元",
+        "vendor": "tencent",
+        "platform_url": "https://console.cloud.tencent.com/tokenhub/apikey",
+        "supported_protocols": [
+          "openai",
+          "anthropic",
+          "responses"
+        ],
+        "openai_base_url": "https://tokenhub.tencentmaas.com/v1",
+        "anthropic_base_url": "https://tokenhub.tencentmaas.com",
+        "openai_auth": "bearer",
+        "anthropic_auth": "x_api_key",
+        "default_model": "hy4",
+        "small_model": null,
+        "supports_model_list": true,
+        "supports_model_detail": false,
+        "supports_price_sync": false,
+        "supports_balance_query": false,
+        "supports_quota_query": false,
+        "supports_usage_query": false,
+        "supports_scrape_balance": false,
+        "endpoints": {
+          "models": "https://tokenhub.tencentmaas.com/v1/models"
+        }
+      },
+      {
         "id": "openrouter",
         "name": "OpenRouter",
         "vendor": "openrouter",
@@ -330,7 +357,7 @@
       "kimi": ["kimi-k3.1-pro", "kimi-k3", "kimi-k2.7-code"],
       "qwen": ["qwen4-max", "qwen3.8-max", "qwen3.8-flash", "qwen3.7-max", "qwen3.7-plus", "qwen3.7-flash", "qwen3.6-plus", "qwen3.6-flash"],
       "zhipu": ["glm-5.3", "glm-5.3-flash", "glm-5.2", "glm-4.7", "glm-4.5-air"],
-      "hunyuan": ["hy4-flash"],
+      "hunyuan": ["hy4", "hy4-flash"],
       "openrouter": ["ox-alpha", "nemotron-3.5-lightning", "nemotron-3-super-120b-a12b", "nemotron-3-ultra-550b-a55b"]
     }
   }

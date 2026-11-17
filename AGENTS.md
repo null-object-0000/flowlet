@@ -352,6 +352,7 @@ Flowlet 支持的模型（全局白名单，不按渠道区分）：
 - glm-5.2
 - glm-4.7
 - glm-4.5-air
+- hy4
 - hy4-flash
 - ox-alpha
 - nemotron-3.5-lightning
@@ -464,7 +465,7 @@ Rust `find_models_cn_model` 与费用匹配 `estimate_cost_at` 均已按此实�
 
 * 顶部 service-strip 完整展示代理状态、今日 Token、客户端接入和 Client Token；
 * 主体仍展示渠道账号、开放模型和 AI Agent 接入三个模块；
-* 渠道账号模块在空状态中展示简短引导，以及 ChatGPT API、LongCat、DeepSeek、Kimi、Qwen、Z.AI 和 OpenRouter 添加入口；
+* 渠道账号模块在空状态中展示简短引导，以及 ChatGPT API、LongCat、DeepSeek、Kimi、Qwen、Z.AI、腾讯混元和 OpenRouter 添加入口；
 * 开放模型模块展示与当前配置相符的空状态，引导用户添加账号并明确选择开放模型；
 * AI Agent 接入保持可用，允许用户提前查看或写入客户端配置；
 * 不展示独立的“开始接入”页面或大段三步说明。

@@ -582,7 +582,7 @@ Provider 固定发这个官方名），`deepseek-v4-flash-0731` → `deepseek-v4
   "kimi": ["kimi-k3.1-pro", "kimi-k3", "kimi-k2.7-code"],
   "qwen": ["qwen4-max", "qwen3.8-max", "qwen3.8-flash", "qwen3.7-max", "qwen3.7-plus", "qwen3.7-flash", "qwen3.6-plus", "qwen3.6-flash"],
   "zhipu": ["glm-5.3", "glm-5.3-flash", "glm-5.2", "glm-4.7", "glm-4.5-air"],
-  "hunyuan": ["hy4-flash"],
+  "hunyuan": ["hy4", "hy4-flash"],
   "openrouter": ["ox-alpha", "nemotron-3.5-lightning", "nemotron-3-super-120b-a12b", "nemotron-3-ultra-550b-a55b"]
 }
 ```
@@ -863,3 +863,18 @@ failed to parse model_catalog_json path `...` as JSON: missing field `shell_type
 新渠道需更新应用并重启，启动自动合并旧外部配置并迁移 SQLite 预设，不改变数据结构、账号与路由状态。
 端点覆盖继续沿用现有配置读写机制；账号级模型地址覆盖即时用于下一次拉取/请求，且禁用官方余额同步。
 协议边界与官方来源见 [渠道接入指南](./channel-integration.md#vibetoken-聚合渠道2026-11-05)。
+
+
+### 腾讯混元 TokenHub 渠道恢复（2026-11-17）
+
+`channels_config.channels` 内置 `hunyuan`（腾讯混元）模板，默认模型 `hy4`，
+支持 `openai` / `anthropic` / `responses`。OpenAI Base URL 为
+`https://tokenhub.tencentmaas.com/v1`（Bearer），Anthropic Base URL 为
+`https://tokenhub.tencentmaas.com`（`x_api_key`）；模型列表端点显式为
+`https://tokenhub.tencentmaas.com/v1/models`。不声明余额或控制台抓取能力。
+`default_exposed_models.hunyuan` 包含 `hy4` 与 `hy4-flash`，账号仍须从真实模型列表显式选择，
+不自动开放模型。两个模型保持独立规范身份，`tencent/hy4` 归一到 `hy4`。
+
+旧外部配置及 SQLite 由已有的内置配置合并和预设迁移在重启时幂等补齐；不改变数据库结构，
+保留账号、Key、地址覆盖、路由启停及优先级。模型选择与路由保存继续热更新。
+协议和端点依据：[TokenHub 官方语言模型调用概览](https://cloud.tencent.cn/document/product/1823/130079)。

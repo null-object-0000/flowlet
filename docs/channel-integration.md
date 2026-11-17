@@ -544,3 +544,45 @@ cargo test <相关测试名>
 来源：[快速开始](https://docs.vibetoken.cn/zh)、[模型 API](https://docs.vibetoken.cn/zh/api-reference/models)、
 [Responses](https://docs.vibetoken.cn/zh/api-reference/responses)、[计费](https://docs.vibetoken.cn/zh/api-reference/billing)。
 已用用户提供的 Key 只读验证模型与余额端点，未调用付费推理；Key 不进入仓库或 fixture。
+
+
+## 腾讯混元（TokenHub）（2026-11-16）
+
+渠道 `hunyuan`（展示名「腾讯混元」）经腾讯云**大模型服务平台 TokenHub** 接入。旧版
+`api.hunyuan.cloud.tencent.com` 已停止新增模型，Hy4 系列只在 TokenHub 提供，因此渠道模板
+直接指向 TokenHub，而不是旧混元端点。
+
+- OpenAI Base URL：`https://tokenhub.tencentmaas.com/v1`（`GET /v1/models`、Bearer 鉴权）；
+- Anthropic Base URL：`https://tokenhub.tencentmaas.com`（请求路径 `/v1/messages`，
+  使用 `x-api-key`，与 OpenAI / Responses 的 Bearer 鉴权区分）；
+- Responses：从 OpenAI Base URL 派生 `/v1/responses`，无状态透传；
+- 控制台：`https://console.cloud.tencent.com/tokenhub/apikey`；
+- 地域：广州站 `tokenhub.tencentmaas.com`；新加坡站为 `tokenhub-intl.tencentmaas.com`，
+  需在账号级 Base URL 覆盖中切换，不跨站调用。
+
+协议结论以官方模型协议表为准：`hy4` 的 OpenAI Chat Completions、OpenAI Responses 与
+Anthropic Messages 均为原生支持。调用前必须在控制台开通对应模型服务，未开通时上游返回
+402（与模型是否支持该协议无关）。TokenHub 对部分模型只提供 Chat Completions，再由平台
+转换 Responses；`hy4` 不属于这一档。
+
+`hy4` 和 `hy4-flash` 为两个独立规范模型，均支持上述三协议，保持用户独立勾选和路由。
+
+模型与价格：`hy4` 登记为规范模型 ID，官方归属 `hunyuan`，models-cn provider 为
+`tencent-hunyuan`（上下文 1,048,576、最大输出 65,536，支持文本与图片输入、思考与工具调用；
+基准价 6 元/百万输入（缓存命中 0.3）、18 元/百万输出）。别名 `tencent/hy4` 用于入站归一。
+`hy4-preview` 是另一个上游资源，未登记白名单；需要时再单独评估。
+
+Token Plan：`sk-tp` 前缀 Key 使用 `https://tokenhub.tencentmaas.com/plan/v3` 与
+`https://tokenhub.tencentmaas.com/plan/anthropic`，与按量付费端点不同。渠道模板默认走按量付费，
+Token Plan 账号通过账号级 Base URL 覆盖接入（与 Qwen Token Plan 的处理方式一致）。
+
+余额：TokenHub 没有公开余额 API，`supports_balance_query = false`，不做控制台抓取；
+账号余额/额度只支持手动维护。
+
+图标：使用 `@lobehub/icons-static-svg@1.93.0` 的 `hunyuan-color.svg`，固化到
+`public/icons/lobe/hunyuan-color.svg`，不依赖运行时 CDN。
+
+官方来源：[API 使用说明](https://cloud.tencent.cn/document/product/1823/130078)、
+[语言模型调用概览（模型协议表）](https://cloud.tencent.cn/document/product/1823/130079)、
+[Responses API 兼容模式说明](https://cloud.tencent.cn/document/product/1823/133813)、
+[模型列表](https://cloud.tencent.cn/document/product/1823/130051)。

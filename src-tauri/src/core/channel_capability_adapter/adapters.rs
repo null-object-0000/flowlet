@@ -2,6 +2,7 @@ use super::ChannelCapabilityAdapter;
 
 mod custom;
 mod deepseek;
+mod hunyuan;
 mod kimi;
 mod longcat;
 mod openai_api;
@@ -18,6 +19,7 @@ pub(super) static ADAPTERS: &[ChannelCapabilityAdapter] = &[
     qwen::ADAPTER,
     custom::ADAPTER,
     zhipu::ADAPTER,
+    hunyuan::ADAPTER,
     openrouter::ADAPTER,
     vibetoken::ADAPTER,
 ];

@@ -9,6 +9,7 @@
     { "id": "flowlet.channel.qwen", "kind": "channel", "channelId": "qwen", "adapterId": "qwen" },
     { "id": "flowlet.channel.custom", "kind": "channel", "channelId": "custom", "adapterId": "custom" },
     { "id": "flowlet.channel.zhipu", "kind": "channel", "channelId": "zhipu", "adapterId": "zhipu" },
+    { "id": "flowlet.channel.hunyuan", "kind": "channel", "channelId": "hunyuan", "adapterId": "hunyuan" },
     { "id": "flowlet.channel.openrouter", "kind": "channel", "channelId": "openrouter", "adapterId": "openrouter" },
     { "id": "flowlet.channel.vibetoken", "kind": "channel", "channelId": "vibetoken", "adapterId": "vibetoken" },
     {

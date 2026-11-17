@@ -445,3 +445,31 @@ node scripts/e2e-node-host.mjs            # 端到端冒烟（含 mock 上游流
 - 回滚镜像 `flowlet:node-20261117-112230-manual-735062e`；compose 备份为部署技能
   `.work/compose.before-20261117-140140.yaml`。OIDC-only 管理日志接口仍要求浏览器登录，
   未声称完成登录后的浏览器视觉验收或实际 HY4 上游推理验收。
+
+
+## 决策模型前端恢复与源码对齐（2026-11-17 14:19）
+
+- 原因：此前发布分支未合入 `8c2a586` / `7030d5a` / `ef8b2a6` 的决策模型前端与
+  System One 契约；HY4 恢复只处理了混元部分，虽保留线上决策模型后端，界面仍缺模型身份。
+- 提交 `8e1f34f` 恢复 `decision-model-preview`、`kind` / `systemone`、Qwen/custom
+  账号选择及候选对账、旧预设协议升级、Agent 对话模型隔离与原有 Node 协议测试；补齐
+  Rust 回滚宿主的协议序列化、路由门控、透传和升级兼容。没有数据库结构变更。
+- 新增联合前端契约：同一自定义网关显式开放 HY4、Flash、decision，生成 7 个隔离候选，
+  三者均可在模型管理页展示；decision 不进入 Agent 默认模型池，取消选择后可清理候选。
+  AGENTS.md 要求今后发布联合校验 HY4/Flash/decision 的 UI、目录和协议。
+- 相关前端测试 90 项与新增联合契约 1 项通过；Node 路由/协议/升级 46 项和存储/混元
+  18 项通过；Rust System One 2 项、目录 16 项、插件契约 3 项、渠道配置 32 项通过。
+  前端/Node 类型检查、Web 构建、cargo check、变更 Rust 文件的格式检查通过。
+- 发布前确认源码与生产的 34 个模型身份（含 kind）和 10 个渠道协议声明一致；合回的
+  9 个 Node 模块与线上模块经 TS 去注释/转译后可执行内容相同，因此生产仅覆盖 Web UI。
+- 镜像 `flowlet:node-20261117-decision-restore-8e1f34f`，基于上一运行镜像
+  `flowlet:node-20261117-hy4-restore-f089d1a`。Canary health/auth/ipc_ping 通过，
+  同一 UI 资源含三个模型并匹配构建，实际 Node 目录与 7 候选协议隔离验证通过。
+- 生产切换前两次活动检查无在途 Agent 调用；切换 3.7 秒，健康探测最长成功间隔
+  3.17 秒，egress 未重建。health/models 200、流式 1/1 DONE，容器 healthy，OIDC 保留。
+  线上 index、含三个模型的资源块与混元图标字节匹配构建。
+- 使用本次发布前最新配置为基线：14 个账号、71 条路由（HY4 4 条），发布前后配置摘要
+  一致；保留用户在前一次发布后新增的模型配置。本次不自动选择/开启模型。
+- 回滚为 `flowlet:node-20261117-hy4-restore-f089d1a`，compose 备份见部署技能
+  `.work/compose.before-20261117-141936.yaml`。未声称浏览器登录后的视觉验收或真实决策
+  上游推理验收；决策协议透传使用本地 mock 验证，线上只做普通流式冒烟。

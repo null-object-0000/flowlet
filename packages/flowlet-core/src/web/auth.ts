@@ -1,3 +1,4 @@
+import type { AccessPolicyStore } from "./access-policy.ts";
 import { commandPermission } from "./permissions.ts";
 import type { UserDirectory } from "./users.ts";
 // Web Host 管理端鉴权（token / OIDC 两种模式）。Owner: node-web.
@@ -752,6 +753,7 @@ function requestOriginOf(
 
 export class AdminAuth {
   userDirectory?: UserDirectory;
+  accessPolicy?: AccessPolicyStore;
   setSessionStore(store: AdminSessionStore) { this.#sessionStore = store; }
   listSessions(userId: string, currentKey: string | null) {
     const now = nowMs();
@@ -1542,7 +1544,7 @@ export class AdminAuth {
         if (address !== null) { identity.email = address; identity.emailVerified = true; }
       }
     }
-    if (github.allowedOrgs.length > 0) {
+    if (this.accessPolicy ? this.accessPolicy.needsGithubGroups(github.apiBase) : github.allowedOrgs.length > 0) {
       const orgs = await this.#githubJson(github, "/user/orgs", accessToken);
       if (Array.isArray(orgs)) {
         identity.groups = orgs
@@ -1697,10 +1699,11 @@ export class AdminAuth {
       return redirectResponse(303, "/?auth_error=auth_not_configured", [...this.#clearBrowserCookie()]);
     }
     const identity = obtained;
-    const allowed =
+    const decision = this.accessPolicy?.admit(identity);
+    const allowed = decision?.allowed ?? (
       transaction.provider === "github"
         ? this.config.github !== null && githubAllowlisted(this.config.github, identity)
-        : this.config.oidc !== null && allowlisted(this.config.oidc, identity);
+        : this.config.oidc !== null && allowlisted(this.config.oidc, identity));
     if (!allowed) {
       console.info(
         `SSO 登录被准入名单拒绝：provider=${transaction.provider} sub=${maskSecret(identity.sub)}`,
@@ -1708,14 +1711,14 @@ export class AdminAuth {
       return redirectResponse(303, "/?auth_error=allowlist_denied", [...this.#clearBrowserCookie()]);
     }
     // 角色：准入只决定「能进来」，能做什么由角色决定（管理台能读全部凭据）。
-    identity.role =
+    identity.role = decision?.role ?? (
       transaction.provider === "github"
         ? this.config.github === null
           ? "admin"
           : roleForGithub(this.config.github, identity)
         : this.config.oidc === null
           ? "admin"
-          : roleForOidc(this.config.oidc, identity);
+          : roleForOidc(this.config.oidc, identity));
     let session: { raw: string; csrf: string };
     try { session = this.#createSession(identity); }
     catch { return redirectResponse(303, "/?auth_error=access_denied", [...this.#clearBrowserCookie()]); }

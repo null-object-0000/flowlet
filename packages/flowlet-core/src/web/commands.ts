@@ -539,6 +539,13 @@ export async function dispatch(ctx: WebContext, command: string, rawArgs: unknow
     return rows.map(row=>({...row, user_id:owners[String(row.request_id)]?.userId??null, credential_id:owners[String(row.request_id)]?.credentialId??null}));
   };
   switch (command) {
+    case "get_access_policy":
+      return ctx.auth?.accessPolicy?.read() ?? null;
+    case "set_access_policy": {
+      if (!ctx.auth?.accessPolicy) throw CommandError.badRequest("实例访问策略未启用");
+      try { return ctx.auth.accessPolicy.save(args); }
+      catch(error) { throw CommandError.badRequest(error instanceof Error ? error.message : "保存失败"); }
+    }
     case "list_my_sessions": {
       const id = requireUser(); return ctx.auth!.listSessions(id, actor?.sessionKey ?? null);
     }
@@ -880,7 +887,7 @@ export async function dispatch(ctx: WebContext, command: string, rawArgs: unknow
       ctx.auth?.applyGithubConfig(null);
       return null;
     }
-    // ── 管理台登录提供方（OIDC / GitLab）：部署字段 + 准入/角色全部可在界面维护 ──
+    // ── 管理台登录提供方（OIDC / GitLab）：认证连接配置，准入/角色由实例策略维护 ──
     // 保存即热替换（含 issuer / client），并从库内恢复，不需要重启容器。
     case "get_oidc_auth_provider": {
       const summary = readOidcProviderSummary(ctx.storage, ctx.auth?.oidcDeployment ?? null);

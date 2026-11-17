@@ -200,3 +200,52 @@ test("imports genuine legacy user/session files once, keeping cookies and stable
     assert.equal(users.security.authenticateToken(pat.token),null);
   } finally {db.close();rmSync(dir,{recursive:true,force:true});}
 });
+
+test("instance policy migrates once, namespaces legacy rules, and decouples provider changes", async () => {
+    const { AccessPolicyStore, ACCESS_POLICY_KEY } = await import("../access-policy.ts");
+    const f = fixture();
+    try {
+        const policy = new AccessPolicyStore(f.db, f.users, f.auth.config);
+        assert.equal(policy.admit(identity("a")).role, "admin");
+        assert.equal(policy.admit({...identity("a"),email:"new@example.com",identityIssuer:"https://other.example"}).allowed, false);
+        assert.equal(f.db.getAppMeta(ACCESS_POLICY_KEY)!.includes("clientSecret"), false);
+        f.auth.config.oidc!.allowedSubs = ["new"];
+        new AccessPolicyStore(f.db, f.users, f.auth.config);
+        assert.equal(policy.admit(identity("new")).allowed, false);
+        const next = policy.save({generation:1,mode:"rules",emails:["NEW@EXAMPLE.COM"],domains:["company.com"],clearLegacy:true});
+        assert.equal(next.legacyRules.length, 0);
+        assert.deepEqual(policy.admit({...identity("new"),identityIssuer:"https://other.example"}),{allowed:true,role:"viewer"});
+        assert.equal(policy.admit({...identity("new"),emailVerified:false}).allowed, false);
+        assert.equal(policy.admit({...identity("x"),email:"x@sub.company.com"}).allowed, false);
+        assert.equal(policy.admit({...identity("x"),email:"x@company.com"}).allowed, true);
+        assert.throws(()=>policy.save({generation:1,mode:"all",emails:[],domains:[]}),/已变更/);
+        f.users.update(f.a.id,"viewer",false);
+        assert.equal(policy.admit({...identity("another"),email:f.a.email,identityIssuer:"https://other.example"}).allowed,false);
+        policy.save({generation:2,mode:"existing",emails:[],domains:[]});
+        assert.equal(policy.admit(identity("new")).allowed,false);
+        assert.deepEqual(policy.admit(identity("b")),{allowed:true,role:"admin"});
+    } finally { f.close(); }
+});
+
+test("migrated org access remains available after provider-only settings remove old roster", async () => {
+    const { AccessPolicyStore } = await import("../access-policy.ts");
+    const f = fixture();
+    try {
+        const config = adminAuthConfigFromEnv({FLOWLET_ADMIN_AUTH_MODE:"oidc",FLOWLET_PUBLIC_WEB_URL:"http://localhost",FLOWLET_ADMIN_TOKEN:"x".repeat(32),FLOWLET_GITHUB_CLIENT_ID:"client",FLOWLET_GITHUB_CLIENT_SECRET:"secret",FLOWLET_GITHUB_ALLOWED_ORGS:"team",FLOWLET_GITHUB_ADMIN_LOGINS:"owner"});
+        const policy = new AccessPolicyStore(f.db,f.users,config);
+        const issuer = config.github!.apiBase;
+        const { saveGithubProvider, readGithubProvider } = await import("../auth-providers.ts");
+        const secrets = {encrypt:(value:string)=>`test:${value}`,decrypt:(value:string)=>value.slice(5)};
+        saveGithubProvider(f.db,secrets,{client_id:"client",client_secret:"secret",allowed_orgs:["team"]});
+        const snapshot = JSON.stringify(policy.read());
+        saveGithubProvider(f.db,secrets,{client_id:"changed"});
+        assert.equal(readGithubProvider(f.db,secrets)?.clientId,"changed");
+        assert.equal(readGithubProvider(f.db,secrets)?.scopes.includes("read:org"),true);
+        assert.equal(JSON.stringify(new AccessPolicyStore(f.db,f.users,{...config,github:readGithubProvider(f.db,secrets)}).read()),snapshot);
+        assert.equal(policy.needsGithubGroups(issuer),true);
+        assert.deepEqual(policy.admit({...identity("org-user"),username:"member",identityIssuer:issuer,groups:["team"]}),{allowed:true,role:"viewer"});
+        assert.equal(policy.admit({...identity("org-user"),username:"member",identityIssuer:"https://another",groups:["team"]}).allowed,false);
+        policy.save({generation:1,mode:"rules",emails:[],domains:[],clearLegacy:true});
+        assert.equal(policy.needsGithubGroups(issuer),false);
+    } finally { f.close(); }
+});

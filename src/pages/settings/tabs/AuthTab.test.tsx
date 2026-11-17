@@ -61,15 +61,13 @@ beforeEach(() => {
 const section = (name: string) => within(screen.getByText(name, { exact: true }).closest("section")!);
 
 describe("登录与访问：GitLab / OIDC 自助配置", () => {
-  it("部署字段可编辑；保存带上 generation、issuer 与完整名单", async () => {
+  it("部署字段可编辑；保存只提交连接配置与 generation", async () => {
     render(<AuthTab />);
     const oidc = section("绑定 GitLab 应用");
     await waitFor(() => expect(oidc.getByDisplayValue("https://gitlab.example.com")).toBeInTheDocument());
     fireEvent.change(oidc.getByDisplayValue("https://gitlab.example.com"), { target: { value: "https://git2.example.com" } });
     fireEvent.change(oidc.getByDisplayValue("cid"), { target: { value: "new-cid" } });
-    const roster = section("谁能登录 · 谁能管理");
-    expect(roster.getByLabelText("可登录用户")).toBeInTheDocument();
-    fireEvent.change(roster.getByLabelText("可登录用户"), { target: { value: "101\nalice@example.com" } });
+    expect(screen.queryByText("谁能登录 · 谁能管理")).not.toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: "保存" })[0]!);
     await waitFor(() => {
       const footer = document.querySelector("[class*='_footerStatus']");
@@ -80,11 +78,8 @@ describe("登录与访问：GitLab / OIDC 自助配置", () => {
       issuer: "https://git2.example.com",
       client_id: "new-cid",
       generation: 3,
-      allowed_subs: ["101"],
-      allowed_emails: ["alice@example.com"],
-      allowed_groups: ["platform/infra"],
-      admin_subs: ["94"],
     });
+    expect(api.saveOidc.mock.calls[0]![0]).not.toHaveProperty("allowed_subs");
     // secret 不回显，也就不会提交
     expect(api.saveOidc.mock.calls[0]![0].client_secret).toBe("");
   });
@@ -107,16 +102,12 @@ describe("登录与访问：GitLab / OIDC 自助配置", () => {
     expect(check.getByText("IdP 未声明 PKCE S256")).toBeInTheDocument();
   });
 
-  it("未填准入就保存：前端直接拦下，不发请求", async () => {
+  it("提供器保存不再要求填写准入规则", async () => {
     api.oidc.mockImplementation(async () => oidcSummary({ allowed_subs: [], allowed_groups: [] }));
     render(<AuthTab />);
-    const roster = section("谁能登录 · 谁能管理");
-    await waitFor(() => expect(roster.getByLabelText("可登录组")).toBeInTheDocument());
-    fireEvent.change(roster.getByLabelText("可登录组"), { target: { value: "" } });
-    fireEvent.change(roster.getByLabelText("可登录用户"), { target: { value: "" } });
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "保存" })[0]).toBeEnabled());
     fireEvent.click(screen.getAllByRole("button", { name: "保存" })[0]!);
-    await waitFor(() => expect(screen.getByText(/至少填一个可登录的用户/u)).toBeInTheDocument());
-    expect(api.saveOidc).not.toHaveBeenCalled();
+    await waitFor(() => expect(api.saveOidc).toHaveBeenCalled());
   });
 
   it("改掉 GitLab 开关后保存：开关一并提交，且不复活 GitHub 的旧状态", async () => {

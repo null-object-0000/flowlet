@@ -1,3 +1,4 @@
+import { AccessPolicyStore } from "./access-policy.ts";
 import { commandPermission } from "./permissions.ts";
 // Web Host（管理界面 + 命令 API）。Owner: node-web.
 //
@@ -280,6 +281,7 @@ export function createWebHost(options: WebHostOptions): WebHost {
     if (loginMode.mode.github) enabled.push("github");
     auth.setEnabledProviders(enabled);
   }
+  if (auth.userDirectory) auth.accessPolicy = new AccessPolicyStore(options.storage, auth.userDirectory, auth.config);
   ctx.auth = auth;
 
   let server: Server | null = null;

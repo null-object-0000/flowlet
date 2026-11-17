@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Banner, Button, Input, Select, Switch, Typography } from "@douyinfe/semi-ui-19";
 import { invokeWebCommand } from "../platform/web/client";
 import styles from "./WebApp.module.css";
+import { AccessPolicyPanel } from "./AccessPolicyPanel";
 type User = { id: string; email: string | null; name: string | null; role: string; enabled: boolean; identities: string[]; lastLoginAt: string };
 export function UsersPanel() {
   const qc = useQueryClient();
@@ -17,7 +18,8 @@ export function UsersPanel() {
     finally { setBusy(null); }
   }
   return <section className={styles.users} aria-label="用户管理">
-    <Typography.Title heading={5}>用户管理</Typography.Title>
+    <AccessPolicyPanel />
+    <Typography.Title heading={5}>谁能管理</Typography.Title>
     <Typography.Paragraph type="tertiary">用户首次登录后自动建立档案。已验证的相同邮箱默认关联到同一用户；角色与停用设置对所有关联登录方式生效。实例中的模型、凭据和运行数据仍为共享资源。</Typography.Paragraph>
     <Input aria-label="搜索用户" placeholder="搜索姓名或邮箱" value={search} onChange={setSearch} showClear />
     {(error || users.error) && <Banner type="danger" description={error || String(users.error)} />}

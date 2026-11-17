@@ -256,7 +256,7 @@ function WebSession() {
                 type="warning"
                 description={
                   oidc
-                    ? "当前没有启用中的登录方式。请联系管理员在 Flowlet「设置 → 登录与访问」打开 GitLab 或 GitHub 登录；应急时可在部署环境开启静态管理凭据兜底（FLOWLET_ADMIN_ALLOW_TOKEN_LOGIN=1）。"
+                    ? "当前没有启用中的登录方式。请联系管理员在 Flowlet「设置 → 登录方式」打开 GitLab 或 GitHub 登录；应急时可在部署环境开启静态管理凭据兜底（FLOWLET_ADMIN_ALLOW_TOKEN_LOGIN=1）。"
                     : "当前没有配置登录方式，请在部署环境设置 FLOWLET_GITHUB_CLIENT_ID / SECRET 或改用管理凭据模式。"
                 }
               />
@@ -391,7 +391,7 @@ function WebSettings({
           { key: "network" as const, label: t("网络"), icon: <IconCloud /> },
           { key: "audit" as const, label: t("操作审计"), icon: <IconLock /> },
           { key: "users" as const, label: t("用户管理"), icon: <IconLock /> },
-          { key: "auth" as const, label: t("登录与访问"), icon: <IconLock /> },
+          { key: "auth" as const, label: t("登录方式"), icon: <IconLock /> },
         ]),
   ];
 
@@ -403,7 +403,7 @@ function WebSettings({
     personal: { title: t("个人访问"), desc: t("个人 API 凭据、CLI 授权与登录会话") },
     audit: { title: t("操作审计"), desc: t("查看用户与凭据的安全操作记录") },
     users: { title: t("用户管理"), desc: t("用户档案、关联邮箱和访问权限") },
-    auth: { title: t("登录与访问"), desc: t("管理台登录方式、准入名单与角色") },
+    auth: { title: t("登录方式"), desc: t("认证提供器、应用凭据与登录入口") },
   };
 
   const generalPanel = (

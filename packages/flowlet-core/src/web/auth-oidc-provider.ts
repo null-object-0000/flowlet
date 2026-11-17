@@ -556,7 +556,7 @@ export function saveOidcProvider(
   const allowedEmails = cleanList(input.allowed_emails, true);
   const allowedDomains = cleanList(input.allowed_domains, true);
   const allowAny = input.allow_any === true;
-  if (!allowAny && allowedSubs.length + allowedGroups.length + allowedEmails.length + allowedDomains.length === 0) {
+  if (storage.getAppMeta("auth_access_policy_v1") === null && !allowAny && allowedSubs.length + allowedGroups.length + allowedEmails.length + allowedDomains.length === 0) {
     throw new Error("必须至少配置一种准入（用户 ID / 组 / 邮箱 / 邮箱域），或显式允许任何人登录");
   }
 

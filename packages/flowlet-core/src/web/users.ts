@@ -30,6 +30,13 @@ export class UserDirectory {
     close() { this.ownedStorage?.close(); }
     list() { return this.security.readUsers(); }
     find(id: string) { return this.list().find(user => user.id === id); }
+    resolve(identity: Identity): ManagedUser | undefined {
+        const issuer = identity.identityIssuer ?? identity.provider;
+        const key = JSON.stringify([issuer, identity.sub]), legacyKey = `${issuer}:${identity.sub}`;
+        const users = this.list();
+        return users.find(user => user.identities.includes(key) || user.identities.includes(legacyKey)) ??
+            (identity.emailVerified ? users.find(user => user.email === identity.email?.trim().toLowerCase()) : undefined);
+    }
     login(identity: Identity) {
         return this.security.transaction(db => {
             const users = this.security.readUsers(db);

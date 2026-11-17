@@ -91,8 +91,6 @@ export function draftFromSummary(
 
 /** 草稿 → 表单提交体。`generation` 只在接管库内记录时才带，避免误触发乐观锁。 */
 export function payloadFromDraft(draft: OidcDraft, generation: number | null): OidcProviderInput {
-  const users = splitSubsAndEmails(draft.allowedUsers);
-  const admins = splitSubsAndEmails(draft.admins);
   const redirects = splitListInput(draft.redirectUrls);
   return {
     issuer: draft.issuer.trim(),
@@ -101,13 +99,6 @@ export function payloadFromDraft(draft: OidcDraft, generation: number | null): O
     client_secret: draft.clientSecret,
     display_name: draft.displayName.trim() || "GitLab",
     scopes: draft.scopes.trim() || "openid",
-    allowed_subs: users.subs,
-    allowed_emails: users.emails,
-    allowed_groups: splitListInput(draft.allowedGroups),
-    allowed_domains: splitListInput(draft.allowedDomains),
-    admin_subs: admins.subs,
-    admin_emails: admins.emails,
-    allow_any: draft.allowAny,
     allow_http_issuer: draft.allowHttpIssuer,
     pkce: draft.pkce,
     nonce: draft.nonce,
@@ -129,9 +120,6 @@ export function validateDraft(draft: OidcDraft, hasStoredSecret = false): string
   if (draft.clientId.trim() === "") return "请填写 GitLab 应用的 Application ID";
   if (draft.clientSecret.trim() === "" && !hasStoredSecret) {
     return "请填写 GitLab 应用的 Application Secret";
-  }
-  if (!draft.allowAny && splitListInput(draft.allowedUsers).length + splitListInput(draft.allowedGroups).length + splitListInput(draft.allowedDomains).length === 0) {
-    return "至少填一个可登录的用户，或打开「允许任何人登录」";
   }
   return null;
 }

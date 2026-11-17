@@ -1,6 +1,8 @@
 /** Reviewed Web command grants. New commands require an explicit declaration. */
 export type CommandPermission = "observe" | "admin" | "self";
 export const COMMAND_PERMISSIONS: Readonly<Record<string, CommandPermission>> = Object.freeze({
+    get_access_policy: "admin",
+    set_access_policy: "admin",
     ipc_ping: "observe",
     proxy_status: "observe",
     list_channel_presets: "observe",

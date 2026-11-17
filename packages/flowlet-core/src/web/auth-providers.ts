@@ -282,16 +282,16 @@ export function saveGithubProvider(
   const adminLogins = cleanList(input.admin_logins);
   const adminEmails = cleanList(input.admin_emails);
   const allowAny = input.allow_any === true;
-  if (!allowAny && allowedLogins.length === 0 && allowedEmails.length === 0 && allowedOrgs.length === 0) {
-    // 管理台能读全部服务凭据：不填准入就等于对全世界开放。
+  if (storage.getAppMeta("auth_access_policy_v1") === null && !allowAny && allowedLogins.length === 0 && allowedEmails.length === 0 && allowedOrgs.length === 0) {
+    // 尚未启用实例策略的旧调用方仍须提供显式准入。
     throw new Error("必须至少配置一种准入（登录名 / 邮箱 / 组织），或显式允许任何人登录");
   }
 
   const scopes =
     (input.scopes ?? "").trim() === ""
-      ? allowedOrgs.length > 0
+      ? previous?.scopes || (allowedOrgs.length > 0
         ? "read:user user:email read:org"
-        : "read:user user:email"
+        : "read:user user:email")
       : (input.scopes ?? "").trim();
 
   const stored: StoredGithubProvider = {

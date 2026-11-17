@@ -1,7 +1,6 @@
 import { cloneElement, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { Button, Input, Select, Switch, TextArea, Toast, Typography } from "@douyinfe/semi-ui-19";
 import { errorMessage } from "../../../shared/errors/AppError";
-import { splitListInput } from "../../../domains/settings/authProviders";
 import {
   checkOidcAuthProvider,
   deleteOidcAuthProvider,
@@ -15,12 +14,8 @@ import {
 } from "../../../domains/settings/oidcAuthProvider";
 import {
   EMPTY_OIDC_DRAFT,
-  admissionWarnings,
   draftFromSummary,
   payloadFromDraft,
-  previewRole,
-  rosterSummary,
-  splitSubsAndEmails,
   validateDraft,
   type OidcDraft,
 } from "../../../domains/settings/oidcDraft";
@@ -128,7 +123,7 @@ function CheckIcon({ status }: { status: OidcCheckItem["status"] }) {
 /**
  * 「登录与访问」——GitLab / OIDC 登录（自助配置）。
  *
- * 设计目标：管理员不读部署文档也能走完「新建 GitLab 应用 → 填地址与凭据 → 选谁能登录 →
+ * 设计目标：管理员不读部署文档也能走完「新建 GitLab 应用 → 填地址与凭据 →
  * 谁能管理 → 校验 → 启用」。因此按步骤分卡片，而不是一长串设置项：
  * 1 应用地址与凭据；2 谁能登录 / 谁能管理（实时预览角色规则）；3 校验；高级项折叠。
  *
@@ -174,8 +169,6 @@ export function OidcAuthSection({ onSaved }: Props) {
   };
 
   const dirty = useMemo(() => JSON.stringify(draft) !== baseline, [draft, baseline]);
-  const roster = useMemo(() => rosterSummary(draft), [draft]);
-  const warnings = useMemo(() => admissionWarnings(draft), [draft]);
 
   const configured = summary?.configured === true;
   const status: Status = !configured
@@ -215,7 +208,7 @@ export function OidcAuthSection({ onSaved }: Props) {
 
   const onSave = async () => {
     const problem = validateDraft(draft, summary?.secret_set === true);
-    // 阻断级问题直接拦下；「管理员可能进不来」这类提醒已在下方卡片常驻展示，不挡保存。
+    // 这里只校验认证连接字段；准入与角色由实例策略负责。
     if (problem !== null) {
       setFormError(problem);
       return;
@@ -279,11 +272,6 @@ export function OidcAuthSection({ onSaved }: Props) {
     patch({ enabled });
   };
 
-  const adminPreview = useMemo(() => {
-    const admins = splitSubsAndEmails(draft.admins);
-    if (admins.subs.length + admins.emails.length > 0) return null;
-    return "未单独指定管理员：直接列在「可登录」的个人可以改配置，按组 / 域进来的只能只读。";
-  }, [draft.admins]);
 
   return (
     <div className={styles.root} data-keywords="gitlab oidc 单点登录 sso 准入 管理员 只读 登录方式">
@@ -366,60 +354,10 @@ export function OidcAuthSection({ onSaved }: Props) {
         </div>
       </Card>
 
-      <Card
-        step={2}
-        title="谁能登录 · 谁能管理"
-        hint="「可登录」决定能进管理台的人；「管理员」决定进来后能否改配置，未列出的可登录者是只读。"
-        done={roster.users + roster.groups + roster.domains > 0}
-      >
-        <div className={styles.roster}>
-          <Field
-            label="可登录用户"
-            help="一行一个：GitLab 用户 ID（Users 页面可见的数字 sub）或邮箱。"
-          >
-            <TextArea autosize={{ minRows: 3, maxRows: 8 }} value={draft.allowedUsers} placeholder={"94\nzhangsan@company.com"} disabled={loading} onChange={(value) => patch({ allowedUsers: value })} />
-          </Field>
-          <Field label="可登录组" help="一行一个 GitLab 组完整路径，组内成员可登录（默认只读）。">
-            <TextArea autosize={{ minRows: 3, maxRows: 8 }} value={draft.allowedGroups} placeholder={"platform/infra"} disabled={loading} onChange={(value) => patch({ allowedGroups: value })} />
-          </Field>
-          <Field label="可登录邮箱域" help="按域放人等于对全公司开放查看，收紧时优先删这一项。">
-            <TextArea autosize={{ minRows: 2, maxRows: 4 }} value={draft.allowedDomains} placeholder={"company.com"} disabled={loading} onChange={(value) => patch({ allowedDomains: value })} />
-          </Field>
-          <Field label="管理员" help="一行一个：用户 ID 或邮箱。建议总是显式填写。">
-            <TextArea autosize={{ minRows: 2, maxRows: 4 }} value={draft.admins} placeholder={"94"} disabled={loading} onChange={(value) => patch({ admins: value })} />
-          </Field>
-        </div>
-        <div className={styles.rolePreview}>
-          <span>
-            <strong>{roster.users}</strong> 个用户 · <strong>{roster.groups}</strong> 个组 ·{" "}
-            <strong>{roster.domains}</strong> 个邮箱域 · 管理员 <strong>{roster.admins}</strong> 人
-          </span>
-          <Switch checked={draft.allowAny} disabled={loading} onChange={(value) => patch({ allowAny: value })} />
-          <span>允许任何人登录</span>
-        </div>
-        {adminPreview ? <div className={styles.help}>{adminPreview}</div> : null}
-        {warnings.map((warning) => (
-          <div key={warning} className={styles.warnNote}>
-            {warning}
-          </div>
-        ))}
-        <div className={styles.help}>
-          规则预览：按数字 ID 登录的人{" "}
-          <strong>{previewRole(draft, { sub: splitSubsAndEmails(draft.allowedUsers).subs[0] ?? "1", email: null, groups: [] })}</strong>
-          ；按第一个组登录的人{" "}
-          <strong>
-            {previewRole(draft, {
-              sub: "0",
-              email: null,
-              groups: [splitListInput(draft.allowedGroups)[0] ?? "__none__"],
-            })}
-          </strong>
-          （admin = 可改配置；viewer = 只读；denied = 进不来）。
-        </div>
-      </Card>
+      <p className={styles.help}>登录准入与管理员角色统一在「用户管理」设置。</p>
 
       <Card
-        step={3}
+        step={2}
         title="连接校验"
         hint="校验 discovery、issuer 一致性、应用凭据与 PKCE 能力；回调地址请在 GitLab 应用里核对。"
         action={

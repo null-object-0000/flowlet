@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Banner, Button, Input, Switch, TextArea, Toast, Typography } from "@douyinfe/semi-ui-19";
+import { Banner, Button, Input, Switch, Toast, Typography } from "@douyinfe/semi-ui-19";
 import { SettingRow, SettingSection } from "../SettingRow";
 import { errorMessage } from "../../../shared/errors/AppError";
 import {
@@ -7,7 +7,6 @@ import {
   deleteGithubAuthProvider,
   getGithubAuthProvider,
   saveGithubAuthProvider,
-  splitListInput,
   type GithubProviderSummary,
 } from "../../../domains/settings/authProviders";
 import {
@@ -17,46 +16,19 @@ import {
 } from "../../../domains/settings/oidcAuthProvider";
 import { OidcAuthSection } from "./OidcAuthSection";
 
-/** 名单统一用「一行一个」的文本框：含 @ 的算邮箱，其余算登录名。 */
-function splitIdentities(value: string): { logins: string[]; emails: string[] } {
-  const items = splitListInput(value);
-  return {
-    logins: items.filter((item) => !item.includes("@")),
-    emails: items.filter((item) => item.includes("@")),
-  };
-}
-
-function joinIdentities(logins: string[], emails: string[]): string {
-  return [...logins, ...emails].join("\n");
-}
-
 type Draft = {
   enabled: boolean;
   clientId: string;
   clientSecret: string;
-  allowed: string;
-  admins: string;
-  orgs: string;
-  allowAny: boolean;
 };
 
 const EMPTY_DRAFT: Draft = {
   enabled: false,
   clientId: "",
   clientSecret: "",
-  allowed: "",
-  admins: "",
-  orgs: "",
-  allowAny: false,
 };
 
-/**
- * 「登录与访问」：管理台登录方式的管理员自助配置。
- *
- * 两段：GitLab / OIDC 与 GitHub OAuth。每段都有「启用」开关——开启哪些登录方式由管理员
- * 自己决定，而不是由部署环境写死。配好之后登录页会列出已启用的按钮；「可登录」决定谁能
- * 进来，「管理员」决定进来之后能不能改东西（没列进管理员的是只读）。
- */
+/** 登录提供器只负责认证连接；准入与角色在用户管理中配置。 */
 export function AuthTab() {
   const [summary, setSummary] = useState<GithubProviderSummary | null>(null);
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
@@ -73,10 +45,7 @@ export function AuthTab() {
         enabled: mode.enabled.includes("github"),
         clientId: next.client_id,
         clientSecret: "",
-        allowed: joinIdentities(next.allowed_logins, next.allowed_emails),
-        admins: joinIdentities(next.admin_logins, next.admin_emails),
-        orgs: next.allowed_orgs.join(", "),
-        allowAny: next.allow_any,
+
       });
     } catch (error) {
       Toast.error(errorMessage(error));
@@ -93,17 +62,9 @@ export function AuthTab() {
   const patch = (next: Partial<Draft>) => setDraft((current) => ({ ...current, ...next }));
 
   const payload = useMemo(() => {
-    const allowed = splitIdentities(draft.allowed);
-    const admins = splitIdentities(draft.admins);
     return {
       client_id: draft.clientId.trim(),
       client_secret: draft.clientSecret,
-      allowed_logins: allowed.logins,
-      allowed_emails: allowed.emails,
-      admin_logins: admins.logins,
-      admin_emails: admins.emails,
-      allowed_orgs: splitListInput(draft.orgs),
-      allow_any: draft.allowAny,
     };
   }, [draft]);
 
@@ -173,7 +134,7 @@ export function AuthTab() {
       <OidcAuthSection onSaved={() => void reload()} />
       <SettingSection
         title="GitHub 登录"
-        note={`${githubStatus} · 公网域名入口默认走 GitHub；与 GitLab 一样，谁能登录、谁能管理都在这里设置，保存立即生效。`}
+        note={`${githubStatus} · 登录准入与管理员角色统一在「用户管理」设置。`}
         keywords="github oauth 登录 单点登录 sso 认证 角色 只读"
       >
         <SettingRow
@@ -212,49 +173,6 @@ export function AuthTab() {
               style={{ width: 280 }}
             />
           }
-        />
-        <SettingRow
-          name="可登录"
-          help="一行一个，登录名或邮箱都行（含 @ 视为邮箱）。不填则任何人都进不来。"
-          control={
-            <TextArea
-              autosize={{ minRows: 2, maxRows: 6 }}
-              value={draft.allowed}
-              placeholder={"changen\nsomeone@example.com"}
-              onChange={(value) => patch({ allowed: value })}
-              style={{ width: 280 }}
-            />
-          }
-        />
-        <SettingRow
-          name="管理员"
-          help="一行一个。列进来的是管理员，其余可登录的人只能只读浏览；不填则所有可登录者都是管理员。"
-          control={
-            <TextArea
-              autosize={{ minRows: 2, maxRows: 6 }}
-              value={draft.admins}
-              placeholder="changen"
-              onChange={(value) => patch({ admins: value })}
-              style={{ width: 280 }}
-            />
-          }
-        />
-        <SettingRow
-          name="可登录组织"
-          help="填了会自动申请 read:org；组织成员可登录，但只读。"
-          control={
-            <Input
-              value={draft.orgs}
-              placeholder="acme"
-              onChange={(value) => patch({ orgs: value })}
-              style={{ width: 280 }}
-            />
-          }
-        />
-        <SettingRow
-          name="允许任何人登录"
-          help="管理台能读全部服务凭据，打开前请确认后果。"
-          control={<Switch checked={draft.allowAny} onChange={(value) => patch({ allowAny: value })} />}
         />
         <SettingRow
           name="回调地址"

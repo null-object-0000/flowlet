@@ -1,5 +1,11 @@
 # Agent 终端规划
 
+> **已归档（2026-11-17）— 历史方案/快照，不作为当前实施或运行指引。**
+> 正文保留当时的技术判断与证据；旧宿主路径、接口草案和测试记录可能已失效。
+> 当前仅维护 Electron + Node/TS 与 Web/Docker，不保留 Rust/Tauri 回滚。
+> 当前实现见 [架构](architecture.md)、[Electron](desktop-electron.md)；
+> 重新启动任何未实现方案前，必须按当前代码重新设计、验证安全边界。
+
 ## 1. 背景与结论
 
 Flowlet 计划增加独立的“Agent 终端”菜单，让用户直接在应用内打开并操作已安装 Agent CLI 的内嵌终端，例如 Claude Code、OpenCode CLI 和 Hermes Agent。

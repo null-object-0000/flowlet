@@ -1,4 +1,4 @@
-import { invokeCommand } from "../../platform/tauri/client";
+import { invokeCommand } from "../../platform/host/client";
 import type {
   AccountWorkspaceStatus,
   AccountWorkspaceSyncResult,

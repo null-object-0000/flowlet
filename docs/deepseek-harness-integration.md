@@ -81,7 +81,7 @@ DSH 原生 DeepSeek Provider 指向 Flowlet `/anthropic` 时，部分中转渠�
 
 同一渠道还可能省略 `tool_use` 起始块的 `input` 对象，DSH 在 `startBlock` 读取
 `native.input` 时会报 `DeepSeek Messages expected a JSON object`，在首个工具调用处中断。
-Flowlet 在 `proxy_anthropic_compat.rs` 中为上述起始块分别追加 `thinking: ""` 或
+Flowlet 在 `packages/flowlet-core/src/proxy/anthropic-compat.ts` 中为上述起始块分别追加 `thinking: ""` 或
 `input: {}`；工具参数仍来自后续 `input_json_delta`，不拼装、不改写增量内容。
 范围为所有客户端的 Anthropic 未压缩（无 Content-Encoding 或 identity）SSE 响应；
 不依赖模型、渠道或 UA，不做跨协议转换。仅修复完整单行 data JSON 中缺失的字段，
@@ -89,7 +89,7 @@ Flowlet 在 `proxy_anthropic_compat.rs` 中为上述起始块分别追加 `think
 解析支持跨网络 chunk、UTF-8 分片以及 LF / CRLF / CR；每行最多缓冲 64 KiB，
 超长、无法解析、多行 JSON、不完整尾部和压缩响应原样透传。
 
-兼容层位于 `capture_timed_stream` 之后，请求详情与用量解析仍基于上游原始字节；
+兼容层位于 上游原文捕获阶段 之后，请求详情与用量解析仍基于上游原始字节；
 仅发往客户端的响应补字段，并移除可能失效的 Content-Length。传输错误和空闲超时
 继续向客户端传播。本行为是响应原样透传的受控例外，修改时须同步 `AGENTS.md`。
 无需新增配置或数据库迁移；更新 Flowlet 可执行文件并重启应用后生效，DSH 无需改配置。
@@ -103,8 +103,8 @@ in the thinking mode must be passed back to the API.`。DSH 的 `llm-pi-ai` 适�
 由 URL 探测决定，且 DSH 的 Provider 配置 schema 无法透传该开关）；经 Flowlet 本地端点
 `http://127.0.0.1:18640/v1` 转发时识别不到，多轮会话就会被 DeepSeek 拒绝。
 
-Flowlet 在代理层处理：`ensure_reasoning_content_passback`（`proxy_http.rs`，由
-`proxy.rs` 在 `rewrite_model` 后调用）为转发到 DeepSeek 推理模型（按
+Flowlet 在代理层处理：`ensureReasoningContentPassback`（`packages/flowlet-core/src/proxy/http.ts`，由
+`forward.ts` 在模型改写后调用）为转发到 DeepSeek 推理模型（按
 `canonical_model_key` 归一后的 `deepseek-v4-flash` / `deepseek-v4.1-flash` /
 `deepseek-v4-flash-vision-exp` / `deepseek-v4-pro`，覆盖千问 Token Plan
 等渠道承载的 DeepSeek 模型）的 OpenAI chat/completions 请求中，缺失该字段的
@@ -134,8 +134,8 @@ pin 到 DeepSeek 官方账号。此时历史里由中转生成、缺少 thinking
 后请求切到 DeepSeek 官方账号，第 82 步请求被拒；用户发出新的用户轮后旧历史不再被校验，
 会话自动恢复）。
 
-Flowlet 在代理层处理：`ensure_anthropic_thinking_passback`（`proxy_http.rs`，由
-`proxy.rs` 在 `rewrite_model` 与 `ensure_reasoning_content_passback` 之后调用）为转发到
+Flowlet 在代理层处理：`ensureAnthropicThinkingPassback`（`packages/flowlet-core/src/proxy/http.ts`，由
+`forward.ts` 在模型改写与 reasoning 回传补全之后调用）为转发到
 DeepSeek 推理模型（`canonical_model_key` 归一后的 `deepseek-v4-flash` /
 `deepseek-v4.1-flash` / `deepseek-v4-flash-vision-exp` / `deepseek-v4-pro`）的 Anthropic
 Messages 请求，在当前用户轮内缺失 `thinking` 块的 `assistant` 消息内容数组**最前**插入
@@ -145,11 +145,9 @@ Messages 请求，在当前用户轮内缺失 `thinking` 块的 `assistant` 消�
 Messages 生效。修改该行为须同步 `AGENTS.md` 第 5 节与本说明。
 
 该补全不能替代上游能力：它只补“缺失字段”，不伪造 thinking 内容（空串）也不补 signature；
-跨上游 thinking 的语义仍以真实上游为准。回归测试为 `proxy_tests.rs` 的
-`ensure_anthropic_thinking_passback_*` 三组单元用例（当前轮补齐、已完成轮次不动、
-非 DeepSeek/非 Anthropic/thinking 未开启原样透传与别名归一），以及代理链路的
-`anthropic_thinking_route_injects_thinking_passback` —— 该用例模拟缺少 thinking 的
-assistant 工具调用历史，断言转发到上游的请求体已补齐空 thinking 块且其余内容不变。
+跨上游 thinking 的语义仍以真实上游为准。Node 回归应覆盖当前轮补齐、已完成轮次不动、
+非 DeepSeek/非 Anthropic/thinking 关闭时原样透传、别名归一，以及最终上游请求捕获一致性。
+测试入口为 `packages/flowlet-core/src/proxy/__tests__/`，不要以旧宿主测试名当作当前覆盖证据。
 
 ### Responses input.status 归一（代理层）
 
@@ -169,8 +167,7 @@ turn 32/33 连续 400；用同一请求体直连可稳定复现，把 `status: n
 或删掉该键后立即 200）。Flowlet 的候选池又可能横跨不同上游，A 家吐出的 item 会被回放到
 B 家，因此这类差异必须在网关归一。
 
-Flowlet 在代理层处理：Rust Host 的 `normalize_responses_input_items`（`proxy_http.rs`，由
-`proxy.rs` 在候选循环前调用一次，与候选无关）与 Node Host 的
+Flowlet 在代理层处理：Node Host 的
 `normalizeResponsesInputItems`（`packages/flowlet-core/src/proxy/http.ts`，由 `forward.ts`
 在 attempt 循环前调用一次）对 `POST /v1/responses` 请求的 `input[*]`：
 `status` 为 `null`、空串或未知取值时改写为 `"completed"`；`encrypted_content` 为 `null`
@@ -180,9 +177,8 @@ Flowlet 在代理层处理：Rust Host 的 `normalize_responses_input_items`（`
 `AGENTS.md` 第 5 节与本说明。
 
 该归一不能替代上游修复：`status: null` 仍是上游缺陷，网关只在转发前做兼容，使已经带上
-坏 item 的客户端历史可以继续使用。回归测试为 `proxy_tests.rs` 的
-`normalize_responses_input_items_*` 两组单元用例（null/空串/未知取值归一与
-`encrypted_content` 清理、非 Responses/字符串 input/无修改时原样透传）。
+坏 item 的客户端历史可以继续使用。Node 回归应覆盖 null/空串/未知值归一、
+`encrypted_content` 清理，以及非 Responses/字符串 input/无需改动时的字节级透传。
 
 一键接入直接修改 DSH 官方配置文件。Flowlet 使用与 DSH 相同的相邻 `<file>.lock` 独占锁协议，
 按叶子路径合并 `llm-pi-ai.providers.flowlet`、`agent-default-model.provider`、
@@ -274,7 +270,7 @@ base-bundle Profile** 的 `cordis.patch.yml` 中部署一个受管 `deepseek-har
 解析，Flowlet 不写入任何插件文件、不修改 DSH npm 包（`dsh-mcp-client` 本身也只桥接
 工具，Resources/Prompts 官方暂不消费）。
 
-受管配置模型（`McpServerSpec`，Rust 与前端类型同步，字段 camelCase）：
+受管配置模型（`McpServerSpec`，Node 与前端类型同步，字段 camelCase）：
 
 - `id`：Flowlet 内部稳定 id（`[A-Za-z0-9_-]`），同时决定插件条目 id `mcp-<id>`；
 - `serverName`：DSH 工具命名空间，`[A-Za-z0-9_-]{1,32}`，存活实例中唯一；
@@ -401,9 +397,9 @@ v0–v3 轨迹事件的解析覆盖（与官方 `ui-conversation` / `ui-trajecto
   对话渲染审批历史行。
 - `llm/retry`：投影为 `model-retry` 事件（次数/延迟/失败原因）；`llm/retry-started` 不单列。
 
-回归夹具见 `src-tauri/tests/fixtures/dsh/`（真实会话裁剪，含未 seeded v3、seeded v3 与 v0），
-另有 `#[ignore]` 的 `dsh_real_store_lists_and_projects_every_session` 可对真实
-`~/.dsh/sessions` 全量核对列表与投影。
+回归夹具见 `packages/flowlet-core/test-fixtures/dsh/`（真实会话裁剪）。
+原生读取与投影实现位于 `packages/flowlet-core/src/agent/sessions/deepseek-harness.ts`；
+真实个人会话核对只能显式授权、只读执行，不能当作自动测试输入或提交到仓库。
 
 ### 会话详情里的本机目录
 

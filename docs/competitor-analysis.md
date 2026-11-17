@@ -1,5 +1,11 @@
 # Flowlet 竞品分析报告
 
+> **已归档（2026-11-17）— 历史方案/快照，不作为当前实施或运行指引。**
+> 正文保留当时的技术判断与证据；旧宿主路径、接口草案和测试记录可能已失效。
+> 当前仅维护 Electron + Node/TS 与 Web/Docker，不保留 Rust/Tauri 回滚。
+> 当前实现见 [架构](architecture.md)、[Electron](desktop-electron.md)；
+> 重新启动任何未实现方案前，必须按当前代码重新设计、验证安全边界。
+
 > 快照时间：原有 GitHub 项目为 2026-07-28；扩展扫描与 CCPark npm 补充快照为 2026-07-29（Asia/Shanghai）。
 >
 > 本报告优先使用竞品官方仓库、官方 README、官方文档和 GitHub API；动态数据均为快照，不等同于活跃用户或商业采用。

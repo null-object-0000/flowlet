@@ -1,10 +1,16 @@
 .git
+# Never upload retired local host artifacts or private data to a Docker context.
+src-tauri
 **/node_modules
-**/target
-.cargo-target-check
 dist
 dist-web
-dist-mobile
+dist-desktop
+packages/flowlet-desktop/dist-host
+packages/flowlet-desktop/release
+packages/flowlet-desktop/build
+.tmp-test
+.tmp-cache
+.tmp-npm
 website/dist
 **/*.log
 **/*.sqlite*
@@ -19,8 +25,6 @@ website/dist
 antigravity-accounts
 flowlet-data
 .DS_Store
-src-tauri/gen
-src-tauri/binaries
 packages/flowlet-agent-bridge/bin
 website/.next
 .worktrees

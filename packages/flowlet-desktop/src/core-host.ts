@@ -8,6 +8,7 @@
 // 本模块不 import electron：平台能力只通过 DesktopHostBridge 注入。
 import { startHost } from "../../flowlet-core/src/index.ts";
 import type { DesktopHostBridge } from "../../flowlet-core/src/desktop/types.ts";
+export { discoverAgentSourceRoots } from "../../flowlet-core/src/agent/sessions/source-roots.ts";
 
 export interface CoreHostStartOptions {
   readonly host: DesktopHostBridge;

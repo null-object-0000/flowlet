@@ -1,85 +1,91 @@
 # 安装包自动构建
 
-仓库通过 `.github/workflows/build-installers.yml` 构建桌面安装包和 Android APK。
+当前仅发布 **Electron + Node/TS 桌面端**；Rust/Tauri 安装包、回滚构建及移动分发已移除。
+Web/Docker 部署见 [Docker 部署文档](docker.md)，官网部署见 [website/README.md](../website/README.md)。
 
 ## 触发方式
 
-- 在 GitHub 仓库的 **Actions → Build installers → Run workflow** 中手动触发。构建结果保存在该次运行的 Artifacts 中。
-- 发布 GitHub Release 时自动触发。构建结果除保存在 Artifacts 外，还会自动上传到对应 Release。
+正式安装包由 `.github/workflows/build-installers.yml` 构建：
 
-Release 应指向需要构建的版本提交。发布前请同步更新 `package.json`、`src-tauri/Cargo.toml` 和 `src-tauri/tauri.conf.json` 中的版本号。
+- Actions → **Build installers → Run workflow**：产物保存在本次 Artifacts；
+- 发布 GitHub Release：构建并上传到对应 Release。Release 必须指向需要发布的版本提交。
 
-## 平台验证状态
+`.github/workflows/desktop-electron.yml` 提供独立的 Electron 构建与 Linux 冒烟；
+具体触发条件与矩阵以工作流文件为准，不再与旧宿主双轨发版。
 
-当前主要开发与完整回归环境是 **Windows 11 原生环境**，开发流程未启用或依赖 WSL。
+发布前用 `npm run version:set -- <版本号>` 同步版本；脚本更新根 `package.json`、锁文件与
+`packages/flowlet-desktop/package.json`；其它 workspace 版本如需独立发布须单独核对。不再维护 Cargo 或旧宿主配置版本。
 
-GitHub Actions 会为 Windows、Linux 和 macOS 生成产物，但“自动构建成功”不等同于已经完成
-对应系统的真机功能回归。Linux 与 macOS 当前尚未完成作者真机回归验证；后续在对应环境完成
-安装、启动、代理、托盘、Agent 接入与核心数据链路测试后，再更新支持状态。
+## 依赖与本地构建
+
+CI 使用 Node.js 26、Go 1.27.x（官方 ACP Go 辅助程序）和 Python 3（Windows/Linux 便携 ZIP）。
+Electron 与 electron-builder 版本来自 `packages/flowlet-desktop/package.json`。
+保留 Go ACP 桥不表示仍有 Rust 运行时依赖。
+
+```bash
+npm ci
+npm run node:commands
+npm run check
+npm run node:typecheck
+npm run desktop:typecheck
+npm run fetch:catalogs
+npm run desktop:dist
+# Windows/Linux 便携 ZIP：
+node scripts/build-desktop-portable.mjs --no-build
+```
+
+`npm run node:commands` 运行 `scripts/check-command-contract.mjs`，只核对静态命令名称、
+Node 注册和 Web 权限白名单；不验证参数、返回值、动态调用或实际行为覆盖率。
+发布仍需相关 Node 测试、`npm run node:e2e` 和 Electron 冒烟，不能用静态检查代替。
 
 ## 构建产物
 
-| 平台 | 架构 | 产物 | 当前验证状态 |
-| --- | --- | --- | --- |
-| Windows 11 | x64 | NSIS `.exe`、MSI `.msi`、便携版 `.zip` | 主要开发与完整回归环境（原生、无 WSL） |
-| Linux | x64 | AppImage、Debian `.deb` | CI 自动构建，尚未完成作者真机回归 |
-| macOS | Apple Silicon | `.dmg` | CI 自动构建并使用 ad-hoc 签名，尚未完成作者完整真机回归，未经过 Apple 公证 |
-| macOS | Intel | `.dmg` | CI 自动构建并使用 ad-hoc 签名，尚未完成作者完整真机回归，未经过 Apple 公证 |
-| Android | arm64 | 正式签名 `.apk` | 实验性移动辅助端 |
+产物目录为 `packages/flowlet-desktop/release/`，命名模板为
+`Flowlet_${version}_${os}_${arch}.${ext}`（electron-builder 实际生成的安装器后缀以 Release 为准）。
 
-各平台任务彼此独立；单个平台失败不会取消其他平台正在执行的构建。
+| 平台 | 架构 | 产物 |
+| --- | --- | --- |
+| Windows | x64 | NSIS `.exe`、`.zip`、带 `portable.tag` 的便携 ZIP；不再提供 MSI |
+| Linux | x64 | AppImage、Debian `.deb`、便携 ZIP |
+| macOS | Apple Silicon / Intel | `.dmg` |
 
-## Electron 桌面端（迁移验证包）
+便携目录位于 `release/portable/Flowlet_<ver>_<platform>_<arch>_portable/`。
+`npm run desktop:update:portable` 只更新 Electron 布局，保留配置、SQLite、日志及用户数据；
+操作前应退出并备份，详见 [Electron 宿主](desktop-electron.md#便携版构建与更新electron)。
 
-桌面端迁移到 Electron 期间，`.github/workflows/desktop-electron.yml` 会构建
-**迁移验证包**（Windows NSIS/zip、Linux AppImage/deb、macOS dmg），与上面的 Tauri
-正式产物并行，**不覆盖** Release 资产：
+## 平台验证状态
 
-- 触发：Actions → **Desktop (Electron) build & smoke** → Run workflow；
-  推送 `v*-beta*` 标签时也会触发；
-- Linux job 会额外跑 `node --test packages/flowlet-core/src`、
-  `node scripts/desktop-command-parity.mjs --check`（Rust 154 条命令覆盖门禁）、
-  `npm run desktop:smoke`（首屏 + `/health`）与 `npm run desktop:smoke:pages`
-  （逐路由渲染 + 截图 + console/命令错误），产物里带 `.flowlet-dev-data/desktop-pages/`
-  的截图与 `report.json`；
-- Windows / macOS job 目前只构建与跑 Node 测试，**真机回归仍需人工完成**（见
-  `docs/desktop-electron.md` §8）。
+既有完整回归主要来自 Windows 11 原生环境（无 WSL）。CI 能构建 Windows/Linux/macOS
+不等于已完成当前版本的真机验证。每次发版都应记录实际验证的版本、系统与结果；
+不能将旧迁移记录或某一次 Linux xvfb 冒烟当作当前全部平台已通过。
 
-本地对应命令：`npm run desktop:smoke:pages`（可传 `--db=<sqlite>` 用老用户数据库副本）。
-
-## Android 签名
-
-Android Release job 需要配置以下 GitHub Actions Secrets：
-
-- `ANDROID_KEYSTORE_BASE64`：release keystore 文件的 Base64 内容；
-- `ANDROID_KEYSTORE_PASSWORD`：keystore 密码；
-- `ANDROID_KEY_ALIAS`：签名 Key Alias；
-- `ANDROID_KEY_PASSWORD`：签名 Key 密码。
-
-流水线会生成仅包含 `arm64-v8a` 原生库的签名 APK，并在上传前使用 Android SDK 的
-`apksigner` 验证签名。keystore 和临时 `keystore.properties` 只存在于 Actions Runner，
-不会写入仓库或上传为构建产物。
+人工回归至少涵盖安装/升级、旧库打开、代理及流式请求、托盘关闭/退出、Agent 配置
+inspect→apply→reapply→restore、S3/LAN 同步、账号工作区与 host/client 模式边界。
+未验证项必须留在发布说明中。
 
 ## 桌面签名说明
 
-Windows 安装包当前未签名。macOS 构建通过 `APPLE_SIGNING_IDENTITY=-` 使用 ad-hoc
-签名，满足 Apple Silicon 对应用签名结构的要求；流水线会在构建后、上传 Release 前运行
-`codesign --verify` 并确认签名类型为 `adhoc`，验证失败的 DMG 不会上传。ad-hoc 签名
-不代表开发者身份，也不等同于 Apple 公证。
+Windows 安装包当前未配置正式代码签名。macOS 的 electron-builder 配置为 `identity: "-"`
+（ad-hoc），正式发布工作流会挂载 DMG 并运行 `codesign --verify`，确认签名类型为 `adhoc`
+后才上传。ad-hoc 不代表开发者身份，也不等同于 Apple 公证。
 
-从浏览器下载未公证的 DMG 后，Gatekeeper 仍可能阻止首次启动。只应对从本仓库官方
-Release 下载并已核对 SHA-256 的文件执行以下操作：
+只对从官方 Release 下载且核对 SHA-256 的文件手动放行：先在系统设置的“隐私与安全性”
+中尝试“仍要打开”；如仍被隔离，可执行：
 
-1. 打开 DMG，将 Flowlet 拖入 `Applications`；
-2. 在终端中执行 `xattr -dr com.apple.quarantine /Applications/Flowlet.app`；
-3. 再从“应用程序”或终端打开 Flowlet。
+```bash
+xattr -dr com.apple.quarantine /Applications/Flowlet.app
+open /Applications/Flowlet.app
+```
 
-正式签名后应移除上述手动放行说明，并将流水线切换为 `Developer ID Application`
-证书签名、Apple notarization 和 stapling。Windows 正式对外分发前也仍需补充代码签名。
+正式签名后应改为 Developer ID、notarization 与 stapling，并删除不再需要的手动放行说明。
 
-## macOS 图标
+## 资源来源
 
-macOS 使用 `src-tauri/icons/macos-icon.png` 作为专用图标源，并将生成的
-`macos-icon.icns` 配置到 Tauri bundle。该版本使用接近满画布的背景层承载 Flowlet 标记，
-避免新版 macOS 为大面积透明的旧式图标自动添加灰色兼容底板。其它平台继续使用
-`src-tauri/icon-manifest.json` 中的通用透明 logo，不受此次调整影响。
+- 图标：仓库根 `resources/icons/`，electron-builder 的 `buildResources` 与平台 icon 指向此处；
+- 模型规格/价格快照：`resources/catalogs/models-cn.json`、`resources/catalogs/models-dev.json`；
+- 可选受管 Agent 扩展：`resources/agent-plugins/`；
+- `scripts/build-desktop-host.mjs` 将运行时资源装配到 `dist-host/runtime`，最终随包放在
+  `resources/runtime`；前端位于随包 `resources/desktop-static`。
+
+不要将应用资源目录与用户数据目录混淆。用户数据定位以
+`packages/flowlet-desktop/src/paths.ts` 为准。

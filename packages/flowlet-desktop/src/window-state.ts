@@ -1,7 +1,7 @@
 // 主窗口尺寸/位置/最大化记忆。
 //
-// Rust 使用 tauri-plugin-window-state（只恢复 SIZE | POSITION | MAXIMIZED，不恢复
-// VISIBLE）。这里等价实现为数据目录下的 JSON；启动后按显示器 workArea 校正，
+// 只恢复尺寸、位置与最大化，不恢复可见状态。数据保存在数据目录 JSON；
+// 启动后按显示器 workArea 校正，
 // 避免上次关闭位置在多屏变化后落到屏幕外。
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

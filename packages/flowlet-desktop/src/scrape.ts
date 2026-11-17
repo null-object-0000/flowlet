@@ -28,8 +28,7 @@ const MAX_LIVE_WINDOWS = 3;
 /**
  * 最小可用抓取计划。与 Rust `ScrapeModeRuntime` 的对应关系：
  * - consoleUrl / secondary / tertiary → 1–3 阶段导航；
- * - interceptorJs → document-start 注入（builtin config 里会调用
- *   `__TAURI_INTERNALS__.invoke('handle_intercepted_response', ...)`，宿主提供兼容 shim）；
+ * - interceptorJs → document-start 注入，捕获保留在页面 stash / CDP，不提供宿主 IPC；
  * - slotRules + requiredSlots → 按 URL 归类响应、收齐后视为捕获完成；
  * - extractorJs → 捕获完成后在页面执行，返回结构化结果。
  *
@@ -356,15 +355,8 @@ export class ScrapeManager {
     });
     await wc.debugger.sendCommand("Page.enable");
     if (typeof plan.interceptorJs === "string" && plan.interceptorJs.trim() !== "") {
-      // 内置 config 的 interceptor 调用 `__TAURI_INTERNALS__.invoke`；提供兼容 shim，
-      // 让沿用 Rust 配置的抓取脚本零改写运行。ACK 由宿主在 loading 事件后忽略。
-      const shim = [
-        "globalThis.__TAURI_INTERNALS__ = globalThis.__TAURI_INTERNALS__ || {",
-        "  invoke: () => Promise.resolve(null),",
-        "};",
-        plan.interceptorJs,
-      ].join("\n");
-      await wc.debugger.sendCommand("Page.addScriptToEvaluateOnNewDocument", { source: shim });
+      // 捕获由 CDP 与页面 stash 完成；不向第三方页面暴露宿主/通用 IPC。
+      await wc.debugger.sendCommand("Page.addScriptToEvaluateOnNewDocument", { source: plan.interceptorJs });
     }
   }
 

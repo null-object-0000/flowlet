@@ -1,5 +1,11 @@
 # Electron + Node 迁移骨架 PoC
 
+> **已归档（2026-11-17）— 历史方案/快照，不作为当前实施或运行指引。**
+> 正文保留当时的技术判断与证据；旧宿主路径、接口草案和测试记录可能已失效。
+> 当前仅维护 Electron + Node/TS 与 Web/Docker，不保留 Rust/Tauri 回滚。
+> 当前实现见 [架构](../../docs/architecture.md)、[Electron](../../docs/desktop-electron.md)；
+> 重新启动任何未实现方案前，必须按当前代码重新设计、验证安全边界。
+
 > 目的：用**可运行的最小骨架**验证 Flowlet 迁移主航道成立——
 > **Electron 壳 + Node 命令服务复用现有 `dist-web` 前端，前端零改动**。
 > 这是 `docs/electron-migration-plan.md` P0 阶段的证据，不是生产实现。

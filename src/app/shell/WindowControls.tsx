@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@douyinfe/semi-ui-19";
 import { IconClose, IconMaximize2, IconMinus, IconRestore } from "@douyinfe/semi-icons";
 import { isDesktopHost } from "../../platform/desktop/mode";
-import { windowCommands } from "../../platform/tauri/window";
+import { windowCommands } from "../../platform/host/window";
 import { WindowResizeHandles } from "./WindowResizeHandles";
 import styles from "./WindowControls.module.css";
 import { useAppPreferences } from "../preferences/AppPreferences";
@@ -27,6 +27,7 @@ export function WindowControls({ standalone = false }: { standalone?: boolean })
   const [isMaximized, setIsMaximized] = useState(false);
 
   useEffect(() => {
+    if (!isDesktopHost) return;
     let disposed = false;
     let unlisten: (() => void) | undefined;
 
@@ -56,24 +57,6 @@ export function WindowControls({ standalone = false }: { standalone?: boolean })
     };
   }, []);
 
-  const onDragRegionMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
-    if (event.buttons !== 1) return;
-    if (isDesktopHost) {
-      // desktop：CSS app-region 已接管拖动与双击最大化，不能再 preventDefault
-      // 或调用 JS 拖动，否则会与平台行为冲突。
-      return;
-    }
-    if (event.detail === 2) {
-      // 双击标题栏：切换最大化/还原。Windows 上 startDragging 会进入系统拖动
-      // 模态循环并吞掉 dblclick，因此不能依赖 onDoubleClick，需在 mousedown 直接处理。
-      // preventDefault 阻断双击默认的文本选中行为。
-      event.preventDefault();
-      runWindowCommand(() => windowCommands.toggleMaximize(), "toggle-maximize");
-      return;
-    }
-    event.preventDefault();
-    runWindowCommand(() => windowCommands.startDragging(), "start-dragging");
-  };
   const toggleMaximize = () => runWindowCommand(() => windowCommands.toggleMaximize(), "toggle-maximize");
 
   const dragRegionClassName = [
@@ -87,12 +70,13 @@ export function WindowControls({ standalone = false }: { standalone?: boolean })
     .filter(Boolean)
     .join(" ");
 
+  if (!isDesktopHost) return null;
+
   return (
     <>
       <WindowResizeHandles />
       <div
         className={dragRegionClassName}
-        onMouseDown={onDragRegionMouseDown}
         role="presentation"
         data-testid="titlebar-drag-region"
       />

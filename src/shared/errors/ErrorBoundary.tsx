@@ -1,6 +1,6 @@
 import React, { Component, type ReactNode } from "react";
 import type { AppError } from "./AppError";
-import { toAppError } from "../../platform/tauri/client";
+import { toAppError } from "../../platform/host/client";
 
 type Props = {
   children: ReactNode;

@@ -1,18 +1,17 @@
 # Flowlet 安装与使用手册
 
-Flowlet 桌面端支持 Windows、macOS 和 Linux；Android APK 是实验性的移动辅助端，
-不能替代桌面端的本地代理与账号管理能力。请只从
+Flowlet 桌面端使用 Electron + Node/TS，目标平台为 Windows、macOS 和 Linux；不再提供 Rust/Tauri 回滚版本。
+独立 Web/Docker 部署见 [Docker 部署文档](docker.md)。桌面安装包请只从
 [Flowlet GitHub Releases](https://github.com/null-object-0000/flowlet/releases) 下载。
 
 ## 选择安装包
 
 | 系统 | 推荐安装包 | 说明 |
 | --- | --- | --- |
-| Windows x64 | `windows_x64-setup.exe` | 常规安装首选；也提供 MSI 和便携版 ZIP |
-| macOS Apple Silicon | `darwin_aarch64.dmg` | 适用于 M1、M2、M3、M4 等 Apple 芯片 Mac |
-| macOS Intel | `darwin_x64.dmg` | 适用于 Intel 芯片 Mac |
-| Linux x64 | `linux_amd64.AppImage` | 免安装运行；也提供 Debian DEB |
-| Android arm64 | `arm64.apk` | 实验性移动辅助端 |
+| Windows x64 | NSIS `.exe`（x64） | 常规安装首选；也提供便携版 ZIP，不再提供 MSI |
+| macOS Apple Silicon | `.dmg`（arm64） | 适用于 M1、M2、M3、M4 等 Apple 芯片 Mac |
+| macOS Intel | `.dmg`（x64） | 适用于 Intel 芯片 Mac |
+| Linux x64 | `.AppImage`（x64） | 免安装运行；也提供 Debian DEB |
 
 ## Windows
 
@@ -32,8 +31,8 @@ Flowlet 桌面端支持 Windows、macOS 和 Linux；Android APK 是实验性的�
 uname -m
 ```
 
-- 输出 `arm64`：下载 Apple Silicon / `darwin_aarch64.dmg`；
-- 输出 `x86_64`：下载 Intel / `darwin_x64.dmg`。
+- 输出 `arm64`：下载 Apple Silicon / arm64 DMG；
+- 输出 `x86_64`：下载 Intel / x64 DMG。
 
 ### 安装
 
@@ -61,7 +60,7 @@ open /Applications/Flowlet.app
 计算 DMG 校验值的示例：
 
 ```bash
-shasum -a 256 ~/Downloads/Flowlet_<版本号>_darwin_aarch64.dmg
+shasum -a 256 ~/Downloads/<下载的DMG文件名>
 ```
 
 ## Linux
@@ -69,23 +68,17 @@ shasum -a 256 ~/Downloads/Flowlet_<版本号>_darwin_aarch64.dmg
 AppImage：
 
 ```bash
-chmod +x Flowlet_<版本号>_linux_amd64.AppImage
-./Flowlet_<版本号>_linux_amd64.AppImage
+chmod +x Flowlet_<版本号>_linux_x64.AppImage
+./Flowlet_<版本号>_linux_x64.AppImage
 ```
 
 Debian / Ubuntu：
 
 ```bash
-sudo apt install ./Flowlet_<版本号>_linux_amd64.deb
+sudo apt install ./Flowlet_<版本号>_linux_x64.deb
 ```
 
 Linux 产物由 CI 自动构建，目前尚未完成作者完整真机回归。
-
-## Android 移动辅助端
-
-下载 arm64 APK 后，按照 Android 系统提示允许当前文件来源安装应用。移动端用于通过自有
-S3 或局域网查看多设备用量、会话和 Agent 状态，并执行部分轻量操作；渠道账号、本地代理
-和完整配置仍需在桌面端管理。
 
 ## 首次使用
 

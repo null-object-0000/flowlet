@@ -69,15 +69,17 @@ function copyRuntimeResources() {
   for (const name of ["config.json", "model-catalog.json", "package.json"]) {
     if (copyIfExists(join(REPO_ROOT, name), join(RUNTIME_DIR, name))) copied.push(name);
   }
-  // models-cn / models-dev：构建时由 src-tauri 目录提供（与 tauri:build 的抓取产物一致）。
+  // 模型目录保留 resources/catalogs 布局，匹配 Node Host 的内置目录候选。
   for (const name of ["models-cn.json", "models-dev.json"]) {
-    const source = join(REPO_ROOT, "src-tauri", name);
-    if (copyIfExists(source, join(RUNTIME_DIR, name))) copied.push(name);
+    const source = join(REPO_ROOT, "resources", "catalogs", name);
+    if (copyIfExists(source, join(RUNTIME_DIR, "resources", "catalogs", name))) copied.push(name);
+    else throw new Error(`缺少内置模型目录：${source}（先执行 npm run fetch:catalogs）`);
   }
   // 图标：托盘 + 打包用。
   const iconDir = join(RUNTIME_DIR, "icons");
   for (const name of ["tray.png", "icon.png", "icon.ico", "icon.icns"]) {
-    copyIfExists(join(REPO_ROOT, "src-tauri", "icons", name), join(iconDir, name));
+    const source = join(REPO_ROOT, "resources", "icons", name);
+    if (!copyIfExists(source, join(iconDir, name))) throw new Error(`缺少桌面图标：${source}`);
   }
   // 自定义抓取描述符（如果仓库根存在）。
   const customScrape = join(REPO_ROOT, "custom-scrape");
@@ -85,13 +87,6 @@ function copyRuntimeResources() {
     mkdirSync(join(RUNTIME_DIR, "custom-scrape"), { recursive: true });
     for (const name of readdirSafe(customScrape)) copyIfExists(join(customScrape, name), join(RUNTIME_DIR, "custom-scrape", name));
   }
-  // electron-builder 的 buildResources 目录。
-  const buildIcons = join(DESKTOP_DIR, "build");
-  mkdirSync(join(buildIcons, "icons"), { recursive: true });
-  copyIfExists(join(REPO_ROOT, "src-tauri", "icons", "icon.png"), join(buildIcons, "icon.png"));
-  copyIfExists(join(REPO_ROOT, "src-tauri", "icons", "icon.ico"), join(buildIcons, "icon.ico"));
-  copyIfExists(join(REPO_ROOT, "src-tauri", "icons", "icon.icns"), join(buildIcons, "icon.icns"));
-  copyIfExists(join(REPO_ROOT, "src-tauri", "icons", "icon.png"), join(buildIcons, "icons", "512x512.png"));
   console.log(`[build-desktop-host] runtime 资源：${copied.join(", ")}`);
 }
 

@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+// These contracts exercise the local desktop Host's config.json path.
+vi.mock("../../platform/web/mode", () => ({ isWebHost: false }));
+
 const invokeMock = vi.fn<(command: string, args?: Record<string, unknown>) => Promise<unknown>>();
 
-vi.mock("../../platform/tauri/client", () => ({
+vi.mock("../../platform/host/client", () => ({
   invokeCommand: (command: string, args?: Record<string, unknown>) => args === undefined ? invokeMock(command) : invokeMock(command, args),
   toAppError: (error: unknown, code: string) => ({ code, message: String(error), retryable: true }),
 }));

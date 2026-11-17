@@ -157,7 +157,7 @@ export function createClientGateway(options: ClientGatewayOptions): ClientGatewa
       for (const [name, value] of upstream.headers.entries()) {
         const key = name.toLowerCase();
         if (HOP_BY_HOP.has(key)) continue;
-        if (key === "content-encoding" || key === "content-length") continue;
+        if (key === "content-encoding" || key === "content-length" || key === "set-cookie") continue;
         response.setHeader(name, value);
       }
       response.setHeader("cache-control", upstream.headers.get("cache-control") ?? "no-store");

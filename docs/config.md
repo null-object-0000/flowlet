@@ -2,7 +2,7 @@
 
 `config.json` 是 Flowlet 的**渠道与运行时配置文件**，位于项目根目录（与 `package.json` 同级）。
 
-Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `write_config` 提供底层读写能力；当前正式前端没有通用配置编辑入口。
+Node Host 在启动时读取它，并通过桌面 HTTP command `read_config` / `write_config` 提供底层读写能力；当前正式前端没有通用配置编辑入口。
 
 ---
 
@@ -10,43 +10,40 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 
 | 场景 | 实际路径 |
 |------|----------|
-| 桌面应用（便携版 / 安装版） | `flowlet.exe` 同级目录下的 `config.json` |
-| headless / Docker 模式 | `FLOWLET_CONFIG_PATH` 指定路径；默认数据库同目录的 `config.json`（Docker 为 `/data/config.json`） |
-| 前端开发（`bun run dev`） | 项目根目录 `config.json` |
+| Electron 开发 | 默认 `.flowlet-dev-data/desktop/config.json`；`--data-dir` 可覆盖 |
+| Electron 便携版 | 有 `portable.tag` 的可写可执行文件目录下 `config.json` |
+| Electron 安装版 | 优先可执行文件同级；不可写则降级到平台应用数据目录 |
+| Node / Docker | `FLOWLET_CONFIG_PATH`，默认数据库同目录（Docker 为 `/data/config.json`） |
+| 前端 demo | 不启动真实 Host，不应作为后端文件读写验证 |
 
-独立服务的环境变量、端口和数据卷详见 [Docker 部署](docker.md)。
+Electron 具体路径以 `packages/flowlet-desktop/src/paths.ts` 为准；Node 环境变量见
+[Docker 部署](docker.md)。不要凭旧版 exe 名称或当前工作目录推测用户数据位置。
 
-### 资源声明
+### 随包资源与加载
 
-`src-tauri/tauri.conf.json` 的 `resources` 字段声明了 `"../config.json": "config.json"`，确保 Tauri 打包时把根目录的 `config.json` 复制到资源目录，最终发布在 exe 旁边。
+1. `config/index.ts` 的 `loadOrCreateConfig` 优先读取外部 JSON；不存在时复制随包默认文件，
+   JSON 解析失败时回退随包默认文件（不自动覆盖损坏原文件）。
+2. `loadChannelsConfig` 在缺少渠道段时回退默认，并通过 `mergeBuiltinConfig` 补齐外部配置缺失的
+   内置渠道/端点/预设。Web 命令与代理必须复用这份合并结果。
+3. `scripts/build-desktop-host.mjs` 将根 `config.json` 与运行时资源装配进 `dist-host/runtime`；
+   Electron 将其放在随包 `resources/runtime`，首次运行只复制缺失的数据文件。
+4. `scripts/build-desktop-portable.mjs` 组装 Electron 便携目录。普通更新保留外部配置，
+   不应通过 `--replace-config` 意外覆盖用户设置。
 
-### 加载与回退逻辑
+这里的“内置”是随包文件，不是编译进旧宿主二进制的字符串。修改仓库默认文件不会自动覆盖
+已有安装的外部文件；SQLite 设置覆盖、账号和路由也不会因此重置。
 
-1. **外部 `config.json` 优先**：Rust 启动时先尝试读取 exe 旁的 `config.json`。
-2. **编译时内置副本**：若外部文件不存在、或缺少 `channels_config` 字段、或解析失败，回退到 `include_str!` 进二进制的默认配置（即仓库根目录 `config.json` 的编译时快照）。
-3. **首次启动写入**：若运行时 `config.json` 不存在，`ensure_config_file` 会把内置副本写入磁盘，用户之后可直接编辑。
-4. **便携版打包**：`scripts/build-portable.mjs` 会把根目录 `config.json` 复制进便携版 ZIP。
-
-> 修改仓库根目录的 `config.json` 会同时影响「编译时内置默认值」和「便携版打包产物」。
-
-### 默认值同步（重要）
-
-`channels_config` 的渠道模板仍有 Rust 工厂兜底；模型身份已集中到共享目录：
+### 默认值与模型身份
 
 | 位置 | 作用 |
 |------|------|
-| `config.json`（仓库根目录） | 运行时外部文件 + 编译时 `include_str!` 默认值 |
-| `model-catalog.json` | 模型白名单、官方渠道归属、别名和 models-cn provider 映射的单一事实源 |
-| `src-tauri/src/core/config.rs` 中的 `ChannelPreset::longcat()` / `ChannelPreset::deepseek()` / `ChannelPreset::kimi()` / `ChannelPreset::qwen()` / `ChannelPreset::zhipu()` / `ChannelPreset::openrouter()` | Rust 侧的工厂默认值 |
+| 根 `config.json` | 随包默认配置源 |
+| 根 `model-catalog.json` | 模型白名单、官方归属、别名与目录 provider 映射的单一事实源 |
+| `packages/flowlet-core/src/config/index.ts` | 解析、回退、合并和运行时默认值 |
+| `resources/catalogs/` | 随包模型规格/价格快照，不扩大白名单 |
 
-> OpenRouter（`openrouter`）是聚合渠道：其 `/models` 返回全部主流模型（带
-> `vendor/` 前缀），因此天然可以勾选开放任意 Flowlet 白名单模型；开放哪些模型
-> 由用户在账号编辑器中**显式勾选**，与普通渠道一致。只有 OpenRouter 独占资源
-> 会登记到 `default_exposed_models.openrouter` / `DEFAULT_EXPOSED_MODELS_BY_CHANNEL.openrouter`
-> 作为目录归属，但仍不会自动勾选。
-
-新增渠道或修改模型支持范围时，务必同步更新对应位置；前端和 Rust 均从
-`model-catalog.json` 读取模型身份，不再维护两份白名单或别名表。
+前端和 Node 必须使用同一模型身份目录，不得另建白名单/别名表。OpenRouter 等聚合渠道同样要求
+用户从真实上游模型列表显式选择；`default_exposed_models` 不代表自动全选。
 
 ---
 
@@ -376,21 +373,24 @@ Rust 后端在启动时读取它，并通过 Tauri command `read_config` / `writ
 | `supports_scrape_balance` | `bool` | 否 | `false` | 是否支持通过后台 webview 登录控制台并拦截 API 抓取套餐余量 |
 | `supports_files_api` | `bool` | 否 | `false` | 是否支持 Anthropic Files API（`<anthropic_base_url>/v1/files` 的上传/列表/检索/删除）。开启后这些无 `model` 字段的请求按渠道绑定到单一账号转发；当前只有 DeepSeek 声明 |
 | `endpoints` | `object` | 否 | `{}` | 端点 URL 覆盖，key 如 `"models"` / `"model_detail"` / `"balance"`；OpenRouter 额外使用 `"credits"` |
-| `scrape` | `object` | 否 | `{}` | 控制台抓取配置。key 为渠道内的抓取模式（当前 LongCat 为 `"hybrid"`，Qwen 为 `"token_plan"` 与 `"freetier"`），value 可包含 `console_url`、可选的 `console_url_secondary`、可选的 `console_url_tertiary`（第三阶段导航 URL，用于 LongCat 加载 `/platform/fuel_pack` 补全已用尽/已过期的历史资源包）、`interceptor_js`、`extractor_js`、`aggregate` 与 `required_slots`。聚合模式按 `required_slots` 判断完整性；单页面模式等待全部必需槽位，多页面且槽位数与页面数一致时按顺序让每个页面等待对应槽位。`extractor_js` 返回统一汇总字段；LongCat 还返回完整 `token_packs` 数组（活跃包来自第一阶段 `token-packs/summary`，历史包来自第三阶段 `token-packs/list`，按 `lotId=resourceId` 去重合并，历史包以 `_fromList: true` 标记），原始接口 payload 单独写入 `raw_scraped_json`。Qwen `token_plan` 模式额外拦截 `/tokenplan/personal/api/v2/reset-card/list`（页面加载时自动请求的可选槽位：有重置卡时进入 `raw_scraped_json` bundle，无卡不阻断同步，不进入 `required_slots`）。**Qwen Token Plan 的额度窗口在 2026-10 控制台改版后由周额度（`weekly` + `per1WeekPercentage`）改为月额度（`monthly` + `per1MonthPercentage`），两种口径都必须兼容**：`extractor_js` 按 月额度 → 周额度 → 5 小时 的顺序取第一个「额度总量与用量百分比都在」的窗口，用量百分比大于 1 时按百分数归一（除以 100）；Rust 槽位校验（`channel_capability_adapter/adapters/qwen.rs::token_plan_payload_satisfies`）只要求 `data.DataV2.data.data` 信封存在、且任一档位含 `five_hour` / `weekly` / `monthly` 中任一数值型额度窗口、任一 `per*Percentage` 数值，不得再锁定 `weekly` / `per1WeekPercentage`，否则改版后的响应会被误判为「未抓全」并中断同步；账号资源同步（`account_resource_sync.rs::parse_qwen_details`）按 5 小时 → 7 天 → 每月 的顺序产出全部窗口，月额度排在最后，移动端取最后一个窗口作为主额度。桌面端账号编辑器与概览页按同一口径解析 `raw_scraped_json`（`src/features/channel-accounts/qwenTokenPlanDetails.ts`）：只渲染真正有数据的额度窗口（上游不再报 5 小时用量后，「5 小时 - / 总量 - / 额度重置时间 -」空占位整块不再渲染），主额度取周期最长且有数据的窗口。Qwen `freetier` 模式拦截福利页接口：`ListBailianFreetier`（槽位 `freetier_list`）、`DescribeFqInstance`（槽位 `fq_instance`，页面按 40 个模板一批连续发多批，Rust 侧按 `Template.Code` 跨批合并并裁剪字段，`required_slots` 只列一个槽位）、`GetBillingAccountAvailableAmount`（槽位 `billing_amount`，余额写入快照 `balance`）、`ListSettleBillTotalSummary`（槽位 `settle_bill`，可选），以及可选的 `queryCurrentCertInfo`（`cert_info`）与 `tool/user/info.json`（`session_info`，页面会话探针）。页面始终自行生成 Cookie、签名和 Header（`sec_token` 由 `tool/user/info.json` 下发，Flowlet 不伪造请求）；Windows/Linux 优先从原生 WebView 网络层读取精确匹配的目标响应，macOS 与原生监听失败时使用 document-start `interceptor_js` fallback。未捕获响应不会被判定为未登录；任务日志会记录渠道、账号标识及缺失槽位。`extractor_js` 由 Rust 以 `extractor(bundle, credential)` 调用：第二个实参是本账号 API Key 的派生指纹（`{ keyPrefix, keyLastFour }`，Key 过短时为 `null`），供需要按 key 对账的控制台使用；内置 extractor 声明单参即可，多传的实参会被忽略。`extractor_js` 必须是**单个顶层函数声明**（Rust 以 `(extractor_js)(...)` 形式求值，顶层并列的 helper 会变成语法错误，需内联到该函数内）。 |
+| `scrape` | `object` | 否 | `{}` | 按模式声明控制台 URL（含可选第二/第三阶段）、`interceptor_js`、`extractor_js`、`aggregate` 与 `required_slots`。Electron CDP 按业务槽位分类、校验与多批合并，不能拿 HTML/埋点当成功；实现见 `packages/flowlet-core/src/scrape/slot-engine.ts`、`desktop/scrape.ts` 与 `packages/flowlet-desktop/src/scrape.ts`。原始响应只存本机 `raw_scraped_json`，资源摘要由 `agent/resources.ts` 去敏生成。 |
 
-Qwen API 按量付费的 `freetier` 数据与 Token Plan 的 `token_plan` 数据都有**等价的 HTTP 通道**（`src-tauri/src/core/qwen_platform.rs`）：账号完成千问平台 device-flow 登录后（登录按平台账号共享，一个账号登录可复用到同渠道其它账号），Flowlet 在一次同步中同时调用 `BssOpenAPI-V3`（按量付费）与 cs-data（Token Plan），生成与本表 `freetier` / `token_plan` 槽位同构并合并的 slot bundle（未订阅时跳过 `token_plan` 槽位，不视为失败）。该路径优先执行，未登录或失败时才回退到本节描述的 WebView 抓取；因此这两个 scrape mode 的槽位定义仍是前端解析口径的事实来源。详见 `docs/channel-integration.md`。
+Qwen Token Plan 必须兼容 `five_hour` / `weekly` / `monthly` 额度窗口与数值型 `per*Percentage`；主额度按最长有效周期展示，不把缺失窗口渲染为空占位。`reset-card/list` 为可选槽位，失败不阻断订阅同步。Qwen 免费额度 `DescribeFqInstance` 可能分批返回，应按 `Template.Code` 去重合并；LongCat 活跃/历史资源包按资源 ID 合并，不能遗漏已过期或已用尽项。页面自行生成 Cookie、签名与会话凭据，Flowlet 不伪造；控制台登录失效必须提示人工处理。
+
+Qwen API 按量付费的 `freetier` 数据与 Token Plan 的 `token_plan` 数据都有**等价的 HTTP 通道**（`packages/flowlet-core/src/web/qwen-platform.ts`）：账号完成千问平台 device-flow 登录后（登录按平台账号共享，一个账号登录可复用到同渠道其它账号），Flowlet 在一次同步中同时调用 `BssOpenAPI-V3`（按量付费）与 cs-data（Token Plan），生成与本表 `freetier` / `token_plan` 槽位同构并合并的 slot bundle（未订阅时跳过 `token_plan` 槽位，不视为失败）。该路径优先执行，未登录或失败时才回退到本节描述的 WebView 抓取；因此这两个 scrape mode 的槽位定义仍是前端解析口径的事实来源。详见 `docs/channel-integration.md`。
+
+页面脚本仅使用可选的 `window.__FLOWLET_SCRAPE__?.invoke?.(...)` 受控抓取回调（若宿主提供），
+不得依赖旧宿主全局对象、任意 IPC 或 Node API；真实响应捕获由 Electron CDP + 有界 stash 完成。
 
 **`interceptor_js` 的页面暂存（`window.__flowlet_scrape_stash`）必须带上限**：
 
-拦截器把命中的响应体暂存到页面全局数组，供 Rust 侧 `drain_scrape_page_stash` 周期性
-取走。该数组是 append-only 的，只在 probe 抓取循环运行期间被 drain；窗口被遗留在
+拦截器把命中的响应体暂存到页面全局数组，供 Electron 抓取循环周期性取走（`packages/flowlet-desktop/src/scrape.ts`）。该数组是 append-only 的，只在 probe 抓取循环运行期间被 drain；窗口被遗留在
 后台时控制台页面会持续写入，renderer 内存无界增长（2026-09-19 事故中进程 RSS 峰值
 3.8 G 的最可疑来源）。
 
 因此内置注入脚本统一通过 `window.__flowlet_scrape_push(obj)` 写入，该 helper 在超过
 8 条时丢弃最旧条目（`splice(0, s.length - 8)`）。**新增或修改任何 `interceptor_js`
-都必须走这个 helper，不得再直接对 stash 调用 `.push()`**；`channels_config.rs` 的
-`embedded_interceptors_cap_the_page_stash` 测试会校验内置配置。上限值写在脚本内的
+都必须走这个 helper，不得再直接对 stash 调用 `.push()`**；相关回归必须校验内置配置的暂存上限。上限值写在脚本内的
 `var M=8`，需要调整时同步修改该常量与本文档。
 
 内置 `custom` 模板用于中转站等完全自定义账号。渠道级 Base URL 保持为空，
@@ -416,8 +416,8 @@ Anthropic 请求不会落到 ChatGPT API。
 账号高级设置可选择直连或使用全局代理地址。新账号默认直连。升级时，已通过全局代理转发模型的账号迁移为使用代理，其他账号迁移为直连。显式选择代理时，模型转发、模型拉取、
 连接测试和 API 余额查询共用此设置，不受旧账号的全局开关影响。
 
-实际选中显式代理的模型请求在 `reqwest::Error::is_connect()` 建连失败后，允许等待
-150 ms 用同一个客户端和可克隆请求再连接一次。两次建连共用响应头超时预算和同一出口。
+实际选中显式代理的模型请求的连接重试只允许在能确认尚未发送业务请求的建连失败阶段发生；具体判定与预算见
+`packages/flowlet-core/src/proxy/upstream.ts`。不得将旧 HTTP 客户端的错误分类当作 Node 证据。
 上游 HTTP 状态、发送请求后的断连、响应读取失败及 SSE 中断均不触发重连。
 ChatGPT API 的最终网络错误日志及重连告警记录底层原因链，用于区分连接、隧道与 TLS
 故障；旧日志只有通用错误文本，不能据此倒推出某次故障的具体网络根因。
@@ -449,8 +449,8 @@ Anthropic 兼容端点（Anthropic Skin）为 `https://openrouter.ai/api`，均�
 Key 一样包含在端到端加密的账号目录中。
 模型列表走标准 OpenAI `/models`（`/api/v1/models`，模板已用 `endpoints.models`
 显式覆盖）。OpenRouter `/models` 返回的模型 ID 带 `vendor/` 命名空间前缀（如
-`deepseek/deepseek-v4-flash`）：白名单判断和规范模型映射会先剥离该前缀（Rust
-`canonical_model_key` / 前端 `canonicalModelKey`），路由 `upstream_model` 仍保留
+`deepseek/deepseek-v4-flash`）：白名单判断和规范模型映射会先剥离该前缀（Node
+`canonicalKey` / 前端 `canonicalModelKey`），路由 `upstream_model` 仍保留
 上游原始 ID 用于转发。由于 OpenRouter `/models` 返回全部主流模型，其账号天然
 **可以**勾选开放任意 Flowlet 白名单模型——未来白名单新增模型时，只要 `/models`
 返回即可由用户勾选开放；开放哪些模型由用户在账号编辑器中显式勾选，不默认全勾选
@@ -460,7 +460,7 @@ Key 一样包含在端到端加密的账号目录中。
 且不支持”排序；价格缺失或无法解析时不推测为免费。
 
 **入站模型名归一**：代理匹配路由前，会先用 `model-catalog.json` 把客户端请求体里的
-`model` 归一到规范模型 ID（Rust `model_catalog::routing_model_id`，复用 `find` 的
+`model` 归一到规范模型 ID（Node `catalog/index.ts` 的 `routingModelId`，复用 `find` 的
 别名 + `vendor/` 前缀 + 大小写查表，未登记的名字原样透传）。因此客户端可以直接用厂商
 官方 API 名或别名请求：`deepseek-flash` → `deepseek-v4.1-flash`（DSH 原生 DeepSeek
 Provider 固定发这个官方名），`deepseek-v4-flash-0731` → `deepseek-v4-flash`。
@@ -604,7 +604,7 @@ LongCat 同时登记 `LongCat-2.0` 与 `LongCat-2.5`，两者是独立模型身�
 **行为**：
 
 - 该字段是各渠道「默认提供哪些模型」的描述性列表，**不再直接作为开放模型的白名单**。
-  真正的白名单来自仓库根目录 `model-catalog.json`；Rust `supported_models()` 与前端
+  真正的白名单来自仓库根目录 `model-catalog.json`；Node `supportedModels()` 与前端
   `FLOWLET_SUPPORTED_MODELS` 均读取该目录，不需要双写同步。
 - 白名单**不按渠道区分**：任意渠道账号只要底层 `/models` 返回了其中的模型，就可勾选开放。
   例如千问套餐端点也会返回 `deepseek-v4-pro`，该模型在全局白名单内，故可勾选。
@@ -613,7 +613,7 @@ LongCat 同时登记 `LongCat-2.0` 与 `LongCat-2.5`，两者是独立模型身�
   路由始终保留完整上游 ID；`default_exposed_models.openrouter` 只登记这些 OpenRouter 资源的
   目录归属，账号仍需用户显式勾选。
 - 一个账号开放哪些模型由**用户显式选择**：在账号编辑器里手动「拉取模型列表」
-  （底层 `/models`，Rust command `fetch_channel_models`），编辑器展示全量上游模型、
+  （底层 `/models`，Node command `fetch_channel_models`），编辑器展示全量上游模型、
   白名单之外的模型展示但禁用勾选，用户勾选后将上游返回的原始模型 ID 保存到
   `channel_accounts.exposed_models`；同一规范模型映射到多个独立上游资源时可分别勾选。
 - 实际为账号自动生成的直连路由 = 全局白名单 **∩ 最近一次 `/models` 返回的
@@ -631,7 +631,7 @@ LongCat 同时登记 `LongCat-2.0` 与 `LongCat-2.5`，两者是独立模型身�
   保留用户已有的启停状态、优先级和时间戳。
 - 自动补齐路由时，只有全局最早创建的渠道账号的新路由默认开启；后续新增的任何官方
   或自定义渠道账号，其新路由默认关闭并等待用户手动开启。已有路由的启停状态不追溯修改。
-- 合并逻辑前后端各一份：`src-tauri/src/core/channels_config.rs` 的 `merge_default_routes`
+- 合并逻辑前后端各一份：`packages/flowlet-core/src/config/index.ts` 的 `mergeDefaultRoutes`
   与 `src/domains/model/commands.ts` 的 `mergeDefaultRoutes`，行为必须一致（只追加缺失路由，
   不覆盖用户已有的启停状态、优先级和时间戳；删除动作由前端 `reconcileAccountRoutes` 在保存时执行）。
 - `custom` 渠道不例外：模型必须来自该账号 `/models` 返回结果，并与全局白名单取交集；
@@ -658,26 +658,32 @@ LongCat 同时登记 `LongCat-2.0` 与 `LongCat-2.5`，两者是独立模型身�
 
 ### 热更新 vs 需重启
 
-| 配置 | 修改后行为 |
+必须区分“通过设置命令保存”与“手动编辑磁盘 JSON”。Node 不承诺旧宿主的逐请求文件热加载。
+
+| 配置/入口 | 修改后行为 |
 |------|-----------|
-| `ua_rules` | **热更新**：下次请求立即生效 |
-| `log_capture` | **热更新**：下次请求立即生效 |
-| `usage_retention` | **热更新**：下一次定时清理（最长 15 分钟）生效 |
-| `usage_cost` | **前端热更新**：保存后费用展示查询立即使用新口径；不影响代理请求 |
-| `network.upstream_proxy` | **进程内热更新**：设置页保存后立即生效；手改文件需重启应用 |
-| `bind` | **需重启代理**：监听地址在启动时绑定 |
-| `channels_config` | **需重启应用**：仅在启动时解析一次；缺失渠道会追加，协议、Base URL 和鉴权字段会同步到 SQLite，模型价格只加载到运行时内存 |
+| 渠道账号、开放模型、路由命令 | 持久化成功后发布运行时快照，后续请求生效 |
+| 设置页 `set_log_capture_config` | 更新 SQLite `app_meta` 与进程配置，后续请求及清理任务使用新值 |
+| 设置页上游代理 | 进程内更新，后续连接/请求使用新配置；不得把失败代理静默改为直连 |
+| 费用展示设置 | 前端缓存失效后重新读取；不改原币金额，不影响模型请求 |
+| 监听地址/端口 | 重启代理后重新绑定；调用密钥以当前 Host 保存流程为准 |
+| 手改 `ua_rules` / `usage_retention` / 渠道段等 JSON | 重启 Host 后重新加载；不要宣称保存文件即全部热生效 |
+| 模型规格/价格目录同步 | 成功后重建相应运行时数据；白名单改动仍需更新应用 |
+| Electron host/client 模式 | 保存后重启桌面应用 |
+
+特定设置的热更新须结合 `web/commands.ts`、`web/config-state.ts`、`desktop/maintenance.ts`
+及 `host/scheduler.ts` 查真实调用链；未确认的字段不得套用旧实现结论。
 
 ### 前端读写
 
-Rust 暴露以下 Tauri command；当前正式前端没有通用配置编辑入口：
+本机 Node Host 暴露以下桌面 HTTP command；当前正式前端没有通用配置编辑入口：
 
 - `read_config()` → 返回 `config.json` 原始字符串
 - `write_config(content)` → 写入完整 JSON 字符串
 
-**写入校验**：`write_config_raw` 仅校验顶层为 JSON 对象或数组，**不做字段级 schema 校验**。新增配置编辑入口时，前端必须自行完成字段级语义校验。
+**写入校验**：`desktop/maintenance.ts` 的 `write_config` 仅校验顶层为 JSON 对象或数组，**不做字段级 schema 校验**。新增配置编辑入口时必须增加字段级语义校验。此命令只写文件，不自动重装全部运行时配置；Web/Docker 不开放任意文件读写。
 
-> 前端不直接访问文件系统；渠道、账号和模型数据通过各自的 Tauri command（如 `list_channel_presets`）从 SQLite 获取。
+> 前端不直接访问文件系统；渠道、账号和模型数据通过各自的 Host command（如 `list_channel_presets`）从 SQLite 获取。
 
 ---
 
@@ -698,13 +704,13 @@ LongCat、DeepSeek、Kimi 对照、SQLite 升级迁移、模型/余额同步、�
 
 3. **在 `default_exposed_models` 中声明默认开放的模型列表**。
 
-4. **按 `docs/channel-integration.md` 完成 Rust 适配、SQLite 迁移、前端、图标与测试**。
+4. **按 `docs/channel-integration.md` 完成 Node/TS 适配、SQLite 迁移、前端、图标与测试**。
 
 5. **同步更新本文档**（第 6.1 节及示例）。
 
 6. **运行检查**：
-   - `cargo check`（Rust 编译）
-   - `bun run build`（前端构建）
+   - `npm run check`、`npm run node:typecheck`、`npm run node:commands`
+   - `npm run build:desktop` / `npm run build:web`，以及相关 Node 测试
    - 启动应用验证渠道模板已加载
 
 ---
@@ -713,16 +719,15 @@ LongCat、DeepSeek、Kimi 对照、SQLite 升级迁移、模型/余额同步、�
 
 | 关注点 | 文件 |
 |--------|------|
-| 资源声明（打包到 exe 旁） | `src-tauri/tauri.conf.json`（`resources` 字段） |
-| JSON 反序列化结构 | `src-tauri/src/core/channels_config.rs` |
-| 运行时配置结构（`ChannelPreset`、`ProxyBindConfig`、`LogCaptureConfig`、`UsageRetentionConfig`、`UaClientRule`） | `src-tauri/src/core/config.rs` |
-| 配置读写与热加载 | `src-tauri/src/core/proxy.rs`、`src-tauri/src/core/proxy_http.rs` |
-| 保留策略执行（Body + 余额快照） | `src-tauri/src/core/storage_tasks.rs`、`src-tauri/src/core/storage_usage.rs` |
-| 上游代理配置解析与运行时全局 | `src-tauri/src/core/upstream_proxy.rs`、`src-tauri/src/core/services.rs`、`src-tauri/src/commands/maintenance.rs` |
-| 启动时加载与回退 | `src-tauri/src/lib.rs`（`build_app_state`、`load_channels_config_from`） |
-| 前端读写 command | `src-tauri/src/commands.rs`（`read_config`、`write_config`） |
-| 便携版打包 | `scripts/build-portable.mjs` |
-| 前端渠道类型与默认开放模型 | `src/domains/channel/types.ts` |
+| 配置解析、回退、路由补齐 | `packages/flowlet-core/src/config/index.ts` |
+| 运行时类型 | `packages/flowlet-core/src/types.ts`、`web/config-state.ts` |
+| Host 装配与启动 | `packages/flowlet-core/src/index.ts` |
+| 设置命令与覆盖 | `packages/flowlet-core/src/web/commands.ts`、`web/config-state.ts` |
+| 桌面文件配置读写 | `packages/flowlet-core/src/desktop/maintenance.ts` |
+| 清理与周期维护 | `packages/flowlet-core/src/host/scheduler.ts`、`storage/maintenance.ts` |
+| Electron 资源/数据定位 | `packages/flowlet-desktop/src/paths.ts` |
+| 资源装配与便携打包 | `scripts/build-desktop-host.mjs`、`scripts/build-desktop-portable.mjs` |
+| 前端渠道类型 | `src/domains/channel/types.ts` |
 
 
 ---
@@ -829,14 +834,14 @@ failed to parse model_catalog_json path `...` as JSON: missing field `shell_type
 动态目录的 `slug` 与 `model` 必须指向同一个规范模型；**切换主模型后需重新执行 Codex 一键接入
 并重启 Codex**（`model_catalog_json` 仅在 Codex 启动时读取一次）。
 
-`src-tauri/src/core/codex_model_catalog.rs` 的回归测试会校验生成条目的必填字段、所选模型取值
+`packages/flowlet-core/src/agent/models-cn.ts` 与 `agent/adapters/codex.ts` 的回归应校验生成条目的必填字段、所选模型取值
 来源与推理档位合法值，防止再次出现缺字段导致 Codex 无法启动。
 
 ### 加载方式
 
 - **运行时生成**：`apply_codex` 按所选主模型从 `models-cn.json` 生成单条目目录，写入
   `~/.codex/config.toml` 的 `model_catalog_json = "~/.codex/model-catalog.flowlet.json"`，并把
-  生成内容写入 `~/.codex/model-catalog.flowlet.json`；不再使用 `include_str!` 静态快照。
+  生成内容写入 `~/.codex/model-catalog.flowlet.json`；不使用仓库级静态 Codex 输出快照。
 - **命名空间**：生成文件名带 `flowlet` 前缀，避免覆盖 DeepSeek（`~/.codex/models.json`）或
   千问（`~/.codex/model-catalog.local.json`）等其他厂商的模型目录文件。
 - **备份与恢复**：写入前会备份 `~/.codex/model-catalog.flowlet.json` 的原有内容与
@@ -846,7 +851,7 @@ failed to parse model_catalog_json path `...` as JSON: missing field `shell_type
 
 | 位置 | 作用 |
 |------|------|
-| `src-tauri/models-cn.json` | 动态目录的数据源：`limits.contextTokens`、`capabilities.inputModalities`、`capabilities.thinking` |
+| `resources/catalogs/models-cn.json` | 动态目录的数据源：`limits.contextTokens`、`capabilities.inputModalities`、`capabilities.thinking` |
 | `src/features/agent-access/agent-access-adapters/codex.ts` 的手动配置片段 | 必须与动态生成规则一致，按当前所选主模型展示与复制 |
 
 修改模型目录或 Codex 目录生成规则时，务必同步前端手动片段；否则复制内容与一键写入会不一致。

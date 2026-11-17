@@ -1,5 +1,4 @@
 import type { OverviewServiceStripLabels, OverviewServiceStripModel } from "../desktop/OverviewServiceStripView";
-import type { UsageSummaryItem } from "../mobile/UsageSummaryGridView";
 import type { RequestLogsRowModel, RequestLogsStatItem, RequestLogsLabels } from "../desktop/RequestLogsView";
 import type { AgentSessionRowModel, AgentSessionsLabels } from "../desktop/AgentSessionsView";
 import type { UsageAnalysisRankEntryModel, UsageAnalysisMatrixColumnModel, UsageAnalysisMatrixRowModel, UsageAnalysisDetailModel, UsageAnalysisLabels } from "../desktop/UsageAnalysisView";
@@ -28,14 +27,6 @@ export function createOverviewServiceFixture(zh: boolean): { model: OverviewServ
       hideToken: zh ? "隐藏 Client Token" : "Hide client token",
     },
   };
-}
-
-export function createUsageSummaryFixture(zh: boolean): UsageSummaryItem[] {
-  return [
-    { id: "tokens", label: "Tokens", value: "8.42M", detail: zh ? "输入 6.1M · 输出 2.3M" : "6.1M in · 2.3M out" },
-    { id: "cost", label: zh ? "预估费用" : "Est. cost", value: "$12.84", detail: zh ? "按模型价格估算" : "Based on model pricing" },
-    { id: "cache", label: zh ? "缓存命中" : "Cache hit", value: "38.6%", detail: zh ? "节省约 3.2M Token" : "About 3.2M tokens saved" },
-  ];
 }
 
 export function createRequestLogsFixture(zh: boolean): {
@@ -168,8 +159,8 @@ export function createAgentSessionsFixture(zh: boolean): {
       {
         id: "ses-3",
         activityAt: "13:48",
-        title: zh ? "检查移动端布局" : "Check mobile layout",
-        subtitle: "OpenCode · Mobile",
+        title: zh ? "检查桌面布局" : "Check desktop layout",
+        subtitle: "OpenCode · Desktop",
         client: "OpenCode",
         requests: "9",
         tokens: "12.1K",

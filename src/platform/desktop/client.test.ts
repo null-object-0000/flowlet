@@ -1,9 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const invokeMock = vi.hoisted(() => vi.fn<(command: string, args?: unknown) => Promise<unknown>>());
-
-vi.mock("@tauri-apps/api/core", () => ({ invoke: invokeMock }));
-
 function setBridge(bridge: unknown) {
   (window as { flowletDesktop?: unknown }).flowletDesktop = bridge;
 }
@@ -11,13 +7,12 @@ function setBridge(bridge: unknown) {
 async function loadCommandClient(mode: "desktop" | "production") {
   vi.stubEnv("MODE", mode);
   vi.resetModules();
-  return import("../tauri/client");
+  return import("../host/client");
 }
 
 describe("invokeCommand desktop transport", () => {
   beforeEach(() => {
     sessionStorage.clear();
-    invokeMock.mockReset();
     vi.stubGlobal("fetch", vi.fn());
   });
 
@@ -51,7 +46,6 @@ describe("invokeCommand desktop transport", () => {
     );
     const headers = (vi.mocked(fetch).mock.calls[0][1] as RequestInit).headers as Record<string, string>;
     expect(headers["X-CSRF-Token"]).toBeUndefined();
-    expect(invokeMock).not.toHaveBeenCalled();
   });
 
   it("prefers a session token over the preload token (web semantics unchanged)", async () => {
@@ -88,13 +82,21 @@ describe("invokeCommand desktop transport", () => {
     window.removeEventListener("flowlet-web-unauthorized", unauthorized);
   });
 
-  it("runs through Tauri IPC, not HTTP, outside the desktop/web modes", async () => {
-    invokeMock.mockResolvedValue({ running: true });
-
-    const { invokeCommand } = await loadCommandClient("production");
+  it.each(["production", "development", "web", "demo"])("always uses Node HTTP in %s without a desktop bridge", async (mode) => {
+    vi.stubEnv("MODE", mode);
+    vi.mocked(fetch).mockResolvedValue(new Response('{"running":true}', { status: 200 }));
+    const { invokeCommand } = await import("../host/client");
     await expect(invokeCommand("proxy_status")).resolves.toEqual({ running: true });
+    expect(fetch).toHaveBeenCalledWith("/api/commands/proxy_status", expect.objectContaining({ method: "POST" }));
+  });
 
-    expect(invokeMock).toHaveBeenCalledWith("proxy_status", undefined);
-    expect(fetch).not.toHaveBeenCalled();
+  it("does not read renderer credentials in client mode", async () => {
+    setBridge({ mode: "client", adminToken: "must-not-use" });
+    sessionStorage.setItem("flowlet.web.admin-token", "stale-renderer-token");
+    vi.mocked(fetch).mockResolvedValue(new Response("null", { status: 200 }));
+    const { invokeCommand } = await loadCommandClient("desktop");
+    await invokeCommand("proxy_status");
+    const headers = (vi.mocked(fetch).mock.calls[0][1] as RequestInit).headers as Record<string, string>;
+    expect(headers.Authorization).toBeUndefined();
   });
 });

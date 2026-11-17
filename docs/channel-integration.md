@@ -89,7 +89,7 @@ OpenRouter 支持两级资源查询（`supports_balance_query=true`）：普通�
 Management Key；配置后改走 `GET /api/v1/credits`，以 `total_credits - total_usage`
 展示真实账户 Credits 余额。Management Key 不参与模型请求、连接测试和路由，认证失败
 也不得把普通 API Key 标记为 `invalid_key`。实现仍由
-`sync.rs::query_openrouter_balance` + `commands::scrape.rs::query_balance` 分发，保存后
+`packages/flowlet-core/src/web/balance.ts` 与 `web/commands.ts` 的 `query_balance` 分发，保存后
 前端 `refreshSavedAccounts` 自动触发同步，快照落库并在概览页展示。
 
 Qwen 是双资源模式渠道：默认 **API 按量付费**（通用 `sk-` 前缀 Key + 渠道级
@@ -105,11 +105,11 @@ Token Plan 模式时自动写入覆盖。两种资源模式均由官方控制台
   改版后主额度窗口由周额度（`weekly` + `per1WeekPercentage`）改为月额度
   （`monthly` + `per1MonthPercentage`）：槽位校验只要求业务信封存在且含任一数值型
   额度窗口 / 任一 `per*Percentage`，账号资源同步按 5 小时 → 7 天 → 每月 输出全部窗口
-  （月额度排最后，移动端取最后一个作为主额度），`extractor_js` 按 月 → 周 → 5 小时
+  （月额度排最后），`extractor_js` 按 月 → 周 → 5 小时
   回退。历史快照仍是周口径，向后兼容不得移除；详见 `docs/config.md` 的 `scrape` 字段；
 - **API 按量付费**（scrape mode `freetier`，控制台 `/home/benefits` 福利页）抓
   免费额度与账单：`ListBailianFreetier`（freetier 模板清单）、
-  `DescribeFqInstance`（免费额度实例，页面按 40 个模板一批连发多批，Rust 侧按
+  `DescribeFqInstance`（免费额度实例，页面按 40 个模板一批连发多批，Node 侧按
   `Template.Code` 跨批合并并裁剪字段）、`GetBillingAccountAvailableAmount`
   （账户可用余额 → 快照 `balance`）、`ListSettleBillTotalSummary`（本月结算账单）
   与可选的 `queryCurrentCertInfo`（实名认证）、`tool/user/info.json`（会话信息）。
@@ -121,7 +121,7 @@ Token Plan 模式时自动写入覆盖。两种资源模式均由官方控制台
 `resource_sync_mode = "auto"`（此前仅有手动维护，无自动数据可丢）。
 
 Qwen API 按量付费的余额与免费额度还有一条**不依赖 WebView** 的官方 HTTP 通道
-（`src-tauri/src/core/qwen_platform.rs`）：账号在编辑器里点「登录千问平台」后，
+（`packages/flowlet-core/src/web/qwen-platform.ts`）：账号在编辑器里点「登录千问平台」后，
 Flowlet 走千问官方 CLI（`@qianwenai/qianwen-cli`）使用的 device flow（PKCE S256）
 取得访问令牌，再以 `POST https://cli.qianwenai.com/data/v2/api.json` 调用
 `BssOpenAPI-V3` 的 `DescribeFqInstance`（免费额度实例，`Template.Name` 由网关直接
@@ -138,7 +138,7 @@ Flowlet 走千问官方 CLI（`@qianwenai/qianwen-cli`）使用的 device flow�
 - Web Host / Docker 没有 WebView，这条 HTTP 路径是它们获取余额与免费额度、订阅额度的
   唯一途径；Node Host 的周期余额同步（启动 30 秒后首轮、之后每 5 分钟）会把
   **已登录的 Qwen 账号**纳入同一轮任务，未登录账号直接跳过；`qwen_platform_status|login_start|login_poll|logout|sync` 已加入
-  `core/web/commands.rs` 的显式命令白名单，授权页由客户端浏览器打开；
+  `packages/flowlet-core/src/web/commands.ts` 的显式命令白名单，授权页由客户端浏览器打开；
 - 凭据按**千问平台账号**共享，存放在数据目录 `qwen-platform/credentials.json`
   （权限 0600，`platforms` 存令牌、`accounts` 存 Flowlet 账号 → 平台账号绑定）：
   同一个平台账号登录一次即可被同渠道的多个 Flowlet 账号复用（未绑定的账号会回退到
@@ -156,14 +156,14 @@ Flowlet 走千问官方 CLI（`@qianwenai/qianwen-cli`）使用的 device flow�
   跳过，不会把「未订阅」误报为同步失败；两套都取不到才报错；
 - 网关返回的免费额度实例带英文展示单位（`Thousand Tokens` / `TenThousand Word` /
   `Second` / `Piece`），且带 `InstanceName` / `Uid` / `StartTime`。写入 bundle 前
-  Rust 侧归一到基础单位（`tokens` / `字` / `秒` / `张`，`BaseValue` 语义不变），
+  Node 侧归一到基础单位（`tokens` / `字` / `秒` / `张`，`BaseValue` 语义不变），
   并丢弃账号身份字段，避免前端把 1000 千tokens 显示成 1,000 Tokens、也避免把
   账号 Uid 写进余额快照；`Template.Name` 由网关直接给出，缺失时才用
   model-mapping 反查；
 - 平台登录令牌**只用于余额/免费额度查询**，不参与模型调用、连接测试与路由；
   渠道 API Key 仍是唯一的模型调用凭据，也不写入 SQLite；
 - 这些网关接口来自千问官方 CLI 的公开行为（不是模型 API 的一部分），接口变化时
-  需对照 CLI 新版本更新 `core/qwen_platform.rs`；控制台抓取配置保留为兜底，
+  需对照 CLI 新版本更新 `packages/flowlet-core/src/web/qwen-platform.ts`；控制台抓取配置保留为兜底，
   `freetier` scrape mode 的槽位定义同时是前端解析口径的事实来源。
 
 **Token Plan 订阅**共用同一次「登录千问平台」，但接口不同（`sync_account` 按
@@ -200,8 +200,8 @@ Flowlet 走千问官方 CLI（`@qianwenai/qianwen-cli`）使用的 device flow�
 账号高级设置可选择直连或使用全局代理地址。新账号默认直连。升级时，已通过全局代理转发模型的账号迁移为使用代理，其他账号迁移为直连。显式选择代理时，模型转发、模型拉取、
 连接测试和 API 余额查询共用此设置，不受旧账号的全局开关影响。
 
-实际选中显式代理的模型请求在 `reqwest::Error::is_connect()` 建连失败后，允许等待
-150 ms 用同一个客户端和可克隆请求再连接一次。两次建连共用响应头超时预算和同一出口。
+实际选中显式代理的模型请求仅能在确认尚未发送业务请求的建连失败阶段重连；具体判定与预算以
+`packages/flowlet-core/src/proxy/upstream.ts` 及 mock 测试为准，不照搬旧客户端错误类型。
 上游 HTTP 状态、发送请求后的断连、响应读取失败及 SSE 中断均不触发重连。
 ChatGPT API 的最终网络错误日志及重连告警记录底层原因链，用于区分连接、隧道与 TLS
 故障；旧日志只有通用错误文本，不能据此倒推出某次故障的具体网络根因。
@@ -261,16 +261,11 @@ ChatGPT API 的最终网络错误日志及重连告警记录底层原因链，�
 
 ### 3.2 同步代码默认值
 
-以下位置必须与 `config.json` 一致：
+必须核对 `src/domains/channel/types.ts`、根 `model-catalog.json` / `plugin-registry.json`，
+以及 `packages/flowlet-core/src/config/index.ts` 的解析、内置合并与默认路由。
+Node 没有旧宿主的预设工厂目录，不要按旧类型名复制空实现。
 
-- `src/domains/channel/types.ts`
-  - `DEFAULT_EXPOSED_MODELS_BY_CHANNEL`
-- `src-tauri/src/core/config.rs`
-  - `ChannelPreset::<channel>()`
-- `src-tauri/src/core/presets.rs`
-  - `builtin_channel_presets()`
-
-外部 `config.json` 可能来自旧版本。新增渠道时必须确认内置配置合并和 SQLite 迁移能够把新渠道带到已有安装，不能只验证全新数据库。
+外部配置可能来自旧版本，必须验证内置合并和 SQLite 升级能把新渠道带到已有安装。
 
 ## 4. SQLite 与升级迁移
 
@@ -282,90 +277,43 @@ Flowlet 运行时的渠道预设会进入 SQLite。新增或修改渠道时至�
 4. 现有路由的优先级和 `enabled` 状态不被重置；
 5. 迁移是幂等的，多次启动结果一致。
 
-当前相关实现：
+当前入口（均已按 Node 文件定位）：
 
-- `src-tauri/src/core/storage_config.rs`
-  - `ensure_missing_presets`
-  - `sync_preset_maintained_config`
-  - 渠道能力字段的其他定向迁移
-- `src-tauri/src/lib.rs`
-  - `build_app_state`
-  - `merge_builtin_config`
-- `src-tauri/src/core/storage_tests.rs`
-  - 新增渠道与旧预设升级测试
+- `packages/flowlet-core/src/config/index.ts`：`loadChannelsConfig`、`mergeBuiltinConfig`、`loadRuntimeSnapshot`；
+- `packages/flowlet-core/src/storage/index.ts` 与 `storage/schema.ts`：预设写入、schema 与升级迁移；
+- `packages/flowlet-core/src/index.ts`：启动装配；
+- `packages/flowlet-core/src/storage/__tests__/storage.test.ts`：存储与旧数据回归。
 
-修改字段时不能只扩展 `ensure_missing_presets`：该函数遇到已存在的渠道会跳过，已有用户仍会保留旧值。
+不能只测试缺失渠道追加：已有旧预设的协议、地址和鉴权也必须能定向更新，而账号与路由状态不重置。
 
-## 5. Rust 渠道能力适配
+## 5. Node 渠道能力接入
 
 ### 5.1 端点解析
 
-在 `src-tauri/src/core/channels_config.rs` 中为非标准端点提供小型 helper。解析优先级保持：
+核对 `packages/flowlet-core/src/web/config-state.ts`、`web/model-sync.ts` 与 `proxy/http.ts`：
+账号级覆盖优先，其次配置中的端点覆盖，再按渠道 Base URL 做明确的兼容拼接；不猜第三方地址。
+模型同步和测试连接要同时验证 `/models`、`/v1/models` 以及非标准路径。
 
-1. `config.json` 的 `endpoints` 显式覆盖；
-2. 基于渠道 Base URL 的兼容拼接；
-3. 明确返回不可用，不猜测第三方地址。
+### 5.2 模型与余额
 
-通用的模型列表测试连接也要检查渠道是否使用 `/models` 还是 `/v1/models`。
+当前实际入口是 `web/model-sync.ts`、`web/balance.ts`，不是旧宿主的 Adapter 文件目录。
+新增渠道仍应隔离专属 DTO / 解析和错误，不把渠道分支散落到转发主流程。
 
-### 5.2 模型同步
+模型结果必须保留渠道、上游原始 ID、真实协议、规格、source 与时间；空 ID 过滤，未知规格不硬编码。
+余额只在官方接口真实可用时声明能力，覆盖超时、HTTP/业务错误、金额和币种，不泄漏 Key。
+控制台抓取为桌面独有能力，入口为 `desktop/scrape.ts` 与 `scrape/`，平台执行在
+`packages/flowlet-desktop/src/scrape.ts` 的隔离 BrowserWindow/CDP。
 
-在对应的 `src-tauri/src/core/channel_capability_adapter/adapters/<adapter>.rs` 中提供模型同步入口；
-可复用 `sync.rs` 的通用 OpenAI-compatible HTTP 与响应映射，响应不兼容时把渠道专属最小反序列化
-结构和转换留在该 Adapter 模块，最终统一返回 `ChannelModel`：
+### 5.3 声明与分发
 
-- `channel_id`、`model`、`display_name` 正确；
-- `supported_protocols` 不超过渠道真实能力；
-- 官方返回上下文和输出上限时原样使用；
-- 官方未返回时使用 `None`，不要统一硬编码；
-- 保留 `source`、`synced_at`、创建和更新时间；
-- 空模型 ID 必须过滤；
-- 网络、HTTP 状态和 JSON 解析错误必须真实返回。
+渠道在根 `plugin-registry.json` 声明 `channelId` / `adapterId`，在 `config.json` 声明真实
+`supports_*`、协议、地址和鉴权。必须同时修改相应 Node 实现和测试，不得只登记能力或默默回退。
+当前 Node 各能力入口并非一个统一的 Capability Adapter 类，接入时须查真实调用链。
+HTTP 命令在 `web/commands.ts` / `web/permissions.ts` 显式登记，桌面专属注册在
+`desktop/commands.ts`；不能为了复用 UI 把桌面抓取开放给 Web/Docker。
 
-LongCat 的模型详情请求、详情失败回退与模型转换均归档在 LongCat Adapter；Kimi 的专属列表
-DTO、发布时间校准与模型转换均归档在 Kimi Adapter。`sync.rs` 只保留标准 OpenAI-compatible
-同步和无渠道含义的共享 URL、排序工具。新渠道应选择最接近的实现参考，不要机械复制。
-
-### 5.3 余额和资源能力
-
-只有官方提供稳定余额接口时才设置 `supports_balance_query=true`，并实现：
-
-- 正确端点和鉴权；
-- 超时；
-- HTTP 错误；
-- 业务错误码；
-- 金额和币种解析；
-- 不在错误或日志中泄露 API Key。
-
-Token 资源包、配额、用量等能力同理。UI 应依赖渠道能力或明确的渠道特例，不应假定所有渠道都有资源包。
-
-### 5.4 Capability Adapter 与 Tauri command 分发
-
-渠道贡献必须在根目录 `plugin-registry.json` 声明 `channelId` 和 `adapterId`。统一注册与能力门控位于
-`src-tauri/src/core/channel_capability_adapter.rs`，渠道实现入口位于
-`src-tauri/src/core/channel_capability_adapter/adapters/`：
-
-1. 行为与既有渠道完全兼容时，复用既有 `adapterId`；
-2. 模型响应、余额响应或路径规则不兼容时，新增一个小型 Adapter，并登记模型同步函数、可选的
-   官方余额函数、路径策略、控制台抓取策略与内置预设工厂；渠道专属 DTO/解析器不得堆回统一分发层；
-3. `plugin_registry` 会在启动时校验 `adapterId` 是否存在，未知 Adapter 不允许静默回退；
-4. `ChannelPreset.supports_*` 是能力声明，Adapter 是能力实现。两者必须同时存在，不能只靠
-   Adapter 绕过配置声明；
-5. 认证方式和端点继续来自 `config.json` / `ChannelPreset`；Adapter 可以按该声明组装请求，但不得
-   硬编码另一份 Base URL、鉴权规则或 API Key。
-
-预设工厂返回的 `ChannelPreset.id` 必须与 `plugin-registry.json` 的 `channelId` 相同；统一契约
-测试会遍历所有渠道贡献验证这一点。新增渠道不再修改 `presets.rs` 的分发分支。
-
-需要控制台抓取时，Adapter 只负责把账号 `resource_mode` 映射为 `config.json` 中的 scrape mode key，
-识别明确登录页，并承载渠道专属业务响应 URL 分类、同槽位合并与完成条件；console URL、拦截器、
-页面 extractor 和必需响应槽位仍放在 `config.json`，WebView 生命周期和阶段等待留在公共抓取层。
-必须同时开启 `ChannelPreset.supports_scrape_balance`，避免声明与实现脱节。
-
-模型同步与余额 Tauri command 已通过统一入口分发，不再添加 `channel_id` 大分支。不支持的能力
-返回明确错误文案。
-
-command 只执行细粒度底层操作。账号保存后的余额、模型、路由刷新仍由 React 编排。
+配置内的页面脚本只允许受控抓取回调 `window.__FLOWLET_SCRAPE__?.invoke?.(...)`（若提供），
+不得依赖任意 IPC；CDP + 有界 stash 才是真实捕获来源。账号保存后的刷新继续由 React 编排。
 
 ## 6. 默认开放模型与路由
 
@@ -399,7 +347,7 @@ AccountEditorDrawer
 - 保存单账号不应无条件重写全部路由；
 - 自定义 Base URL 时，官方余额和模型同步是否应跳过必须明确。
 
-渠道模型生成直接路由后，还必须验证 `proxy_routing.rs` 和 `proxy_http.rs` 中的规范模型身份校验、协议、账号健康状态和 `/models` 过滤条件。
+渠道模型生成直接路由后，还必须验证 `packages/flowlet-core/src/proxy/routing.ts` 和 `proxy/http.ts` 中的规范模型身份校验、协议、账号健康状态和 `/models` 过滤条件。
 
 ## 7. 前端接入
 
@@ -439,9 +387,9 @@ AccountEditorDrawer
 
 每个新渠道至少覆盖适用的测试：
 
-### Rust
+### Node/TS
 
-- `core::plugin_contract` 统一契约测试通过，确认注册表、预设、Capability Adapter、能力声明、
+- 渠道/目录/配置与 Node 入口的相关契约测试通过，确认注册表、预设、Capability Adapter、能力声明、
   scrape mode、默认模型与模型目录互相一致；
 - `config.json` 能解析渠道、端点、价格、默认模型与模型目录；
 - 全新 SQLite 能追加渠道；
@@ -469,12 +417,13 @@ AccountEditorDrawer
 完成后依次执行：
 
 ```text
-bun run check
-bun run test
-bun run build
-cargo fmt --check
-cargo check
-cargo test <相关测试名>
+npm run check
+npm test
+npm run build:desktop
+npm run build:web
+npm run node:typecheck
+npm run node:commands
+node --test packages/flowlet-core/src
 ```
 
 再使用不含生产密钥的本地数据验证：
@@ -498,17 +447,16 @@ cargo test <相关测试名>
 - [ ] `config.json`
 - [ ] `docs/config.md`
 - [ ] `src/domains/channel/types.ts`
-- [ ] `src-tauri/src/core/config.rs`
-- [ ] `src-tauri/src/core/presets.rs`
-- [ ] `src-tauri/src/core/channels_config.rs`
-- [ ] `src-tauri/src/core/storage_config.rs`
-- [ ] `src-tauri/src/lib.rs`
-- [ ] `src-tauri/src/core/sync.rs`
-- [ ] `src-tauri/src/commands.rs`
+- [ ] 根 `model-catalog.json` / `plugin-registry.json`
+- [ ] `packages/flowlet-core/src/config/index.ts`
+- [ ] `packages/flowlet-core/src/storage/index.ts` / `storage/schema.ts`
+- [ ] `packages/flowlet-core/src/web/model-sync.ts` / `web/balance.ts`
+- [ ] `packages/flowlet-core/src/web/commands.ts` / `web/permissions.ts`
+- [ ] 适用的 `packages/flowlet-core/src/proxy/` / `scrape/` / `desktop/`
 - [ ] `src/features/channel-accounts/`
 - [ ] `src/pages/overview/`
 - [ ] `public/icons/lobe/`
-- [ ] Rust 存储、同步、路由测试
+- [ ] Node 存储、同步、路由测试
 - [ ] 前端账号、默认路由和 UI 测试
 
 交付说明必须包含：
@@ -593,7 +541,7 @@ Token Plan 账号通过账号级 Base URL 覆盖接入（与 Qwen Token Plan 的
 `decision-model-preview` 是独立的结构化决策模型，模型目录登记 `kind: "decision"`。
 它使用 `POST /v1/systemone`（上游百炼网关为 `/compatible-mode/v1/systemone`），
 请求与响应原样透传，仅按候选替换 `model`；记录上游真实输入 Token，不虚构输出 Token。
-协议隔离由目录、前端候选对账、Node 与 Rust 路由共同保证；它不进入对话模型池或 Agent 接入。
+协议隔离由目录、前端候选对账、Node 路由共同保证；它不进入对话模型池或 Agent 接入。
 
 Qwen 需要账号级 Token Plan 或业务空间网关地址，缺失时禁用选择并不生成候选。
 自定义网关使用其 OpenAI Base URL，模型只接受该账号实际 `/models` 返回结果。

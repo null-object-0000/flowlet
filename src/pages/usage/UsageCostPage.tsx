@@ -25,17 +25,17 @@ import { createHeatLevelScale } from "../../shared/visualization/heatmapLevels";
 import { groupConvertedUsageCost, summarizeConvertedUsageCost } from "./usageCostConversion";
 import type { DailyUsageTotal } from "../../domains/device-sync/types";
 import {
-  buildMobileUsageHeatmap,
-  buildMobileDailyHourlyHeatmap,
+  buildUsageHeatmap,
+  buildDailyHourlyHeatmap,
   buildUsageTokenDetails,
   buildWeekdayHourHeatmap,
   DEFAULT_USAGE_PERIOD,
-  filterMobileUsage,
-  formatMobileUsageRange,
-  getMobileUsageRange,
-  summarizeMobileUsage,
-  type MobileUsageHeatmapMetric,
-  type MobileUsagePeriod,
+  filterUsage,
+  formatUsageRange,
+  getUsageRange,
+  summarizeUsage,
+  type UsageHeatmapMetric,
+  type UsagePeriod,
 } from "../../features/usage/deviceUsagePresentation";
 import styles from "./UsageCostPage.module.css";
 
@@ -43,9 +43,9 @@ export function UsageCostPage() {
   const { language, t } = useAppPreferences();
   const refresh = useRefreshControl({ intervalMs: 30_000 });
   const [deviceId, setDeviceId] = useState<string | null>(null);
-  const [period, setPeriod] = useState<MobileUsagePeriod>(DEFAULT_USAGE_PERIOD);
+  const [period, setPeriod] = useState<UsagePeriod>(DEFAULT_USAGE_PERIOD);
   const [periodOffset, setPeriodOffset] = useState(0);
-  const [heatmapMetric, setHeatmapMetric] = useState<MobileUsageHeatmapMetric>("tokens");
+  const [heatmapMetric, setHeatmapMetric] = useState<UsageHeatmapMetric>("tokens");
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selectedHour, setSelectedHour] = useState<string | null>(null);
   const [unknownRequestsOpen, setUnknownRequestsOpen] = useState(false);
@@ -58,11 +58,11 @@ export function UsageCostPage() {
   const hourlyUsage = useDeviceHourlyUsage(deviceId, true, refresh.autoRefresh);
   const now = useMemo(() => new Date(), []);
   const range = useMemo(
-    () => getMobileUsageRange(period, periodOffset, now),
+    () => getUsageRange(period, periodOffset, now),
     [now, period, periodOffset],
   );
   const rangeLabel = useMemo(
-    () => formatMobileUsageRange(range, period, language),
+    () => formatUsageRange(range, period, language),
     [language, period, range],
   );
   const periodLogRange = useMemo(() => {
@@ -97,10 +97,10 @@ export function UsageCostPage() {
     [costConfig, modelCurrencyOf, scopedCostRows],
   );
   const days = useMemo(
-    () => filterMobileUsage(usage.data ?? [], period, periodOffset, now),
+    () => filterUsage(usage.data ?? [], period, periodOffset, now),
     [now, period, periodOffset, usage.data],
   );
-  const summary = useMemo(() => summarizeMobileUsage(days), [days]);
+  const summary = useMemo(() => summarizeUsage(days), [days]);
   const periodUnknownRequests = useMemo(
     () => days.reduce((total, day) => total + day.unknownCount, 0),
     [days],
@@ -123,7 +123,7 @@ export function UsageCostPage() {
     nativeEvents: summary.nativeEvents,
   });
   const heatmap = useMemo(
-    () => buildMobileUsageHeatmap(usage.data ?? [], period, periodOffset, now, heatmapMetric),
+    () => buildUsageHeatmap(usage.data ?? [], period, periodOffset, now, heatmapMetric),
     [heatmapMetric, now, period, periodOffset, usage.data],
   );
   const weekHourlyHeatmap = useMemo(
@@ -131,7 +131,7 @@ export function UsageCostPage() {
     [heatmapMetric, hourlyUsage.data, now, periodOffset],
   );
   const dailyHourlyChart = useMemo(
-    () => buildMobileDailyHourlyHeatmap(hourlyUsage.data ?? [], periodOffset, now, heatmapMetric),
+    () => buildDailyHourlyHeatmap(hourlyUsage.data ?? [], periodOffset, now, heatmapMetric),
     [heatmapMetric, hourlyUsage.data, now, periodOffset],
   );
   const activeHourlyHeatmap = period === "day" ? dailyHourlyChart : weekHourlyHeatmap;
@@ -418,7 +418,7 @@ export function UsageCostPage() {
               { value: "day", label: t("日") },
               { value: "week", label: t("周") },
               { value: "month", label: t("月") },
-            ] as Array<{ value: MobileUsagePeriod; label: string }>)}
+            ] as Array<{ value: UsagePeriod; label: string }>)}
             onChange={(value) => {
               setPeriod(value);
               setPeriodOffset(0);
@@ -595,7 +595,7 @@ function calculateTokenConfidence(proxyRequests: number, nativeEvents: number, u
 }
 
 function getSelectedLogRange(
-  period: MobileUsagePeriod,
+  period: UsagePeriod,
   selectedDate: string | null,
   selectedHour: string | null,
   selectedHourEnd: number | null,
@@ -652,7 +652,7 @@ function formatConfidence(value: number) {
 }
 
 function formatHeatmapValues(
-  metric: MobileUsageHeatmapMetric,
+  metric: UsageHeatmapMetric,
   tokens: number,
   estimatedCost: number,
   currency: "CNY" | "USD",

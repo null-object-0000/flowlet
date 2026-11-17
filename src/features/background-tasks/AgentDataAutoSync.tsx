@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { listen } from "../../platform/host/events";
 import { useQueryClient } from "@tanstack/react-query";
 import { backgroundTaskCommands } from "../../domains/background-task/commands";
 import { queryKeys } from "../../shared/query-keys";
@@ -78,7 +78,10 @@ export function AgentDataAutoSync() {
       if (watchTimer) window.clearTimeout(watchTimer);
       watchTimer = window.setTimeout(flushWatchChange,
         Math.max(FILE_WATCH_DEBOUNCE, FILE_WATCH_COOLDOWN - (Date.now() - lastWatchSyncAt)));
-    }).catch(() => () => undefined);
+    }).catch((error: unknown) => {
+      console.error("Failed to subscribe to Agent source changes; periodic synchronization remains available", error);
+      return () => undefined;
+    });
     return () => { stopped = true; publishSchedule(null); if (timer) window.clearTimeout(timer); if (watchTimer) window.clearTimeout(watchTimer); document.removeEventListener("visibilitychange", onVisibility); void unlisten.then((dispose) => dispose()); };
   }, [client]);
   return null;

@@ -3,7 +3,7 @@
  * 只有 Web Host 有「管理员自己配登录方式」这件事（桌面壳走本地单用户，不存在登录页），
  * 所以这个模块只在 Web Host 下被渲染，命令也只由 Node Host 实现。
  */
-import { invokeCommand, toAppError } from "../../platform/tauri/client";
+import { invokeCommand, toAppError } from "../../platform/host/client";
 
 /** 与 Node Host 的 `get_oidc_auth_provider` 返回一致；**不含 secret**。 */
 export type OidcProviderSummary = {

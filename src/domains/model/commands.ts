@@ -1,4 +1,4 @@
-import { invokeCommand, toAppError } from "../../platform/tauri/client";
+import { invokeCommand, toAppError } from "../../platform/host/client";
 import {
   FLOWLET_SUPPORTED_MODELS,
   canonicalModelId,

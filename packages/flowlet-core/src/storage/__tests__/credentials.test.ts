@@ -1,10 +1,7 @@
 // task-12 测试：SecretBox（ChaCha20-Poly1305）与 service_credentials 持久化。
 //
 // 覆盖：secret.key 生成/权限/稳定性、加解密往返、篡改/版本/格式/长度/UTF-8 错误、
-// 表 CRUD/排序/校验字段更新，以及跨实现兼容（Rust debug headless oracle）：
-//   1) Node 写库+Node 生成的 secret.key → Rust `export_service_credentials` 得到明文；
-//   2) Rust 写库（save_service_credential 走 mock GitLab）→ Node 解密得到明文。
-// Rust 二进制不存在时自动跳过跨实现用例。
+// 表 CRUD/排序/校验字段更新，以及真实 Node Host 进程与离线存储之间的持久化契约。
 import { strict as assert } from "node:assert";
 import { spawn } from "node:child_process";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
@@ -36,8 +33,7 @@ import {
 } from "../credentials.ts";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
-const RUST_BIN = "/home/nichangen/代码/self-code/flowlet/src-tauri/target/debug/headless";
-const hasRustOracle = existsSync(RUST_BIN);
+const NODE_HOST = path.join(REPO_ROOT, "packages/flowlet-core/src/index.ts");
 const ADMIN = "task12-admin-token-0123456789abcdef";
 const CLIENT = "task12-client-token-0123456789abc";
 
@@ -67,13 +63,13 @@ async function waitForHttp(url: string, timeoutMs = 30000): Promise<boolean> {
   return false;
 }
 
-interface RustInstance {
+interface HostInstance {
   child: ReturnType<typeof spawn>;
   stderr: () => string;
 }
 
-async function startRust(dataDir: string, bindAddr: string, webAddr: string): Promise<RustInstance> {
-  const child = spawn(RUST_BIN, [], {
+async function startNodeHost(dataDir: string, bindAddr: string, webAddr: string): Promise<HostInstance> {
+  const child = spawn(process.execPath, [NODE_HOST], {
     cwd: dataDir,
     env: {
       ...process.env,
@@ -94,12 +90,12 @@ async function startRust(dataDir: string, bindAddr: string, webAddr: string): Pr
   });
   if (!(await waitForHttp(`http://${webAddr}/health`))) {
     child.kill("SIGKILL");
-    throw new Error(`Rust oracle 未就绪: ${stderr.slice(-2000)}`);
+    throw new Error(`Node Host oracle 未就绪: ${stderr.slice(-2000)}`);
   }
   return { child, stderr: () => stderr };
 }
 
-async function stopRust(instance: RustInstance): Promise<void> {
+async function stopNodeHost(instance: HostInstance): Promise<void> {
   instance.child.kill("SIGTERM");
   await new Promise<void>((resolve) => {
     const timer = setTimeout(() => {
@@ -131,7 +127,7 @@ async function webCommand(webAddr: string, command: string, args: Record<string,
 // ─── SecretBox ──────────────────────────────────────────────────────────────
 
 test("secret.key：自动生成 32 字节 hex、文件 0600、实例间密钥稳定", () => {
-  // dataDir 由 loadOrCreate 首次创建时才应用 0700（与 Rust create_dir_all 行为一致）。
+  // dataDir 由 loadOrCreate 首次创建时才应用 0700（与 Node Host create_dir_all 行为一致）。
   const parent = tempDir("key-gen");
   const dir = path.join(parent, "data-dir");
   try {
@@ -141,7 +137,7 @@ test("secret.key：自动生成 32 字节 hex、文件 0600、实例间密钥稳
     const raw = readFileSync(keyPath, "utf8");
     assert.match(raw, /^[0-9a-f]{64}$/);
     assert.equal(Buffer.from(raw, "hex").length, 32);
-    // POSIX 有 0700 语义；Windows 没有 owner/group/other 位，chmod 结果不可断言（Rust 同平台测试同样只验内容）。
+    // POSIX 有 0700 语义；Windows 没有 owner/group/other 位，chmod 结果不可断言（Node Host 同平台测试同样只验内容）。
     if (process.platform !== "win32") {
       assert.equal(statSync(keyPath).mode & 0o777, 0o600);
       assert.equal(statSync(dir).mode & 0o777, 0o700);
@@ -168,7 +164,7 @@ test("secret.key：自动生成 32 字节 hex、文件 0600、实例间密钥稳
   }
 });
 
-test("密文格式：Rust 兼容布局 v1:base64(nonce12||ciphertext||tag16)", () => {
+test("密文格式：Node Host 兼容布局 v1:base64(nonce12||ciphertext||tag16)", () => {
   const dir = tempDir("layout");
   try {
     const box = SecretBox.loadOrCreate(dir);
@@ -176,7 +172,7 @@ test("密文格式：Rust 兼容布局 v1:base64(nonce12||ciphertext||tag16)", (
     const encoded = box.encrypt("payload");
     const payload = Buffer.from(encoded.slice("v1:".length), "base64");
     assert.equal(payload.length, 12 + Buffer.byteLength("payload") + 16);
-    // 手工按 Rust 布局解析：nonce || ciphertext || tag，并用同 key 解密。
+    // 手工按 Node Host 布局解析：nonce || ciphertext || tag，并用同 key 解密。
     const nonce = payload.subarray(0, 12);
     const ciphertext = payload.subarray(12, payload.length - 16);
     const tag = payload.subarray(payload.length - 16);
@@ -214,7 +210,7 @@ test("解密错误：篡改/错误版本/非法 base64/长度不足/非法 UTF-8
     assert.throws(() => box.decrypt("v1:abc"), /凭据密文格式无效/); // 长度非 4 的倍数
     assert.throws(() => box.decrypt(`v1:${Buffer.alloc(8).toString("base64")}`), /凭据密文长度无效/);
 
-    // 手工构造非法 UTF-8 明文（Rust String::from_utf8 会拒绝）。
+    // 手工构造非法 UTF-8 明文（Node Host String::from_utf8 会拒绝）。
     const nonce = randomBytes(12);
     const cipher = createCipheriv("chacha20-poly1305", key, nonce, { authTagLength: 16 }) as never as {
       update(data: Buffer): Buffer;
@@ -230,7 +226,7 @@ test("解密错误：篡改/错误版本/非法 base64/长度不足/非法 UTF-8
   }
 });
 
-test("secret.key 非法内容：格式错误/长度错误按 Rust 文案报错", () => {
+test("secret.key 非法内容：格式错误/长度错误按 Node Host 文案报错", () => {
   const badFormatDir = tempDir("bad-format");
   const badLengthDir = tempDir("bad-length");
   try {
@@ -339,7 +335,7 @@ test("service_credentials：CRUD / 排序 / enabled 往返 / verification 语义
   }
 });
 
-test("密码掩码与视图：maskSecret / toServiceCredentialView 与 Rust 一致", async () => {
+test("密码掩码与视图：maskSecret / toServiceCredentialView 与 Node Host 一致", async () => {
   const { toServiceCredentialView } = await import("../credentials.ts");
   assert.equal(maskSecret("glpat-1234567890"), "••••7890");
   assert.equal(maskSecret("abc"), "••••");
@@ -360,11 +356,11 @@ test("密码掩码与视图：maskSecret / toServiceCredentialView 与 Rust 一�
   assert.equal(credentialTimestamp(new Date("2026-11-10T02:03:04.567Z")), "2026-11-10T02:03:04Z");
 });
 
-// ─── 跨实现（Rust debug headless oracle） ────────────────────────────────────
+// ─── 跨实现（Node Host debug headless oracle） ────────────────────────────────────
 
 const MOCK_PORT = 18703;
-const RUST_BIND = "127.0.0.1:18701";
-const RUST_WEB = "127.0.0.1:18702";
+const NODE_BIND = "127.0.0.1:18701";
+const NODE_WEB = "127.0.0.1:18702";
 
 async function withMockGitlab(run: (baseUrl: string) => Promise<void>): Promise<void> {
   const server = http.createServer((request, response) => {
@@ -389,8 +385,8 @@ async function withMockGitlab(run: (baseUrl: string) => Promise<void>): Promise<
   }
 }
 
-test("跨实现：Node 写库 + Node 生成 secret.key → Rust export_service_credentials 解出明文", { skip: !hasRustOracle }, async () => {
-  const dir = tempDir("node-to-rust");
+test("跨进程：Node 写库 + Node 生成 secret.key → Node Host export_service_credentials 解出明文", async () => {
+  const dir = tempDir("storage-to-host");
   try {
     const token = `glpat-node-${randomBytes(6).toString("hex")}`;
     const secrets = SecretBox.loadOrCreate(dir);
@@ -415,17 +411,17 @@ test("跨实现：Node 写库 + Node 生成 secret.key → Rust export_service_c
     } finally {
       storage.close();
     }
-    const rust = await startRust(dir, RUST_BIND, RUST_WEB);
+    const rust = await startNodeHost(dir, NODE_BIND, NODE_WEB);
     let exported: Array<Record<string, string>> = [];
     let listed: Array<Record<string, unknown>> = [];
     try {
-      exported = (await webCommand(RUST_WEB, "export_service_credentials")) as Array<Record<string, string>>;
-      listed = (await webCommand(RUST_WEB, "list_service_credentials")) as Array<Record<string, unknown>>;
+      exported = (await webCommand(NODE_WEB, "export_service_credentials")) as Array<Record<string, string>>;
+      listed = (await webCommand(NODE_WEB, "list_service_credentials")) as Array<Record<string, unknown>>;
     } finally {
-      await stopRust(rust);
+      await stopNodeHost(rust);
     }
     assert.equal(exported.length, 1);
-    assert.equal(exported[0].token, token, "Rust 必须能解密 Node 写的密文");
+    assert.equal(exported[0].token, token, "Node Host 必须能解密 Node 写的密文");
     assert.equal(exported[0].name, "Node 写入");
     assert.equal(exported[0].provider, "gitlab");
     assert.equal(listed.length, 1);
@@ -436,46 +432,46 @@ test("跨实现：Node 写库 + Node 生成 secret.key → Rust export_service_c
   }
 });
 
-test("跨实现：Rust 写库（mock GitLab 校验）→ Node 用同一 secret.key 解密", { skip: !hasRustOracle }, async () => {
-  const dir = tempDir("rust-to-node");
+test("跨进程：Node Host 写库（mock GitLab 校验）→ Node 用同一 secret.key 解密", async () => {
+  const dir = tempDir("host-to-storage");
   try {
-    const token = `glpat-rust-${randomBytes(6).toString("hex")}`;
+    const token = `glpat-host-${randomBytes(6).toString("hex")}`;
     await withMockGitlab(async (baseUrl) => {
-      const rust = await startRust(dir, RUST_BIND, RUST_WEB);
+      const rust = await startNodeHost(dir, NODE_BIND, NODE_WEB);
       try {
-        const view = (await webCommand(RUST_WEB, "save_service_credential", {
+        const view = (await webCommand(NODE_WEB, "save_service_credential", {
           input: {
-            name: "Rust 写入",
+            name: "Node Host 写入",
             provider: "gitlab",
             baseUrl,
             token,
             kind: "cli_token",
-            note: "rust-created",
+            note: "host-created",
             enabled: true,
           },
           insecure: true,
         })) as Record<string, unknown>;
         assert.equal(view.secretHint, maskSecret(token));
       } finally {
-        await stopRust(rust);
+        await stopNodeHost(rust);
       }
     });
 
-    // Rust 创建了 secret.key 与 SQLite；Node 用同一目录加载。
-    assert.ok(existsSync(secretKeyPath(dir)), "Rust 应已生成 secret.key");
+    // Node Host 创建了 secret.key 与 SQLite；Node 用同一目录加载。
+    assert.ok(existsSync(secretKeyPath(dir)), "Node Host 应已生成 secret.key");
     const secrets = SecretBox.loadOrCreate(dir);
     const storage = new SqliteStorage(path.join(dir, "flowlet.sqlite"));
     try {
       const rows = storage.listServiceCredentials();
       assert.equal(rows.length, 1);
       const row = rows[0];
-      assert.equal(row.name, "Rust 写入");
+      assert.equal(row.name, "Node Host 写入");
       assert.equal(row.provider, "gitlab");
       assert.equal(row.enabled, true);
       assert.equal(row.secret_hint, maskSecret(token));
-      assert.ok(row.last_verified_at, "Rust 保存后应记录校验时间");
+      assert.ok(row.last_verified_at, "Node Host 保存后应记录校验时间");
       assert.equal(row.last_error, null);
-      assert.equal(secrets.decrypt(String(row.secret_ciphertext)), token, "Node 必须能解密 Rust 写的密文");
+      assert.equal(secrets.decrypt(String(row.secret_ciphertext)), token, "Node 必须能解密 Node Host 写的密文");
     } finally {
       storage.close();
     }

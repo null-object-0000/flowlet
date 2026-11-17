@@ -6,8 +6,7 @@ const css = readFileSync(resolve(process.cwd(), "src/styles/tokens.css"), "utf8"
 const resetCss = readFileSync(resolve(process.cwd(), "src/styles/reset.css"), "utf8");
 const lightScope = css.match(/:root\s*{([\s\S]*?)\n}/)?.[1] ?? "";
 const darkScope = css.match(/body\[theme-mode="dark"\]\s*{([\s\S]*?)\n}/)?.[1] ?? "";
-const sourceCss = collectCssFiles(resolve(process.cwd(), "src"))
-  .filter(({ file }) => !file.replace(/\\/g, "/").includes("/src/mobile/"));
+const sourceCss = collectCssFiles(resolve(process.cwd(), "src"));
 
 describe("readability color tokens", () => {
   it("keeps the primary text alias tied to the tested primary text color", () => {

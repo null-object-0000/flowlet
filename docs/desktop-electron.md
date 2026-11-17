@@ -1,12 +1,8 @@
 # Electron 桌面宿主（packages/flowlet-desktop）
 
-> 状态：**实现中 / 冒烟通过**（2026-11-10）。Rust/Tauri 版仍是行为权威参考
-> （`src-tauri/**` 只读）；本包是桌面端迁移到 Electron + Node/TS 后的正式宿主。
->
-> 设计决策见 [`electron-migration-plan.md`](./electron-migration-plan.md)、
-> [`migration/platform-gap-matrix.md`](./migration/platform-gap-matrix.md)、
-> [`migration/node-host.md`](./migration/node-host.md)、
-> [`migration/commands-and-schema.md`](./migration/commands-and-schema.md)。
+> 当前正式桌面宿主为 **Electron + Node/TS**；Rust/Tauri 实现及回滚、旧构建和旧对拍链路已移除。
+> 当前架构见 [architecture.md](architecture.md)，发布见 [release-builds.md](release-builds.md)。
+> 本文的日期化验证记录只证明当时执行过的测试，不等于当前所有平台或行为全部通过。
 
 ---
 
@@ -14,12 +10,12 @@
 
 ```text
 Electron main（Node 24 / ESM，dist-host/main.mjs）
-  ├─ 解析数据目录（与 Rust 一致）→ app.setPath(userData/sessionData)
+  ├─ 解析数据目录（paths.ts）→ app.setPath(userData/sessionData)
   ├─ 单实例锁 + 第二次启动聚焦
   ├─ 生成随机管理 token（32B base64url，≥24 字符）
   ├─ 动态 import dist-host/core-host.mjs
   │    └─ flowlet-core startHost()（同进程）
-  │         ├─ SQLite（node:sqlite，直接打开 Rust 同库）
+  │         ├─ SQLite（node:sqlite，保留既有 schema 与增量迁移）
   │         ├─ 本地代理 127.0.0.1:18640（可配）
   │         ├─ Web Host 127.0.0.1:0（随机端口，静态服务 dist-desktop）
   │         └─ `/api/commands/*` 桌面命令超集（DesktopHostBridge → main）
@@ -37,6 +33,10 @@ Electron main（Node 24 / ESM，dist-host/main.mjs）
 - **主进程不直接 import Electron 到 core**：`flowlet-core` 只认
   `DesktopHostBridge.invoke(channel, payload)`，平台能力全部收口在
   `packages/flowlet-desktop/src/bridge.ts`。
+- **前端平台边界**：领域命令通过 `src/platform/host/client.ts` 走 HTTP；窗口能力通过
+  `src/platform/host/window.ts`；对话框/固定事件通过 `host/dialog.ts`、`host/events.ts`
+  到 `src/platform/desktop/bridge.ts` 对接 preload。`dialog` / 本机事件只在 host 模式暴露；
+  不向页面开放任意 IPC channel、Node 文件系统或远程管理凭据。
 - **core-host 独立 bundle**：`flowlet-core` 内部用 `import.meta.url` 定位
   config/model 目录与 capture-cleanup worker；bundle 会改变路径。构建脚本用
   esbuild 插件把这些 URL 重写到运行期 `FLOWLET_RUNTIME_ROOT_URL` 下的虚拟目录树
@@ -60,15 +60,10 @@ Electron main（Node 24 / ESM，dist-host/main.mjs）
 
 ---
 
-## 2. 数据目录（必须与 Rust/Tauri 版一致）
+## 2. 数据目录
 
-权威实现：
-
-- `src-tauri/src/lib.rs::app_database_path`：**SQLite 始终在 exe 同级目录**；
-- `src-tauri/src/core/webview_profile.rs::is_portable`：exe 旁存在
-  `portable.tag` 即便携版；
-- `scripts/build-portable.mjs`：复制 `config.json` / 模型目录并写入
-  `portable.tag`。
+权威实现为 `packages/flowlet-desktop/src/paths.ts`；兼容既有 SQLite、配置和便携目录，
+但不依赖旧宿主源码。首次升级前应备份完整数据目录。
 
 Electron 侧解析（`packages/flowlet-desktop/src/paths.ts`）：
 
@@ -81,11 +76,11 @@ Electron 侧解析（`packages/flowlet-desktop/src/paths.ts`）：
 - **不使用 Electron 默认 `userData`**：`app.setPath("userData", <webviewRoot>/main-webview)`、
   `app.setPath("sessionData", <webviewRoot>)` 必须在 `ready` 前调用。
 - 主窗口 partition：`persist:main-webview`；抓取窗口：`persist:scrape-<accountId>`。
-  与 Rust 的 per-account user-data-dir 相比，目录名不同（`Partitions/` 下），但
+  partition 位于 `Partitions/` 下，
   cookie/localStorage/IndexedDB/cache 同样按账号隔离；**既有 WebView2/WebKitGTK
-  登录态无法迁移**（HG-5），用户需要重新登录。
+  登录态无法直接复用**，用户需要重新登录。
 - 首次启动会把随包 `config.json` / `model-catalog.json` / `models-cn.json` /
-  `models-dev.json` 复制到数据目录（目标已存在则跳过），与 Rust setup 行为一致。
+  `models-dev.json` 复制到数据目录（目标已存在则跳过）。
 - 窗口记忆：`<dataDir>/window-state.json`（只保存 SIZE/POSITION/MAXIMIZED，
   不保存可见性；启动后按 workArea 校正到可见屏幕）。
 - 日志：`<dataDir>/logs/flowlet-desktop.log`（5MB 轮转）。
@@ -96,8 +91,7 @@ Electron 侧解析（`packages/flowlet-desktop/src/paths.ts`）：
 
 ### 便携版构建与更新（Electron）
 
-Tauri 时代的 `tauri:build:portable` / `tauri:update:portable` 只认 `src-tauri/target/release`
-和 `flowlet(.exe)`，**Electron 桌面端不走这套**。对应命令：
+仅支持 Electron 便携布局，对应命令：
 
 ```bash
 npm run desktop:portable           # 前端+host → electron-builder --dir → 组装便携目录 → 打 zip
@@ -119,20 +113,20 @@ npm run desktop:update:portable    # 构建 → 停进程 → 覆盖程序文件
 - 首次打包需要能访问 `github.com/electron/electron/releases` 下 electron 二进制，
   受限网络先 `export HTTPS_PROXY=http://127.0.0.1:7890`。
 
-`scripts/update-portable.mjs` 现在**两种布局都认**（`--layout auto|tauri|electron`，
-按目录里的 `resources/app.asar` 或 `flowlet_lib.*` 判断）：
+`scripts/update-portable.mjs` 只更新 Electron 布局：
 
-- `npm run desktop:update:portable` → `--layout electron`
-- `npm run tauri:update:portable` → `--layout tauri --replace-config`（保持旧行为）
-- 覆盖时保留：`config.json`、`portable.tag`、`flowlet.sqlite*`、`data/`、`logs/`、`desktop-config.json`
-- `--skip-build` 可跳过构建直接用现有产物；`--dry-run` 只打印识别结果
+- `npm run desktop:update:portable`，或 `node scripts/update-portable.mjs --target <便携目录>`；
+- 默认保留配置、`portable.tag`、SQLite 主文件/WAL/SHM、`data/`、`logs/` 与 `desktop-config.json`；
+- `--replace-config` 会显式覆盖配置，常规升级不要使用；先备份并核对目标目录；
+- `--skip-build` 跳过构建；`--dry-run` 只打印识别结果，不停进程或覆盖文件；
+- 不再接受旧宿主布局选择参数。
 
 ---
 
 ## 3. Host channel 契约
 
 契约来源：`packages/flowlet-core/src/desktop/README.md`。main 侧实现
-`DesktopHostBridge`（`src/bridge.ts`）。**未知 channel 会 reject
+`DesktopHostBridge`（`packages/flowlet-desktop/src/bridge.ts`）。**未知 channel 会 reject
 `未实现的桌面宿主 channel：...`**，不静默返回 null。
 
 | channel | 实现要点 |
@@ -146,14 +140,14 @@ npm run desktop:update:portable    # 构建 → 停进程 → 覆盖程序文件
 | `platform.autostart.get/set` | win/mac `app.setLoginItemSettings`；Linux 写 `~/.config/autostart/flowlet.desktop`（`Exec="<exe>" --hidden`） |
 | `platform.relaunch` | `app.relaunch()` + 正常退出流程 |
 | `platform.quit` | 停代理 → 关 Host → 停运行时 → `app.exit(0)` |
-| `keyring.get/set/delete` | safeStorage 密文文件；首次读到 Rust keyring 旧条目时迁移；删除同步清旧条目 |
+| `keyring.get/set/delete` | safeStorage 密文文件；首次读到旧 OS keyring 条目时迁移；删除同步清旧条目 |
 | `agentRuntime.start/stop/status` | 目前实现 DSH：`dsh web --no-open` 或 `npx @deepseek-ai/dsh web --no-open`，健康检查 127.0.0.1:3080（20s），外部进程不接管 |
 | `scrape.openConsole/closeConsole/runPlan/cancel/probeLogin/evaluate` | CDP + 隐藏 BrowserWindow + per-account partition，见 §4；`evaluate` 在已打开窗口内直接执行 extractor（不导航、不等网络），供 `scrape_balance` 复用 probe 阶段响应 |
 | `power.preventSuspend` | `powerSaveBlocker.start("prevent-app-suspension")` / `stop`（不阻止熄屏） |
 
-### keyring 与 Rust 旧条目
+### 凭据存储与旧系统条目兼容
 
-Rust 只把两类密钥放 OS 凭据库（账号 API Key 仍在 SQLite 明文，与现状一致）：
+既有安装可能把两类密钥放 OS 凭据库（账号 API Key 仍在 SQLite 明文，与现状一致）：
 
 - S3 Secret：service `Flowlet Device Sync`，username
   `s3-<sha256(endpoint\0bucket\0access_key_id)>`；
@@ -180,11 +174,11 @@ Rust 只把两类密钥放 OS 凭据库（账号 API Key 仍在 SQLite 明文，
   `setPermissionRequestHandler` 全拒、`setWindowOpenHandler` 拒绝弹窗。
 - UA：默认 Chromium UA；`channelId === "longcat"` 时固定
   `Mozilla/5.0 (Windows NT 10.0; Win64; x64) ... Chrome/126.0.0.0 Safari/537.36`
-  （沿用 Rust `scrape_console.rs` 策略；Qwen 走阿里云 SSO，不覆盖 UA）。
+  （Qwen 走阿里云 SSO，不覆盖 UA）。
 - 响应捕获：`webContents.debugger.attach("1.3")` →
   `Network.enable`（maxResourceBufferSize 8MB）→ `Network.responseReceived` +
   `Network.loadingFinished` → `Network.getResponseBody`。
-- 同时保留最多 3 个窗口（Rust `SCRAPE_WEBVIEW_MAX_LIVE`）；超限回收最旧窗口。
+- 同时保留最多 3 个窗口（以 `scrape.ts` 限制为准）；超限回收最旧窗口。
 
 ### `scrape.runPlan` 的 plan（最小可用定义，与 desktop-scrape 对接）
 
@@ -193,7 +187,7 @@ interface ScrapePlan {
   consoleUrl?: string;              // 第 1 阶段导航
   consoleUrlSecondary?: string;     // 第 2 阶段
   consoleUrlTertiary?: string;      // 第 3 阶段
-  interceptorJs?: string;           // document-start 注入（兼容 Rust config 的 __TAURI_INTERNALS__ 调用）
+  interceptorJs?: string;           // document-start 注入；不得依赖页面 IPC 执行宿主命令
   extractorJs?: string;             // 捕获后执行：async (bundle, credential) => unknown
   requiredSlots?: string[];         // 收齐这些槽位才算捕获完成
   slotRules?: {
@@ -213,11 +207,9 @@ interface ScrapePlan {
 
 另有 `scrape.evaluate`（payload `{accountId, source, bundle, credential, timeoutMs?}`）：
 在**已存在的** per-account 抓取窗口里执行 `(<source>)(bundle, credential)`，
-不导航、不等网络，返回 `{ result }`；脚本抛错/超时（默认 10s，对齐 Rust
-`eval_with_callback`）reject 可读错误，窗口不存在返回「抓取窗口未打开」。
-用于 Rust `scrape_balance` 复用 probe 阶段已捕获响应的场景。`interceptorJs` 在 main world 注入，目前提供
-`__TAURI_INTERNALS__.invoke` 兼容 shim（resolve null），因此沿用 Rust config 的
-内置 interceptor 不会报错；**响应捕获以 CDP 为准**，不依赖页面 IPC 回传。
+不导航、不等网络，返回 `{ result }`；脚本抛错/超时（默认 10s）reject 可读错误，窗口不存在返回「抓取窗口未打开」。
+用于 `scrape_balance` 复用 probe 阶段已捕获响应。响应捕获以 CDP 为准，不依赖页面 IPC 回传；
+配置中的历史页面回调不得用于开放任意宿主命令。
 
 > `probeLogin` 当前是 URL/页面文本启发式（`login|signin|auth|sso` 或
 > "登录/扫码登录"），待 desktop-scrape 提供渠道级登录页规则后替换。
@@ -281,25 +273,11 @@ xvfb-run -a packages/flowlet-desktop/node_modules/electron/dist/electron \
 `build-desktop-host.mjs`。若 desktop 前端构建失败，可加 `--fallback-static` 临时
 把 `dist-web` 复制成 `dist-desktop` 做壳层冒烟（汇报中必须注明）。
 
-### Electron 二进制获取（本机无系统 Electron）
+### 依赖安装
 
-本机 `~/.cache/electron/5a625dfd.../electron-v44.7.0-linux-x64.zip` 已有可用
-linux-x64 包。直接 `npm i -D electron@44.7.0` 在受限网络下可能失败，可手工安装：
-
-```bash
-cd packages/flowlet-desktop
-ELECTRON_CACHE=$HOME/.cache/electron npm install --no-package-lock --no-save \
-  --workspaces=false electron@44.7.0 esbuild@0.28.2
-# npm 若跳过 install 脚本，手工解压：
-cd node_modules/electron
-mkdir -p dist
-unzip -q -o "$HOME/.cache/electron/5a625dfd3df3efc3971556afe64989f9aa6ea0f4cd6e33889c1951789041498f/electron-v44.7.0-linux-x64.zip" -d dist
-chmod +x dist/electron
-printf 'electron' > path.txt
-```
-
-开发脚本会自动在 `chrome-sandbox` 非 root:4755 时追加 `--no-sandbox`，并在
-`DISPLAY` 存在时追加 `--ozone-platform=x11`（Wayland 环境不指定会不映射窗口）。
+从仓库根运行 `npm ci`，版本以锁文件与桌面包 `devDependencies` 为准。
+首次打包需要下载 Electron 与打包工具；网络失败应配置可信代理或缓存，
+不要按旧机器缓存路径手工替换不同版本的二进制。
 
 ---
 
@@ -435,14 +413,14 @@ xvfb-run ... flowlet-desktop --screenshot=... --data-dir=<data-dir>
 
 ---
 
-## 7.1 验证命令（迁移期门禁）
+## 7.1 当前验证命令
 
 | 命令 | 覆盖 | 通过标准 |
 | --- | --- | --- |
 | `npm run node:typecheck` | flowlet-core TS | 0 error |
 | `node --test packages/flowlet-core/src` | Node Host + 桌面命令 | 0 fail |
 | `npm run check` | 前端 TS | 0 error |
-| `node scripts/desktop-command-parity.mjs` | Rust 154 条桌面命令覆盖度 | missing = 0 |
+| `npm run node:commands` | 静态命令名称、注册与 Web 权限白名单 | 无注册问题；不是行为覆盖证明 |
 | `npm run desktop:smoke` | Electron 启动 + 首屏 + `/health` + preload 桥 | `SMOKE OK` |
 | `npm run desktop:smoke:pages` | 逐路由渲染 + 截图 + console/命令错误 | 全部路由 ok、0 console error、0 命令失败 |
 | `npm run desktop:dist` | electron-builder 出包 | AppImage/deb 生成 |
@@ -462,7 +440,7 @@ xvfb-run ... flowlet-desktop --screenshot=... --data-dir=<data-dir>
 
 ```text
 npm run desktop:portable                      # → Flowlet_0.2.0_win32_x64_portable（540 MB，含 resources/app.asar）
-node scripts/update-portable.mjs --layout electron --target <便携目录> --skip-build --no-restart
+node scripts/update-portable.mjs --target <便携目录> --skip-build --no-restart
 Start-Process <便携目录>\Flowlet.exe           # 数据目录 = exe 旁（portable.tag）
 ```
 
@@ -479,8 +457,8 @@ Chat Completions / SSE / Anthropic Messages / Responses 四条链路各打出一
 
 | 模式 | 本机做什么 | 命令通道 | 可用能力 |
 | --- | --- | --- | --- |
-| **host**（默认） | 启动完整 Node Host：SQLite、模型代理 18640、本机管理 API、桌面命令超集 | 同进程 `POST /api/commands/{command}` | 全部 154 条桌面命令（Agent 接入、抓取、跨设备同步、自启…） |
-| **client** | **不启动 Host**，只跑 Client Gateway（静态界面 + `/api` 反代） | 本机网关 → 远程 Docker/Web Host 的 66 条管理命令 | 远程观测 + 管理（账号/模型/日志/会话/用量/服务凭据/远程设置）；本机 Agent 接入、抓取、跨设备同步、自启**不可用** |
+| **host**（默认） | 启动完整 Node Host：SQLite、模型代理 18640、本机管理 API、桌面命令超集 | 同进程 `POST /api/commands/{command}` | 已注册的 Web + 桌面命令（Agent 接入、抓取、跨设备同步、自启…） |
+| **client** | **不启动 Host**，只跑 Client Gateway（静态界面 + `/api` 反代） | 本机网关 → 远程 Docker/Web Host 的 显式白名单管理命令 | 远程观测 + 管理（账号/模型/日志/会话/用量/服务凭据/远程设置）；本机 Agent 接入、抓取、跨设备同步、自启**不可用** |
 
 ### 调用链（客户端模式）
 
@@ -531,15 +509,14 @@ renderer（同一份 dist-desktop，按 Web 管理台渲染）
 | Windows Job Object | Flowlet 崩溃/被强杀时 DSH 进程树可能残留（HG-6） | 已用 detached 进程组 + `taskkill /T /F` 做正常退出回收；强杀缺口未解 |
 | Windows toast / AUMID | 便携版 toast 可能被系统静默丢弃（HG-3） | `platform.notify` 仅 `Notification`，未写 HKCU AUMID；安装版需快捷方式 + CLSID |
 | Linux 无边框缩放/装饰 | X11 下八向缩放靠 IPC 模拟，无吸附/无系统边缘 | 可接受；若体验差允许安装版退化为 `frame:true`（未启用） |
-| Android / iOS | Electron 无移动端 target（HG-1） | 本轮不做，保留 Tauri Android 辅助端 |
 | 抓取登录态迁移 | WebView2/WebKitGTK 登录态无法迁移（HG-5） | 用户需重新登录；`partition` 提供新的隔离存储 |
 | `scrape.runPlan` / `scrape.evaluate` 契约 | plan 仍是“最小定义”；`probeLogin` 是 URL/文本启发式 | 已按 desktop-scrape 要求补 `scrape.evaluate` 与 credential/fallback 放宽；登录页规则待渠道实现提供 |
-| `agentRuntime` 覆盖 | 目前仅 DSH；检测/启动策略比 Rust `agent_environment` 简化 | 依赖 PATH 的 `dsh` 或 `npx`，未解析 npx/npm 安装方式 |
+| `agentRuntime` 覆盖 | 目前仅 DSH；检测/启动范围以 Node 环境探测和宿主运行时实现为准 | 依赖 PATH 的 `dsh` 或 `npx`，未解析 npx/npm 安装方式 |
 | Linux `safeStorage` | 无 Secret Service 时 `basic_text` 弱加密 | 诊断暴露 backend；未强制阻断 |
-| 安装版 exe 目录只读 | Program Files/`/usr/bin` 下无法写 DB | 自动降级到 `%LOCALAPPDATA%` 并告警（与 Rust 行为不同，属必要偏差） |
+| 安装版 exe 目录只读 | Program Files/`/usr/bin` 下无法写 DB | 自动降级到 `%LOCALAPPDATA%` 并告警 |
 | 多显示器/DPI | `ensureWindowOnScreen` 只做 workArea clamp | 未做 DPI 缩放换算 |
 | 深色/浅色主题托盘图标 | 只使用 `tray.png` | 未按主题切换 |
-| 通知点击 / Windows AUMID | 便携版 toast 可能被系统丢弃（HG-3） | 已实现通知点击回到主窗口，并在 Windows 启动时幂等写 `HKCU\Software\Classes\AppUserModelId\site.snewbie.flowlet`（DisplayName/IconUri，与 Rust 对齐）；未真机验证 |
+| 通知点击 / Windows AUMID | 便携版 toast 可能被系统丢弃（HG-3） | 已实现通知点击回到主窗口，并在 Windows 启动时幂等写 `HKCU\Software\Classes\AppUserModelId\site.snewbie.flowlet`（DisplayName/IconUri）；未真机验证 |
 | 自定义抓取描述符发现根 | Node 无「exe 同级」概念 | 探 `process.execPath` 目录 + 脚本目录 + `~/.flowlet/custom-scrape`，可用 `FLOWLET_CUSTOM_SCRAPE_DIRS` 覆盖（部署/测试用） |
 
 ### 安全说明
@@ -547,4 +524,4 @@ renderer（同一份 dist-desktop，按 Web 管理台渲染）
 - 管理 token 只存在于主进程内存 + preload 同步 IPC，不落盘、不写日志、不出现在
   进程 argv；渲染进程 `contextIsolation:true`、`sandbox:true`、`nodeIntegration:false`。
 - 抓取窗口加载任意第三方页面，权限请求全部拒绝、禁止 `window.open`。
-- 账号 API Key 仍按现状存 SQLite 明文（与 Rust 一致，本次未改变安全边界）。
+- 账号 API Key 仍按现状存 SQLite 明文（删除旧宿主不改变该安全边界）。

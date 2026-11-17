@@ -109,18 +109,6 @@ export const queryKeys = {
     lanServerStatus: () => [...queryKeys.deviceSync.all, "lan-server-status"] as const,
     lanProbes: () => [...queryKeys.deviceSync.all, "lan-probes"] as const,
   },
-  mobileDeviceSync: {
-    all: ["mobile-device-sync"] as const,
-    devices: () => [...queryKeys.mobileDeviceSync.all, "devices"] as const,
-    accountResources: () => [...queryKeys.mobileDeviceSync.all, "account-resources"] as const,
-    agents: (deviceId: string) => [...queryKeys.mobileDeviceSync.all, "agents", deviceId] as const,
-    dailyUsage: (deviceId: string | null) => [...queryKeys.mobileDeviceSync.all, "daily-usage", deviceId ?? "all"] as const,
-    hourlyUsage: (deviceId: string | null) => [...queryKeys.mobileDeviceSync.all, "hourly-usage", deviceId ?? "all"] as const,
-    sessions: (deviceId: string | null) => [...queryKeys.mobileDeviceSync.all, "sessions", deviceId ?? "all"] as const,
-    permissions: (deviceId: string, sessionId: string) => [...queryKeys.mobileDeviceSync.all, "permissions", deviceId, sessionId] as const,
-    s3Settings: () => [...queryKeys.mobileDeviceSync.all, "s3-settings"] as const,
-    lanProbes: () => [...queryKeys.mobileDeviceSync.all, "lan-probes"] as const,
-  },
   settings: {
     all: ["settings"] as const,
     autostart: () => [...queryKeys.settings.all, "autostart"] as const,

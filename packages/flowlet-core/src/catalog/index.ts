@@ -182,9 +182,11 @@ export function loadModelCatalog(catalogDir: string, repoRoot: string): ModelCat
     {};
   const modelsCn =
     readJson(path.join(catalogDir, "models-cn.json")) ??
+    readJson(path.join(repoRoot, "resources", "catalogs", "models-cn.json")) ??
     readJson(path.join(repoRoot, "models-cn.json"));
   const modelsDev =
     readJson(path.join(catalogDir, "models-dev.json")) ??
+    readJson(path.join(repoRoot, "resources", "catalogs", "models-dev.json")) ??
     readJson(path.join(repoRoot, "models-dev.json"));
   const catalog = new ModelCatalogImpl(raw, modelsCn, modelsDev);
   // 进程级单例同步指向本次加载结果，供 config/proxy 中无 catalogDir 的调用方使用。

@@ -4,7 +4,7 @@
 
 ## UI/UX 优化
 
-- [ ] 分阶段改善桌面端与移动端的字体、颜色、界面密度、系统缩放和窗口自适应，实施计划与验收矩阵见 [`ui-readability-adaptive-layout-todo.md`](./ui-readability-adaptive-layout-todo.md)
+- [ ] 分阶段改善桌面端的字体、颜色、界面密度、系统缩放和窗口自适应，实施计划与验收矩阵见 [`ui-readability-adaptive-layout-todo.md`](./ui-readability-adaptive-layout-todo.md)
 - [ ] Codex 账号与用量里的最后更新时间支持鼠标悬浮上去查看下次刷新数据时间
 
 ## 请求日志
@@ -23,10 +23,6 @@
 ## 用量成本
 
 - [*] 用量成本里没有把没经过 flowlet 的费用算在里面，当然也可以出一个筛选项或者开关看是近仅看经过 flowlet 的部分还是看全部，亦或者只看未经过的
-
-## 移动端
-
-- [*] 同一局域网设备通过 S3 快照发现 PC 私有 IP 与随机端口，认证直连后每 3 秒刷新会话和 OpenCode 待确认权限，并支持手机端“同意本次 / 否决”；不可达时回退 S3。当前为前台页内实时机制，系统后台推送另行规划
 
 ## 未来规划
 

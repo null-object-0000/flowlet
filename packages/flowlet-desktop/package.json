@@ -21,7 +21,7 @@
     "asar": true,
     "directories": {
       "output": "release",
-      "buildResources": "build"
+      "buildResources": "../../resources/icons"
     },
     "files": [
       "dist-host/**/*",
@@ -43,7 +43,7 @@
         "deb"
       ],
       "category": "Utility",
-      "icon": "build/icons",
+      "icon": "../../resources/icons/icon.png",
       "maintainer": "Flowlet <flowlet@localhost>"
     },
     "win": {
@@ -51,7 +51,7 @@
         "nsis",
         "zip"
       ],
-      "icon": "build/icon.ico"
+      "icon": "../../resources/icons/icon.ico"
     },
     "nsis": {
       "oneClick": false,
@@ -63,8 +63,10 @@
         "dmg"
       ],
       "category": "public.app-category.developer-tools",
-      "icon": "build/icon.icns"
-    }
+      "icon": "../../resources/icons/icon.icns",
+      "identity": "-"
+    },
+    "artifactName": "Flowlet_${version}_${os}_${arch}.${ext}"
   },
   "author": {
     "name": "Flowlet",

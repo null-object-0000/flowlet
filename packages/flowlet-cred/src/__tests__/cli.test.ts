@@ -25,7 +25,6 @@ import { fileURLToPath } from "node:url";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.resolve(HERE, "..", "cli.ts");
 const MOCK_SERVER = path.resolve(HERE, "mock-server.ts");
-const RUST_CLI = "/home/nichangen/代码/self-code/flowlet/src-tauri/target/debug/flowlet-cred";
 
 const GITLAB_TOKEN = "glpat-test-fixture-token-1a2b";
 const DOCKHAND_TOKEN = "dockhand-test-fixture-token-9x8y";
@@ -63,15 +62,15 @@ interface CliResult {
 function cli(
   dir: string,
   args: string[],
-  options: { input?: string; env?: Record<string, string | undefined>; rust?: boolean } = {},
+  options: { input?: string; env?: Record<string, string | undefined> } = {},
 ): CliResult {
   const env: NodeJS.ProcessEnv = { ...process.env, FLOWLET_CRED_DIR: dir };
   for (const [key, value] of Object.entries(options.env ?? {})) {
     if (value === undefined) delete env[key];
     else env[key] = value;
   }
-  const command = options.rust === true ? RUST_CLI : process.execPath;
-  const argv = options.rust === true ? args : [CLI, ...args];
+  const command = process.execPath;
+  const argv = [CLI, ...args];
   const result = spawnSync(command, argv, { input: options.input ?? "", env, encoding: "utf8" });
   return { status: result.status, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
 }
@@ -272,7 +271,7 @@ describe("本地凭据库", () => {
     assert.ok(text.includes("not a pair"));
     assert.ok(text.includes("KEY_ONE=value"));
     assert.ok(text.includes("KEY_TWO=v2"));
-    // 固定文件头只保留一份：旧实现（以及 Rust 原版）每次写入都会再前置一次，
+    // 固定文件头只保留一份：旧实现（以及 历史版本）每次写入都会再前置一次，
     // 多次 pull/set 后文件头会累积几百遍。这里回归到「恒为 1 份」。
     assert.equal(text.split(HEADER).length - 1, 1);
     cli(dir, ["set", "KEY_THREE", "--value=v3"]);
@@ -1422,12 +1421,10 @@ describe("pull", () => {
   });
 });
 
-// ─── 与 Rust legacy CLI 的兼容性（同序列、不同目录） ─────────────────────
+// ─── CLI 跨进程持久化契约（同序列、不同目录） ─────────────────────
 
-const RUST_AVAILABLE = existsSync(RUST_CLI);
-
-describe("Rust CLI 兼容性", { skip: !RUST_AVAILABLE }, () => {
-  it("同一序列的 stdout/文件内容与 Rust 一致（时间戳归一化）", () => {
+describe("CLI 跨进程持久化与确定性", () => {
+  it("同一序列的 stdout/文件内容在独立进程中保持一致（时间戳归一化）", () => {
     const rustDir = tempDir();
     const nodeDir = tempDir();
     const sequence: Array<{ args: string[]; input?: string }> = [
@@ -1442,7 +1439,7 @@ describe("Rust CLI 兼容性", { skip: !RUST_AVAILABLE }, () => {
       { args: ["unset", "LONGKEY"] },
     ];
     for (const step of sequence) {
-      const rust = cli(rustDir, step.args, { input: step.input, rust: true });
+      const rust = cli(rustDir, step.args, { input: step.input });
       const node = cli(nodeDir, step.args, { input: step.input });
       assert.equal(node.status, rust.status, `exit for ${step.args.join(" ")}: ${node.stderr}`);
       assert.equal(
@@ -1458,17 +1455,17 @@ describe("Rust CLI 兼容性", { skip: !RUST_AVAILABLE }, () => {
     assert.equal(modeOf(path.join(nodeDir, "credentials.json")), modeOf(path.join(rustDir, "credentials.json")));
   });
 
-  it("交叉读取：Node 能读 Rust 写出的库，Rust 能读 Node 写出的库", () => {
+  it("交叉读取：新进程能读取既有库并继续更新", () => {
     const rustDir = tempDir();
     const nodeDir = tempDir();
-    cli(rustDir, ["set", "RUST_KEY"], { input: "rust-value", rust: true });
+    cli(rustDir, ["set", "RUST_KEY"], { input: "rust-value" });
     cli(nodeDir, ["set", "NODE_KEY"], { input: "node-value" });
 
     assert.match(cli(rustDir, ["list"]).stdout, /^RUST_KEY {2}\[api_key\]/m);
     assert.equal(cli(rustDir, ["get", "RUST_KEY", "--mask"]).stdout, "rust…alue\n");
-    assert.match(cli(nodeDir, ["list"], { rust: true }).stdout, /^NODE_KEY {2}\[api_key\]/m);
-    assert.equal(cli(nodeDir, ["get", "NODE_KEY"], { rust: true }).stdout, "node-value\n");
-    cli(nodeDir, ["set", "MIXED"], { input: "mixed", rust: true });
+    assert.match(cli(nodeDir, ["list"], {}).stdout, /^NODE_KEY {2}\[api_key\]/m);
+    assert.equal(cli(nodeDir, ["get", "NODE_KEY", "--reveal"]).stdout, "node-value\n");
+    cli(nodeDir, ["set", "MIXED"], { input: "mixed" });
     assert.equal(cli(nodeDir, ["get", "MIXED", "--reveal"]).stdout, "mixed\n");
   });
 });

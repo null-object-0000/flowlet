@@ -1,14 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // 契约测试：确认命令封装只把冻结的 command 名与 { accountId } 传给
-// invokeCommand，不在页面或其它模块里重复拼写 Tauri command。
+// invokeCommand，不在页面或其它模块里重复拼写 Host command。
 
 const invokeMock = vi.fn(
   (cmd: string, args?: Record<string, unknown>, timeoutMs?: number): Promise<unknown> =>
     Promise.resolve(undefined),
 );
 
-vi.mock("../../platform/tauri/client", () => ({
+vi.mock("../../platform/host/client", () => ({
   invokeCommand: (cmd: string, args?: Record<string, unknown>, timeoutMs?: number): Promise<unknown> =>
     timeoutMs === undefined ? invokeMock(cmd, args) : invokeMock(cmd, args, timeoutMs),
   toAppError: (error: unknown, code: string) => ({ code, message: String(error), retryable: true }),

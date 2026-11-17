@@ -1,4 +1,4 @@
-import { invokeCommand, toAppError } from "../../platform/tauri/client";
+import { invokeCommand, toAppError } from "../../platform/host/client";
 import type { AgentNativeUsageSummaryRow, UsageSummaryFilter, UsageSummaryRow, UsageTodaySummary } from "./types";
 
 export const usageCommands = {

@@ -21,7 +21,6 @@ export const zh = {
     title: "让多个 AI Agent，共用一个模型入口。",
     subtitle: "统一管理模型账号，切换上游无需重新配置 Agent。每次请求、实际路由、Token 和费用，都能追到对应会话。",
     primary: "获取 Flowlet",
-    android: "Android 快速安装",
     secondary: "查看产品演示",
     platform: "Windows 11 已完整回归",
     endpoint: "一个本地端点",
@@ -41,12 +40,8 @@ export const zh = {
   },
   demo: {
     eyebrow: "交互式产品预览",
-    desktopTab: "桌面控制台",
-    mobileTab: "移动辅助端",
     title: "直接操作完整的 Flowlet 桌面界面。",
     subtitle: "从模型接入到 Agent 工作追踪，亲自体验 Flowlet 如何把运行状态、请求链路和用量成本收进一个本地控制台。",
-    mobileTitle: "从手机查看多台设备的使用情况。",
-    mobileSubtitle: "切换下方菜单，体验移动端如何汇总多台设备的用量、设备与会话信息。",
   },
   value: {
     eyebrow: "为什么 Flowlet",
@@ -135,7 +130,6 @@ export const zh = {
     ctaTitle: "给你的 AI Agent 一个共同入口。",
     ctaDesc: "免费开源，MIT License。下载 Flowlet，统一管理模型账号、Agent 接入与每一次请求。",
     primary: "前往 Releases",
-    android: "Android 安装",
     secondary: "阅读 README",
   },
   footer: {

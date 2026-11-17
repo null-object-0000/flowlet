@@ -6,12 +6,14 @@
 //     adminToken,
 //     window: { startDragging, startResizeDragging, resizeBegin, resizeEnd,
 //               minimize, toggleMaximize, isMaximized, close, onMaximizedChanged },
+//     dialog / events (local Host only),
 //     platform: { openExternal },
 //     openExternal,
 //   }
 //
 // 渲染进程拿不到 ipcRenderer / nodeIntegration；所有调用都经过 main 的白名单 handler。
 import { contextBridge, ipcRenderer } from "electron";
+import type { DesktopDialogOptions, FlowletDesktopBridge } from "../../../src/platform/desktop/bridge";
 
 type ResizeDirection =
   | "East"
@@ -24,7 +26,7 @@ type ResizeDirection =
   | "West";
 
 interface Bootstrap {
-  /** 主机模式=本机随机管理 token；客户端模式=远程管理凭据（token 模式）。 */
+  /** 主机模式=本机随机管理 token；客户端模式为空（远程凭据仅在 main）。 */
   adminToken: string;
   /** host / client：决定渲染进程加载桌面壳还是 Web 管理台界面。 */
   mode: "host" | "client";
@@ -52,8 +54,17 @@ function attachPointerSession(moveChannel: string, endChannel: string): void {
   window.addEventListener("pointercancel", onUp, { once: true });
 }
 
+function subscribeHostEvent(
+  channel: "host:event:agent-source-changed" | "host:event:storage-usage-progress",
+  listener: (payload: unknown) => void,
+): () => void {
+  const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => listener(payload);
+  ipcRenderer.on(channel, handler);
+  return () => { ipcRenderer.removeListener(channel, handler); };
+}
+
 const desktopApi = {
-  adminToken: bootstrap.adminToken,
+  adminToken: bootstrap.mode === "client" ? "" : bootstrap.adminToken,
   /** 运行模式：host = 本机 Node Host；client = 连接远程 Web Host。 */
   mode: bootstrap.mode === "client" ? "client" : "host",
   clientBaseUrl: bootstrap.clientBaseUrl,
@@ -99,21 +110,23 @@ const desktopApi = {
       };
     },
   },
+  ...(bootstrap.mode !== "client" ? {
+    dialog: {
+      open: (options: DesktopDialogOptions): Promise<string | string[] | null> => ipcRenderer.invoke("dialog:open", options),
+      save: (options: DesktopDialogOptions): Promise<string | null> => ipcRenderer.invoke("dialog:save", options),
+    },
+    events: {
+      onAgentSourceChanged: (listener: (payload: unknown) => void): (() => void) =>
+        subscribeHostEvent("host:event:agent-source-changed", listener),
+      onStorageUsageProgress: (listener: (payload: unknown) => void): (() => void) =>
+        subscribeHostEvent("host:event:storage-usage-progress", listener),
+    },
+  } : {}),
   platform: {
     openExternal: (url: string): Promise<void> => ipcRenderer.invoke("platform:open-external", url),
   },
   // lead 约定的顶层别名；与 platform.openExternal 等价。
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke("platform:open-external", url),
-};
+} satisfies FlowletDesktopBridge;
 
 contextBridge.exposeInMainWorld("flowletDesktop", desktopApi);
-
-// 兼容仍静态 import @tauri-apps/plugin-dialog 的遗留页面（如设置 → 同步 → 导出/导入）。
-// 只暴露最小 invoke，主进程只放行 plugin:dialog|open / save；其它命令在 main 拒绝。
-const globals = window as unknown as { __TAURI_INTERNALS__?: unknown };
-if (globals.__TAURI_INTERNALS__ === undefined) {
-  contextBridge.exposeInMainWorld("__TAURI_INTERNALS__", {
-    invoke: (command: string, args?: unknown): Promise<unknown> =>
-      ipcRenderer.invoke("tauri:compat-invoke", command, args),
-  });
-}

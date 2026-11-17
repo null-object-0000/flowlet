@@ -1,9 +1,10 @@
-import { isDesktopClient } from "../desktop/mode";
+import { isDesktopClient, isDesktopHost } from "../desktop/mode";
+import { resolveFrontendTarget } from "../host/mode";
 
-/**
- * True when the frontend runs against a remote Web Host:
- * - 浏览器里的 Web Host 构建（`vite --mode web`）；
- * - Electron 客户端模式（`mode === "client"`）：本机只跑 Client Gateway，
- *   命令与登录语义与 Web Host 完全一致，本机桌面能力全部隐藏。
- */
-export const isWebHost = import.meta.env.MODE === "web" || isDesktopClient;
+/** Web capability boundary also applies to browser development and Electron client mode. */
+export const isWebHost = resolveFrontendTarget(
+  import.meta.env.MODE,
+  isDesktopHost,
+  isDesktopClient,
+  import.meta.env.VITE_FLOWLET_DEMO === "true",
+) === "web";

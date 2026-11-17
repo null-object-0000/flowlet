@@ -1,5 +1,15 @@
 # Flowlet 产品表达与前端共享化改版说明
 
+> **已归档（2026-11-17）— 历史资料，不作为当前开发、构建、发布或配置指引。**
+> 当前仅维护 Electron + Node/TS 与 Web/Docker；Rust/Tauri 及其回滚、移动与旧对拍链路已移除。
+> 下文保留当时的正文、命令、路径与测量结论供追溯，不表示这些代码或操作仍可用。
+> 当前入口：[架构](architecture.md)、[Electron 桌面](desktop-electron.md)、
+> [Docker](docker.md)、[发布构建](release-builds.md)。
+
+> **当前平台范围（2026-11-17）**：仅保留 Electron 桌面、Tauri 桌面回滚及 Web/Docker。
+> 本文中的 Android/iOS、移动只读客户端、扫码配对、移动构建和迁移建议仅为历史记录，
+> 已失效，不代表当前支持或待办；桌面设备 S3/LAN 同步与账号工作区继续保留。
+
 > 状态：进行中，本文记录 2026 年 8 月首个正式版本准备阶段的产品、文档、官网与前端架构改版。
 
 > 历史说明：文中「聚合模型」相关内容描述改版当时的实现；聚合模型已在后续版本彻底移除，
@@ -54,17 +64,6 @@ README、CHANGELOG 和官网统一说明：
 
 这一区分的是“提供构建产物”和“已经完成真机验证”，避免发布页对支持程度作过度承诺。
 
-### 2.4 移动端能力描述修正
-
-移动端不再被描述为只能“处理 OpenCode 权限请求”。更准确的能力边界是：
-
-- 查看多设备用量、会话和 Agent 状态；
-- 通过局域网或自有 S3 获取同步数据；
-- 处理 Agent 的交互确认；
-- 当前已经实现的交互确认适配首先是 OpenCode，未来可以扩展其他 Agent。
-
-即“Agent 交互确认”是产品能力，“OpenCode 权限请求”只是当前首个适配实现。
-
 ## 3. 官网信息架构改版
 
 旧官网已经整体重构，不再以长功能列表堆叠产品能力。
@@ -102,7 +101,7 @@ Demo 之后不再用五个同权重的大区块重复解释功能，而是收束
 
 1. **工作流价值**：模型接入、故障定位和成本归因三项实际收益，并紧接从 Agent 会话到
    真实请求、路由、上游结果和费用的完整证据链；
-2. **支持与可信边界**：现有 Agent、模型渠道和实验性 Android 辅助端，与本地代理、响应零改写和
+2. **支持与可信边界**：现有 Agent 与模型渠道，与本地代理、响应零改写和
    用户自有同步能力放在同一区域说明；
 3. **快速开始**：三步接入、下载/GitHub 操作和 Windows 11 / macOS / Linux 平台验证边界。
 
@@ -111,7 +110,7 @@ Demo 之后不再用五个同权重的大区块重复解释功能，而是收束
 
 ## 4. 前端共享化的目标
 
-此前真实桌面应用、移动端和官网 Demo 分别维护 UI。即使官网努力模仿实际应用，也会产生以下问题：
+此前真实桌面应用和官网 Demo 分别维护 UI。即使官网努力模仿实际应用，也会产生以下问题：
 
 - 产品页面改版后官网很快失真；
 - 官网 Demo 容易使用过小字号或不完整布局；
@@ -119,10 +118,10 @@ Demo 之后不再用五个同权重的大区块重复解释功能，而是收束
 - 调试应用页面往往必须同时启动 Tauri/Rust；
 - Demo 数据无法直接用于页面回归和沟通。
 
-本次建立仓库级 `packages/product-ui` 纯展示层，使三类消费者使用同一组视图组件：
+本次建立仓库级 `packages/product-ui` 纯展示层，使真实应用与 Demo 使用同一组视图组件：
 
 ```text
-真实桌面 / 移动应用
+真实桌面 / Web 应用
   Query、Tauri command、Router、业务 Hook
                   │
                   ▼
@@ -256,19 +255,6 @@ Demo 会同步替换矩阵数值，不再只有静态选中样式。
 设备标题下拉、日/周/月周期、上一/下一时间范围和刷新控件与真实 `UsageCostPage` 完全复用
 `DesktopControlsView`，周期与设备状态仍分别由真实查询容器和 Demo 本地状态持有。
 
-## 7. 移动端当前状态
-
-移动端本轮完成的是概览用量摘要组件 `UsageSummaryGridView` 的共享。真实 `MobileOverviewPage` 继续读取真实移动端数据，并将 Token、请求数、缓存命中和费用映射为共享摘要项。
-
-尚未完成：
-
-- 完整移动端应用壳共享；
-- 移动端会话、用量等完整页面 View Model 化；
-- 官网中的独立移动端产品演示；
-- 不依赖移动端后端连接的完整 `dev:frontend:mobile` 模式。
-
-因此目前应该表述为“PC 共享化主体已经建立，移动端从概览摘要开始迁移”，而不是“PC 和移动端所有页面已经完全共用”。
-
 ## 8. 无后端的前端调试模式
 
 新增命令：
@@ -307,12 +293,6 @@ npm run dev:frontend
 
 ```bash
 npm run tauri:dev
-```
-
-移动端前端继续使用：
-
-```bash
-npm run dev:mobile
 ```
 
 官网使用：
@@ -368,7 +348,6 @@ npm --prefix website run check
 
 ```bash
 npm run build
-npm run build:mobile
 npm run website:build
 npm test
 git diff --check
@@ -380,7 +359,6 @@ git diff --check
 npm run check                         通过
 npm --prefix website run check        通过
 npm run build                         通过
-npm run build:mobile                  通过
 npm run website:build                 通过
 npm test                              95 个测试文件、727 个测试通过
 git diff --check                      通过
@@ -436,10 +414,8 @@ CLI/Desktop 状态和完整侧边栏枚举均完成实际验证。
 
 建议按以下顺序继续迁移：
 
-1. 抽取完整移动端应用壳和主要页面；
-2. 增加 `dev:frontend:mobile`；
-3. 为 `packages/product-ui` 增加独立的组件与 fixture 测试；
-4. 在官网自动化检查中固定验证 `1200 × 720` PC Demo、移动宽度菜单和中英文切换；
-5. 共享 Design Tokens 的单一来源，减少官网和应用各自维护相似 Token 的漂移风险。
+1. 为 `packages/product-ui` 增加独立的组件与 fixture 测试；
+2. 在官网自动化检查中固定验证 `1200 × 720` PC Demo、窄屏浏览器菜单和中英文切换；
+3. 共享 Design Tokens 的单一来源，减少官网和应用各自维护相似 Token 的漂移风险。
 
 迁移过程中应继续坚持：业务容器负责真实状态与动作，共享层负责展示；不要为了让官网可运行而把真实 command 替换成全局 mock，也不要让 Demo fixtures 进入真实数据链路。

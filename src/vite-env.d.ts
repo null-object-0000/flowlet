@@ -6,16 +6,13 @@ declare const __FLOWLET_APP_VERSION__: string;
 
 /**
  * Flowlet 运行目标由 `vite --mode` 决定：
- * - 未指定 / Tauri desktop：默认分支；
+ * - 未指定：浏览器 Web Host 管理台（不推断桌面能力）；
  * - `web`：Docker / Web Host（`isWebHost`）；
- * - `mobile`：移动端；
  * - `demo`：官网 Demo；
  * - `desktop`：Electron 桌面壳（`isDesktopHost`，产物 `dist-desktop`）。
  *
  * `MODE` 已由 `vite/client` 声明为 string；这里只补 Flowlet 自定义的构建期变量。
  */
 interface ImportMetaEnv {
-  readonly VITE_FLOWLET_TARGET?: string;
   readonly VITE_FLOWLET_DEMO?: string;
-  readonly TAURI_ENV_PLATFORM?: string;
 }

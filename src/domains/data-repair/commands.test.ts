@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const invokeMock = vi.fn((_command: string, _args?: Record<string, unknown>): Promise<unknown> => Promise.resolve(undefined));
 
-vi.mock("../../platform/tauri/client", () => ({
+vi.mock("../../platform/host/client", () => ({
   invokeCommand: (command: string, args?: Record<string, unknown>) => invokeMock(command, args),
   toAppError: (error: unknown, code: string) => ({ code, message: String(error), retryable: true }),
 }));
@@ -12,7 +12,7 @@ import { dataRepairCommands } from "./commands";
 afterEach(() => invokeMock.mockReset());
 
 describe("dataRepairCommands contract", () => {
-  it("exposes each repair stage through the typed Tauri boundary", async () => {
+  it("exposes each repair stage through the typed Host boundary", async () => {
     invokeMock
       .mockResolvedValueOnce({ scannedRequests: 2, repairedRequests: 1, repairedLogs: 2, skippedRequests: 1 })
       .mockResolvedValueOnce(3)

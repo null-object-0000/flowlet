@@ -1,7 +1,5 @@
-import { IconClose } from "@douyinfe/semi-icons";
 import { SideSheet } from "@douyinfe/semi-ui-19";
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import type { ReactNode } from "react";
 import { formatInteger, type NumberLanguage } from "../../shared/formatters/number";
 import { CompactNumber } from "../../shared/ui/CompactNumber";
 import { APP_OVERLAY_Z_INDEX } from "../../shared/ui/overlayLayers";
@@ -21,7 +19,6 @@ export function UsageTokenDetailSheet({
   details,
   language,
   t,
-  mobile = false,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -29,72 +26,10 @@ export function UsageTokenDetailSheet({
   details: UsageTokenDetails;
   language: NumberLanguage;
   t: Translate;
-  mobile?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const touchStartY = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (!visible) return;
-    setExpanded(false);
-    if (!mobile) return;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = previousOverflow; };
-  }, [mobile, visible]);
-
   const content = (
     <UsageMetricComparison details={details} language={language} t={t} />
   );
-
-  if (mobile) {
-    if (!visible) return null;
-    return createPortal(
-      <div
-        className={styles.mobileBackdrop}
-        style={{ zIndex: APP_OVERLAY_Z_INDEX.modal }}
-        onClick={onClose}
-      >
-        <section
-          className={styles.mobileSheet}
-          data-expanded={expanded || undefined}
-          data-testid="sheet"
-          data-placement="bottom"
-          role="dialog"
-          aria-modal="true"
-          aria-label={t("Token 用量明细")}
-          onClick={(event) => event.stopPropagation()}
-        >
-          <button
-            type="button"
-            className={styles.mobileHandle}
-            aria-label={expanded ? t("收起") : t("展开")}
-            onClick={() => setExpanded((value) => !value)}
-            onTouchStart={(event) => { touchStartY.current = event.touches[0]?.clientY ?? null; }}
-            onTouchEnd={(event) => {
-              const start = touchStartY.current;
-              const end = event.changedTouches[0]?.clientY;
-              touchStartY.current = null;
-              if (start == null || end == null) return;
-              if (end - start < -28) setExpanded(true);
-              if (end - start > 48) setExpanded(false);
-            }}
-          >
-            <span />
-          </button>
-          <header className={styles.mobileHeader}>
-            <div>
-              <strong>{t("Token 用量明细")}</strong>
-              <span>{contextLabel}</span>
-            </div>
-            <button type="button" aria-label={t("关闭")} onClick={onClose}><IconClose /></button>
-          </header>
-          <div className={styles.mobileBody}>{content}</div>
-        </section>
-      </div>,
-      document.body,
-    );
-  }
 
   return (
     <SideSheet

@@ -81,13 +81,12 @@ out
 # Nuxt.js build / generate output
 .nuxt
 dist
-src-tauri/target/
-src-tauri/gen/schemas/
+# 只保护已废弃宿主遗留的本地构建/私有数据；源码和构建链不再依赖此目录。
+/src-tauri/
 flowlet.sqlite
-src-tauri/flowlet.sqlite*
 # 随包内置的模型目录文件（打包时由 scripts/fetch-models-*.mjs 自动生成）
-src-tauri/models-cn.json
-src-tauri/models-dev.json
+resources/catalogs/*.json
+resources/catalogs/*.json.bak
 .output
 
 # Gatsby files
@@ -161,12 +160,10 @@ vite.config.ts.timestamp-*
 examples/custom-scrape/friday/
 .tmp-zai/
 
-# IDE metadata (including generated Android projects)
+# IDE metadata
 **/.idea/
 *.iml
 
-.cargo-target-check/
-dist-mobile/
 
 # Local Antigravity OAuth grants and quota snapshots
 antigravity-accounts/

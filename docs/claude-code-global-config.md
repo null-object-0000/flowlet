@@ -130,14 +130,14 @@ Flowlet 无法预先扫描用户未来可能进入的所有项目，因此项目
 
 ```text
 AgentAccessSideSheet
-  -> useClaudeCodeGlobalConfig
+  -> useAgentGlobalConfig
   -> src/domains/agent/commands.ts
   -> inspect/apply/restore_agent_global_config
-  -> src-tauri/src/core/agent_global_config.rs
+  -> packages/flowlet-core/src/agent/adapters/claude-code.ts
   -> ~/.claude/settings.json
 ```
 
-前端负责状态展示、操作编排和用户反馈；Rust 负责路径解析、JSON 校验、受管字段合并、备份、恢复、原子写入和凭据隔离。
+前端负责状态展示、操作编排和用户反馈；Node 负责路径解析、JSON 校验、受管字段合并、备份、恢复、原子写入和凭据隔离。
 
 ## 8. 生效方式
 

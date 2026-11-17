@@ -1,7 +1,7 @@
 import type { MouseEvent } from "react";
 import { requireDesktopWindowBridge } from "../../platform/desktop/bridge";
 import { isDesktopHost } from "../../platform/desktop/mode";
-import { windowCommands, type ResizeDirection } from "../../platform/tauri/window";
+import type { ResizeDirection } from "../../platform/desktop/bridge";
 import styles from "./WindowResizeHandles.module.css";
 
 const HANDLES: { direction: ResizeDirection; className: string }[] = [
@@ -16,8 +16,7 @@ const HANDLES: { direction: ResizeDirection; className: string }[] = [
 ];
 
 /**
- * Electron desktop（HG-2 降级实现）：没有 Tauri `startResizeDragging(direction)`
- * 的等价 API。这里把方向 + 初始屏幕坐标交给 preload 桥的 `resizeBegin`，
+ * Electron desktop：把方向 + 初始屏幕坐标交给 preload 桥的 `resizeBegin`，
  * preload 随后把 pointermove/pointerup 转发为 `window:resize-move` /
  * `window:resize-end`，主进程用 `setBounds` 跟随（无系统 resize 模态与窗口吸附）。
  * 渲染进程再补一次 `mouseup`/`blur` 的 `resizeEnd` 作为兜底（主进程实现必须幂等）。
@@ -43,8 +42,8 @@ async function resizeDesktopWindow(
 
 /**
  * 无边框窗口的缩放手柄。Linux/GTK 的无边框窗口没有系统提供的 resize 边框，
- * 需要在窗口边缘放置透明热区：Tauri 调用 `startResizeDragging` 进入系统缩放；
- * Electron desktop 走 preload 桥的 `resizeBegin`（主进程 setBounds 跟随）。
+ * 需要在窗口边缘放置透明热区，通过 preload 桥的 `resizeBegin`
+ * 由主进程 setBounds 跟随。
  *
  * 层级关系（见 WindowControls.module.css）：
  * - 边缘热区（1000）低于标题栏拖拽区（1001）与窗口控制按钮（1002），
@@ -52,18 +51,13 @@ async function resizeDesktopWindow(
  * - 四角热区（1003）高于控制按钮，保证窗口最角落始终可抓取缩放。
  */
 export function WindowResizeHandles() {
+  if (!isDesktopHost) return null;
   const startResize =
     (direction: ResizeDirection) => (event: MouseEvent<HTMLDivElement>) => {
       if (event.buttons !== 1) return;
       event.preventDefault();
-      if (isDesktopHost) {
-        void resizeDesktopWindow(direction, event.screenX, event.screenY).catch((error) => {
-          console.error("Failed to resize the window through the desktop bridge", error);
-        });
-        return;
-      }
-      void windowCommands.startResizeDragging(direction).catch((error) => {
-        console.error("Failed to start window resize dragging", error);
+      void resizeDesktopWindow(direction, event.screenX, event.screenY).catch((error) => {
+        console.error("Failed to resize the window through the desktop bridge", error);
       });
     };
 

@@ -1,6 +1,6 @@
 # Flowlet Product UI
 
-Flowlet 桌面端、移动端与官网共用的纯展示层。
+Flowlet 桌面端、Web 管理台与官网共用的纯展示层。
 
 规则：
 

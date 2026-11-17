@@ -12,7 +12,7 @@ import { UsageTokenDetailSheet } from "./UsageTokenDetailSheet";
 import { DETAIL_SHEET_WIDTH } from "../../shared/ui/drawerWidth";
 
 describe("UsageTokenDetailSheet", () => {
-  it("compares total, Flowlet, and Agent native values by metric in the mobile bottom sheet", () => {
+  it("compares total, Flowlet, and Agent native values by metric in the detail drawer", () => {
     render(
       <UsageTokenDetailSheet
         visible
@@ -20,7 +20,6 @@ describe("UsageTokenDetailSheet", () => {
         contextLabel="2026年8月3日"
         language="zh-CN"
         t={(source) => source}
-        mobile
         details={{
           total: column(160, 40, 6),
           flowlet: { ...column(100, 30, 4), cacheWriteInput: null, reasoning: null },
@@ -29,7 +28,7 @@ describe("UsageTokenDetailSheet", () => {
       />,
     );
 
-    expect(screen.getByTestId("sheet")).toHaveAttribute("data-placement", "bottom");
+    expect(screen.getByTestId("desktop-sheet")).toHaveAttribute("data-placement", "right");
     expect(screen.getByText("Token 用量明细")).toBeInTheDocument();
     expect(screen.getByText("2026年8月3日")).toBeInTheDocument();
     expect(screen.getByRole("table", { name: "Token 用量明细" })).toBeInTheDocument();

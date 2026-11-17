@@ -3,7 +3,7 @@ import type { HourlyUsageTotal } from "../../domains/device-sync/types";
 import { buildWeekdayHourHeatmap, DEFAULT_USAGE_PERIOD } from "./deviceUsagePresentation";
 
 describe("usage period defaults", () => {
-  it("defaults PC usage statistics and the mobile overview to week", () => {
+  it("defaults usage statistics to week", () => {
     expect(DEFAULT_USAGE_PERIOD).toBe("week");
   });
 });

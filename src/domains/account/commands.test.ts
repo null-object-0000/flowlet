@@ -1,14 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // Contract test: verify the account adapter forwards each concern to the
-// correct Tauri command name / argument shape without duplicating the raw
+// correct Host command name / argument shape without duplicating the raw
 // command strings anywhere else in the UI.
 
 const invokeMock = vi.fn(
   (cmd: string, args?: Record<string, unknown>, timeoutMs?: number): Promise<unknown> => Promise.resolve(undefined),
 );
 
-vi.mock("../../platform/tauri/client", () => ({
+vi.mock("../../platform/host/client", () => ({
   invokeCommand: (cmd: string, args?: Record<string, unknown>, timeoutMs?: number): Promise<unknown> =>
     timeoutMs === undefined ? invokeMock(cmd, args) : invokeMock(cmd, args, timeoutMs),
   toAppError: (err: unknown, code: string) => ({ code, message: String(err), retryable: true }),

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, Checkbox, Input, Pagination, Progress, Select, SideSheet, Space, Switch, Tag, Toast, Typography } from "@douyinfe/semi-ui-19";
 import { IconChevronDown, IconChevronUp, IconExternalOpen, IconRefresh } from "@douyinfe/semi-icons";
-import { toAppError } from "../../platform/tauri/client";
+import { toAppError } from "../../platform/host/client";
 import { accountCommands } from "../../domains/account/commands";
 import { channelCommands } from "../../domains/channel/commands";
 import { modelCommands } from "../../domains/model/commands";

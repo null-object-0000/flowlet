@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-const devHost = process.env.TAURI_DEV_HOST;
+const devHost = process.env.FLOWLET_DEV_HOST;
 
 /** 应用版本号，单一来源 package.json；经 define 注入供 flowlet-ai SDK 组装 User-Agent。 */
 const appVersion = JSON.parse(
@@ -33,9 +33,5 @@ export default defineConfig({
           port: 1421,
         }
       : undefined,
-    watch: {
-      ignored: ["**/src-tauri/target/**"],
-    },
   },
-  envPrefix: ["VITE_", "TAURI_"],
 });

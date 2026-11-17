@@ -51,7 +51,7 @@ before(async () => {
         return;
       }
       if (request.url === "/api/session") {
-        response.writeHead(remoteStatus, { "content-type": "application/json" });
+        response.writeHead(remoteStatus, { "content-type": "application/json", "set-cookie": "flowlet_session=remote-private; HttpOnly; Path=/" });
         response.end(JSON.stringify({ authenticated: true, mode: "token", csrf_token: "csrf-1" }));
         return;
       }
@@ -116,6 +116,7 @@ test("/api 反代注入 Bearer 与 CSRF，且不转发渲染进程自带的 Auth
       headers: { Authorization: "Bearer renderer-forged", Cookie: "evil=1" },
     });
     assert.equal(session.status, 200);
+    assert.equal(session.headers.get("set-cookie"), null, "remote session cookies must stay in main");
     assert.equal((recorded[0]?.authorization ?? null), "Bearer test-token");
     assert.equal(recorded[0]?.cookie ?? null, null);
 

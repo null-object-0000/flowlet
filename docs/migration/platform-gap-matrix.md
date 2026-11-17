@@ -1,5 +1,15 @@
 # Flowlet Tauri/Rust → Electron + Node/TS 平台能力缺口矩阵
 
+> **已归档（2026-11-17）— 历史资料，不作为当前开发、构建、发布或配置指引。**
+> 当前仅维护 Electron + Node/TS 与 Web/Docker；Rust/Tauri 及其回滚、移动与旧对拍链路已移除。
+> 下文保留当时的正文、命令、路径与测量结论供追溯，不表示这些代码或操作仍可用。
+> 当前入口：[架构](../architecture.md)、[Electron 桌面](../desktop-electron.md)、
+> [Docker](../docker.md)、[发布构建](../release-builds.md)。
+
+> **当前平台范围（2026-11-17）**：仅保留 Electron 桌面、Tauri 桌面回滚及 Web/Docker。
+> 本文中的 Android/iOS、移动只读客户端、扫码配对、移动构建和迁移建议仅为历史记录，
+> 已失效，不代表当前支持或待办；桌面设备 S3/LAN 同步与账号工作区继续保留。
+
 > 状态：只读盘点结论（未运行任何 `cargo` / `npm` 构建，未修改 `src-tauri/` 与 `src/`）
 > 盘点基线：`main` @ `26fed4c`（2026-11-09）
 > Electron 依据：`electron/electron` 的 `main` 分支 API 文档（2026-11 拉取）与 `www.electron.build/docs/*`；本机 `web_fetch` 工具因上游 401 不可用，改用 `curl` 直接读取 `raw.githubusercontent.com` 文档源，见文末「取证方式与限制」

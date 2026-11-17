@@ -1,4 +1,4 @@
-import { invokeCommand, toAppError } from "../../platform/tauri/client";
+import { invokeCommand, toAppError } from "../../platform/host/client";
 import type { AppError } from "../../shared/errors/AppError";
 import type { ChannelPreset, CustomScrapeChannel } from "./types";
 

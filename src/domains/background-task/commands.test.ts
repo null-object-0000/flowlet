@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const invokeMock = vi.fn((_command: string, _args?: Record<string, unknown>, _timeout?: number): Promise<unknown> => Promise.resolve(undefined));
-vi.mock("../../platform/tauri/client", () => ({
+vi.mock("../../platform/host/client", () => ({
   invokeCommand: (command: string, args?: Record<string, unknown>, timeout?: number) => invokeMock(command, args, timeout),
   toAppError: (error: unknown, code: string) => ({ code, message: String(error), retryable: true }),
 }));

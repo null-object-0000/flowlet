@@ -1,4 +1,4 @@
-import { invokeCommand, toAppError } from "../../platform/tauri/client";
+import { invokeCommand, toAppError } from "../../platform/host/client";
 import type {
   DailyUsageTotal,
   DeviceUsageImportPreview,
@@ -10,16 +10,11 @@ import type {
   LanPeerProbe,
   LanServerReport,
   S3ConnectionTestResult,
-  S3DevicePullResult,
   S3DeviceSyncResult,
   S3SyncConfigInput,
   S3SyncSettings,
   SharedAgentSession,
-  SyncedAccountResource,
-  SyncedAgentSession,
-  SyncedAgentProfile,
 } from "./types";
-import type { OpenCodePermissionDecision, OpenCodePermissionReport } from "../agent-session/types";
 
 export const deviceSyncCommands = {
   snapshot: (): Promise<DeviceUsageSnapshot> =>
@@ -80,60 +75,6 @@ export const deviceSyncCommands = {
   probeLanPeers: (deviceId: string | null): Promise<LanPeerProbe[]> =>
     invokeCommand<LanPeerProbe[]>("probe_lan_peers", { deviceId })
       .catch(toDeviceSyncError("lan_peer_probe_failed")),
-};
-
-export const mobileDeviceSyncCommands = {
-  devices: (): Promise<KnownDevice[]> =>
-    invokeCommand<KnownDevice[]>("list_shared_devices")
-      .catch(toDeviceSyncError("shared_device_list_failed")),
-  accountResources: (): Promise<SyncedAccountResource[]> =>
-    invokeCommand<SyncedAccountResource[]>("list_shared_account_resources")
-      .catch(toDeviceSyncError("shared_account_resources_failed")),
-  agents: (deviceId: string): Promise<SyncedAgentProfile[]> =>
-    invokeCommand<SyncedAgentProfile[]>("list_shared_device_agents", { deviceId })
-      .catch(toDeviceSyncError("shared_device_agents_failed")),
-  dailyUsage: (deviceId: string | null): Promise<DailyUsageTotal[]> =>
-    invokeCommand<DailyUsageTotal[]>("shared_device_daily_usage", { deviceId })
-      .catch(toDeviceSyncError("shared_device_daily_usage_failed")),
-  hourlyUsage: (deviceId: string | null): Promise<HourlyUsageTotal[]> =>
-    invokeCommand<HourlyUsageTotal[]>("shared_device_hourly_usage", { deviceId })
-      .catch(toDeviceSyncError("shared_device_hourly_usage_failed")),
-  sessions: (deviceId: string | null): Promise<SharedAgentSession[]> =>
-    invokeCommand<SharedAgentSession[]>("list_shared_device_sessions", { deviceId })
-      .catch(toDeviceSyncError("shared_device_sessions_failed")),
-  refreshLan: (deviceId: string | null): Promise<{ attemptedDevices: number; refreshedDevices: number; failedDevices: number }> =>
-    invokeCommand<{ attemptedDevices: number; refreshedDevices: number; failedDevices: number }>("refresh_shared_device_usage_lan", { deviceId })
-      .catch(toDeviceSyncError("lan_device_refresh_failed")),
-  refreshDevice: (deviceId: string): Promise<DeviceRefreshResult> =>
-    invokeCommand<DeviceRefreshResult>("refresh_shared_device", { deviceId }, Number.POSITIVE_INFINITY)
-      .catch(toDeviceSyncError("shared_device_refresh_failed")),
-  refreshSessionLan: (deviceId: string, agentType: string, sessionId: string): Promise<SyncedAgentSession> =>
-    invokeCommand<SyncedAgentSession>("refresh_shared_device_session_lan", { deviceId, agentType, sessionId })
-      .catch(toDeviceSyncError("shared_device_session_lan_refresh_failed")),
-  probeLanPeers: (deviceId: string | null): Promise<LanPeerProbe[]> =>
-    invokeCommand<LanPeerProbe[]>("probe_lan_peers", { deviceId })
-      .catch(toDeviceSyncError("lan_peer_probe_failed")),
-  cachedLanProbes: (): Promise<LanPeerProbe[]> =>
-    invokeCommand<LanPeerProbe[]>("list_cached_lan_probes")
-      .catch(toDeviceSyncError("lan_peer_probe_failed")),
-  s3Settings: deviceSyncCommands.s3Settings,
-  saveS3Config: deviceSyncCommands.saveS3Config,
-  testS3Connection: (config: S3SyncConfigInput): Promise<S3ConnectionTestResult> =>
-    invokeCommand<S3ConnectionTestResult>("test_s3_read_connection", { config }, 45_000)
-      .catch(toDeviceSyncError("s3_read_connection_test_failed")),
-  refreshS3: (): Promise<S3DevicePullResult> =>
-    invokeCommand<S3DevicePullResult>("refresh_shared_device_usage_s3", undefined, Number.POSITIVE_INFINITY)
-      .catch(toDeviceSyncError("s3_device_refresh_failed")),
-  remoteOpenCodePermissions: (deviceId: string, sessionId: string): Promise<OpenCodePermissionReport> =>
-    invokeCommand<OpenCodePermissionReport>("list_remote_opencode_permissions", { deviceId, sessionId })
-      .catch(toDeviceSyncError("remote_opencode_permission_list_failed")),
-  replyRemoteOpenCodePermission: (
-    deviceId: string,
-    permissionId: string,
-    decision: OpenCodePermissionDecision,
-  ): Promise<void> =>
-    invokeCommand<void>("reply_remote_opencode_permission", { deviceId, permissionId, decision })
-      .catch(toDeviceSyncError("remote_opencode_permission_reply_failed")),
 };
 
 function toDeviceSyncError(code: string): (error: unknown) => never {

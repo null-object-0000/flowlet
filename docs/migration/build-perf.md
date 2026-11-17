@@ -1,5 +1,15 @@
 # 过渡期 Rust 构建提速（实测报告）
 
+> **已归档（2026-11-17）— 历史资料，不作为当前开发、构建、发布或配置指引。**
+> 当前仅维护 Electron + Node/TS 与 Web/Docker；Rust/Tauri 及其回滚、移动与旧对拍链路已移除。
+> 下文保留当时的正文、命令、路径与测量结论供追溯，不表示这些代码或操作仍可用。
+> 当前入口：[架构](../architecture.md)、[Electron 桌面](../desktop-electron.md)、
+> [Docker](../docker.md)、[发布构建](../release-builds.md)。
+
+> **当前平台范围（2026-11-17）**：仅保留 Electron 桌面、Tauri 桌面回滚及 Web/Docker。
+> 本文中的 Android/iOS、移动只读客户端、扫码配对、移动构建和迁移建议仅为历史记录，
+> 已失效，不代表当前支持或待办；桌面设备 S3/LAN 同步与账号工作区继续保留。
+
 > 适用阶段：Flowlet 迁移到 Electron + Node 的过渡期。目标是在不改变产物语义、平台支持
 > （Android 仍需 `staticlib`/`cdylib`）的前提下，降低日常 Rust 重编译的 CPU、IO、
 > 产物体积与磁盘占用。

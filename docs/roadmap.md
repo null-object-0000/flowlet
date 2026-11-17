@@ -1,5 +1,9 @@
 # Roadmap
 
+> 当前架构仅维护 Electron + Node/TS 和 Web/Docker，旧宿主已移除。
+> 以下已完成里程碑保留早期产品演进背景，不代表当前版本测试结果；
+> 当前开发/验收命令以 [AGENTS.md](../AGENTS.md)、[Electron](desktop-electron.md) 与 [Docker](docker.md) 为准。
+
 ## 当前判断
 
 Flowlet 已经完成桌面端和本地透明代理的基础雏形，但还不是稳定可用版本。当前阶段路线调整为 LongCat + DeepSeek first：先把 LongCat / DeepSeek OpenAI-compatible、Anthropic-compatible、Claude Code 接入、多账号管理、余额和账号级统计做完整。
@@ -24,10 +28,10 @@ LongCat + DeepSeek first 阶段使用 Channel / Account / Model 三层概念，�
 - [x] 创建 `docs/roadmap.md`
 - [x] 创建 `docs/architecture.md`
 - [x] 初始化 React + TypeScript + Vite 前端骨架
-- [x] 初始化 Tauri 2 / Rust 后端骨架
-- [x] 增加 `src/`、`src-tauri/`、`docs/` 基础目录结构
+- [x] 建立桌面宿主与后端骨架（历史阶段，现为 Electron + Node/TS）
+- [x] 增加 `src/`、`packages/`、`docs/` 基础目录结构
 - [x] 增加基础开发脚本
-- [x] 实现代理状态、启动、停止 Tauri command
+- [x] 实现代理状态、启动、停止 Host command
 - [x] 实现 `127.0.0.1:18640/health`
 - [x] 实现 `/v1/*` OpenAI-compatible 透明转发雏形
 - [x] 接入 SQLite 配置存储
@@ -46,7 +50,7 @@ LongCat + DeepSeek first 阶段使用 Channel / Account / Model 三层概念，�
 
 ## 当前阻塞记录
 
-当前无已知的架构重构阻塞项。历史 `cargo check` 权限问题已经复验通过，不再作为当前状态保留。
+当前无已知的架构重构阻塞项。旧宿主的历史编译结果不作为当前 Node/Electron 的验收依据。
 
 ## 插件化架构收口（进行中）
 
@@ -57,13 +61,13 @@ LongCat + DeepSeek first 阶段使用 Channel / Account / Model 三层概念，�
 - [x] Channel Capability registry 改为直接绑定各渠道类型化异步函数，移除中央策略枚举二次分发
 - [x] 将 DeepSeek / Kimi / OpenRouter 官方余额 DTO、解析和错误处理归档到对应 Channel Adapter
 - [x] 将 LongCat / Qwen 控制台响应分类、合并和完成条件归档到对应 Channel Adapter
-- [x] 将 `sync.rs` 中 Kimi / LongCat 的模型专属 DTO、发布时间校准与详情转换器归档到对应 Channel Adapter
+- [x] 将 渠道同步模块 中 Kimi / LongCat 的模型专属 DTO、发布时间校准与详情转换器归档到对应 Channel Adapter
 - [x] 用 DeepSeek Harness 完成新增 Agent 端到端接入演练：新增 `web` Surface，通过直接安全合并 DSH 官方配置文件接通一键写入/恢复，并接通环境、v0 会话与原生会话身份识别
 - [ ] 用新增 Channel 完成一次端到端接入演练，固化脚手架与验收清单
 
 ## 后台任务运行时收口（进行中）
 
-- [x] 建立由 `FlowletServices` 持有的统一 `JobRuntime`
+- [x] 建立后台任务存储与进程内运行控制（历史设计；当前 Node 入口见架构文档）
 - [x] 统一后台同步任务的作用域去重、活动 `job_id` 关联、RAII 释放与取消信号
 - [x] 接入 Agent 数据、Codex 账号、渠道资源、S3 设备和账号工作区同步
 - [x] 将后台任务的作用域、timeout、retry policy 与可取消等待统一为显式 `JobDefinition`
@@ -107,16 +111,16 @@ LongCat + DeepSeek first 阶段使用 Channel / Account / Model 三层概念，�
 - [x] 重建 SQLite 表：`channel_presets`、`channel_accounts`、`channel_models`、`clients`、`virtual_models`、`virtual_model_routes`、`request_logs`、`usage_records`、`model_prices`、`account_balance_snapshots`
 - [x] 重构代理层支持多协议入口和多账号路由
 - [x] 重构桌面 UI 适配 Channel / Account / Model 三层架构
-- [x] 运行 `cargo check` / `cargo test` / `cargo fmt` 通过
+- [x] 完成当时后端的编译/测试/格式检查（历史结果，非当前验收）
 - [x] 运行 `bun run check` / `bun run build` 通过
 
 ## Milestone 1：LongCat OpenAI-compatible 透明转发 ✅
 
 - [x] 运行 `bun run check`
 - [x] 运行 `bun run build`
-- [x] 运行 `cargo fmt`
-- [x] 运行 `cargo test`
-- [x] 运行 `cargo check`
+- [x] 完成当时后端格式检查（历史结果）
+- [x] 完成当时后端测试（历史结果）
+- [x] 完成当时后端编译检查（历史结果）
 - [x] 支持 LongCat OpenAI base_url (`https://api.longcat.chat/openai`)
 - [x] 验证 `/v1/*` OpenAI-compatible 透明转发
 - [x] 支持 `/openai/v1/chat/completions`
@@ -222,7 +226,7 @@ LongCat + DeepSeek first 阶段使用 Channel / Account / Model 三层概念，�
 - [x] 建立 Flowlet、Codex、Claude Code、OpenCode 只读数据源探针与统一 Observation / Evidence / ProbeReport 契约
 - [ ] 冻结金额精度、币种、时区、账期和摊销边界
 - [ ] 设计增量 migrations、唯一键、索引和幂等导入策略
-- [ ] 为按量、Token 包、订阅和未分配场景建立 Rust 验收夹具
+- [ ] 为按量、Token 包、订阅和未分配场景建立 Node 验收夹具
 
 ### Phase 1：网关账本 MVP
 
@@ -253,13 +257,13 @@ LongCat + DeepSeek first 阶段使用 Channel / Account / Model 三层概念，�
 
 - [x] 系统托盘（显示/隐藏窗口、启动/停止代理、退出）
 - [x] 关闭窗口时最小化到托盘而非退出
-- [ ] 开机自启动（tauri-plugin-autostart）实机回归
+- [ ] 开机自启动（Electron 平台实现）实机回归
 - [x] 托盘tooltip显示代理状态（运行中/已停止）
 - [ ] Agent 终端：在 Flowlet 内通过 PTY 承载受支持的 Agent CLI；不拉起外部终端或外部 Agent 进程，按 [`agent-terminal.md`](./agent-terminal.md) 分阶段实施
 
 ## 后续阶段：Docker / Web Console
 
-- [ ] Core 支持 headless 运行（独立于 Tauri GUI）
+- [ ] Core 支持 headless 运行（独立于 Electron GUI）
 - [ ] Web Console
 - [ ] Docker Compose
 - [ ] Volume 持久化

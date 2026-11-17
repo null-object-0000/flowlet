@@ -1,12 +1,5 @@
 export { OverviewServiceStripView } from "./desktop/OverviewServiceStripView";
 export type { OverviewServiceStripLabels, OverviewServiceStripModel, ProductProtocol } from "./desktop/OverviewServiceStripView";
-export { UsageSummaryGridView } from "./mobile/UsageSummaryGridView";
-export type { UsageSummaryItem } from "./mobile/UsageSummaryGridView";
-export { MobileAppFrameView } from "./mobile/MobileAppFrameView";
-export type { MobileNavItem } from "./mobile/MobileAppFrameView";
-export { default as mobilePageStyles } from "./mobile/MobilePageView.module.css";
-export { MobileCardView, MobileDeviceListView, MobilePageHeaderView, MobilePageView, mobileProductViewStyles } from "./mobile/MobileProductViews";
-export type { MobileDeviceRowModel } from "./mobile/MobileProductViews";
 export { DesktopAppFrameView, DesktopSidebarView } from "./desktop/DesktopAppFrameView";
 export type { DesktopNavGroup, DesktopNavItem } from "./desktop/DesktopAppFrameView";
 export { DesktopPageHeaderView, DesktopPageLayoutView } from "./desktop/DesktopPageLayoutView";
@@ -39,14 +32,12 @@ export { UsageAnalysisDemoView } from "./demo/UsageAnalysisDemoView";
 export { UsageStatisticsDemoView } from "./demo/UsageStatisticsDemoView";
 export { ModelsServiceDemoView } from "./demo/ModelsServiceDemoView";
 export { SettingsDemoView } from "./demo/SettingsDemoView";
-export { MobileCompanionDemoView } from "./demo/MobileCompanionDemoView";
 export {
   createAgentSessionsFixture,
   createModelsServiceFixture,
   createOverviewServiceFixture,
   createRequestLogsFixture,
   createUsageAnalysisFixture,
-  createUsageSummaryFixture,
 } from "./demo/fixtures";
 export { DesktopCalendarRangeControlView, DesktopCalendarRangePanelView, DesktopCustomRangeActionView, DesktopDeviceTitlePickerView, DesktopFilterToolbarView, DesktopRefreshControlView, DesktopSearchFieldView, DesktopTimePeriodSwitchView, DesktopTimePresetSelectView, DesktopTimeRangeNavigatorView, DesktopTimeScopeView } from "./desktop/DesktopControlsView";
 export type { DesktopDeviceOption, DesktopFilterSelectModel, DesktopSegmentOption, DesktopSelectOption } from "./desktop/DesktopControlsView";

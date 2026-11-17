@@ -1,4 +1,4 @@
-import { invokeCommand, toAppError } from "../../platform/tauri/client";
+import { invokeCommand, toAppError } from "../../platform/host/client";
 import type { A2aAgent, A2aAgentInput, A2aCall, A2aKey } from "./types";
 
 function call<T>(

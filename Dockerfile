@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
-# Flowlet Docker image — Node Host (migration: replaces the Rust headless binary).
-# Two build stages: the unchanged web UI bundle, then the Node host source+deps.
+# Flowlet Docker image — Node Host + Web UI + Go ACP bridge.
+# Build the ACP bridge, web UI and Node dependencies in separate stages.
 # Runtime stage keeps the原 deployment contract: non-root 10001, /data volume,
 # ports 8080 (web) / 18640 (model entry), /health healthcheck, SIGTERM shutdown.
 

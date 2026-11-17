@@ -1,11 +1,16 @@
 # 桌面（Electron）命令层
 
-本目录是 Rust/Tauri 桌面端 142 条命令的 Node/TS 等价实现。**Web Host 已实现的 66 条命令不在这里重复**，
-它们继续由 `../web/commands.ts` 的 dispatch 处理；桌面命令是 Web 命令面的**超集**。
+本目录提供 Electron 本机 Host 的桌面命令。Web 已实现的命令继续由
+`../web/commands.ts` 处理，不在这里重复；桌面命令仅在 `ctx.desktop` 存在时可用。
+不再依赖旧宿主源码作为行为权威，命令数量以当前注册表为准。
+
+静态注册检查：仓库根运行 `npm run node:commands`（`scripts/check-command-contract.mjs`）。
+只检查字面量名称、Node 注册与 Web 权限白名单，不证明参数/返回值或行为 100% 覆盖。
+行为仍须相关 Node 测试、`npm run node:e2e` 与 Electron 冒烟。
 
 ## 目录与负责人
 
-| 文件 | 负责命令（权威行为见 `src-tauri/src/commands/*.rs`） | 负责人 |
+| 文件 | 负责命令（实现与测试为当前事实源） | 负责人 |
 | --- | --- | --- |
 | `agent.ts` | Agent 环境/运行时/Codex/Antigravity/全局配置（17 条） | desktop-agent |
 | `maintenance.ts` | 设置、配置导入导出、存储维护、自启、路由规则（22 条） | desktop-maintenance |
@@ -21,8 +26,8 @@
 ## 命令实现约定
 
 1. **参数读取复用 `../web/errors.ts` 的 `argString/argInteger/argObject/argBytes/...`**，错误用
-   `CommandError.badRequest/notImplemented`（`../types.ts`），错误文案与 Rust `Err(String)` 对齐。
-2. **返回字段风格必须与 Rust 逐字段一致**（snake_case / camelCase 混用，不要「顺手统一」）。
+   `CommandError.badRequest/notImplemented`（`../types.ts`），保留既有可读错误文案与结构。
+2. **返回字段必须保持既有 HTTP 契约兼容**（snake_case / camelCase 混用，不要「顺手统一」）。
 3. **不直接 sqlite**：需要新查询时在自己的领域文件旁新增 `../storage/<domain>.ts` 导出纯函数
    （签名 `(db: DatabaseSync, ...) => ...`），通过 `ctx.storage.withDatabase((db) => ...)` 调用；
    不要改 `../storage/index.ts` 的方法列表（避免与其它领域冲突，由 Lead 统一收口）。
@@ -46,9 +51,9 @@ Electron 主进程（`packages/flowlet-desktop/`）实现下列 channel；命令
 | `platform.autostart.set` | `{ enabled }` | `null` | 写系统自启项 |
 | `platform.relaunch` | `{}` | `null` | 请求重启应用（不保证立即返回） |
 | `platform.quit` | `{}` | `null` | 退出应用（停止代理） |
-| `keyring.get` | `{ service, username }` | `{ secret: string \| null }` | OS 凭据库读取 |
-| `keyring.set` | `{ service, username, secret }` | `null` | OS 凭据库写入 |
-| `keyring.delete` | `{ service, username }` | `null` | OS 凭据库删除 |
+| `keyring.get` | `{ service, username }` | `{ secret: string \| null }` | safeStorage 密文读取，兼容迁移旧 OS 条目 |
+| `keyring.set` | `{ service, username, secret }` | `null` | safeStorage 密文写入 |
+| `keyring.delete` | `{ service, username }` | `null` | 删除密文与适用的旧条目 |
 | `agentRuntime.start` | `{ agentType, cwd? }` | `{ running, pid?, url? }` | 托管 Agent 运行时（DSH Web 等） |
 | `agentRuntime.stop` | `{ agentType }` | `null` | 停止托管运行时 |
 | `agentRuntime.status` | `{}` | `{ running, pid?, url?, external? }` | 运行时状态 |
@@ -61,6 +66,10 @@ Electron 主进程（`packages/flowlet-desktop/`）实现下列 channel；命令
 
 ## 数据目录
 
-桌面版必须打开与 Rust/Tauri 版本**同一个**数据库路径（便携版在 exe 旁 `data/`，安装版在系统数据目录），
-否则用户升级后会丢失账号/日志。解析规则见 `src-tauri/src/core/portable.rs` 与 `src-tauri/src/lib.rs`，
-Electron 主进程负责解析并通过 `DesktopRuntime.dataDir` 传入。
+Electron 数据与随包资源路径由 `packages/flowlet-desktop/src/paths.ts` 解析，再通过
+`DesktopRuntime.dataDir` 传入。开发默认 `.flowlet-dev-data/desktop`；便携版有 `portable.tag` 时
+优先可执行文件目录；不可写时降级平台应用数据目录。不要假定数据库总在 `data/` 子目录。
+升级必须保留现有账号/日志、设备身份与 S3/LAN / 账号工作区契约。
+
+前端命令通过 `src/platform/host` 的 HTTP 边界；窗口、文件对话框与固定事件走受控 preload bridge。
+不得开放任意 renderer IPC / host channel，client 模式不开放本机 Agent、抓取、同步或自启。

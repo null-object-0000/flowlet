@@ -517,13 +517,7 @@ Pi 的用户确认目前没有稳定落入其会话存储，因此相关场景�
 OpenCode 接入后通过全局权限插件发现 CLI、Web 与 Desktop 实例的实际动态端口，并读取当前会话待确认权限；
 会话详情允许用户“同意本次”或“否决”，操作经对应实例直接回传 OpenCode。Flowlet 不暴露永久放行；
 存在 pending permission 时优先判定为等待用户，插件状态暂不可用或 permission 消失后回退到本地消息推断。
-配置了同一 S3 设备目录的手机或其它设备会从设备快照发现当前 PC 的局域网端点；端点可达时，
-移动会话页每 3 秒直接刷新会话摘要和 OpenCode 待确认权限，并允许远程执行“同意本次”或
-“否决”。直连请求经过启动级 capability key 认证，响应加密传输；不可达时只读数据回退到
-最近一次 S3 快照，可执行按钮不做离线排队。
-移动端底部 Tab 固定按“概览、会话、设备、设置”排序，Tab 切换替换当前导航记录，不让用户
-返回时逐个穿过历史 Tab。概览与会话共用当前设备筛选，入口位于各自页面标题右侧，以设备名称
-文字菜单代替表单式 Select；任一页面切换设备后，另一页面继续使用同一设备。
+桌面设备间继续通过自有 S3 共享用量、会话与 Agent 摘要，局域网同步服务及其认证加密边界保持不变。
 
 Claude Code、OpenCode、ChatGPT（Codex）Desktop、Codex CLI 和 Pi 的会话详情按需读取最后一个
 真实用户输入及其后的全部 Agent 回复、思考与工具事件，不截断单条正文或输出轮数；不读取或展示
@@ -614,8 +608,8 @@ Docker / Web 不是第一阶段主形态，而是高级部署形态。
 
 ```text
 AI Reverse Proxy Core     本地代理、渠道模板与账号、路由、日志落盘、离线分析
-Desktop Client（当前形态） Tauri 可视化客户端、系统托盘、开机自启、管理 Core 生命周期
-Docker / Web Console      后续高级部署形态（见 §6.2），复用 Core，浏览器访问
+Desktop Client（当前形态） Electron + Node/TS 可视化客户端、系统托盘、开机自启、管理 Core 生命周期
+Docker / Web Console      已支持的独立 Node Host 部署形态，复用核心与浏览器管理界面
 ```
 
 ---
@@ -844,7 +838,7 @@ Flowlet 再根据路由结果选择该规范模型的候选账号与上游变体
 ## 13. 数据模型
 
 当前阶段采用 Channel / Account / Model 三层结构。本节为字段参考，实际表结构以
-`src-tauri/src/core/storage.rs` 的迁移为准。
+`packages/flowlet-core/src/storage/schema.ts` 与 `storage/index.ts` 的迁移为准。
 
 ### 13.1 channel_presets
 

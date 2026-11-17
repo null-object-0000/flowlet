@@ -49,15 +49,14 @@ Flowlet 可以检测本机安装，并为以下 Agent 写入和恢复全局配�
 请求失败时可以看到实际路由、上游响应和错误；日常使用时可以按 Agent、模型、渠道与会话
 核对 Token、缓存命中、预估费用、套餐余量和 Codex Credits。
 
-### 从手机查看并轻量操作
+### 桌面设备间同步
 
-Release 同时提供实验性 Android 移动辅助端，可通过自有 S3 与局域网查看多设备用量、会话和 Agent 状态，
-也可远程处理 Agent 的交互确认（当前已支持 OpenCode 权限请求）。移动端当前
-仍是实验性能力，不替代桌面端代理和账号管理。
+使用自有 S3-compatible 存储同步设备用量、会话和 Agent 摘要，并在桌面端按设备查看。
+桌面使用 Electron + Node/TS，不再保留 Rust/Tauri 宿主；也可独立部署 Web/Docker Host。
 
 ## 开始使用
 
-1. 从 [GitHub Releases](https://github.com/null-object-0000/flowlet/releases) 下载桌面端或 Android 移动辅助端；
+1. 从 [GitHub Releases](https://github.com/null-object-0000/flowlet/releases) 下载桌面客户端；
 2. 添加一个渠道账号，拉取并选择需要开放的模型；
 3. 在概览页选择你的 Agent，在接入抽屉中选定默认模型后一键接入 Flowlet；
 4. 回到 Agent 正常工作，在 Flowlet 中查看请求、会话和用量。
@@ -71,7 +70,8 @@ Release 同时提供实验性 Android 移动辅助端，可通过自有 S3 与�
 ## 本地优先
 
 Flowlet 默认只在本机保存渠道 API Key、Client Token、配置和使用数据。多设备 S3 同步是
-可选能力，且不会同步请求正文、凭据或渠道账号。
+可选能力。设备快照不携带渠道凭据或代理请求正文，但可包含会话最近一轮交互，
+应按敏感数据管理；渠道账号工作区另需显式启用，并使用独立密钥端到端加密。
 
 请求捕获可能包含敏感 Header 和 Body；如果不需要完整排障信息，可以在“设置 → 数据捕获”
 中开启敏感 Header 脱敏或关闭相应捕获。
@@ -86,15 +86,19 @@ Flowlet 默认只在本机保存渠道 API Key、Client Token、配置和使用�
 <details>
 <summary>从源码运行</summary>
 
-需要 Node.js 22、Rust stable 与 Tauri 2 系统依赖：
+仓库开发使用 Node.js 26 与 npm；桌面运行时由 Electron 提供。构建 ACP 辅助程序还需要 Go（CI 使用 1.27.x），不需要 Rust 工具链：
 
 ```bash
 git clone https://github.com/null-object-0000/flowlet.git
 cd flowlet
 npm ci
-npm run tauri:dev
+npm run desktop:dev
+# 仅预览前端：npm run dev
+# Web 管理台 + Node Host：见 docs/docker.md
 ```
 
+桌面构建/便携更新见 [Electron 宿主](docs/desktop-electron.md)，发版见 [发布构建](docs/release-builds.md)。
+静态命令注册核对运行 `npm run node:commands`；该检查不证明参数或行为覆盖率。
 架构与贡献说明见 [架构文档](docs/architecture.md)。
 
 </details>

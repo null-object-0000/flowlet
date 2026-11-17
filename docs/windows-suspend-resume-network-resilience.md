@@ -1,5 +1,11 @@
 # Windows 待机恢复后请求失败
 
+> **已归档（2026-11-17）— 历史资料，不作为当前开发、构建、发布或配置指引。**
+> 当前仅维护 Electron + Node/TS 与 Web/Docker；Rust/Tauri 及其回滚、移动与旧对拍链路已移除。
+> 下文保留当时的正文、命令、路径与测量结论供追溯，不表示这些代码或操作仍可用。
+> 当前入口：[架构](architecture.md)、[Electron 桌面](desktop-electron.md)、
+> [Docker](docker.md)、[发布构建](release-builds.md)。
+
 > 状态：根因已重新定位（2026-07-28 修正旧结论）；方向 1、3 已实现（2026-07-28），待 Windows 实测
 > 发现时间：2026-07-21
 > 触发环境：Windows 11（**S0 低电量待机 / Modern Standby**，无 S3），Flowlet 便携版运行在 `C:\Users\nicha\Downloads\Flowlet_0.1.0_x64_portable`

@@ -2,17 +2,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const invokeMock = vi.fn((_command: string, _args?: Record<string, unknown>): Promise<unknown> => Promise.resolve(undefined));
 
-vi.mock("../../platform/tauri/client", () => ({
+vi.mock("../../platform/host/client", () => ({
   invokeCommand: (command: string, args?: Record<string, unknown>) => invokeMock(command, args),
   toAppError: (error: unknown, code: string) => ({ code, message: String(error), retryable: true }),
 }));
 
-import { deviceSyncCommands, mobileDeviceSyncCommands } from "./commands";
+import { deviceSyncCommands } from "./commands";
 
 afterEach(() => invokeMock.mockReset());
 
 describe("deviceSyncCommands contract", () => {
-  it("reads the minimal device usage snapshot through the typed Tauri boundary", async () => {
+  it("reads the minimal device usage snapshot through the typed Host boundary", async () => {
     const snapshot = {
       schemaVersion: 2,
       deviceId: "8d58734f-0b71-49ea-b5a4-115b389a9ae7",
@@ -76,65 +76,4 @@ describe("deviceSyncCommands contract", () => {
     expect(invokeMock).toHaveBeenLastCalledWith("recover_current_device_sync", undefined);
   });
 
-  it("keeps cloud sync read-only while allowing authenticated LAN permission replies", async () => {
-    const config = {
-      endpoint: "https://example.com",
-      region: "auto",
-      bucket: "flowlet-sync",
-      prefix: "users/me",
-      accessKeyId: "read-only-key",
-      secretAccessKey: "secret",
-      pathStyle: false,
-    };
-    invokeMock.mockResolvedValueOnce([]);
-    await mobileDeviceSyncCommands.devices();
-    expect(invokeMock).toHaveBeenLastCalledWith("list_shared_devices", undefined);
-
-    invokeMock.mockResolvedValueOnce([]);
-    await mobileDeviceSyncCommands.accountResources();
-    expect(invokeMock).toHaveBeenLastCalledWith("list_shared_account_resources", undefined);
-
-    invokeMock.mockResolvedValueOnce([]);
-    await mobileDeviceSyncCommands.agents("device-1");
-    expect(invokeMock).toHaveBeenLastCalledWith("list_shared_device_agents", { deviceId: "device-1" });
-
-    invokeMock.mockResolvedValueOnce([]);
-    await mobileDeviceSyncCommands.dailyUsage(null);
-    expect(invokeMock).toHaveBeenLastCalledWith("shared_device_daily_usage", { deviceId: null });
-
-    invokeMock.mockResolvedValueOnce([]);
-    await mobileDeviceSyncCommands.hourlyUsage("device-1");
-    expect(invokeMock).toHaveBeenLastCalledWith("shared_device_hourly_usage", { deviceId: "device-1" });
-
-    invokeMock.mockResolvedValueOnce([]);
-    await mobileDeviceSyncCommands.sessions("device-1");
-    expect(invokeMock).toHaveBeenLastCalledWith("list_shared_device_sessions", { deviceId: "device-1" });
-
-    invokeMock.mockResolvedValueOnce({ attemptedDevices: 1, refreshedDevices: 1, failedDevices: 0 });
-    await mobileDeviceSyncCommands.refreshLan("device-1");
-    expect(invokeMock).toHaveBeenLastCalledWith("refresh_shared_device_usage_lan", { deviceId: "device-1" });
-
-    invokeMock.mockResolvedValueOnce({ message: "ok" });
-    await mobileDeviceSyncCommands.testS3Connection(config);
-    expect(invokeMock).toHaveBeenLastCalledWith("test_s3_read_connection", { config });
-
-    invokeMock.mockResolvedValueOnce({ remoteDevices: 1 });
-    await mobileDeviceSyncCommands.refreshS3();
-    expect(invokeMock).toHaveBeenLastCalledWith("refresh_shared_device_usage_s3", undefined);
-
-    invokeMock.mockResolvedValueOnce({ available: true, permissions: [] });
-    await mobileDeviceSyncCommands.remoteOpenCodePermissions("device-1", "session-1");
-    expect(invokeMock).toHaveBeenLastCalledWith("list_remote_opencode_permissions", {
-      deviceId: "device-1",
-      sessionId: "session-1",
-    });
-
-    invokeMock.mockResolvedValueOnce(undefined);
-    await mobileDeviceSyncCommands.replyRemoteOpenCodePermission("device-1", "permission-1", "allow_once");
-    expect(invokeMock).toHaveBeenLastCalledWith("reply_remote_opencode_permission", {
-      deviceId: "device-1",
-      permissionId: "permission-1",
-      decision: "allow_once",
-    });
-  });
 });

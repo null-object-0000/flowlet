@@ -1,7 +1,6 @@
 // 托管 Agent Web 运行时（当前仅 DeepSeek Harness / DSH）。
 //
-// Rust 权威实现：`src-tauri/src/core/agent_runtime.rs` +
-// `agent_environment/adapters/deepseek_harness.rs`：
+// 与受控 Agent 安装探测和启动契约保持一致：
 // - DSH 安装方式为 npx 时启动 `npx @deepseek-ai/dsh web --no-open`，
 //   否则 `dsh web --no-open`；
 // - 就绪判定是 TCP 连接 127.0.0.1:3080（20s 超时）；

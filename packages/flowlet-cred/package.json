@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.2.0",
   "type": "module",
-  "description": "Flowlet global credential store CLI (Node port of the Rust flowlet-cred; no Rust runtime required)",
+  "description": "Flowlet global credential store CLI for Node.js",
   "bin": {
     "flowlet": "./bin/flowlet.mjs"
   },
@@ -13,8 +13,7 @@
     "./gitlab": "./src/gitlab.ts"
   },
   "scripts": {
-    "test": "node --test src/__tests__/",
-    "compat": "node scripts/compat.mjs"
+    "test": "node --test src/__tests__/"
   },
   "engines": {
     "node": ">=22.6"

@@ -1,7 +1,7 @@
 /**
  * 设备平台标签。后端 `platform` 字段保存稳定的小写键：桌面系统用
  * `windows` / `macos` / `linux`，Linux 发行版用 `/etc/os-release` 的 `ID`
- * （如 `ubuntu`、`debian`），移动端用 `android` / `ios`。
+ * （如 `ubuntu`、`debian`）。历史同步快照中的 `android` / `ios` 标签仍兼容展示。
  */
 const PLATFORM_LABELS: Record<string, string> = {
   windows: "Windows",
@@ -26,8 +26,7 @@ const PLATFORM_LABELS: Record<string, string> = {
 
 /**
  * 把设备 platform 键映射为展示用标签。未知发行版 ID 退化为首字母大写，
- * 空值或 `unknown` 返回空串，由调用方决定兜底文案（桌面 "Flowlet"、
- * 移动端 "Desktop"）。
+ * 空值或 `unknown` 返回空串，由调用方决定兜底文案。
  */
 export function platformLabel(platform: string): string {
   const value = (platform ?? "").trim().toLowerCase();

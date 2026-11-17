@@ -12,7 +12,7 @@ vi.mock("../../domains/background-task/commands", () => ({
   backgroundTaskCommands: { syncAgentData: mocks.sync },
 }));
 vi.mock("@tanstack/react-query", () => ({ useQueryClient: () => mocks.client }));
-vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.listen }));
+vi.mock("../../platform/host/events", () => ({ listen: mocks.listen }));
 
 import { AgentDataAutoSync, getNextAgentSyncAt } from "./AgentDataAutoSync";
 

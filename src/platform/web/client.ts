@@ -1,5 +1,5 @@
 import { desktopAdminToken } from "../desktop/bridge";
-import { isDesktopHost } from "../desktop/mode";
+import { isDesktopClient, isDesktopHost } from "../desktop/mode";
 
 const TOKEN_KEY = "flowlet.web.admin-token";
 
@@ -53,6 +53,7 @@ export class WebCommandUnauthorizedError extends Error {
  * 因此 sessionStorage 为空时回退到 preload 桥。
  */
 export function adminToken() {
+  if (isDesktopClient) return ""; // Gateway injects remote credentials in main only.
   return sessionStorage.getItem(TOKEN_KEY) ?? desktopAdminToken();
 }
 

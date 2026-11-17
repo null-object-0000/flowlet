@@ -1,17 +1,17 @@
-// 打包前从 models.dev 官方拉取最新的 api.json，写入 src-tauri/models-dev.json，
-// 随 Tauri bundle.resources 打包进安装包，让用户开箱即用。
+// 打包前从 models.dev 官方拉取最新的 api.json，写入 resources/catalogs/models-dev.json，
+// 由 Electron / Node Host 作为内置模型目录读取，让用户开箱即用。
 //
 // 用法：node scripts/fetch-models-dev.mjs
 
-import { writeFileSync, existsSync, copyFileSync, unlinkSync } from "node:fs";
+import { writeFileSync, mkdirSync, existsSync, copyFileSync, unlinkSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, "..");
-const SRC_TAURI = join(PROJECT_ROOT, "src-tauri");
-const DEST = join(SRC_TAURI, "models-dev.json");
-const BACKUP = join(SRC_TAURI, "models-dev.json.bak");
+const CATALOG_DIR = join(PROJECT_ROOT, "resources", "catalogs");
+const DEST = join(CATALOG_DIR, "models-dev.json");
+const BACKUP = join(CATALOG_DIR, "models-dev.json.bak");
 
 const SOURCE_URL = "https://models.dev/api.json";
 
@@ -54,6 +54,7 @@ async function main() {
       copyFileSync(DEST, BACKUP);
     }
 
+    mkdirSync(CATALOG_DIR, { recursive: true });
     writeFileSync(DEST, body, "utf8");
     const providers = Object.keys(parsed).length;
     let models = 0;
@@ -62,7 +63,7 @@ async function main() {
         models += Object.keys(provider.models).length;
       }
     }
-    console.log(`  写入：${join("src-tauri", "models-dev.json")}`);
+    console.log(`  写入：${join("resources", "catalogs", "models-dev.json")}`);
     console.log(`  ${providers} 个厂商、${models} 个模型`);
 
     // 清理备份

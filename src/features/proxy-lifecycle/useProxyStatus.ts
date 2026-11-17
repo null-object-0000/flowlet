@@ -7,7 +7,7 @@ export function useProxyStatus() {
   return useQuery({
     queryKey: queryKeys.proxy.status(),
     queryFn: () => proxyCommands.status(),
-    // Tauri invoke is not a browser network call; keep it available offline.
+    // The loopback Node Host stays reachable even when the OS reports offline.
     networkMode: "always",
     refetchOnWindowFocus: false,
     // Match the legacy overview: reconcile native proxy state every 3 seconds.

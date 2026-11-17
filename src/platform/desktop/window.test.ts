@@ -1,20 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DesktopWindowBridge } from "./bridge";
 
-const tauriWindowApi = vi.hoisted(() => ({
-  startDragging: vi.fn<() => Promise<void>>(),
-  startResizeDragging: vi.fn<(direction: string) => Promise<void>>(),
-  minimize: vi.fn<() => Promise<void>>(),
-  isMaximized: vi.fn<() => Promise<boolean>>(),
-  onResized: vi.fn<(handler: () => void) => Promise<() => void>>(),
-  toggleMaximize: vi.fn<() => Promise<void>>(),
-  close: vi.fn<() => Promise<void>>(),
-}));
-
-vi.mock("@tauri-apps/api/window", () => ({
-  getCurrentWindow: () => tauriWindowApi,
-}));
-
 type WindowBridgeFns = {
   minimize: ReturnType<typeof vi.fn>;
   toggleMaximize: ReturnType<typeof vi.fn>;
@@ -51,7 +37,7 @@ function setBridge(bridge: unknown) {
 async function loadWindowCommands(mode: "desktop" | "production") {
   vi.stubEnv("MODE", mode);
   vi.resetModules();
-  return (await import("../tauri/window")).windowCommands;
+  return (await import("../host/window")).windowCommands;
 }
 
 describe("windowCommands transport selection", () => {
@@ -59,13 +45,6 @@ describe("windowCommands transport selection", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    tauriWindowApi.startDragging.mockResolvedValue();
-    tauriWindowApi.startResizeDragging.mockResolvedValue();
-    tauriWindowApi.minimize.mockResolvedValue();
-    tauriWindowApi.isMaximized.mockResolvedValue(false);
-    tauriWindowApi.onResized.mockResolvedValue(vi.fn());
-    tauriWindowApi.toggleMaximize.mockResolvedValue();
-    tauriWindowApi.close.mockResolvedValue();
     bridge = makeDesktopWindowBridge();
   });
 
@@ -88,11 +67,7 @@ describe("windowCommands transport selection", () => {
     expect(bridge.toggleMaximize).toHaveBeenCalledOnce();
     expect(bridge.close).toHaveBeenCalledOnce();
     expect(bridge.isMaximized).toHaveBeenCalledOnce();
-    // desktop 模式绝不能碰到 Tauri window API。
-    expect(tauriWindowApi.minimize).not.toHaveBeenCalled();
-    expect(tauriWindowApi.toggleMaximize).not.toHaveBeenCalled();
-    expect(tauriWindowApi.close).not.toHaveBeenCalled();
-    expect(tauriWindowApi.isMaximized).not.toHaveBeenCalled();
+
   });
 
   it("maps the maximized-state subscription to window:maximized-changed", async () => {
@@ -108,7 +83,6 @@ describe("windowCommands transport selection", () => {
 
     const stopListening = await windowCommands.onResized(onResize);
     expect(bridge.onMaximizedChanged).toHaveBeenCalledOnce();
-    expect(tauriWindowApi.onResized).not.toHaveBeenCalled();
 
     capturedListener?.(true);
     expect(onResize).toHaveBeenCalledOnce();
@@ -126,8 +100,6 @@ describe("windowCommands transport selection", () => {
 
     expect(bridge.startDragging).toHaveBeenCalledOnce();
     expect(bridge.startResizeDragging).toHaveBeenCalledWith("SouthEast");
-    expect(tauriWindowApi.startDragging).not.toHaveBeenCalled();
-    expect(tauriWindowApi.startResizeDragging).not.toHaveBeenCalled();
   });
 
   it("rejects with a readable error when the desktop bridge is missing", async () => {
@@ -135,23 +107,18 @@ describe("windowCommands transport selection", () => {
     await expect(windowCommands.minimize()).rejects.toThrow(/桌面桥不可用/);
   });
 
-  it("keeps the Tauri transport for non-desktop builds", async () => {
+  it.each(["production", "development", "web", "demo"])("never assumes a native window in %s without preload", async (mode) => {
+    vi.stubEnv("MODE", mode);
+    const { windowCommands } = await import("../host/window");
+    await expect(windowCommands.minimize()).rejects.toThrow(/桌面桥不可用/);
+    await expect(windowCommands.startResizeDragging("NorthWest")).rejects.toThrow(/桌面桥不可用/);
+  });
+
+  it("keeps window controls available in Electron client mode", async () => {
+    setBridge({ mode: "client", window: bridge });
     const windowCommands = await loadWindowCommands("production");
-
-    await windowCommands.minimize();
-    await windowCommands.isMaximized();
-    await windowCommands.toggleMaximize();
     await windowCommands.close();
-    await windowCommands.startDragging();
-    await windowCommands.startResizeDragging("NorthWest");
-
-    expect(tauriWindowApi.minimize).toHaveBeenCalledOnce();
-    expect(tauriWindowApi.isMaximized).toHaveBeenCalledOnce();
-    expect(tauriWindowApi.toggleMaximize).toHaveBeenCalledOnce();
-    expect(tauriWindowApi.close).toHaveBeenCalledOnce();
-    expect(tauriWindowApi.startDragging).toHaveBeenCalledOnce();
-    expect(tauriWindowApi.startResizeDragging).toHaveBeenCalledWith("NorthWest");
-    expect(bridge.minimize).not.toHaveBeenCalled();
+    expect(bridge.close).toHaveBeenCalledOnce();
   });
 
   it("exposes the desktop bridge contract required by the renderer", () => {

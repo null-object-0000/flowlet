@@ -440,10 +440,9 @@ export const handlers: DesktopHandlerMap = {
     }
   },
 
-  storage_usage_summary: (ctx, rawArgs) => {
+  storage_usage_summary: async (ctx, rawArgs) => {
     const args = argsObject(rawArgs);
-    // Rust 命令体只读取 scanId 用于事件关联；Node 侧事件由宿主实现，这里仍校验参数。
-    argString(args, "scanId");
+    const scanId = argString(args, "scanId");
     try {
       const dbPath = ctx.storage.dbPath();
       const capture = ctx.storage.captureDiskUsage();
@@ -455,7 +454,17 @@ export const handlers: DesktopHandlerMap = {
         captureFiles: capture.segments,
         captureBytes: capture.bytes,
       };
-      return ctx.storage.withDatabase((db) => storageUsageSummary(db, fileMetrics));
+      const summary = ctx.storage.withDatabase((db) => storageUsageSummary(db, fileMetrics));
+      // 当前扫描是同步聚合：只报告真实完成结果，不伪造逐步扫描进度。
+      try {
+        await ctx.desktop.host.invoke("events.emit", {
+          event: "storage-usage-progress",
+          payload: { scanId, summary },
+        });
+      } catch (error) {
+        console.warn("[storage] Could not publish scan completion; HTTP result remains available", error);
+      }
+      return summary;
     } catch (error) {
       throw badRequest(error);
     }

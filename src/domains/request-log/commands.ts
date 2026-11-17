@@ -1,4 +1,4 @@
-import { invokeCommand, toAppError } from "../../platform/tauri/client";
+import { invokeCommand, toAppError } from "../../platform/host/client";
 import type { RequestLogChannelAccountOptions, RequestLogClient, RequestLogFilter, RequestLogModelOptions, RequestLogPage, RequestLogRow } from "./types";
 
 export const requestLogCommands = {

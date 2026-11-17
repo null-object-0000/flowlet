@@ -2,8 +2,7 @@
 //
 // - Windows / macOS：`app.setLoginItemSettings({ openAtLogin, args: ["--hidden"] })`；
 // - Linux：`setLoginItemSettings` 不支持，写 XDG autostart `.desktop`
-//   （`$XDG_CONFIG_HOME/autostart/flowlet.desktop`，默认 `~/.config/autostart`），
-//   与 Tauri autostart 插件等价。
+//   （`$XDG_CONFIG_HOME/autostart/flowlet.desktop`，默认 `~/.config/autostart`）。
 import { app } from "electron";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";

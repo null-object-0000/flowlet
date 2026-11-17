@@ -12,6 +12,7 @@ import type { DesktopKeyring } from "./keyring.ts";
 import type { DesktopLogger } from "./logger.ts";
 import type { DesktopPaths } from "./paths.ts";
 import type { ScrapeManager } from "./scrape.ts";
+import { parseHostEvent, type HostEventName } from "./renderer-capabilities.ts";
 
 type Payload = Record<string, unknown> | undefined;
 
@@ -36,6 +37,7 @@ export interface BridgeDependencies {
   readonly proxyStatus: () => Promise<string | null>;
   /** 通知点击等场景回到主窗口（不改变代理运行状态）。 */
   readonly showWindow: () => void;
+  readonly emit: (event: HostEventName, payload: unknown) => void;
 }
 
 export class DesktopHostBridgeImpl implements DesktopHostBridge {
@@ -53,6 +55,11 @@ export class DesktopHostBridgeImpl implements DesktopHostBridge {
 
   private async dispatch(channel: string, payload: Record<string, unknown>): Promise<unknown> {
     switch (channel) {
+      case "events.emit": {
+        const event = parseHostEvent(payload);
+        this.deps.emit(event.event, event.payload);
+        return null;
+      }
       case "platform.appInfo":
         return this.appInfo();
       case "platform.openExternal": {

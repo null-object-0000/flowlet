@@ -2,7 +2,7 @@
 //
 // 权威实现：src-tauri/src/core/device_identity.rs（DeviceUsageBundle / DeviceUsageSnapshot /
 // validate / from_bytes）。字段命名与磁盘 JSON 完全一致（全部 camelCase），因为该 JSON
-// 会被其它设备与移动端直接读取；任何字段改名都会让其它设备读不了。
+// 会被其它设备直接读取；任何字段改名都会让其它设备读不了。
 //
 // 校验口径必须与 Rust 逐条一致，否则导入端会接受 Rust 会拒绝的文件（或相反）：
 // - bundle.format = "flowlet-device-usage"、version = 1；

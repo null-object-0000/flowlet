@@ -34,7 +34,7 @@ packages/product-ui/*
 
 `website` 会直接引用 `packages/product-ui` 的源码；两者已登记为根目录 npm workspace，统一使用根目录的 `package-lock.json` 和同一套 React / Semi Design 依赖。因此必须从仓库根目录执行 `npm ci`，不要在 `website` 目录单独安装依赖或生成 lockfile。这两个目录中的任意变更都必须触发官网构建。Cloudflare Git 集成会负责 production 和 preview deployments；仓库无需配置 `CLOUDFLARE_API_TOKEN` 或 `CLOUDFLARE_ACCOUNT_ID`。
 
-`flowlet.pages.dev` 保留备用。生产域名的 DNS 指向 EdgeOne，备用部署不修改该 DNS 记录。桌面安装包和 Android 分发仍由现有发布工作流负责。
+`flowlet.pages.dev` 保留备用。生产域名的 DNS 指向 EdgeOne，备用部署不修改该 DNS 记录。Electron 桌面安装包由 `.github/workflows/build-installers.yml` 负责（见 [发布构建](../docs/release-builds.md)）；Web/Docker 部署独立于官网发布，不再构建或发布 Rust/Tauri 产物。
 
 ## 本地验证
 

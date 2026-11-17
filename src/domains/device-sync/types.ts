@@ -125,7 +125,7 @@ export type SyncedAccountQuotaWindow = {
   resetsAt: string | null;
 };
 
-/** 桌面设备发布的去敏账号资源摘要；移动端按 accountId 聚合，不按设备展示。 */
+/** 桌面设备发布的去敏账号资源摘要，保留跨设备快照契约。 */
 export type SyncedAccountResource = {
   accountId: string;
   channelId: string;
@@ -277,12 +277,4 @@ export type LanPeerProbe = {
   protocolVersion: number | null;
   errorKind: LanProbeErrorKind | null;
   error: string | null;
-};
-
-export type MobileSyncUpdate = {
-  completedAt: string;
-  s3ImportedDevices: number;
-  s3FailedObjects: number;
-  s3Error: string | null;
-  lanProbeCount: number;
 };

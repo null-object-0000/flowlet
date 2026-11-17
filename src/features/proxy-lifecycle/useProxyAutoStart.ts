@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useProxyStatus } from "./useProxyStatus";
 import { proxyCommands } from "../../domains/proxy/commands";
 import type { AppError } from "../../shared/errors/AppError";
-import { toAppError } from "../../platform/tauri/client";
+import { toAppError } from "../../platform/host/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "../../shared/query-keys";
 import { isProxyAutoStartSuspended } from "./proxyAutoStartSuspension";

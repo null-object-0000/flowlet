@@ -1,14 +1,10 @@
 # Docker 与浏览器部署
 
-> **迁移状态（2026-11）**：Docker 版已从 Rust `headless` 二进制切换到
-> **Node Host**（`packages/flowlet-core`，Node 26 直接执行 TypeScript）。迁移目标是行为等价替换：
-> 镜像不再包含 Rust 工具链与编译产物，环境变量、端口、`/data` 数据卷、SQLite schema、管理端
-> 鉴权（token / GitLab OIDC）全部保持相同契约。当前线上实例（10.100.217.60）于 **2026-11-17 更新 ACP 后台托管与断线续连**，
-> 镜像 `flowlet:node-20261117-acp-managed-a43dbd6`（前版本 `flowlet:node-20261117-acp-managed-91b463a`；
-> 涉及权限或撤销后的回滚限制见下文用户体系说明）。Node Host 于 2026-11-10 首次上线。实现契约见 [migration/node-host.md](migration/node-host.md)，
-> 镜像与冒烟记录见 [migration/docker-node.md](migration/docker-node.md)。
+当前容器使用 **Node Host**（`packages/flowlet-core`，Node.js 26 原生执行 TypeScript），
+复用 React 管理台、SQLite 和代理核心。镜像不包含 Rust 工具链或旧宿主，不保留跨语言回滚/对拍。
+不需要显示服务、GTK 或桌面登录会话。Node 启动入口为 `packages/flowlet-core/src/index.ts`，
+管理 HTTP 命令与显式权限声明分别见 `web/commands.ts`、`web/permissions.ts`。
 
-Docker 版由独立服务和 React 管理界面组成，不需要 Tauri、GTK、显示服务或桌面登录会话。
 镜像附带官方 SDK 的 ACP 辅助程序；登记宿主 ACP 程序默认关闭，显式设置
 `FLOWLET_ENABLE_ACP=1` 后重启才可用。Agent 程序需另行安装、登录并配置容器可访问的工作目录，
 不会执行客户端机器上的命令。管理页也可为原生 A2A 服务生成 T3 Code / Paseo 接入配置，见
@@ -57,8 +53,8 @@ docker compose logs -f flowlet
 
 管理凭据与模型调用密钥分别鉴权。管理凭据不能调用模型，调用密钥不能访问管理接口。未设置 `FLOWLET_CLIENT_TOKEN` 时，首次启动随机生成调用密钥并保存到数据卷，后续重启继续使用。
 token 模式的浏览器凭据仅保存在当前标签页的 sessionStorage 中；OIDC 模式改用 HttpOnly 会话 Cookie，
-会话记录（Cookie 的 sha256、身份、CSRF token、过期时间）同时写入数据卷 `/data/admin-sessions.json`（0600），
-因此 Node Host 重启/升级后管理台仍然保持登录（Rust 回滚镜像为纯内存会话，切回后需要重新登录）。
+会话记录进入数据卷 SQLite 的 `security_*` 表；旧 `admin-sessions.json` 只用于一次性迁移，
+因此重启/升级后仍可使用未过期且未被撤销的登录态。
 HTTP 部署下 Cookie 不带 `Secure`，只应在可信内网使用；需要公网访问时请在入口配置 HTTPS。
 
 构建时若 Debian 官方源较慢，可在 `.env` 中设置 `DEBIAN_MIRROR=http://mirrors.tuna.tsinghua.edu.cn` 后重新构建。替换范围仅限构建容器的软件源，仍使用 Debian 仓库签名验证；参见 [TUNA Debian 镜像说明](https://mirrors.tuna.tsinghua.edu.cn/help/debian/)。Docker Hub 基础镜像需要由宿主机拉取，`DEBIAN_MIRROR` 不替代 Docker 镜像仓库。
@@ -66,7 +62,7 @@ HTTP 部署下 Cookie 不带 `Secure`，只应在可信内网使用；需要公�
 ## 管理端 GitLab OIDC SSO
 
 目标实例：公司 GitLab（`https://git.17usoft.com`，GitLab CE 10.8.7 + 定制 OIDC）。
-完整方案、M0 验证结果与安全边界见 [`admin-sso-design.md`](./admin-sso-design.md)。
+当前用户和安全契约见本文后面的“用户、会话、个人凭据与审计”；原始 SSO 设计已归档，不作为部署指引。
 
 1. 在 GitLab 创建 OAuth 应用（个人应用即可）：Redirect URI 填
    `http://10.100.217.60:20134/api/auth/callback`；Scopes **只勾 `openid`**；
@@ -134,7 +130,7 @@ OIDC 模式不内置任何 client secret；GitLab 应用 Secret 只放在 `.env`
 Docker 版升级只替换 `flowlet` 容器，**不重建 `flowlet-egress`**（经代理的 OpenAI 请求不会因升级中断）。
 默认发布路径（技能 `flowlet-docker-deploy`）是：
 
-1. 用当前运行镜像做基础层，把改动过的 `packages/flowlet-core/src` 文件 overlay 成新镜像（秒级，不做 npm/Rust 全量构建）；
+1. 用当前运行镜像做基础层，把改动过的 `packages/flowlet-core/src` 文件 overlay 成新镜像（复用依赖层；耗时以本次实际发布为准）；
 2. 更新 Dockhand stack 文件里的 `services.flowlet.image`，但**不触发 compose 重启**；
 3. 通过 Docker Engine API 创建新容器 → 停旧容器（新 Host 快速退出）→ 启动新容器 → `/health` 200 后接管 → 删除旧容器并把名字改回 `flowlet`。
 
@@ -187,7 +183,6 @@ Docker 版升级只替换 `flowlet` 容器，**不重建 `flowlet-egress`**（�
 | `FLOWLET_CATALOG_DIR` | `/data/catalogs`，价格目录同步文件持久化位置 |
 | `FLOWLET_SHUTDOWN_ABORT_MS` | 进程退出时在途请求的宽限毫秒数，默认 `250`；超时后强制断开连接，避免容器 stop 被长 SSE 拖到 `stop_grace_period` |
 | `FLOWLET_SHUTDOWN_HARD_EXIT_MS` | 关闭硬超时毫秒数，默认 `2000`；超过后直接退出进程 |
-| `RUST_LOG` | `info`（Rust 版；Node Host 不使用） |
 | `NODE_ENV` | `production`（Node Host） |
 
 Compose 使用命名卷 `flowlet-data` 持久化 `/data`；容器以 UID/GID `10001:10001` 运行。自定义绑定目录时需赋予该用户写权限。
@@ -208,28 +203,22 @@ docker compose start flowlet
 
 ## 不使用 Docker 的开发运行
 
-Node Host（迁移后的默认形态，无需 Rust 工具链）：
+使用 Node.js 26（与仓库/容器一致）：
 
 ```bash
 npm ci
 npm run build:web
-scripts/run-node-host.sh          # 复制数据副本到 .flowlet-dev-data/ 后启动
-# 等价于：node packages/flowlet-core/src/index.ts
-```
-
-端到端冒烟：`node scripts/e2e-node-host.mjs`；Rust↔Node 对拍：`node scripts/web-parity.mjs`。
-
-Rust 版 host 已不参与构建与部署（生产 Web Host 由 Node Host 承载），仅在需要回滚对照或
-Rust↔Node 对拍时按需编译，Cargo feature `legacy-server` 默认关闭：
-
-```bash
 export FLOWLET_ADMIN_TOKEN="$(openssl rand -hex 32)"
-cargo run --manifest-path src-tauri/Cargo.toml --no-default-features --features legacy-server --bin headless
+npm run node:host
 ```
 
-默认监听 `127.0.0.1:8080` 和 `127.0.0.1:18640`，数据库位于 `flowlet-data/`。
-桌面构建继续使用默认 Cargo feature；`core::web` 与 `headless` 二进制只在 `legacy-server`
-下编译，不会进入桌面产物。
+默认监听 `127.0.0.1:8080` 和 `127.0.0.1:18640`，数据库位于 `flowlet-data/`；
+需要隔离真实数据时显式设置 `FLOWLET_DB_PATH` / `FLOWLET_CONFIG_PATH`。
+可选 `scripts/run-node-host.sh` 会准备开发数据副本；运行前核对其来源路径，不要污染生产库。
+
+验证：`npm run node:typecheck`、`npm run node:commands`、相关 Node 测试与
+`npm run node:e2e`。静态命令检查只验证名称/注册/权限白名单，不证明行为完全覆盖。
+Go ACP 辅助程序由 `npm run agent-bridge:build` 构建并继续保留。
 
 ### 管理用户与邮箱关联
 

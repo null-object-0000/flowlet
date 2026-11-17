@@ -47,7 +47,6 @@
   --flowlet-color-warning-text: #6f4a14;
   --flowlet-color-warning-strong: #7a4a0c;
   --flowlet-color-shell-glow: rgba(220, 228, 240, 0.3);
-  --flowlet-color-mobile-shell-glow: transparent;
   --flowlet-radius-control: 7px;
   --flowlet-radius-card: 12px;
   --flowlet-radius-dialog: 16px;
@@ -121,7 +120,6 @@ body[theme-mode="dark"] {
   --flowlet-color-warning-text: #e8c582;
   --flowlet-color-warning-strong: #ffd78b;
   --flowlet-color-shell-glow: rgba(45, 91, 160, 0.18);
-  --flowlet-color-mobile-shell-glow: var(--flowlet-color-shell-glow);
   --flowlet-shadow-card: 0 12px 28px rgba(0, 0, 0, 0.2), 0 2px 8px rgba(0, 0, 0, 0.16);
   --flowlet-shadow-floating: 0 28px 80px rgba(0, 0, 0, 0.5);
 

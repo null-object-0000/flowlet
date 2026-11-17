@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { invoke } from "@tauri-apps/api/core";
+import { invokeCommand as invoke } from "../../platform/host/client";
 import {
   applyAgentGlobalConfig,
   authorizeCodexAccount,
@@ -13,7 +13,10 @@ import {
   stopAgentRuntime,
 } from "./commands";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("../../platform/host/client", async (original) => ({
+  ...await original<typeof import("../../platform/host/client")>(),
+  invokeCommand: vi.fn(),
+}));
 
 describe("agent commands", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -23,7 +26,7 @@ describe("agent commands", () => {
 
     await listAgentCapabilities();
 
-    expect(invoke).toHaveBeenCalledWith("list_agent_capabilities", undefined);
+    expect(invoke).toHaveBeenCalledWith("list_agent_capabilities");
   });
 
   it.each(["claude-code", "opencode", "pi", "codex"])("uses the typed environment boundary for %s", async (agentId) => {
@@ -37,7 +40,7 @@ describe("agent commands", () => {
 
     await detectAgentEnvironment(agentId);
 
-    expect(invoke).toHaveBeenCalledWith("detect_agent_environment", { agentId });
+    expect(invoke).toHaveBeenCalledWith("detect_agent_environment", { agentId }, 10_000);
   });
 
   it.each([
@@ -46,31 +49,31 @@ describe("agent commands", () => {
   ] as const)("uses the typed Agent runtime boundary", async (call, command) => {
     vi.mocked(invoke).mockResolvedValue({});
     await call();
-    expect(invoke).toHaveBeenCalledWith(command, { agentId: "deepseek-harness" });
+    expect(invoke).toHaveBeenCalledWith(command, { agentId: "deepseek-harness" }, command === "start_agent_runtime" ? 30_000 : 15_000);
   });
 
-  it("queries Codex account data through the typed Tauri boundary", async () => {
+  it("queries Codex account data through the typed Host boundary", async () => {
     vi.mocked(invoke).mockResolvedValue({ accounts: [] });
 
     await queryCodexAccounts();
 
-    expect(invoke).toHaveBeenCalledWith("query_codex_accounts", undefined);
+    expect(invoke).toHaveBeenCalledWith("query_codex_accounts", undefined, 60_000);
   });
 
-  it("reads cached Codex account snapshots through the typed Tauri boundary", async () => {
+  it("reads cached Codex account snapshots through the typed Host boundary", async () => {
     vi.mocked(invoke).mockResolvedValue({ accounts: [] });
 
     await listCachedCodexAccounts();
 
-    expect(invoke).toHaveBeenCalledWith("list_cached_codex_accounts", undefined);
+    expect(invoke).toHaveBeenCalledWith("list_cached_codex_accounts");
   });
 
-  it("starts independent Codex account authorization through the typed Tauri boundary", async () => {
+  it("starts independent Codex account authorization through the typed Host boundary", async () => {
     vi.mocked(invoke).mockResolvedValue({ account_id: "account-2", signed_in: true });
 
     await authorizeCodexAccount();
 
-    expect(invoke).toHaveBeenCalledWith("authorize_codex_account", undefined);
+    expect(invoke).toHaveBeenCalledWith("authorize_codex_account", undefined, 360_000);
   });
 
   it.each([

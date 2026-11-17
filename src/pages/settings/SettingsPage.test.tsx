@@ -9,13 +9,24 @@ vi.mock("lottie-web", () => ({
   default: { loadAnimation: vi.fn(() => ({ destroy: vi.fn() })) },
 }));
 
-vi.mock("@tauri-apps/plugin-dialog", () => ({
+vi.mock("../../platform/host/dialog", () => ({
   save: vi.fn().mockResolvedValue(null),
   open: vi.fn().mockResolvedValue(null),
 }));
 
 const deviceSyncMocks = vi.hoisted(() => ({
   refetchKnownDevices: vi.fn().mockResolvedValue({ isError: false }),
+  s3Configured: false,
+  s3Config: {
+    endpoint: "https://sync.example.com",
+    region: "auto",
+    bucket: "flowlet-sync",
+    prefix: "devices",
+    accessKeyId: "access-key",
+    secretAccessKey: "private-sync-secret",
+    pathStyle: true,
+  },
+  exportConnection: vi.fn(),
 }));
 
 vi.mock("../../features/settings/useAutostartSetting", () => ({
@@ -156,7 +167,7 @@ vi.mock("../../features/device-sync/useDeviceSync", () => ({
   }),
   useS3SyncSettings: () => ({
     data: {
-      config: null,
+      config: deviceSyncMocks.s3Configured ? deviceSyncMocks.s3Config : null,
       status: {
         status: "never",
         lastAttemptAt: null,
@@ -173,7 +184,7 @@ vi.mock("../../features/device-sync/useDeviceSync", () => ({
   useDeviceUsageTransfer: () => ({
     renameCurrentDevice: { isPending: false, mutateAsync: vi.fn() },
     exportBundle: { isPending: false, mutateAsync: vi.fn() },
-    exportS3ConnectionConfig: { isPending: false, mutateAsync: vi.fn() },
+    exportS3ConnectionConfig: { isPending: false, mutateAsync: deviceSyncMocks.exportConnection },
     previewImport: { isPending: false, mutateAsync: vi.fn() },
     importBundle: { isPending: false, mutateAsync: vi.fn() },
     saveS3Config: { isPending: false, mutateAsync: vi.fn() },
@@ -210,6 +221,8 @@ describe("SettingsPage", () => {
     localStorage.clear();
     Toast.destroyAll();
     deviceSyncMocks.refetchKnownDevices.mockClear();
+    deviceSyncMocks.s3Configured = false;
+    deviceSyncMocks.exportConnection.mockReset();
   });
 
   it("renders the settings layout with search", () => {
@@ -325,13 +338,27 @@ describe("SettingsPage", () => {
     expect(pathStyle).not.toBeChecked();
   });
 
+  it("opens desktop connection text directly without mobile pairing and masks credentials", async () => {
+    deviceSyncMocks.s3Configured = true;
+    deviceSyncMocks.exportConnection.mockResolvedValue(deviceSyncMocks.s3Config);
+    renderWithQueryClient(<SettingsPage />);
+    fireEvent.click(screen.getByRole("button", { name: "同步管理" }));
+    fireEvent.click(await screen.findByRole("button", { name: /连接新设备/ }));
+
+    await waitFor(() => expect(deviceSyncMocks.exportConnection).toHaveBeenCalledOnce());
+    expect(screen.getByRole("tab", { name: "连接文本" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("tab", { name: "扫码连接" })).not.toBeInTheDocument();
+    expect(await screen.findByText(/"type": "flowlet.s3-connection"/)).not.toHaveTextContent("private-sync-secret");
+    expect(screen.getByRole("button", { name: /复制连接文本/ })).toBeInTheDocument();
+  });
+
   it("opens connection import inside the unified device dialog", async () => {
     renderWithQueryClient(<SettingsPage />);
     fireEvent.click(screen.getByRole("button", { name: "同步管理" }));
     fireEvent.click(await screen.findByRole("button", { name: "导入用量" }));
 
-    expect(screen.getByText("选择一种方式，将手机或另一台桌面设备连接到当前同步空间")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "扫码连接" })).toBeInTheDocument();
+    expect(screen.getByText("通过连接文本，将另一台桌面设备连接到当前同步空间")).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "扫码连接" })).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "连接文本" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "导入连接" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByPlaceholderText("粘贴 Flowlet 连接文本（连接包或账号工作区接入包）")).toBeInTheDocument();

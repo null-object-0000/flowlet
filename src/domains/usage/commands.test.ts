@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const invokeMock = vi.fn((_command: string, _args?: Record<string, unknown>): Promise<unknown> => Promise.resolve(undefined));
 
-vi.mock("../../platform/tauri/client", () => ({
+vi.mock("../../platform/host/client", () => ({
   invokeCommand: (command: string, args?: Record<string, unknown>) => invokeMock(command, args),
   toAppError: (error: unknown, code: string) => ({ code, message: String(error), retryable: true }),
 }));
@@ -12,7 +12,7 @@ import { usageCommands } from "./commands";
 afterEach(() => invokeMock.mockReset());
 
 describe("usageCommands contract", () => {
-  it("reads usage summaries through the typed Tauri boundary", async () => {
+  it("reads usage summaries through the typed Host boundary", async () => {
     invokeMock.mockResolvedValueOnce([]);
     const filter = {
       startAt: "2026-07-31T16:00:00.000Z",
@@ -27,13 +27,13 @@ describe("usageCommands contract", () => {
     });
   });
 
-  it("reads Agent native usage through the typed Tauri boundary", async () => {
+  it("reads Agent native usage through the typed Host boundary", async () => {
     invokeMock.mockResolvedValueOnce([]);
     expect(await usageCommands.nativeSummary()).toEqual([]);
     expect(invokeMock).toHaveBeenCalledWith("agent_native_usage_summary", undefined);
   });
 
-  it("reads today token summary through the typed Tauri boundary", async () => {
+  it("reads today token summary through the typed Host boundary", async () => {
     const summary = {
       total_tokens: 12345,
       input_tokens: 10000,

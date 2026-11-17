@@ -11,9 +11,8 @@ const windowApi = vi.hoisted(() => ({
   close: vi.fn<() => Promise<void>>(),
 }));
 
-vi.mock("@tauri-apps/api/window", () => ({
-  getCurrentWindow: () => windowApi,
-}));
+vi.mock("../../platform/host/window", () => ({ windowCommands: windowApi }));
+vi.mock("../../platform/desktop/mode", () => ({ isDesktopHost: true }));
 
 vi.mock("../preferences/AppPreferences", () => ({
   useAppPreferences: () => ({ t: (key: string) => key }),
@@ -32,12 +31,13 @@ describe("WindowControls", () => {
     windowApi.close.mockResolvedValue();
   });
 
-  it("starts window dragging on a single left-button mousedown", async () => {
+  it("leaves native titlebar dragging to the Electron CSS region", () => {
     render(<WindowControls />);
 
     fireEvent.mouseDown(screen.getByTestId("titlebar-drag-region"), { buttons: 1, detail: 1 });
 
-    await waitFor(() => expect(windowApi.startDragging).toHaveBeenCalledOnce());
+    expect(screen.getByTestId("titlebar-drag-region").className).toContain("dragRegionDesktop");
+    expect(windowApi.startDragging).not.toHaveBeenCalled();
     expect(windowApi.toggleMaximize).not.toHaveBeenCalled();
   });
 
@@ -55,7 +55,7 @@ describe("WindowControls", () => {
     expect(region.className).not.toContain("dragRegionStandalone");
   });
 
-  it("toggles maximize on a double mousedown without starting a drag or selecting text", async () => {
+  it("does not intercept native titlebar double-click maximization", () => {
     render(<WindowControls />);
 
     const node = screen.getByTestId("titlebar-drag-region");
@@ -63,10 +63,9 @@ describe("WindowControls", () => {
     const preventDefault = vi.spyOn(event, "preventDefault");
     node.dispatchEvent(event);
 
-    await waitFor(() => expect(windowApi.toggleMaximize).toHaveBeenCalledOnce());
+    expect(windowApi.toggleMaximize).not.toHaveBeenCalled();
     expect(windowApi.startDragging).not.toHaveBeenCalled();
-    // 双击最大化的同时，必须阻止默认的文本选中行为。
-    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(preventDefault).not.toHaveBeenCalled();
   });
 
   it("ignores non-primary mouse buttons on the drag region", () => {

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Toast } from "@douyinfe/semi-ui-19";
 import type { ProxyRuntimeState } from "../../domains/proxy/types";
-import { toAppError } from "../../platform/tauri/client";
+import { toAppError } from "../../platform/host/client";
 import type { AppError } from "../../shared/errors/AppError";
 import { useProxyActions } from "./useProxyActions";
 import { useProxyAutoStart } from "./useProxyAutoStart";

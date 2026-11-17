@@ -3,6 +3,11 @@
 本文用于在另一台 Flowlet 设备（例如公司电脑 `changen-work`）上整理历史 Token
 数据。目标是尽可能恢复真实的上游消耗，同时保留无法确认的记录，不用猜测值填充历史。
 
+> 当前维护命令由 Node `packages/flowlet-core/src/storage/repair.ts` 实现。
+> 已核实捕获体重解析、未知占位和费用重算；未确认存在旧宿主的原生 transcript 自动唯一匹配回填，
+> 不应假定该回退已经迁入。下文 transcript 匹配原则用于人工审计或未来实现约束，不保证当前命令执行。
+> Web/Docker 不扫描个人 Agent 文件。无法从真实捕获确认的用量继续保持未知。
+
 ## 1. 统计口径
 
 用量成本页选择“本机”时，Token 由两个互斥来源合并：
@@ -102,7 +107,7 @@ SQLite 文件；无法停机时应使用 SQLite 在线备份 API，而不是普�
 - `away_summary`、重试和未采纳响应仍保留为经过 Flowlet 的真实调用；
 - 未返回 usage 的请求仍显示为未知，而不是 0 Token；
 - 数据库 `PRAGMA integrity_check` 返回 `ok`，`PRAGMA foreign_key_check` 无结果；
-- 重新生成或同步设备快照后，移动端和其他设备看到的该设备汇总一致。
+- 重新生成或同步设备快照后，其他桌面设备看到的该设备汇总一致。
 
 建议记录以下修复前后数字，便于审计：
 
@@ -197,11 +202,11 @@ Anthropic `/messages/count_tokens` 是上下文长度计算接口，不执行模
 ## 9. 实现入口
 
 - 前端编排：`src/features/settings/useDataRepair.ts`
-- Tauri command：`src-tauri/src/commands/usage.rs`
-- 捕获响应重解析：`Storage::reanalyze_captured_usage`
-- Agent 原生会话唯一匹配回填：`Storage::repair_usage_from_native_sessions`
-- 未知用量补齐：`Storage::analyze_unknown_usage`
-- 费用重算：`Storage::recalculate_usage_costs`
+- Node command：`packages/flowlet-core/src/web/commands.ts` / `desktop/maintenance.ts`
+- 捕获响应重解析：`packages/flowlet-core/src/storage/repair.ts`
+- Agent 原生会话唯一匹配回填：Node 原生回填须按当前实现单独确认（Web 不扫描原生文件）
+- 未知用量补齐：`storage/repair.ts` 的未知用量阶段
+- 费用重算：`storage/repair.ts` 的费用重算阶段
 - 原生用量账本：`agent_usage_events`
 - 捕获文件：数据库同目录的 `request-captures/`
 

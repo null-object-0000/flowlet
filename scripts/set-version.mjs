@@ -28,33 +28,16 @@ update("package.json", (content) =>
   replaceRequired(content, /("version"\s*:\s*")[^"]+(")/, `$1${nextVersion}$2`, "package.json"),
 );
 
+update("packages/flowlet-desktop/package.json", (content) =>
+  replaceRequired(content, /("version"\s*:\s*")[^"]+(")/, `$1${nextVersion}$2`, "desktop package.json"),
+);
+
 update("package-lock.json", (content) => {
-  let count = 0;
-  const next = content.replace(/("version"\s*:\s*")[^"]+(")/g, (match, prefix, suffix) => {
-    if (count >= 2) return match;
-    count += 1;
-    return `${prefix}${nextVersion}${suffix}`;
-  });
-  if (count !== 2) throw new Error("无法更新 package-lock.json 的根包版本");
-  return next;
+  const lock = JSON.parse(content);
+  lock.version = nextVersion;
+  lock.packages[""].version = nextVersion;
+  lock.packages["packages/flowlet-desktop"].version = nextVersion;
+  return `${JSON.stringify(lock, null, 2)}\n`;
 });
 
-update("src-tauri/Cargo.toml", (content) =>
-  replaceRequired(
-    content,
-    /(\[package\][\s\S]*?\bversion\s*=\s*")[^"]+(")/,
-    `$1${nextVersion}$2`,
-    "src-tauri/Cargo.toml",
-  ),
-);
-
-update("src-tauri/Cargo.lock", (content) =>
-  replaceRequired(
-    content,
-    /(\[\[package\]\]\s*\r?\nname\s*=\s*"flowlet"\s*\r?\nversion\s*=\s*")[^"]+(")/,
-    `$1${nextVersion}$2`,
-    "src-tauri/Cargo.lock",
-  ),
-);
-
-console.log(`Flowlet 版本已同步为 ${nextVersion}`);
+console.log(`Flowlet / Electron 版本已同步为 ${nextVersion}`);

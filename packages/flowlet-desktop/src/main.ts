@@ -1,7 +1,7 @@
 // Flowlet 桌面 Electron 主进程。
 //
 // 职责：
-// 1. app ready 前解析与 Rust/Tauri 一致的数据目录，并重定向 Electron userData；
+// 1. app ready 前解析兼容历史桌面版本的数据目录，并重定向 Electron userData；
 // 2. 单实例锁；第二次启动聚焦已有窗口；
 // 3. 生成随机管理 token，进程内启动 flowlet-core `startHost()`（Node Host +
 //    本机 HTTP 命令通道 + dist-desktop 静态资源）；
@@ -25,6 +25,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { AgentRuntimeManager } from "./agent-runtime.ts";
+import { startAgentSourceWatcher } from "./agent-source-watcher.ts";
+import type { AgentSourceRoot } from "../../flowlet-core/src/agent/sessions/source-roots.ts";
 import { normalizeBaseUrl } from "./client/config.ts";
 import { createClientGateway, type ClientGateway } from "./client/gateway.ts";
 import {
@@ -37,6 +39,7 @@ import { openModeWindow } from "./mode-window.ts";
 import { RemoteSession } from "./remote-session.ts";
 import { AutostartController } from "./autostart.ts";
 import { DesktopHostBridgeImpl } from "./bridge.ts";
+import { registerDialogHandlers } from "./renderer-capabilities.ts";
 import { DesktopKeyring } from "./keyring.ts";
 import { DesktopLogger } from "./logger.ts";
 import {
@@ -164,8 +167,8 @@ async function run(): Promise<void> {
   // 运行模式：CLI 覆盖 > 持久化配置 > 主机模式（老用户升级后默认行为不变）。
   const stored = readStoredDesktopConfig();
   const clientMode = (cli.mode ?? stored.config.mode) === "client";
-  /** preload 暴露给渲染进程的管理凭据：主机模式是本机随机 token，客户端模式是远程凭据。 */
-  let bootstrapAdminToken = clientMode ? "" : adminToken;
+  /** preload 暴露给渲染进程的管理凭据：主机模式是本机随机 token，客户端模式为空。 */
+  const bootstrapAdminToken = clientMode ? "" : adminToken;
   let clientBaseUrl = "";
   let gateway: ClientGateway | null = null;
   let remoteSession: RemoteSession | null = null;
@@ -197,6 +200,8 @@ async function run(): Promise<void> {
   let quitting = false;
   let webUrl: string | null = null;
   let host: { close(): Promise<void>; webAddr: string } | null = null;
+  let sourceWatcher: ReturnType<typeof startAgentSourceWatcher> | null = null;
+  let discoverSourceRoots: (() => AgentSourceRoot[]) | null = null;
 
   const keyring = new DesktopKeyring({ dataDir: paths.dataDir, logger });
   const autostart = new AutostartController(logger);
@@ -242,6 +247,7 @@ async function run(): Promise<void> {
     quitting = true;
     logger.info("开始退出 Flowlet", { reason });
     saveState();
+    sourceWatcher?.close();
     if (clientMode) {
       // 客户端模式只关本地网关，不碰任何代理/远程状态。
       try {
@@ -304,6 +310,9 @@ async function run(): Promise<void> {
       return typeof status?.running === "boolean" ? (status.running ? "running" : "stopped") : null;
     },
     showWindow: () => showWindow(),
+    emit: (event, payload) => {
+      if (!clientMode) getWindow()?.webContents.send(`host:event:${event}`, payload);
+    },
   });
 
   await app.whenReady();
@@ -347,7 +356,6 @@ async function run(): Promise<void> {
               });
             })();
       gateway = clientGateway;
-      if (authKind === "token") bootstrapAdminToken = remoteToken;
       if (authKind === "session" && remoteSession !== null) {
         const status = await remoteSession.status();
         if (!status.authenticated) needsModeSetup = true;
@@ -358,7 +366,8 @@ async function run(): Promise<void> {
     } else {
     // 延迟 import：core bundle 依赖上面设置的 FLOWLET_RUNTIME_ROOT_URL。
     const coreHostModule: string = "./core-host.mjs";
-    const { startFlowletHost } = (await import(coreHostModule)) as {
+    const coreHost = (await import(coreHostModule)) as {
+      discoverAgentSourceRoots: () => AgentSourceRoot[];
       startFlowletHost: (options: {
         host: DesktopHostBridgeImpl;
         appVersion: string;
@@ -373,7 +382,8 @@ async function run(): Promise<void> {
         webAddr: string;
       }) => Promise<{ close(): Promise<void>; webAddr: string }>;
     };
-    host = await startFlowletHost({
+    discoverSourceRoots = coreHost.discoverAgentSourceRoots;
+    host = await coreHost.startFlowletHost({
       host: hostBridge,
       appVersion,
       dataDir: paths.dataDir,
@@ -492,6 +502,7 @@ async function run(): Promise<void> {
     quitApp,
     resize: { current: null },
     logger,
+    trustedOrigin: new URL(webUrl).origin,
     bootstrap: () => ({
       adminToken: bootstrapAdminToken,
       mode: clientMode ? "client" : "host",
@@ -499,6 +510,13 @@ async function run(): Promise<void> {
     }),
   });
   mainWindow = createMainWindow(paths, webUrl, cli);
+  if (!clientMode && discoverSourceRoots !== null) {
+    sourceWatcher = startAgentSourceWatcher({
+      discover: discoverSourceRoots,
+      emit: () => getWindow()?.webContents.send("host:event:agent-source-changed", {}),
+      warn: (message, detail) => logger.warn(message, detail),
+    });
+  }
   app.on("second-instance", () => {
     logger.info("收到第二次启动请求，聚焦已有窗口");
     showWindow();
@@ -705,6 +723,11 @@ function createMainWindow(paths: DesktopPaths, webUrl: string, cli: CliOptions):
     },
   });
   win.setMinimumSize(MIN_CONTENT_WIDTH, MIN_CONTENT_HEIGHT);
+  const preventUntrustedNavigation = (event: Electron.Event, url: string): void => {
+    if (new URL(url).origin !== new URL(webUrl).origin) event.preventDefault();
+  };
+  win.webContents.on("will-navigate", preventUntrustedNavigation);
+  win.webContents.on("will-redirect", preventUntrustedNavigation);
   win.webContents.setWindowOpenHandler(({ url }) => {
     // 与 Rust open_external_url 语义一致：外部链接交给系统浏览器，不开新窗口。
     if (url.startsWith("http://") || url.startsWith("https://")) {
@@ -747,7 +770,7 @@ function createTray(
   logger: DesktopLogger,
 ): Tray {
   const candidates = [
-    join(paths.repoRoot, "src-tauri", "icons", "tray.png"),
+    join(paths.repoRoot, "resources", "icons", "tray.png"),
     join(paths.runtimeRoot, "icons", "tray.png"),
     join(paths.runtimeRoot, "icons", "icon.png"),
   ];
@@ -785,7 +808,7 @@ function createTray(
 }
 
 interface DesktopBootstrap {
-  /** 管理凭据：主机模式=本机随机 token；客户端模式=远程管理凭据（token 模式）。 */
+  /** 管理凭据：主机模式=本机随机 token；客户端模式为空（远程凭据仅在主进程）。 */
   adminToken: string;
   /** host / client，渲染进程据此决定加载桌面壳还是 Web 管理台界面。 */
   mode: "host" | "client";
@@ -905,12 +928,14 @@ interface IpcDeps {
   resize: { current: ResizeSession | null };
   logger: DesktopLogger;
   bootstrap: () => DesktopBootstrap;
+  trustedOrigin: string;
 }
 
 function registerIpcHandlers(deps: IpcDeps): void {
-  const fromMainWindow = (event: Electron.IpcMainInvokeEvent): BrowserWindow => {
+  const fromMainWindow = (event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent): BrowserWindow => {
     const win = BrowserWindow.fromWebContents(event.sender);
-    if (win === null || win !== deps.getWindow()) {
+    if (win === null || win !== deps.getWindow() || event.senderFrame !== win.webContents.mainFrame ||
+        new URL(event.senderFrame.url).origin !== deps.trustedOrigin) {
       throw new Error("拒绝来自非主窗口的 IPC 调用");
     }
     return win;
@@ -918,7 +943,12 @@ function registerIpcHandlers(deps: IpcDeps): void {
 
   // preload 在页面脚本执行前同步取管理 token（避免 token 出现在进程 argv 里）。
   ipcMain.on("desktop:bootstrap", (event) => {
-    event.returnValue = deps.bootstrap();
+    try {
+      fromMainWindow(event);
+      event.returnValue = deps.bootstrap();
+    } catch {
+      event.returnValue = null;
+    }
   });
 
   ipcMain.handle("window:minimize", (event) => {
@@ -996,33 +1026,12 @@ function registerIpcHandlers(deps: IpcDeps): void {
     deps.resize.current = null;
     deps.saveState();
   });
-  // Tauri plugin-dialog 兼容 shim：src/pages/settings/tabs/SyncTab.tsx 仍静态 import
-  // @tauri-apps/plugin-dialog。只放行 open/save 两个命令，避免把通用 invoke 暴露给渲染进程。
-  ipcMain.handle("tauri:compat-invoke", async (event, command: unknown, args: unknown) => {
-    fromMainWindow(event);
-    if (command !== "plugin:dialog|open" && command !== "plugin:dialog|save") {
-      throw new Error(`不允许的 Tauri 兼容命令：${String(command)}`);
-    }
-    const options = (args as { options?: Record<string, unknown> } | null)?.options ?? {};
-    if (command === "plugin:dialog|open") {
-      const result = await dialog.showOpenDialog({
-        title: typeof options["title"] === "string" ? options["title"] : undefined,
-        defaultPath: typeof options["defaultPath"] === "string" ? options["defaultPath"] : undefined,
-        properties: [
-          ...(options["directory"] === true ? (["openDirectory"] as const) : (["openFile"] as const)),
-          ...(options["multiple"] === true ? (["multiSelections"] as const) : []),
-        ],
-        filters: normalizeDialogFilters(options["filters"]),
-      });
-      if (result.canceled || result.filePaths.length === 0) return null;
-      return options["multiple"] === true ? result.filePaths : result.filePaths[0];
-    }
-    const result = await dialog.showSaveDialog({
-      title: typeof options["title"] === "string" ? options["title"] : undefined,
-      defaultPath: typeof options["defaultPath"] === "string" ? options["defaultPath"] : undefined,
-      filters: normalizeDialogFilters(options["filters"]),
-    });
-    return result.canceled ? null : (result.filePath ?? null);
+  registerDialogHandlers({
+    handle: (channel, handler) => ipcMain.handle(channel, handler),
+    fromMainWindow,
+    isHostMode: () => deps.bootstrap().mode === "host",
+    open: (win, options) => dialog.showOpenDialog(win, options),
+    save: (win, options) => dialog.showSaveDialog(win, options),
   });
   ipcMain.handle("platform:open-external", async (event, url: unknown) => {
     fromMainWindow(event);
@@ -1037,22 +1046,6 @@ function registerIpcHandlers(deps: IpcDeps): void {
 }
 
 let dragSession: { startCursor: { x: number; y: number }; startBounds: Rectangle } | null = null;
-
-function normalizeDialogFilters(raw: unknown): { name: string; extensions: string[] }[] | undefined {
-  if (!Array.isArray(raw)) return undefined;
-  const filters: { name: string; extensions: string[] }[] = [];
-  for (const item of raw) {
-    if (item === null || typeof item !== "object") continue;
-    const name = (item as { name?: unknown }).name;
-    const extensions = (item as { extensions?: unknown }).extensions;
-    if (typeof name !== "string" || !Array.isArray(extensions)) continue;
-    filters.push({
-      name,
-      extensions: extensions.filter((ext): ext is string => typeof ext === "string" && ext !== ""),
-    });
-  }
-  return filters.length === 0 ? undefined : filters;
-}
 
 function isResizeDirection(value: unknown): value is ResizeDirection {
   return (

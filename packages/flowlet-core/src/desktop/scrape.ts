@@ -13,9 +13,8 @@
 // - 宿主负责「窗口 + CDP 抓包 + 页面执行」：导航、Network.* 捕获、在页面里跑 extractor；
 // - 命令层负责「模式解析 + 槽位语义 + 完成判定 + 会话状态机 + 落库 + 错误映射」：
 //   config.json / 自定义描述符驱动 ScrapePlan，逐阶段收槽位并按 Rust 语义合并/校验；
-// - 页面注入的 `__TAURI_INTERNALS__.invoke('handle_intercepted_response' ...)` 在
-//   Electron 侧是 resolve-null shim（CDP 为准），两条 handle_* 命令仍保留为同一语义的
-//   页面回调入口：宿主若转发 IPC（需补 accountId）即可写入同一份会话缓冲。
+// - 页面拦截器可使用受控的可选 __FLOWLET_SCRAPE__ 回调；默认以 CDP + stash 为准，
+//   不向第三方控制台暴露通用宿主 IPC。两条 handle_* 命令保留为受控回调入口。
 import { randomUUID } from "node:crypto";
 
 import { CommandError } from "../types.ts";

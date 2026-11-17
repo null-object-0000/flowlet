@@ -1,9 +1,8 @@
 // 局域网发现/探测状态的 app_meta 持久化。Owner: desktop-device。
 //
-// 权威实现：src-tauri/src/core/lan_sync.rs 的三个 app_meta 键：
+// 权威实现：src-tauri/src/core/lan_sync.rs 的两个 app_meta 键：
 // - `device_lan_descriptor_v1`：本机对外发布的 LanPeerDescriptor；
 // - `device_lan_peers_v1`：已知 peer 的 LanPeerDescriptor 映射（deviceId → descriptor）；
-// - `mobile_lan_probe_cache_v1`：最近一次探测结果缓存（移动端读取）。
 // 这里全部是纯函数（db 直接读写 app_meta），供桌面命令层通过
 // `ctx.storage.withDatabase((db) => ...)` 调用。
 import type { DatabaseSync } from "node:sqlite";
@@ -13,7 +12,6 @@ import { getAppMeta, setAppMeta } from "./config.ts";
 
 export const LAN_DESCRIPTOR_KEY = "device_lan_descriptor_v1";
 export const LAN_PEERS_KEY = "device_lan_peers_v1";
-export const LAN_PROBE_CACHE_KEY = "mobile_lan_probe_cache_v1";
 
 export interface LanProbeResult {
   deviceId: string;
@@ -23,11 +21,6 @@ export interface LanProbeResult {
   protocolVersion: number | null;
   errorKind: "unreachable" | "unauthorized" | "outdated" | "invalid" | null;
   error: string | null;
-}
-
-export interface LanProbeCache {
-  probedAt: string;
-  probes: LanProbeResult[];
 }
 
 function readJson(db: DatabaseSync, key: string): unknown {
@@ -82,16 +75,4 @@ export function rememberPeer(
   const registry = loadPeerRegistry(db);
   registry[deviceId] = descriptor;
   savePeerRegistry(db, registry);
-}
-
-export function loadProbeCache(db: DatabaseSync): LanProbeCache | null {
-  const value = readJson(db, LAN_PROBE_CACHE_KEY);
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
-  const cache = value as Partial<LanProbeCache>;
-  if (typeof cache.probedAt !== "string" || !Array.isArray(cache.probes)) return null;
-  return { probedAt: cache.probedAt, probes: cache.probes as LanProbeResult[] };
-}
-
-export function saveProbeCache(db: DatabaseSync, cache: LanProbeCache): void {
-  setAppMeta(db, LAN_PROBE_CACHE_KEY, JSON.stringify(cache));
 }

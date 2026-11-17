@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { listen } from "@tauri-apps/api/event";
+import { listen } from "../../platform/host/events";
 import { useState } from "react";
 import { getStorageUsage } from "../../domains/settings/commands";
 import type { StorageUsageSummary } from "../../domains/settings/types";

@@ -1,7 +1,8 @@
 /** Native ACP sessions retain upstream configuration instead of losing it in A2A conversion. */
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { Readable, Writable } from "node:stream";
+import { Writable } from "node:stream";
+import { byteStream } from "./byte-stream.ts";
 import {
   client,
   methods,
@@ -172,7 +173,7 @@ export async function startNativeAcp(
     },
   );
   const connection = app.connect(
-    ndJsonStream(Writable.toWeb(child.stdin), Readable.toWeb(child.stdout), {
+    ndJsonStream(Writable.toWeb(child.stdin), byteStream(child.stdout), {
       maxMessageBytes: 4 * 1024 * 1024,
     }),
   );

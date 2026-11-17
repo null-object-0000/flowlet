@@ -22,8 +22,8 @@ describe("desktop mode detection", () => {
     expect(resolveDesktopHost("development", true)).toBe(true);
   });
 
-  it("never treats Web Host / Tauri / mobile / demo modes as desktop without the bridge", () => {
-    for (const mode of ["web", "production", "development", "mobile", "demo"]) {
+  it("never treats Web Host / browser / demo modes as desktop without the bridge", () => {
+    for (const mode of ["web", "production", "development", "demo"]) {
       expect(resolveDesktopHost(mode, false)).toBe(false);
     }
   });
@@ -43,13 +43,13 @@ describe("desktop mode detection", () => {
     expect(isDesktopHost).toBe(true);
   });
 
-  it("客户端模式只在 desktop 构建且 preload 声明 client 时成立", async () => {
+  it("preload 声明 client 在任何构建下都保持客户端能力边界", async () => {
     expect(resolveDesktopClient("desktop", "client")).toBe(true);
     expect(resolveDesktopClient("desktop", "host")).toBe(false);
     expect(resolveDesktopClient("desktop", undefined)).toBe(false);
-    // Web Host / Tauri / mobile 即使桥声明 client 也不是 Electron 客户端模式。
-    for (const mode of ["web", "production", "development", "mobile", "demo"]) {
-      expect(resolveDesktopClient(mode, "client")).toBe(false);
+    // 壳加载 dev/web 构建时也不得绕过 client 能力边界。
+    for (const mode of ["web", "production", "development", "demo"]) {
+      expect(resolveDesktopClient(mode, "client")).toBe(true);
     }
   });
 

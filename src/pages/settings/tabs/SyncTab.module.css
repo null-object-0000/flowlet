@@ -38,7 +38,6 @@
 .workspaceConsent p { margin: 0; color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-body); line-height: 1.65; }
 .workspaceOption { display: grid; gap: 4px; }
 .workspaceOption > span { color: var(--flowlet-color-text-tertiary); font-size: 12px; }
-.qrWorkspaceHint { margin: 14px 0 -6px; color: var(--flowlet-color-text-tertiary); font-size: 12px; line-height: 1.6; }
 .lanBody { display: grid; }
 .lanService { padding: 12px 14px; display: grid; grid-template-columns: minmax(0, 2fr) minmax(140px, 1fr); gap: 12px; border-bottom: 1px solid var(--flowlet-color-border); }
 .lanService > div { min-width: 0; display: grid; gap: 4px; align-content: start; }
@@ -95,16 +94,6 @@
 .connectionTabs :global(.semi-tabs-bar) { margin: 0; padding: 0 20px; }
 .connectionTabs :global(.semi-tabs-content) { min-height: 390px; }
 .connectionTabs :global(.semi-tabs-pane) { padding: 18px 20px 20px; }
-.qrLayout { min-height: 350px; display: grid; grid-template-columns: 290px minmax(0, 1fr); align-items: center; gap: 26px; }
-.qrPanel { min-height: 294px; padding: 13px; display: grid; place-items: center; align-content: center; gap: 12px; border-radius: 13px; background: #fff; border: 1px solid var(--flowlet-color-border); }
-.qrPanel span { color: var(--flowlet-color-text-secondary); font-size: var(--flowlet-font-size-caption); text-align: center; }
-.connectGuide h3 { margin: 0; font-size: 15px; }
-.connectGuide ol { margin: 18px 0 0; padding: 0; display: grid; gap: 12px; list-style: none; }
-.connectGuide li { display: flex; align-items: flex-start; gap: 10px; }
-.connectGuide li > span { width: 24px; height: 24px; flex: none; display: grid; place-items: center; border-radius: 50%; color: var(--semi-color-primary); background: var(--semi-color-primary-light-default); font-size: var(--flowlet-font-size-caption); line-height: var(--flowlet-line-height-caption); font-weight: 700; }
-.connectGuide li p { margin: 0; color: var(--flowlet-color-text-secondary); font-size: 12.5px; line-height: 1.6; }
-.expireBox { margin-top: 22px; padding: 11px 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid color-mix(in srgb, var(--semi-color-primary) 20%, var(--flowlet-color-border)); border-radius: 10px; background: var(--semi-color-primary-light-default); }
-.expireBox > span { color: var(--flowlet-color-text-secondary); font-size: 12px; }
 .secretNotice { margin: 0 0 12px; padding: 9px 10px; border-radius: 8px; color: var(--semi-color-warning); background: var(--semi-color-warning-light-default); font-size: 12px; line-height: 1.55; }
 .connectionPanel, .importPanel { display: grid; gap: 12px; }
 .connectionCode { height: 245px; margin: 0; padding: 14px 15px; overflow: auto; border: 1px solid var(--flowlet-color-border); border-radius: 10px; color: var(--flowlet-color-text-secondary); background: var(--flowlet-color-surface-muted); font-family: var(--flowlet-font-family-mono); font-size: var(--flowlet-font-size-code); line-height: var(--flowlet-line-height-code); white-space: pre-wrap; }
@@ -126,5 +115,4 @@
   .deviceHead { display: none; }
   .deviceRow { grid-template-columns: minmax(0, 1fr) auto; }
   .deviceUpdated, .deviceState, .deviceMenu { display: none; }
-  .qrLayout { grid-template-columns: 1fr; }
 }

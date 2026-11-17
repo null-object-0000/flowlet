@@ -4,7 +4,7 @@ import styles from "./ScrollBottomControl.module.css";
 
 /**
  * 右下角「滚动到底部」悬浮按钮：用户不在会话内容底部时出现，
- * 有新内容到达时通过右上角红点提示。与移动端会话弹窗的滚动控件一致。
+ * 有新内容到达时通过右上角红点提示。
  */
 export function ScrollBottomControl({
   hasUnseenContent,

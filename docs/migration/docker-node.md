@@ -1,5 +1,11 @@
 # Docker 镜像迁移到 Node Host
 
+> **已归档（2026-11-17）— 历史资料，不作为当前开发、构建、发布或配置指引。**
+> 当前仅维护 Electron + Node/TS 与 Web/Docker；Rust/Tauri 及其回滚、移动与旧对拍链路已移除。
+> 下文保留当时的正文、命令、路径与测量结论供追溯，不表示这些代码或操作仍可用。
+> 当前入口：[架构](../architecture.md)、[Electron 桌面](../desktop-electron.md)、
+> [Docker](../docker.md)、[发布构建](../release-builds.md)。
+
 > 状态：**Node Host 已与当前线上版本（含 GitLab OIDC SSO）对齐**：严格对拍 0/0
 > （命令 58 步 + HTTP 检查，Rust oracle = 线上容器二进制 + 生产库快照），镜像已在远端构建并
 > 通过容器冒烟（token / oidc 两种模式）；**尚未替换线上 `flowlet` 栈**（部署需要用户授权）。

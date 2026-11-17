@@ -1,5 +1,11 @@
 # Claude Code 权限等待监测（一期：只监测，不代理动作）
 
+> **已归档（2026-11-17）— 历史方案/快照，不作为当前实施或运行指引。**
+> 正文保留当时的技术判断与证据；旧宿主路径、接口草案和测试记录可能已失效。
+> 当前仅维护 Electron + Node/TS 与 Web/Docker，不保留 Rust/Tauri 回滚。
+> 当前实现见 [架构](architecture.md)、[Electron](desktop-electron.md)；
+> 重新启动任何未实现方案前，必须按当前代码重新设计、验证安全边界。
+
 > 本文档是**已批准但暂缓实施**的方案记录，供后续重启该任务时参考。
 > 原计划会话产物已迁移至本文件。
 
@@ -31,7 +37,7 @@ claude 终端触发权限
 Flowlet 侧：
   → list_agent_sessions 扫描 waiting-*.json，transcript 交叉校验 + TTL 兜底
   → 命中会话 runtime_status 合并为 waiting_user（过滤/分页前，与 opencode 同规则）
-  → 桌面列表标签/筛选、移动端快照自动生效（waiting_user 展示链路已存在）
+  → 桌面列表标签/筛选、设备共享快照自动生效（waiting_user 展示链路已存在）
 ```
 
 ### 1. hook 脚本（新建源码常量，`agent_global_config.rs`）
@@ -59,7 +65,7 @@ Flowlet 侧：
   2. **TTL 兜底**：`updatedAt` 超过 30 分钟视为残留（claude 被杀等情况）→ 删除、跳过。
 - `pending_sessions()` 返回仍有有效 marker 的 session_id 集合。
 - `list_agent_sessions`（`commands/observability.rs`）在现有 opencode pending 收集之外，追加 claude-code pending 集合；`storage_usage.rs` 的 `list_agent_sessions` 增加第三个参数，opencode 走原 `opencode_control::merge_runtime_status`，claude-code 走新 `claude_code_control::merge_runtime_status`（两条独立路径，不动 opencode 既有逻辑与测试），均在过滤/分页**之前**合并。
-- 移动端零成本受益：`runtime_status` 已随设备快照同步，`SharedAgentSession` 无需改动。
+- 桌面设备共享继续受益：`runtime_status` 已随设备快照同步，`SharedAgentSession` 无需改动。
 
 ### 4. 只读明细（小增量，提升监测可解释性）
 

@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+### 移除
+
+- 彻底移除 Rust/Tauri 桌面、headless 与 legacy 凭据 CLI，不保留回滚实现；删除 Cargo 配置、旧构建/便携更新/对拍脚本及对应 CI。
+  图标、规格目录与可选 Agent 扩展迁至根 `resources/icons`、`resources/catalogs`、`resources/agent-plugins`；
+  真实上游 fixture 迁至 `packages/flowlet-core/test-fixtures`。保留 Go ACP 桥、桌面设备身份、S3/LAN、设备快照与加密账号工作区契约。
+- 前端平台命令边界从旧目录迁至 `src/platform/host`，统一 HTTP 命令；窗口、对话框与固定事件经受控 Electron bridge。
+  新增 `scripts/check-command-contract.mjs` / `npm run node:commands`，仅核对静态名称、注册与权限白名单，不宣称行为覆盖率。
+
+- 移除 Android/iOS 移动客户端、扫码配对、移动构建与 APK/Pgyer 分发，以及官网移动演示和安装入口。
+  仅保留 Electron + Node/TS 桌面及 Web/Docker；桌面设备间 S3/LAN 同步、设备快照与账号工作区不受影响。
+
 ### 安全
 
 - Web Host 将登录准入移至实例级用户管理：认证提供器只负责连接，已验证邮箱规则跨入口生效；用户角色和停用统一维护，旧准入规则只迁移一次并可显式移除。
@@ -60,32 +71,30 @@
   改为 Electron 宿主（`packages/flowlet-desktop/`）+ 复用 `packages/flowlet-core` 的 Node
   命令面与代理核心，渲染层直接加载现有 React 界面（`vite build --mode desktop` → `dist-desktop`），
   命令通道走本机 `POST /api/commands/{command}`（随机管理 token 经 preload 注入，不落盘）；
-  Tauri/Rust 版本保留为回滚路径，Android 工程未改动。
+  不再保留旧桌面宿主或回滚构建。
 - 桌面命令层（`packages/flowlet-core/src/desktop/`）：在 Web Host 66 条命令之上补齐桌面独有
   命令——Agent 接入 17 条（环境探测/全局配置 inspect→apply→restore/Codex/Antigravity/托管运行时）、
   设置与维护 22 条 + 账号工作区 5 条、观测与会话 19 条（原生会话目录合并、DSH v0–v4 时间线、
   后台任务、成本探测、目录预设同步）、跨设备同步 23 条（S3 SigV4 + LAN HMAC/ChaCha20 信封）；
-  覆盖度用 `node scripts/desktop-command-parity.mjs` 追踪：**154/154（100%）**。
+  命令注册通过 `npm run node:commands` 静态核对；参数、返回值与行为需另行验证。
 - 桌面控制台抓取（CDP）：`open/close_scrape_console`、`probe_scrape_login`、`scrape_balance`、
   `sync_scrape_balances`、拦截回调、外部链接与自定义抓取注册表共 10 条命令，按 `config.json`
-  抓取描述符驱动（零渠道硬编码），槽位引擎/extractor 与 Rust 行为对齐；Electron 统一用
+  抓取描述符驱动（零渠道硬编码），槽位引擎/extractor 保持既有契约；Electron 统一用
   `webContents.debugger`（CDP）替代 WebView2/WebKitGTK 三套实现。**升级后控制台渠道需重新登录
   一次**（旧 WebView 登录态无法迁移，命令层会明确返回 `login_required` 而不是伪造成功）。
 - `packages/flowlet-desktop`：单实例、无边框窗口壳（CSS app-region 拖动 + IPC 伪缩放）、托盘
-  （关闭隐藏、仅托盘退出停代理）、窗口记忆、开机自启、`safeStorage` 凭据存储并兼容迁移 Rust
-  keyring 旧条目、`platform/keyring/agentRuntime/scrape/power` host channel、
+  （关闭隐藏、仅托盘退出停代理）、窗口记忆、开机自启、`safeStorage` 凭据存储并兼容迁移既有
+  OS keyring 条目、`platform/keyring/agentRuntime/scrape/power` host channel、
   electron-builder 打包（AppImage/deb/nsis/zip/dmg），以及 `desktop:dev/build/dist/smoke` 脚本。
 - 前端新增 `desktop` 运行模式（`src/platform/desktop/**`）：命令改走本机 HTTP、窗口能力经 preload
-  桥接、`isWebHost`/移动端/demo 语义不变。
-- 桌面迁移门禁与验证：新增 `npm run desktop:smoke:pages`（逐路由渲染 + 截图 + console/命令
-  错误报告，支持 `--db=<sqlite>` 跑老用户数据库）、`node scripts/desktop-command-parity.mjs
-  --check`（154 条命令覆盖门禁）与 `.github/workflows/desktop-electron.yml`（三平台构建 +
-  Linux xvfb 冒烟，产物为迁移验证包，不覆盖 Tauri 正式 Release）。
+  桥接、`isWebHost`/demo 语义不变。
+- 桌面验证保留 `npm run desktop:smoke:pages`（逐路由渲染、截图与命令错误报告，支持数据库副本）；
+  正式安装包工作流构建 Electron，独立 Electron 工作流提供构建与 Linux 冒烟。
 - Windows 通知：`platform.notify` 支持点击回到主窗口；启动时幂等写
   `HKCU\Software\Classes\AppUserModelId\site.snewbie.flowlet`（DisplayName/IconUri），
-  与 Rust `notification_registry.rs` 对齐，缓解便携版 toast 被系统丢弃（仍未真机验证）。
+  缓解便携版 toast 被系统丢弃（仍未真机验证）。
 
-- **桌面端新增「主机 / 客户端」双运行模式**：主机模式不变（本机 Node Host + 154 条桌面命令）；
+- **桌面端新增「主机 / 客户端」双运行模式**：主机模式不变（本机 Node Host + 已注册桌面命令）；
   客户端模式不启动本机 Host，只跑 Client Gateway（同源静态界面 + `/api` 反向代理）连接
   Docker/Web Host，复用 Web 管理台做远程观测与管理（账号/模型/日志/会话/用量/服务凭据），
   本机 Agent 接入、控制台抓取、跨设备同步与开机自启在客户端模式不可用；
@@ -98,17 +107,13 @@
 
 ### 变更
 
-- **Rust 服务端遗留物移出默认构建**：生产 Web Host 已由 Node Host 承载，因此 Rust `core::web`
-  命令白名单与 `headless` 二进制改为 Cargo feature `legacy-server`（默认关闭），Rust legacy 凭据
-  CLI 改为 `legacy-cred`（默认关闭）；`tower-http` 随之变为可选依赖。桌面构建不再编译这两条
-  链路（减少约 3.6k 行 Rust 与非桌面依赖），对拍/回滚需要时按文档显式开启；
-  `npm run node:parity` 的 Rust oracle 需先用 `--features legacy-server --bin headless` 构建。
+- Web、桌面与 CLI 收敛为 Node/TypeScript 当前实现；不再通过 Cargo feature 保留旧服务端或 CLI。
+  历史迁移/审计资料置顶归档，当前开发、配置与发布说明改为真实 Node/Electron 路径。
 
 ### 新增
 
 - **服务凭据新增 Jenkins provider**：管理台「服务凭据」在 GitLab、Dockhand 之后新增 Jenkins
-  （用户名 + API Token 的 HTTP Basic 认证）：服务凭据表新增可空 `username` 列（Rust Host /
-  Node Host 均做 `ALTER TABLE` 迁移，GitLab / Dockhand 行为 NULL），保存时实际请求
+  （用户名 + API Token 的 HTTP Basic 认证）：服务凭据表新增可空 `username` 列（Node Host 做 `ALTER TABLE` 迁移，GitLab / Dockhand 行为 NULL），保存时实际请求
   `GET {base}/me/api/json` 校验，版本取 `X-Jenkins` 响应头；校验失败不落库；
 - `flowlet pull` 为 Jenkins 生成 `{PREFIX}_URL` / `{PREFIX}_USER` / `{PREFIX}_TOKEN`
   （其它 provider 仍为两把键）；CLI 新增 `flowlet jenkins set / status / api / env / clear`，
@@ -119,7 +124,7 @@
   PocketBase 底座，默认 8090）。Beszel 没有长期 API Token，因此凭据存「登录邮箱（明文）+
   密码（密文）」，保存时实际请求 `POST {base}/api/collections/users/auth-with-password`
   换短期 token 校验，版本取 `GET /api/beszel/info` 的 `v`，摘要为「{n} 台系统」；
-  校验失败不落库。Rust Host / Node Host / CLI / 前端与文档同步实现；
+  校验失败不落库。Node Host / CLI / 前端与文档同步实现；
 - `flowlet pull` 为 Beszel 生成 `{PREFIX}_URL` / `{PREFIX}_EMAIL` / `{PREFIX}_PASSWORD`；
   CLI 新增 `flowlet beszel set / status / systems / api / env / clear`，支持
   `--profile=<alias>` 多实例（例如 `BESZEL_MON_*`）。
@@ -129,7 +134,7 @@
   保存时请求 `GET {base}/v2/`，401 时按 `WWW-Authenticate` 的 Bearer 质询换 token 后重试，
   版本取 `docker-distribution-api-version` 响应头；用户名 + 密码/token（robot account 同样只是
   普通用户名 + token，不做特判）。不实现任何 Harbor 专属能力：不调用 `/api/v2.0/*`、
-  不探测 catalog、不支持 `docker search` 与 ChartMuseum。Rust Host / Node Host / CLI / 前端与
+  不探测 catalog、不支持 `docker search` 与 ChartMuseum。Node Host / CLI / 前端与
   文档同步实现，校验失败不落库；
 - `flowlet pull` 为 registry 生成 `{PREFIX}_HOST` / `{PREFIX}_USER` / `{PREFIX}_TOKEN`
   （`_HOST` 是 host[:port]、无 scheme，可直接用于 `docker login` / `helm registry login`；
@@ -153,18 +158,17 @@
   item 带 `"status": null`（或空串、未知取值），客户端（DSH/pi-ai 等）会把它们原样塞回
   下一轮 `input`，校验严格的上游返回 `The parameter `input.status` specified in the request
   are not valid: unknown status: .`；坏 item 一旦进入历史，该会话后续每一轮都会被拒、
-  重试无效（2026-11-10 DSH 会话 `session-a07de002` turn 32/33 即此形态）。Rust
-  （`proxy_http::normalize_responses_input_items`）与 Node Host
-  （`proxy::normalizeResponsesInputItems`）都在转发前把 `input[*].status` 的非法值归一为
+  重试无效（2026-11-10 DSH 会话 `session-a07de002` turn 32/33 即此形态）。Node Host 的 `normalizeResponsesInputItems`（`proxy/http.ts`）在转发前把 `input[*].status` 的非法值归一为
   `"completed"`、清掉 `encrypted_content: null`；合法 status、`input` 为字符串、非
   Responses 协议、无需修改的请求保持字节级透传，item 的顺序 / id / type / 内容不变。
 - 修复流式响应带 `content-encoding: gzip / deflate / br / zstd` 时用量丢失：代理此前把压缩
   字节直接交给 TTFT 探针与 usage 累加器，解析不到 `usage` 事件，导致请求日志 Token / 费用
   显示 `—`、用量统计不计入（DeepSeek 官方 Anthropic 端点对 SSE 返回 gzip 时必现，历史日志中
-  该账号 1,923 条请求全部无 usage）。现在 Rust（`proxy_http::StreamUsageDecoder`）与
-  Node Host（`proxy::StreamObservationDecoder`）都在**观测侧**做增量解压：转发的原始压缩字节、
+  该账号 1,923 条请求全部无 usage）。现在 Node Host（`proxy::StreamObservationDecoder`）在**观测侧**做增量解压：转发的原始压缩字节、
   `content-encoding` 头不变，响应体捕获仍按原逻辑解压；解压失败 / 截断只停用观测解压并按
   `partial` 语义处理，不影响转发、日志与连接。非流式 buffered 解压路径不变。
+
+> 以下已发布版本条目保留发布时的技术栈和验证记录，不作为当前构建/运行指引。
 
 ## [0.2.0] - 2026-11-09
 

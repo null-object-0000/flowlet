@@ -23,7 +23,6 @@ export const en: Messages = {
     title: "One model endpoint for all your AI agents.",
     subtitle: "Manage model accounts once and switch upstream providers without reconfiguring every agent. Trace each request, actual route, token, and cost back to its session.",
     primary: "Get Flowlet",
-    android: "Android install",
     secondary: "View product demo",
     platform: "Fully tested on native Windows 11",
     endpoint: "One local endpoint",
@@ -43,12 +42,8 @@ export const en: Messages = {
   },
   demo: {
     eyebrow: "Interactive product preview",
-    desktopTab: "Desktop console",
-    mobileTab: "Mobile companion",
     title: "Use the complete Flowlet desktop interface.",
     subtitle: "Explore how Flowlet brings model access, agent activity, request traces, and usage costs together in one local control console.",
-    mobileTitle: "Check every device from your phone.",
-    mobileSubtitle: "Switch between the views below to explore usage, devices, and sessions across multiple devices.",
   },
   value: {
     eyebrow: "Why Flowlet",
@@ -125,7 +120,6 @@ export const en: Messages = {
     ctaTitle: "Give your AI agents one shared endpoint.",
     ctaDesc: "Free and open source under the MIT License. Download Flowlet to manage model accounts, agent access, and every request in one place.",
     primary: "Go to Releases",
-    android: "Install on Android",
     secondary: "Read the README",
   },
   footer: {

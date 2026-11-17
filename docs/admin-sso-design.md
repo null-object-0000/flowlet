@@ -1,5 +1,11 @@
 # 管理端 OAuth / OIDC 单点登录设计
 
+> **已归档（2026-11-17）— 历史资料，不作为当前开发、构建、发布或配置指引。**
+> 当前仅维护 Electron + Node/TS 与 Web/Docker；Rust/Tauri 及其回滚、移动与旧对拍链路已移除。
+> 下文保留当时的正文、命令、路径与测量结论供追溯，不表示这些代码或操作仍可用。
+> 当前入口：[架构](architecture.md)、[Electron 桌面](desktop-electron.md)、
+> [Docker](docker.md)、[发布构建](release-builds.md)。
+
 状态：**v0.6：准入 / 管理员 / 登录方式开关改为管理台自助配置（2026-11-13）**；v0.5 已实现并完成真实 GitLab 登录验证（2026-11-09）；首个 IdP = GitLab
 日期：2026-11-09（v0.2 纳入了规范、各 IdP 与 Rust crate 的实机核验；v0.3 收窄首个 IdP 落地细节）
 范围：headless / Docker Web Host 的浏览器管理台（`FLOWLET_WEB_ADDR` 暴露的 Web UI 与

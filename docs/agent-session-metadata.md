@@ -1,8 +1,8 @@
 # Agent 会话名称与项目的服务端派生（Web Host / Docker）
 
-> 适用实现：`packages/flowlet-core`（Docker / Web Host 实际运行）。桌面 Rust Host 不参与本次
-> 派生：桌面端已经能通过读取本机原生会话文件（`agent_session_adapter`）拿到真实标题与 cwd，
-> 并且 `merge_agent_session_catalog` 以原生值优先。
+> 适用实现：`packages/flowlet-core`（Docker / Web Host 实际运行）。Electron 本机 Host 还可通过
+> `packages/flowlet-core/src/agent/sessions/` 读取原生标题与 cwd，并优先使用原生元数据。
+> Web/Docker 不扫描服务器上的个人 Agent 文件。
 
 ## 1. 背景与边界
 
@@ -24,7 +24,7 @@ Docker 版「会话管理」只聚合经过本实例代理的请求观测（[doc
 
 ## 2. 存储
 
-新增表（Node Host 与桌面 Rust 的 schema 契约同步维护，只增不改；桌面旧版本读到未知表会忽略）：
+新增表（Electron 与 Web/Docker 共用 Node schema，增量维护）：
 
 ```sql
 CREATE TABLE IF NOT EXISTS agent_session_metadata (

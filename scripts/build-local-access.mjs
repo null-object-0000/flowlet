@@ -137,7 +137,7 @@ function stageCli(tmpRoot) {
   const packageJson = {
     name: "flowlet-cli",
     version,
-    description: "Flowlet 全局凭据库 CLI（无需 Rust 运行时）",
+    description: "Flowlet 全局凭据库 CLI（Node.js）",
     type: "module",
     bin: stagedBin,
     // engines 跟随源包声明（当前为 >=22.6，与 bin/flowlet.mjs 的版本自检一致）。

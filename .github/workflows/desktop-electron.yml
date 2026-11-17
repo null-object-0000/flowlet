@@ -1,12 +1,4 @@
-# Electron 桌面端（迁移验证）构建与冒烟。
-#
-# 与 build-installers.yml（Tauri 正式产物）并行存在，本 workflow 只产出
-# “Electron 迁移验证包”，不覆盖正式 Release 资产；确认桌面端切换后可在
-# build-installers.yml 中改为主产物。
-#
-# 触发：
-#   - 手动 Run workflow（默认构建三平台，可选只跑 Linux 冒烟）
-#   - 预发布标签（v*-beta*）推送
+# Electron 桌面端构建、Node 契约检查与冒烟；正式发布由 build-installers.yml 负责。
 name: Desktop (Electron) build & smoke
 
 on:
@@ -30,10 +22,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
+      - name: Set up Go for the ACP bridge
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.x'
+          cache-dependency-path: packages/flowlet-agent-bridge/go.sum
       - name: Install dependencies
         run: npm ci
+      - name: Build ACP bridge for Node tests
+        run: npm run agent-bridge:build
       - name: Typecheck (core + desktop host + frontend)
         run: |
           npm run node:typecheck
@@ -41,8 +40,10 @@ jobs:
           npm run desktop:typecheck
       - name: Node tests (core + desktop commands)
         run: node --test packages/flowlet-core/src
-      - name: Desktop command parity (Rust ↔ Node)
-        run: node scripts/desktop-command-parity.mjs --check
+      - name: Node command-name contract (registration only)
+        run: npm run node:commands
+      - name: Fetch bundled model catalogs
+        run: npm run fetch:catalogs
       - name: Build desktop frontend + host bundle
         run: |
           npm run build:desktop
@@ -74,15 +75,24 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
+      - name: Set up Go for the ACP bridge
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.x'
+          cache-dependency-path: packages/flowlet-agent-bridge/go.sum
       - name: Install dependencies
         run: npm ci
+      - name: Build ACP bridge for Node tests
+        run: npm run agent-bridge:build
       - name: Typecheck + tests
         run: |
           npm run node:typecheck
           npm run desktop:typecheck
           node --test packages/flowlet-core/src
+      - name: Fetch bundled model catalogs
+        run: npm run fetch:catalogs
       - name: Build desktop frontend + host bundle
         run: |
           npm run build:desktop
@@ -96,7 +106,6 @@ jobs:
           path: |
             packages/flowlet-desktop/release/*.exe
             packages/flowlet-desktop/release/*.zip
-            packages/flowlet-desktop/release/*.msi
           if-no-files-found: error
 
   macos:
@@ -106,15 +115,24 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 26
           cache: npm
+      - name: Set up Go for the ACP bridge
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.x'
+          cache-dependency-path: packages/flowlet-agent-bridge/go.sum
       - name: Install dependencies
         run: npm ci
+      - name: Build ACP bridge for Node tests
+        run: npm run agent-bridge:build
       - name: Typecheck + tests
         run: |
           npm run node:typecheck
           npm run desktop:typecheck
           node --test packages/flowlet-core/src
+      - name: Fetch bundled model catalogs
+        run: npm run fetch:catalogs
       - name: Build desktop frontend + host bundle
         run: |
           npm run build:desktop

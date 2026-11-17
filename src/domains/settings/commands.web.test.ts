@@ -6,7 +6,7 @@ const { invokeMock } = vi.hoisted(() => ({
 
 vi.mock("../../platform/web/mode", () => ({ isWebHost: true }));
 
-vi.mock("../../platform/tauri/client", () => ({
+vi.mock("../../platform/host/client", () => ({
   invokeCommand: (command: string, args?: Record<string, unknown>) =>
     args === undefined ? invokeMock(command) : invokeMock(command, args),
   toAppError: (error: unknown, code: string) => ({ code, message: String(error), retryable: true }),

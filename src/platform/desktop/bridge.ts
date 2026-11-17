@@ -8,10 +8,10 @@
  * - 主进程 channel 名见各方法注释，窗口壳与主进程两侧对齐后不要再改。
  *
  * 约束：本文件不得引入任何 renderer 侧业务模块（只放类型与桥存在性判断），
- * 避免 web / mobile / demo 构建把 Electron 概念带进来。
+ * 避免 web / demo 构建把 Electron 概念带进来。
  */
 
-/** 与 Tauri `@tauri-apps/api/window` 的 resize 方向枚举保持一致（该类型未导出）。 */
+/** 窗口八向缩放方向；renderer/preload/main 共享相同命名。 */
 export type ResizeDirection =
   | "East"
   | "North"
@@ -24,7 +24,7 @@ export type ResizeDirection =
 
 /**
  * `window:resize-begin` 的 payload（preload 转成 IPC 参数）。
- * 主进程按 Tauri 方向名（`SouthEast` 等）解析，并优先取 `direction`。
+ * 主进程按方向名（`SouthEast` 等）解析，并优先取 `direction`。
  */
 export type DesktopResizeBeginPayload = {
   direction: ResizeDirection;
@@ -40,7 +40,7 @@ export type DesktopMaximizedState = { maximized: boolean };
  * 主进程实现失败时应 reject（不要返回 undefined），让渲染进程的 catch 能落到
  * 可读日志上。
  *
- * 拖动说明（HG-2）：Electron 没有 Tauri `startDragging()` 的等价 JS API，
+ * 拖动说明（HG-2）：Electron 标题栏使用 CSS 原生拖动，
  * 标题栏与抽屉头部改用 CSS `-webkit-app-region: drag` 让平台原生处理拖动与
  * 双击最大化；`startDragging` / `startResizeDragging` 是壳额外提供的兼容通道，
  * 渲染进程正常路径不依赖它们。8 向缩放手柄降级为 `resizeBegin` + 主进程
@@ -76,6 +76,20 @@ export type DesktopWindowBridge = {
   startResizeDragging?: (direction: ResizeDirection) => Promise<void>;
 };
 
+export type DesktopDialogOptions = {
+  title?: string;
+  defaultPath?: string;
+  filters?: { name: string; extensions: string[] }[];
+  multiple?: boolean;
+  directory?: boolean;
+};
+
+/** Fixed subscriptions only: never expose raw IPC or renderer-selected channels. */
+export type DesktopEventsBridge = {
+  onAgentSourceChanged: (listener: (payload: unknown) => void) => () => void;
+  onStorageUsageProgress: (listener: (payload: unknown) => void) => () => void;
+};
+
 /** preload 注入的 `window.flowletDesktop` 形状。 */
 export type FlowletDesktopBridge = {
   /**
@@ -93,6 +107,13 @@ export type FlowletDesktopBridge = {
   /** 打开「运行模式 / 连接主机」设置窗口。 */
   openModeSettings?: () => Promise<void>;
   window?: DesktopWindowBridge;
+  /** Local Host only; absent in client mode. */
+  dialog?: {
+    open: (options: DesktopDialogOptions) => Promise<string | string[] | null>;
+    save: (options: DesktopDialogOptions) => Promise<string | null>;
+  };
+  /** Local Host events; absent in client mode. */
+  events?: DesktopEventsBridge;
   /** channel: `platform:open-external`；主进程用 `shell.openExternal` 打开并做协议校验。 */
   platform?: {
     openExternal?: (url: string) => Promise<void>;
@@ -103,7 +124,7 @@ export type FlowletDesktopBridge = {
 
 declare global {
   interface Window {
-    /** 仅在 Electron desktop 壳中由 preload 注入；Tauri / Web / mobile 下不存在。 */
+    /** 仅在 Electron desktop 壳中由 preload 注入；Web 下不存在。 */
     flowletDesktop?: FlowletDesktopBridge;
   }
 }

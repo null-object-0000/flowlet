@@ -1,9 +1,8 @@
 import { IconCopy, IconMore, IconPlus, IconRefresh } from "@douyinfe/semi-icons";
 import { Button, Checkbox, Dropdown, Input, Modal, SideSheet, Switch, Tabs, Tag, TextArea, Toast } from "@douyinfe/semi-ui-19";
 import { useQueryClient } from "@tanstack/react-query";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { open, save } from "../../../platform/host/dialog";
 import { useEffect, useMemo, useState } from "react";
-import { QRCodeSVG } from "qrcode.react";
 import { useAppPreferences } from "../../../app/preferences/AppPreferences";
 import {
   parseSyncPackage,
@@ -34,7 +33,7 @@ import { DETAIL_SHEET_WIDTH } from "../../../shared/ui/drawerWidth";
 import styles from "./SyncTab.module.css";
 
 type S3Draft = Omit<S3SyncConfigInput, "secretAccessKey"> & { secretAccessKey: string };
-type ConnectionTab = "qr" | "text" | "import";
+type ConnectionTab = "text" | "import";
 
 const EMPTY_S3_DRAFT: S3Draft = {
   endpoint: "",
@@ -60,10 +59,9 @@ export function SyncTab() {
   const [preview, setPreview] = useState<DeviceUsageImportPreview | null>(null);
   const [renameValue, setRenameValue] = useState<string | null>(null);
   const [s3Draft, setS3Draft] = useState<S3Draft | null>(null);
-  const [sharePackage, setSharePackage] = useState<{ text: string; qr: string } | null>(null);
+  const [sharePackage, setSharePackage] = useState<{ text: string } | null>(null);
   const [connectionText, setConnectionText] = useState<string | null>(null);
   const [connectionTab, setConnectionTab] = useState<ConnectionTab | null>(null);
-  const [expiresIn, setExpiresIn] = useState(60);
   const [workspaceConsentVisible, setWorkspaceConsentVisible] = useState(false);
   const [includeWorkspace, setIncludeWorkspace] = useState(false);
 
@@ -76,28 +74,23 @@ export function SyncTab() {
     }
   }, [connectionText]);
 
+  // 连接文本仍含长期凭据，保留原有的 60 秒自动清屏保护；这不撤销已复制的凭据。
   useEffect(() => {
-    if (!sharePackage) return undefined;
-    setExpiresIn(60);
-    const timer = window.setInterval(() => {
-      setExpiresIn((current) => {
-        if (current > 1) return current - 1;
-        window.clearInterval(timer);
-        setSharePackage(null);
-        setConnectionTab(null);
-        return 0;
-      });
-    }, 1_000);
-    return () => window.clearInterval(timer);
+    if (!sharePackage) return;
+    const timer = window.setTimeout(() => {
+      setSharePackage(null);
+      setConnectionTab(null);
+    }, 60_000);
+    return () => window.clearTimeout(timer);
   }, [sharePackage]);
 
   const exportUsage = async () => {
-    const path = await save({
-      defaultPath: `flowlet-usage-${new Date().toISOString().slice(0, 10)}.flowlet.json`,
-        filters: [{ name: t("Flowlet 设备用量"), extensions: ["json"] }],
-    });
-    if (!path) return;
     try {
+      const path = await save({
+        defaultPath: `flowlet-usage-${new Date().toISOString().slice(0, 10)}.flowlet.json`,
+        filters: [{ name: t("Flowlet 设备用量"), extensions: ["json"] }],
+      });
+      if (!path) return;
       await transfer.exportBundle.mutateAsync(path);
       Toast.success(t("设备用量已导出"));
     } catch (error) {
@@ -106,13 +99,13 @@ export function SyncTab() {
   };
 
   const chooseUsageImport = async () => {
-    const path = await open({
-      multiple: false,
-      directory: false,
-        filters: [{ name: t("Flowlet 设备用量"), extensions: ["json"] }],
-    });
-    if (typeof path !== "string") return;
     try {
+      const path = await open({
+        multiple: false,
+        directory: false,
+        filters: [{ name: t("Flowlet 设备用量"), extensions: ["json"] }],
+      });
+      if (typeof path !== "string") return;
       const result = await transfer.previewImport.mutateAsync(path);
       setImportPath(path);
       setPreview(result);
@@ -231,20 +224,18 @@ export function SyncTab() {
     },
   });
 
-  const generateShare = async (tab: Extract<ConnectionTab, "qr" | "text">, withWorkspace: boolean) => {
-    setConnectionTab(tab);
+  const generateShare = async (withWorkspace: boolean) => {
+    setConnectionTab("text");
     try {
       if (withWorkspace) {
         const accountPackage = await accountWorkspace.exportDesktopPackage.mutateAsync();
         setSharePackage({
           text: serializeDesktopWorkspacePackage(accountPackage),
-          qr: serializeDesktopWorkspacePackage(accountPackage, true),
         });
       } else {
         const config = await transfer.exportS3ConnectionConfig.mutateAsync();
         setSharePackage({
           text: serializeS3ConnectionPackage(config),
-          qr: serializeS3ConnectionPackage(config, true),
         });
       }
     } catch (error) {
@@ -253,15 +244,15 @@ export function SyncTab() {
     }
   };
 
-  const openShare = (tab: Extract<ConnectionTab, "qr" | "text"> = "qr") => {
-    void generateShare(tab, tab === "text" && includeWorkspace);
+  const openShare = () => {
+    void generateShare(includeWorkspace);
   };
 
   const toggleIncludeWorkspace = (checked: boolean) => {
     setIncludeWorkspace(checked);
     if (connectionTab === "text") {
       setSharePackage(null);
-      void generateShare("text", checked);
+      void generateShare(checked);
     }
   };
 
@@ -332,7 +323,7 @@ export function SyncTab() {
 
   return (
     <div className={styles.root}>
-      <section className={styles.card} data-keywords="S3 R2 MinIO 对象存储 同步 连接 二维码">
+      <section className={styles.card} data-keywords="S3 R2 MinIO 对象存储 同步 连接">
         <header className={styles.sectionHeader}>
           <div>
             <div className={styles.deviceTitle}>
@@ -518,7 +509,7 @@ export function SyncTab() {
               theme="solid"
               disabled={!settings.data?.config}
               loading={transfer.exportS3ConnectionConfig.isPending}
-              onClick={() => void openShare("qr")}
+              onClick={() => void openShare()}
             >
               {t("连接新设备")}
             </Button>
@@ -584,7 +575,7 @@ export function SyncTab() {
         title={(
           <div className={styles.connectionTitle}>
             <strong>{t("连接新设备")}</strong>
-            <span>{t("选择一种方式，将手机或另一台桌面设备连接到当前同步空间")}</span>
+            <span>{t("通过连接文本，将另一台桌面设备连接到当前同步空间")}</span>
           </div>
         )}
         visible={connectionTab != null}
@@ -598,7 +589,7 @@ export function SyncTab() {
         <Tabs
           className={styles.connectionTabs}
           type="line"
-          activeKey={connectionTab ?? "qr"}
+          activeKey={connectionTab ?? "text"}
           tabPaneMotion={false}
           onChange={(key) => {
             const next = key as ConnectionTab;
@@ -606,37 +597,10 @@ export function SyncTab() {
               setConnectionText((current) => current ?? "");
               setConnectionTab(next);
             } else {
-              // 二维码固定使用普通连接包（面向移动端，不含工作区密钥）；
-              // 连接文本按是否勾选工作区重新生成，切换页签时始终与当前选项一致。
-              void generateShare(next, next === "text" && includeWorkspace);
+              void generateShare(includeWorkspace);
             }
           }}
         >
-          <Tabs.TabPane tab={t("扫码连接")} itemKey="qr">
-            <div className={styles.qrLayout}>
-              <div className={styles.qrPanel}>
-                {sharePackage ? <QRCodeSVG value={sharePackage.qr} size={214} level="M" marginSize={1} /> : null}
-                <span>{t("使用 Flowlet 移动端扫描")}</span>
-              </div>
-              <div className={styles.connectGuide}>
-                <h3>{t("在另一台设备上完成连接")}</h3>
-                <ol>
-                  <li><span>1</span><p>{t("打开 Flowlet 移动端，进入「设置 → 同步管理」。")}</p></li>
-                  <li><span>2</span><p>{t("点击「扫码连接」，扫描左侧二维码。")}</p></li>
-                  <li><span>3</span><p>{t("确认设备名称后，即可开始同步每日用量。")}</p></li>
-                </ol>
-                {workspaceEnabled ? (
-                  <p className={styles.qrWorkspaceHint}>
-                    {t("二维码面向移动端，不包含账号工作区密钥；桌面设备请使用「连接文本」并勾选工作区")}
-                  </p>
-                ) : null}
-                <div className={styles.expireBox}>
-                  <span>{t("连接信息将在 {seconds} 秒后失效", { seconds: expiresIn })}</span>
-                  <Button icon={<IconRefresh />} theme="outline" loading={transfer.exportS3ConnectionConfig.isPending} onClick={() => void openShare("qr")}>{t("刷新二维码")}</Button>
-                </div>
-              </div>
-            </div>
-          </Tabs.TabPane>
           <Tabs.TabPane tab={t("连接文本")} itemKey="text">
             <div className={styles.connectionPanel}>
               {workspaceEnabled ? (
@@ -653,7 +617,7 @@ export function SyncTab() {
               <p className={styles.secretNotice}>{t("连接文本包含访问凭证，仅用于你信任的设备。界面默认隐藏 Secret，复制时会复制完整内容。")}</p>
               <pre className={styles.connectionCode}>{sharePackage ? maskConnectionPackage(sharePackage.text) : ""}</pre>
               <div className={styles.connectionFoot}>
-                <span>{t("该连接文本将在本弹窗关闭后失效")}</span>
+                <span>{t("连接文本包含长期访问凭证，请勿泄露；关闭弹窗会清除本地展示")}</span>
                 <Button icon={<IconCopy />} type="primary" theme="solid" onClick={() => void copyConnectionText()}>{t("复制连接文本")}</Button>
               </div>
             </div>
@@ -712,7 +676,7 @@ export function SyncTab() {
         cancelText={t("取消")}
       >
         <div className={styles.workspaceConsent}>
-          <p>{t("现有渠道账号将使用独立密钥加密后写入已配置的 S3。加入工作区的桌面设备可读取账号凭据，但移动端连接包不会包含此密钥。")}</p>
+          <p>{t("现有渠道账号将使用独立密钥加密后写入已配置的 S3。仅向可信的桌面设备分享包含工作区密钥的连接文本。")}</p>
           <p>{t("启用后，账号名称、API Key 和工作区默认地址由 S3 统一管理；路由、启停、优先级、模型选择和本机地址仍只保存在当前设备。")}</p>
         </div>
       </Modal>

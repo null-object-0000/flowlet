@@ -21,27 +21,17 @@ jobs:
         include:
           - name: Windows x64
             platform: windows-latest
-            target: x86_64-pc-windows-msvc
-            args: --bundles nsis,msi
             artifact: windows-x64
           - name: Linux x64
             platform: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            args: --bundles appimage,deb
             artifact: linux-x64
           - name: macOS Apple Silicon
             platform: macos-latest
-            target: aarch64-apple-darwin
-            args: --target aarch64-apple-darwin --bundles dmg
-            artifact: macos-aarch64
+            artifact: macos-arm64
           - name: macOS Intel
-            platform: macos-latest
-            target: x86_64-apple-darwin
-            args: --target x86_64-apple-darwin --bundles dmg
+            platform: macos-15-intel
             artifact: macos-x64
-
     runs-on: ${{ matrix.platform }}
-
     steps:
       - name: Check out release source
         uses: actions/checkout@v7
@@ -49,35 +39,37 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 26
           cache: npm
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      # ACP stdio execution uses the official Go A2A bridge on every platform.
+      - name: Set up Go for the ACP bridge
+        uses: actions/setup-go@v6
         with:
-          targets: ${{ matrix.target }}
+          go-version: '1.27.x'
+          cache-dependency-path: packages/flowlet-agent-bridge/go.sum
 
-      - name: Install Linux system dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-
-      - name: Set up Python for the Windows portable bundle
-        if: runner.os == 'Windows'
+      - name: Set up Python for portable ZIPs
+        if: runner.os != 'macOS'
         uses: actions/setup-python@v7
         with:
           python-version: '3.x'
 
-      - name: Install frontend dependencies
+      - name: Install dependencies
         run: npm ci
+
+      - name: Check command registration and types
+        run: |
+          npm run node:commands
+          npm run check
+          npm run node:typecheck
+          npm run desktop:typecheck
 
       - name: Fetch bundled model catalogs
         shell: bash
         run: |
           for attempt in 1 2 3; do
-            npm run fetch:catalogs
-            if [ -s src-tauri/models-cn.json ] && [ -s src-tauri/models-dev.json ]; then
+            if npm run fetch:catalogs && [ -s resources/catalogs/models-cn.json ] && [ -s resources/catalogs/models-dev.json ]; then
               exit 0
             fi
             echo "Model catalogs are incomplete after attempt ${attempt}; retrying..." >&2
@@ -86,206 +78,65 @@ jobs:
           echo "Failed to fetch the bundled model catalogs" >&2
           exit 1
 
-      - name: Build installers
-        uses: tauri-apps/tauri-action@v1
+      - name: Build Electron installers
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Apple Silicon requires a structurally valid signature. Until Flowlet
-          # has a Developer ID certificate, use Tauri's documented ad-hoc
-          # identity so the app is signed without claiming Apple notarization.
-          APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && '-' || '' }}
-        with:
-          # macOS assets are uploaded by the gated step below only after the
-          # generated app bundle passes codesign verification.
-          releaseId: ${{ github.event_name == 'release' && runner.os != 'macOS' && github.event.release.id || '' }}
-          tagName: ${{ github.event_name == 'release' && runner.os != 'macOS' && github.event.release.tag_name || '' }}
-          args: ${{ matrix.args }}
-          releaseAssetNamePattern: Flowlet_[version]_[platform]_[arch][setup][ext]
-          uploadWorkflowArtifacts: true
-          workflowArtifactNamePattern: flowlet-${{ matrix.artifact }}-[bundle]
-          uploadUpdaterJson: false
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run desktop:dist
 
       - name: Verify macOS ad-hoc signature
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          dmg_path="$(find src-tauri/target -type f -path '*/release/bundle/dmg/*.dmg' -print -quit)"
-          if [ -z "$dmg_path" ]; then
-            echo "The macOS bundle build did not produce a DMG" >&2
+          shopt -s nullglob
+          dmgs=(packages/flowlet-desktop/release/*.dmg)
+          if [ "${#dmgs[@]}" -ne 1 ]; then
+            echo "Expected exactly one macOS DMG" >&2
             exit 1
           fi
-
           mount_point="$(mktemp -d)"
           cleanup() {
             hdiutil detach "$mount_point" -quiet || true
             rmdir "$mount_point" || true
           }
           trap cleanup EXIT
-
-          hdiutil attach "$dmg_path" -nobrowse -readonly -mountpoint "$mount_point" -quiet
+          hdiutil attach "${dmgs[0]}" -nobrowse -readonly -mountpoint "$mount_point" -quiet
           app_path="$mount_point/Flowlet.app"
-          if [ ! -d "$app_path" ]; then
-            echo "Flowlet.app was not found inside the generated DMG" >&2
-            exit 1
-          fi
-
           codesign --verify --deep --strict --verbose=2 "$app_path"
           signature_info="$(codesign --display --verbose=4 "$app_path" 2>&1)"
           printf '%s\n' "$signature_info"
-          if ! grep -q '^Signature=adhoc$' <<<"$signature_info"; then
+          if [[ "$signature_info" != *"Signature=adhoc"* ]]; then
             echo "Expected an ad-hoc macOS signature" >&2
             exit 1
           fi
 
-      - name: Upload verified macOS DMG to the GitHub Release
-        if: runner.os == 'macOS' && github.event_name == 'release'
+      - name: Build Electron portable ZIP
+        if: runner.os != 'macOS'
+        run: node scripts/build-desktop-portable.mjs --no-build
+
+      - name: Upload installers and portable ZIPs
+        uses: actions/upload-artifact@v7
+        with:
+          name: flowlet-${{ matrix.artifact }}
+          path: |
+            packages/flowlet-desktop/release/*.exe
+            packages/flowlet-desktop/release/*.zip
+            packages/flowlet-desktop/release/*.AppImage
+            packages/flowlet-desktop/release/*.deb
+            packages/flowlet-desktop/release/*.dmg
+            packages/flowlet-desktop/release/portable/*.zip
+          if-no-files-found: error
+
+      - name: Upload verified assets to the GitHub Release
+        if: github.event_name == 'release'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          dmg_path="$(find src-tauri/target -type f -path '*/release/bundle/dmg/*.dmg' -print -quit)"
-          if [ -z "$dmg_path" ]; then
-            echo "The verified macOS build did not produce a DMG" >&2
+          shopt -s nullglob
+          assets=(packages/flowlet-desktop/release/*.exe packages/flowlet-desktop/release/*.zip packages/flowlet-desktop/release/*.AppImage packages/flowlet-desktop/release/*.deb packages/flowlet-desktop/release/*.dmg packages/flowlet-desktop/release/portable/*.zip)
+          if [ "${#assets[@]}" -eq 0 ]; then
+            echo "No release assets were produced" >&2
             exit 1
           fi
-
-          case "${{ matrix.target }}" in
-            aarch64-apple-darwin) release_arch="aarch64" ;;
-            x86_64-apple-darwin) release_arch="x64" ;;
-            *) echo "Unsupported macOS release target: ${{ matrix.target }}" >&2; exit 1 ;;
-          esac
-
-          version="$(node -p "require('./package.json').version")"
-          release_asset="$RUNNER_TEMP/Flowlet_${version}_darwin_${release_arch}.dmg"
-          cp "$dmg_path" "$release_asset"
-          gh release upload "${{ github.event.release.tag_name }}" "$release_asset" --clobber
-
-      - name: Build Windows portable ZIP
-        if: runner.os == 'Windows'
-        run: node scripts/build-portable.mjs
-
-      - name: Upload Windows portable workflow artifact
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v7
-        with:
-          name: flowlet-windows-x64-portable
-          path: src-tauri/target/release/bundle/portable/*.zip
-          if-no-files-found: error
-
-      - name: Upload Windows portable ZIP to the GitHub Release
-        if: runner.os == 'Windows' && github.event_name == 'release'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ github.event.release.tag_name }}" src-tauri/target/release/bundle/portable/*.zip --clobber
-
-  android:
-    name: Android arm64
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Check out release source
-        uses: actions/checkout@v7
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Set up Java
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: '21'
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v4
-
-      - name: Install Android SDK packages
-        shell: bash
-        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;30.0.15729638"
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android
-
-      - name: Install frontend dependencies
-        run: npm ci
-
-      - name: Fetch bundled model catalogs
-        shell: bash
-        run: |
-          for attempt in 1 2 3; do
-            npm run fetch:catalogs
-            if [ -s src-tauri/models-cn.json ] && [ -s src-tauri/models-dev.json ]; then
-              exit 0
-            fi
-            echo "Model catalogs are incomplete after attempt ${attempt}; retrying..." >&2
-            sleep $((attempt * 5))
-          done
-          echo "Failed to fetch the bundled model catalogs" >&2
-          exit 1
-
-      - name: Configure Android release signing
-        shell: bash
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
-            if [ -z "${!name}" ]; then
-              echo "Required GitHub Actions secret is missing: ${name}" >&2
-              exit 1
-            fi
-          done
-
-          keystore_path="$GITHUB_WORKSPACE/src-tauri/gen/android/flowlet-release.jks"
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore_path"
-          cat > src-tauri/gen/android/keystore.properties <<EOF
-          storePassword=$ANDROID_KEYSTORE_PASSWORD
-          keyPassword=$ANDROID_KEY_PASSWORD
-          keyAlias=$ANDROID_KEY_ALIAS
-          storeFile=$keystore_path
-          EOF
-
-      - name: Build signed Android APK
-        run: npm run tauri:android:build
-
-      - name: Verify and stage Android APK
-        shell: bash
-        run: |
-          source_apk="src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk"
-          version="$(node -p "require('./package.json').version")"
-          output_dir="src-tauri/target/release/bundle/android"
-          output_apk="$output_dir/Flowlet_${version}_arm64.apk"
-
-          test -f "$source_apk"
-          mkdir -p "$output_dir"
-          cp "$source_apk" "$output_apk"
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$output_apk"
-
-      - name: Upload Android APK workflow artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: flowlet-android-arm64-apk
-          path: src-tauri/target/release/bundle/android/*.apk
-          if-no-files-found: error
-
-      - name: Upload Android APK to the GitHub Release
-        if: github.event_name == 'release'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ github.event.release.tag_name }}" src-tauri/target/release/bundle/android/*.apk --clobber
-
-      - name: Upload Android APK to Pgyer
-        if: github.event_name == 'release'
-        shell: bash
-        env:
-          PGYER_API_KEY: ${{ secrets.PGYER_API_KEY }}
-          RELEASE_NOTES: ${{ github.event.release.body }}
-        run: bash scripts/upload-pgyer.sh src-tauri/target/release/bundle/android/*.apk
+          gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber

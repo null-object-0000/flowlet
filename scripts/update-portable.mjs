@@ -1,17 +1,13 @@
 // 便携版一键更新：构建 -> 停止当前实例 -> 覆盖程序文件 -> 重新启动。
 //
-// 同时支持两种程序布局：
-//   - tauri    ：Rust/Tauri 版（可执行文件 flowlet(.exe) + flowlet_lib.*，产物来自 src-tauri/target/release）
-//   - electron ：新桌面端（可执行文件 Flowlet(.exe) + resources/app.asar，产物来自 packages/flowlet-desktop/release）
+// Electron 程序布局：可执行文件 Flowlet(.exe) + resources/app.asar，
+// 产物来自 packages/flowlet-desktop/release。
 //
 // 用法：
 //   npm run desktop:update:portable                   # 更新 Electron 便携版（自动识别目录）
-//   npm run tauri:update:portable                     # 更新 Tauri 便携版（旧）
-//   node scripts/update-portable.mjs --layout auto    # 两种都能认
 //   node scripts/update-portable.mjs --target <目录>  # 显式指定
 //
 // 选项：
-//   --layout <auto|tauri|electron>  程序布局，默认 auto（按目标目录/运行进程判断）
 //   --target <目录>                 显式指定需要更新的便携版目录
 //   --replace-config                用仓库 config.json 覆盖目标配置
 //   --no-restart                    更新完成后不重新启动
@@ -20,8 +16,6 @@
 //   --help                          显示帮助
 
 import {
-  chmodSync,
-  copyFileSync,
   cpSync,
   existsSync,
   mkdirSync,
@@ -39,48 +33,18 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolve(SCRIPT_DIR, "..");
 const PACKAGE_JSON = JSON.parse(readFileSync(join(PROJECT_ROOT, "package.json"), "utf8"));
 const VERSION = PACKAGE_JSON.version;
-const ARCH = process.env.TAURI_ENV_ARCH
-  ?? process.arch.replace("x86_", "x").replace("x86", "x64");
+const ARCH = process.arch;
 const PLATFORM = process.platform;
 
-/** 两套布局的差异集中在这里：可执行文件名、产物目录、构建脚本、覆盖策略。 */
-const LAYOUTS = {
-  tauri: {
-    key: "tauri",
-    executable: PLATFORM === "win32" ? "flowlet.exe" : "flowlet",
-    directoryName: PLATFORM === "win32"
-      ? `Flowlet_${VERSION}_${ARCH}_portable`
-      : `Flowlet_${VERSION}_linux_${ARCH}_portable`,
-    buildScript: "tauri:build:portable",
-    buildRoot: join(PROJECT_ROOT, "src-tauri", "target", "release", "bundle", "portable"),
-    // Tauri 便携版是「程序 + 库 + 模型目录」的扁平文件集合。
-    payloadFiles: PLATFORM === "win32"
-      ? ["flowlet.exe", "flowlet_lib.dll", "models-cn.json", "models-dev.json", "portable.tag"]
-      : [
-          "flowlet",
-          "libflowlet_lib.so",
-          "models-cn.json",
-          "models-dev.json",
-          "portable.tag",
-          "flowlet.png",
-          "install-desktop-entry.sh",
-        ],
-    marker: (dir) => existsSync(join(dir, "flowlet_lib.dll"))
-      || existsSync(join(dir, "libflowlet_lib.so"))
-      || existsSync(join(dir, "flowlet.exe")),
-  },
-  electron: {
-    key: "electron",
-    executable: PLATFORM === "win32" ? "Flowlet.exe" : "flowlet",
-    directoryName: PLATFORM === "win32"
-      ? `Flowlet_${VERSION}_win32_${ARCH}_portable`
-      : `Flowlet_${VERSION}_linux_${ARCH}_portable`,
-    buildScript: "desktop:portable",
-    buildRoot: join(PROJECT_ROOT, "packages", "flowlet-desktop", "release", "portable"),
-    // Electron 便携版是整棵应用目录（exe + resources/ + locales/ …），按目录覆盖。
-    payloadFiles: null,
-    marker: (dir) => existsSync(join(dir, "resources", "app.asar")),
-  },
+/** Electron 便携版按整棵应用目录覆盖，始终保留运行数据。 */
+const ELECTRON = {
+  key: "electron",
+  executable: PLATFORM === "win32" ? "Flowlet.exe" : "flowlet",
+  directoryName: PLATFORM === "win32"
+    ? `Flowlet_${VERSION}_win32_${ARCH}_portable`
+    : `Flowlet_${VERSION}_linux_${ARCH}_portable`,
+  buildScript: "desktop:portable",
+  buildRoot: join(PROJECT_ROOT, "packages", "flowlet-desktop", "release", "portable"),
 };
 
 /** Electron 覆盖时不能碰的东西：数据、配置、便携标记。 */
@@ -100,11 +64,9 @@ function printHelp() {
 
 用法：
   npm run desktop:update:portable            # Electron 桌面端
-  npm run tauri:update:portable              # Tauri 版本（旧）
   node scripts/update-portable.mjs --target <便携版目录>
 
 选项：
-  --layout <auto|tauri|electron>  程序布局（默认 auto）
   --target <目录>                 显式指定需要更新的便携版目录
   --replace-config                同时用仓库 config.json 覆盖目标配置
   --no-restart                    更新完成后不重新启动 Flowlet
@@ -116,7 +78,6 @@ function printHelp() {
 function parseArgs(argv) {
   const options = {
     target: null,
-    layout: "auto",
     replaceConfig: false,
     restart: true,
     skipBuild: false,
@@ -130,13 +91,6 @@ function parseArgs(argv) {
       const value = argv[index + 1];
       if (!value || value.startsWith("--")) throw new Error("--target 后必须提供目录");
       options.target = resolve(value);
-      index += 1;
-    } else if (arg === "--layout") {
-      const value = argv[index + 1];
-      if (value !== "auto" && value !== "tauri" && value !== "electron") {
-        throw new Error("--layout 只能是 auto / tauri / electron");
-      }
-      options.layout = value;
       index += 1;
     } else if (arg === "--replace-config") {
       options.replaceConfig = true;
@@ -168,9 +122,9 @@ function runPowerShell(command) {
   return result.stdout.trim();
 }
 
-/** 列出正在运行的 Flowlet（两种布局一起扫，名字可能重复 → 用可执行文件路径区分）。 */
+/** 列出正在运行的 Electron Flowlet，用可执行文件路径区分实例。 */
 function listFlowletProcesses() {
-  const names = new Set([LAYOUTS.tauri.executable, LAYOUTS.electron.executable]);
+  const names = new Set([ELECTRON.executable]);
 
   if (PLATFORM === "linux") {
     return readdirSync("/proc", { withFileTypes: true })
@@ -205,14 +159,6 @@ function samePath(left, right) {
     return resolve(left).toLocaleLowerCase("en-US") === resolve(right).toLocaleLowerCase("en-US");
   }
   return resolve(left) === resolve(right);
-}
-
-/** 按目录内容判断这是哪套布局。 */
-function detectLayoutByDir(dir) {
-  for (const layout of Object.values(LAYOUTS)) {
-    if (layout.marker(dir)) return layout;
-  }
-  return null;
 }
 
 /** 目标目录：显式 → 运行中的便携版（含 portable.tag）→ Linux 桌面启动器。 */
@@ -266,25 +212,6 @@ function resolveLinuxDesktopTarget() {
   return targetDir;
 }
 
-/** 选定布局：显式指定 > 目标目录特征 > 报错让人指定。 */
-function resolveLayout(options, processes) {
-  if (options.layout !== "auto") return LAYOUTS[options.layout];
-
-  if (options.target) {
-    const detected = detectLayoutByDir(options.target);
-    if (detected) return detected;
-  }
-
-  const targetDir = resolveTargetDirectory(options.target, processes);
-  const detected = detectLayoutByDir(targetDir);
-  if (detected) return detected;
-
-  throw new Error(
-    "无法判断目标目录是 Tauri 还是 Electron 便携版；请用 --layout 指定，"
-      + "或确认目录里有 flowlet_lib.* / flowlet.exe / resources/app.asar。",
-  );
-}
-
 function validateTarget(targetDir, layout) {
   if (!existsSync(targetDir)) throw new Error(`目标目录不存在：${targetDir}`);
   const targetExe = join(targetDir, layout.executable);
@@ -293,6 +220,9 @@ function validateTarget(targetDir, layout) {
   }
   if (!existsSync(join(targetDir, "portable.tag"))) {
     throw new Error(`目标目录中没有 portable.tag，不会覆盖非便携版安装：${targetDir}`);
+  }
+  if (!existsSync(join(targetDir, "resources", "app.asar"))) {
+    throw new Error(`目标目录不是 Electron 应用（缺少 resources/app.asar）：${targetDir}`);
   }
   return targetExe;
 }
@@ -326,17 +256,11 @@ function validateBuildPayload(layout, replaceConfig) {
   if (!existsSync(join(buildDir, layout.executable))) {
     throw new Error(`便携版产物缺少可执行文件：${join(buildDir, layout.executable)}`);
   }
-  if (layout.payloadFiles === null) return;
-
-  const required = replaceConfig
-    ? [...layout.payloadFiles, "config.json"]
-    : layout.payloadFiles;
-  const missing = required.filter((fileName) => (
-    !fileName.endsWith(".so") && !fileName.endsWith(".dll")
-    && !existsSync(join(buildDir, fileName))
-  ));
-  if (missing.length > 0) {
-    throw new Error(`便携版产物不完整，缺少：${missing.join(", ")}`);
+  if (!existsSync(join(buildDir, "resources", "app.asar"))) {
+    throw new Error(`便携版产物不完整，缺少 resources/app.asar：${buildDir}`);
+  }
+  if (replaceConfig && !existsSync(join(buildDir, "config.json"))) {
+    throw new Error(`便携版产物缺少 config.json：${buildDir}`);
   }
 }
 
@@ -400,54 +324,21 @@ function copyPayload(layout, targetDir, replaceConfig) {
   mkdirSync(targetDir, { recursive: true });
   const buildDir = buildDirOf(layout);
 
-  if (layout.payloadFiles === null) {
-    // Electron：整棵应用目录覆盖，但保留配置、数据库与 data/。
-    for (const entry of readdirSync(buildDir)) {
-      if (!replaceConfig && ELECTRON_PRESERVE.has(entry)) {
-        console.log(`  跳过 ${entry}（保留目标现有文件）`);
-        continue;
-      }
-      const source = join(buildDir, entry);
-      const target = join(targetDir, entry);
-      rmSync(target, { recursive: true, force: true });
-      cpSync(source, target, { recursive: true });
-      console.log(`  已更新 ${entry}`);
+  for (const entry of readdirSync(buildDir)) {
+    if (ELECTRON_PRESERVE.has(entry) && !(replaceConfig && entry === "config.json")) {
+      console.log(`  跳过 ${entry}（保留目标现有文件）`);
+      continue;
     }
-    console.log("  已保留数据库、data/ 与现有 config.json");
-    return;
-  }
-
-  const files = replaceConfig ? [...layout.payloadFiles, "config.json"] : layout.payloadFiles;
-  for (const fileName of files) {
-    const source = join(buildDir, fileName);
-    if (!existsSync(source)) {
-      if (fileName.endsWith(".so") || fileName.endsWith(".dll")) continue;
-      throw new Error(`便携版产物缺少文件：${source}`);
+    const source = join(buildDir, entry);
+    const target = resolve(targetDir, entry);
+    if (dirname(target) !== resolve(targetDir) || samePath(buildDir, targetDir)) {
+      throw new Error(`拒绝覆盖不安全的目标路径：${target}`);
     }
-    copyFileSync(source, join(targetDir, fileName));
-    if (PLATFORM === "linux" && (
-      fileName === layout.executable || fileName === "install-desktop-entry.sh"
-    )) {
-      chmodSync(join(targetDir, fileName), 0o755);
-    }
-    console.log(`  已更新 ${fileName}`);
+    rmSync(target, { recursive: true, force: true });
+    cpSync(source, target, { recursive: true });
+    console.log(`  已更新 ${entry}`);
   }
-
-  if (!replaceConfig && existsSync(join(targetDir, "config.json"))) {
-    console.log("  已保留现有 config.json（传 --replace-config 可覆盖）");
-  }
-  console.log("  已保留数据库及目标目录中的其他运行数据");
-
-  const installer = join(targetDir, "install-desktop-entry.sh");
-  if (PLATFORM === "linux" && existsSync(installer)) {
-    const result = spawnSync(installer, [], { cwd: targetDir, encoding: "utf8" });
-    if (result.status === 0) {
-      console.log("  已刷新当前用户的 Flowlet 桌面启动器和图标");
-    } else {
-      const detail = result.stderr?.trim();
-      console.warn(`  警告：桌面启动器刷新失败${detail ? `：${detail}` : ""}`);
-    }
-  }
+  console.log(`  已保留数据库、data/ 与${replaceConfig ? "已更新" : "现有"} config.json`);
 }
 
 function restartFlowlet(targetExe, shouldRestart) {
@@ -484,11 +375,15 @@ function main() {
     return;
   }
 
-  console.log("=== Flowlet 便携版一键更新 ===");
+  if (PLATFORM !== "linux" && PLATFORM !== "win32") {
+    throw new Error("便携版一键更新目前仅支持 Linux / Windows");
+  }
+
+  console.log("=== Flowlet Electron 便携版一键更新 ===");
 
   if (options.dryRun) {
     const processes = listFlowletProcesses();
-    const layout = resolveLayout(options, processes);
+    const layout = ELECTRON;
     const targetDir = resolveTargetDirectory(options.target, processes);
     validateTarget(targetDir, layout);
     console.log(`布局：${layout.key}`);
@@ -499,7 +394,7 @@ function main() {
   }
 
   const processes = listFlowletProcesses();
-  const layout = resolveLayout(options, processes);
+  const layout = ELECTRON;
   console.log(`布局：${layout.key}`);
   console.log(`构建目录：${buildDirOf(layout)}`);
   console.log(`配置策略：${options.replaceConfig ? "覆盖 config.json" : "保留现有 config.json"}`);

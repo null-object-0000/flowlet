@@ -27,7 +27,6 @@ export default defineConfig({
     // 48 个 "failed to load" 文件级错误，掩盖真实失败。
     exclude: [
       ...configDefaults.exclude,
-      "src-tauri/target/**",
       ".worktrees/**",
       "poc/**",
       ".agents/**",

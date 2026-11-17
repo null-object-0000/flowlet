@@ -1,5 +1,11 @@
 # Flowlet Node Host（Docker 优先）实现契约
 
+> **已归档（2026-11-17）— 历史资料，不作为当前开发、构建、发布或配置指引。**
+> 当前仅维护 Electron + Node/TS 与 Web/Docker；Rust/Tauri 及其回滚、移动与旧对拍链路已移除。
+> 下文保留当时的正文、命令、路径与测量结论供追溯，不表示这些代码或操作仍可用。
+> 当前入口：[架构](../architecture.md)、[Electron 桌面](../desktop-electron.md)、
+> [Docker](../docker.md)、[发布构建](../release-builds.md)。
+
 > 目标：用 Node/TS 重写 **headless / Docker Host**，作为 Rust `headless` 二进制的**行为等价替代**。
 > 桌面端（Electron）已在 2026-11-10 起基于同一 `flowlet-core` 开工：桌面独有命令注册在
 > `packages/flowlet-core/src/desktop/`（见该目录 README），Electron 宿主在

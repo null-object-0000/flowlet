@@ -1,6 +1,6 @@
 // 构建 Electron 桌面端的便携版（未安装、绿色目录）ZIP。
 //
-// 与 Tauri 版 `scripts/build-portable.mjs` 的产物同构：
+// 便携目录布局：
 //   目录里放程序 + portable.tag + config.json，双击即可跑，数据落在程序旁边
 //   （`packages/flowlet-desktop/src/paths.ts`：exe 旁有 portable.tag → 数据目录 = exe 目录）。
 //
@@ -194,7 +194,7 @@ function detectExecutable(dir) {
   return executableLike[0]?.name ?? null;
 }
 
-/** 使用 Python 内置 zipfile 跨平台打包（与 Tauri 便携版共用同一脚本）。 */
+/** 使用 Python 内置 zipfile 跨平台打包。 */
 function zipDir() {
   step("压缩便携版…");
   if (existsSync(ZIP_PATH)) rmSync(ZIP_PATH);

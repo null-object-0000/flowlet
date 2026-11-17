@@ -15,7 +15,7 @@ import { formatFullTimestamp, formatTimestamp } from "../../shared/formatters/da
 import styles from "./AgentSessionDetailSideSheet.module.css";
 
 import { errorMessage } from "../../shared/errors/AppError";
-// 打开抽屉期间自动刷新当前 Tab 的间隔，与移动端会话详情抽屉（MobileSessionSheet）一致。
+// 打开抽屉期间自动刷新当前 Tab 的间隔。
 const SESSION_AUTO_REFRESH_MS = 5_000;
 
 export function AgentSessionDetailSideSheet({

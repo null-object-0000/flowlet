@@ -1,5 +1,11 @@
 # Flowlet 代理核心迁移勘察：行为契约、Node 等价实现设计与 Spike 定义
 
+> **已归档（2026-11-17）— 历史资料，不作为当前开发、构建、发布或配置指引。**
+> 当前仅维护 Electron + Node/TS 与 Web/Docker；Rust/Tauri 及其回滚、移动与旧对拍链路已移除。
+> 下文保留当时的正文、命令、路径与测量结论供追溯，不表示这些代码或操作仍可用。
+> 当前入口：[架构](../architecture.md)、[Electron 桌面](../desktop-electron.md)、
+> [Docker](../docker.md)、[发布构建](../release-builds.md)。
+
 > **性质**：只读勘察结论 + 重写技术设计，是 `task-5` 的唯一产物。
 > **基线**：`main` @ `26fed4c`（2026-11-09，`feat: support LongCat-2.5`）。
 > **范围**：`src-tauri/src/core/{proxy,proxy_http,proxy_routing,proxy_anthropic_compat,proxy_tests,request_capture,logging,usage,rate_limiter}.rs`，及其装配点 `services.rs`、`bin/headless.rs`、`core/web/*`、`commands/proxy.rs`、`upstream_proxy.rs`、`model_catalog.rs`、`model_input_capabilities.rs`、`agent_identity_adapter*`、`agent_session_identity.rs`、`storage_usage.rs`（捕获/日志/用量段）、`config.rs`（代理相关结构）。

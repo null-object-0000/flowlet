@@ -1,7 +1,7 @@
 # Agent 网关：A2A 入口
 
 Flowlet Node Host（Electron 本机宿主及 Web/Docker）可登记外部 A2A Agent，统一管理调用入口、
-统一 Client Token 和调用记录。入口位于左侧「工作台 → Agent 网关」，会话管理页也保留快捷入口。旧 Rust/Tauri/Android 宿主暂不提供此能力。
+统一 Client Token 和调用记录。入口位于左侧「工作台 → Agent 网关」，会话管理页也保留快捷入口。不再维护旧桌面回滚宿主。
 也可登记 ACP stdio 程序，并生成供 ACP 客户端启动的配置；原生 ACP 会话保留真实模型列表与切换，
 A2A Artifact 在 ACP 客户端显示为普通消息而非工具调用，见 [ACP 适配与生命周期](acp-bridge.md)。
 Electron 客户端模式管理的是远程 Node Host 的 Agent；调用方应连接远程 Host，不能把客户端本机网关当作 A2A 入口。
@@ -112,7 +112,7 @@ curl http://localhost:8080/a2a/research \
 ## 观测与存储
 
 SQLite 新增 `a2a_agents`、`a2a_keys`、`a2a_calls` 三张独立表及索引，在首次使用 A2A 时幂等创建。
-不改变现有模型表与请求日志表，旧 Rust 宿主会忽略新表。备份时连同 `secret.key` 一起保留。
+不改变现有模型表与请求日志表，保留增量 schema 演进。备份时连同 `secret.key` 一起保留。
 
 调用记录包含 Agent、Client Token 标识或旧密钥 ID、方法、耗时、HTTP 状态、task/context ID、上游任务状态和错误。
 HTTP 200 不代表任务完成：JSON-RPC error 与任务状态独立记录，未观察到终态或正常暂停状态的 SSE 会标记异常结束。
@@ -138,7 +138,7 @@ npm run node:typecheck
 npm run check
 npm run build:web
 npm run build:desktop
-node scripts/desktop-command-parity.mjs
+npm run node:commands
 ```
 
 真实外部 Agent 的认证及业务测试应在独立验证环境完成。不要在网关代码中加入该 Agent 的域名、
@@ -179,7 +179,7 @@ node scripts/desktop-command-parity.mjs
   只覆盖 `a2a/gateway.ts`、`a2a/network.ts`、`a2a/protocol.ts`，三个文件镜像 SHA-256 校验通过。
 - 本地及 canary 镜像内各通过 23 项协议测试，覆盖全部标准操作转发、可选能力拒绝、
   扩展 Card 改写、标准错误保留、版本/扩展协商、文件/结构化内容透传、正常暂停与断流观测。
-  前后端类型检查、A2A 前端 2 项测试、Web 构建通过；未修改 Rust、前端、数据库结构或配置字段。
+  前后端类型检查、A2A 前端 2 项测试、Web 构建通过；未改变数据库结构或配置字段。
 - 发布前在线备份 `/data/backups/a2a-standard-20261112-016ba24/`，以独立数据卷还原并验证 canary；
   14 个渠道账号、11 条服务凭据保留。生产 `/health` healthy、OIDC-only、模型列表及流式回归 3/3。
 - 主实例切换最长健康探测间隔 3.16 秒；`flowlet-egress` 和 `aiops-a2a` 容器及启动时间未变。

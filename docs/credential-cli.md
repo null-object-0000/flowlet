@@ -13,7 +13,7 @@ v5 新增 Jenkins provider（用户名 + API Token 的 Basic 认证），服务�
 `flowlet jenkins` 子命令、`pull` 为 Jenkins 生成 `{PREFIX}_URL` / `{PREFIX}_USER` / `{PREFIX}_TOKEN`。
 v4 新增 `flowlet login` 浏览器授权（loopback + PKCE）：OIDC-only 实例不再需要管理凭据；
 v3 起用户侧命令统一为 `flowlet`，并支持同 provider 多实例环境前缀与 `--profile`、Web Host 下载安装引导。
-Node 版 CLI 为默认实现；Rust 版二进制名仍为 `flowlet-cred`，标为 legacy，仅用于对拍）
+CLI 仅维护 Node/TS 实现；旧二进制与跨语言对拍链路已移除。
 日期：2026-11-10（v1：Node 移植完成；v2：新增 Dockhand provider；v3：CLI 更名 `flowlet` +
 多实例 env 前缀 + 本机接入下载；v4：`flowlet login` 浏览器授权 + 本机 `auth.json`；
 v5：Jenkins provider + 服务凭据用户名字段；v6：Beszel provider；v7：OCI 镜像仓库 provider；
@@ -32,7 +32,7 @@ Flowlet 的凭据分两种，**不要混为一谈**：
 临时环境变量里；现在集中到一份 dotenv，由 CLI 统一写入，Agent 按需读取或用 CLI 注入。
 
 > **命令名**：用户侧统一是 `flowlet`（第二期由 `flowlet-cred` 更名，不保留别名）。
-> 仓库内仍保留 Rust legacy 二进制 `flowlet-cred` 仅用于兼容性对拍，见 §3.3。
+> 使用 Node CLI，不再构建或分发旧宿主 CLI；检查见 §3.3。
 
 ## 2. 存储布局
 
@@ -57,7 +57,7 @@ Flowlet 的凭据分两种，**不要混为一谈**：
 - `auth.json` 只存 `flowlet login` 拿到的 token（`flwcli_…`），与 `credentials.env` 同目录；
   token 只用于 `flowlet pull`，不会写进 `.env`，也不会被 `list` / `env` 输出。
 
-`credentials.env` 示例（文件头由 CLI 维护，Rust legacy 写同一份文案，逐字节一致）：
+`credentials.env` 示例（文件头由 CLI 维护）：
 
 ```dotenv
 # Flowlet 全局凭据库
@@ -91,7 +91,7 @@ SQLite service_credentials 表       # id / name / provider / base_url / usernam
 
 ## 3. CLI
 
-### 3.1 运行方式（Node 默认，Rust legacy）
+### 3.1 运行方式（Node/TS）
 
 Node 版位于 `packages/flowlet-cred/`，需要 **Node.js 22.6+**（本仓库 Node 26）直接跑 TS，无构建步骤。
 Node 22.6–22.17 的类型剥离仍需 `--experimental-strip-types`，`bin/flowlet.mjs` 会自动检测版本并
@@ -115,15 +115,6 @@ Agent 机器不需要仓库，直接用 Web Host 页面提供的下载安装脚�
 ```bash
 curl -fsSL http://<flowlet-host>:20134/downloads/install-flowlet.sh \
   | sh -s -- --base=http://<flowlet-host>:20134/downloads
-```
-
-Rust legacy 版（仅兼容性对拍/回滚用，Agent 机器不再需要；二进制名仍为 `flowlet-cred`，
-Cargo feature `legacy-cred` 默认关闭，需要时显式开启）：
-
-```bash
-cargo build --release --manifest-path src-tauri/Cargo.toml \
-  --no-default-features --features legacy-cred --bin flowlet-cred
-# 产物：src-tauri/target/release/flowlet-cred
 ```
 
 ### 3.2 命令
@@ -194,26 +185,18 @@ flowlet uptime-kuma env [--profile=TW]                    # {PREFIX}_URL / {PREF
 flowlet uptime-kuma clear [--profile=TW]
 ```
 
-### 3.3 Node 与 Rust legacy 的已知差异
+### 3.3 兼容性与验证
 
-- `get` 默认**掩码**，需显式 `--reveal` 才输出明文（Rust legacy 默认明文、`--mask` 掩码）；
-  `--mask` 在 Node 版继续可用，跨版本脚本不受影响。
-- Node 版额外提供 `clear`（清空全部凭据，保留注释/文件头与权限）；Rust legacy 无此命令。
-- Rust legacy **没有** `login` / `logout`，也**没有** `dockhand` 子命令、不支持 `--profile`；
-  它是第一期行为的对拍基线：`gitlab` 子命令只读写默认前缀（`GITLAB_*`），`pull` 复用共享
-  `env_keys` 写 `DOCKHAND_URL` / `DOCKHAND_TOKEN`（或导出条目里的 `envPrefix`），
-  且只认 `--token` / `FLOWLET_ADMIN_TOKEN`（不读 `auth.json`）。
-- Rust legacy 二进制名保持 `flowlet-cred`（Cargo 顶层 bin 名 `flowlet` 已被桌面端占用）；
-  用户侧命令统一 `flowlet`，不保留 `flowlet-cred` 别名。
-- 其余命令的输出、错误文案、dotenv/JSON 文件字节、权限（0700/0600）、原子写行为一致；
-  `packages/flowlet-cred/scripts/compat.mjs` 用同一序列对 Rust legacy 与 Node CLI 做逐行对拍
-  （路径/RFC3339 时间戳归一化），并验证双向交叉读取：
+用户命令统一为 `flowlet`，不保留旧二进制别名。`get` 默认掩码，必须显式 `--reveal`
+才输出明文；`--mask` 继续兼容。`clear` 保留注释与文件头，权限和原子写入规则不变。
 
-  ```bash
-  npm run cred:compat     # 期望：输出与文件字节级一致
-  npm run cred:test       # node:test（本地库 / GitLab mock / Dockhand mock / 多 profile / pull / 兼容性）
-  npm run cred:typecheck  # tsc --noEmit
-  ```
+```bash
+npm run cred:test
+npm run cred:typecheck
+```
+
+测试使用本地 mock 和临时凭据目录；不再依赖旧 CLI 对拍。文件格式、权限、错误与行为兼容性
+必须用 Node 回归逐项验证，不能用静态命令计数证明。
 
 ## 4. 远程登录授权（Docker / Web Host）
 
@@ -447,7 +430,7 @@ flowlet registry clear --profile=na      # 只删 NA 这个前缀
 - **本机接入**（仅 Web Host）：页面头部「本机接入」按钮提供 CLI / Skills 下载与一键命令，
   以及「已授权的 CLI」列表（见 §4.2 与 §15）。
 
-对应的管理命令（桌面 Tauri 与 Web 白名单同名）：
+对应的管理命令（Node Web 命令面；Electron 本机 Host 复用）：
 
 ```text
 list_credential_providers / list_service_credentials /
@@ -469,8 +452,7 @@ UI 页面本身不调用导出，只调用 `reveal_service_credential` / `list_c
 Bearer）；`flowlet login` 签发的 CLI token 作用域只有 `credentials:read` 且白名单仅
 `export_service_credentials`，调用本命令返回 403。入口在「编辑服务凭据」抽屉的 Token 字段，
 点击后才请求明文并就地展示，可复制或点「隐藏」收起；列表接口仍只返回掩码（`••••1a2b`），
-明文不写日志、不缓存；前端用完即丢弃（点「隐藏」或关闭抽屉即清空状态）。Rust Host 未实现该命令，
-桌面端调用会失败并提示「无法查看原始 token」。
+明文不写日志、不缓存；前端用完即丢弃（点「隐藏」或关闭抽屉即清空状态）。桌面复用 Node 命令实现；能否调用由当前认证上下文和显式权限声明决定。
 
 UI 是配置入口，CLI 是分发/消费入口：
 
@@ -519,7 +501,7 @@ flowlet gitlab env --profile=work               # GITLAB_WORK_URL / GITLAB_WORK_
 
 已验证：用 10.8.7 语义的 mock 服务跑通 `set → status(用户+版本 10.8.7) → projects(含
 default_branch/visibility) → api GET /version`，以及错误 token 不落库、未配置时的提示、
-`env`/`clear`；`core/gitlab.rs` 7 个单测覆盖 URL 归一、子路径、项目解析、错误映射、分页头。
+`env`/`clear`；Node GitLab mock 测试覆盖 URL 归一、子路径、项目解析、错误映射、分页头。
 
 ## 10. Dockhand 适配（Bearer API Token）
 
@@ -814,7 +796,7 @@ Web Host 的「服务凭据」页提供「本机接入」抽屉（桌面模式�
   （或用 `FLOWLET_ADMIN_TOKEN`）；OIDC 实例不开启 `ALLOW_TOKEN_LOGIN`，`--token` 会 401。
 - **已授权的 CLI**：抽屉内「已授权的 CLI」段列出名称 / 创建时间 / 到期时间 / 最近使用，
   每行「撤销」需确认；撤销后对应机器上的 `flowlet pull` 立即 401，需要重新 `flowlet login`。
-  桌面 Host（Tauri）尚未实现该命令，此时列表位置只显示说明文案，登录与同步命令照常可用。
+  本机接入下载引导仅 Web 模式展示；具体命令由 Node 显式权限白名单控制。
 
 - **安装 Skills**：下载 `http://<flowlet-host>:20134/downloads/flowlet-skills.tar.gz`，解压到你所
   在 Agent 的 skills 目录，阅读 `flowlet-credentials/SKILL.md`；页面「复制 Agent 提示词」会生成
@@ -843,47 +825,18 @@ Web Host 的「服务凭据」页提供「本机接入」抽屉（桌面模式�
   容器内没有用户 `config_dir`，CLI 需要显式设置 `FLOWLET_CRED_DIR` 时才在容器里使用。
 - **与 Web Host 鉴权（OIDC）**：CLI 授权走**独立作用域 token**（`credentials:read`），
   不打开管理 Bearer 兜底、也不复用管理会话 Cookie；详见 §4.2 与
-  [`admin-sso-design.md`](./admin-sso-design.md) §5.1.1 / §7.6。
-- **与 UI**：`core/credential_store.rs` 是纯 Rust 模块，后续可直接被桌面/Web 命令复用
-  （读列表、读单值、写值、删除），不需要重写存储层。
+  [Docker 用户与鉴权契约](./docker.md#用户会话个人凭据与审计sqlite)。
+- **与 UI**：服务端由 `packages/flowlet-core/src/web/credentials.ts` 与
+  `storage/credentials.ts` 管理加密数据；本机 CLI 使用 `packages/flowlet-cred/src/store.ts` 的 dotenv。
+  两者职责不同，不可把服务端密文文件当成本机环境文件。
 
 ## 17. 验收
 
-- `cargo test --no-default-features --lib credential_store`：9 个用例覆盖读写、顺序、
-  注释保留、引号编码、权限、重复键、导出格式、非法键名；
-- `cargo test --no-default-features --lib gitlab`：7 个用例覆盖 URL 归一（含子路径与
-  `/api/v4` 粘贴）、相对路径限制、项目解析、错误码提示、分页头（含末页 0 值）；
-- `cargo test --no-default-features --lib secret_box`：4 个用例覆盖加解密、密钥跨实例稳定、
-  不同密钥不可解、密文篡改被拒；
-- `cargo test --no-default-features --lib storage_credentials`：覆盖 CRUD、启停、校验结果落库、
-  `env_prefix` 存取；
-- `cargo test --no-default-features --lib service_credentials`：覆盖 providers（含 v7 的
-  `registry` 顺序）、`env_keys`（registry 三把键含 `_HOST`）、环境前缀归一/唯一性、
-  Dockhand / Jenkins / registry 校验、Jenkins / registry 用户名校验；
-- `cargo test --no-default-features --lib jenkins`：覆盖 URL 归一、空用户名/token、
-  Basic 认证身份解析、`X-Jenkins` 版本与错误码提示；
-- `cargo test --no-default-features --lib beszel`：覆盖 URL 归一（`/api`、`/_/`、子路径）、
-  相对路径限制、邮箱 + 密码认证、info/systems 解析与错误码提示；
-- `cargo test --no-default-features --lib registry`：覆盖仓库地址归一（补 scheme、去 `/v2`、
-  拒绝路径/query）、`registry_host`、Basic 直接 200、Bearer 质询换 token 后重试 200、
-  401/403/404/429 与网络错误映射、用户名校验；
-- `node --test packages/flowlet-core/src/web/__tests__/registry.test.ts`：Node Host 侧的
-  同一套 Registry V2 校验与错误文案（与 Rust / CLI 逐字一致）；
-- `cargo test --no-default-features --lib uptime_kuma`：URL 归一（子路径 / `#/settings/api-keys`
-  fragment / 粘贴 `/metrics`）、Basic 空用户名头、`monitor_status` 与 `app_version` 解析
-  （含中文 label 空格与 Prometheus 转义）、空 Key 拒绝；
-- `node --test packages/flowlet-core/src/web/__tests__/uptime-kuma.test.ts`：
-  Web Host 的同一套归一/解析/错误文案，以及 `checkUptimeKuma` 的 detail/version 与
-  `envKeys` 的 `UPTIME_KUMA_API_KEY`；
-- `node --test packages/flowlet-cred/src/__tests__/uptime-kuma.test.ts`：
-  CLI mock `/metrics` 覆盖 200 文本、401、200 HTML、302（不跟随）、404、200 空样本、空 Key；
-- `npm run cred:typecheck` / `npm run cred:test`：Node CLI 覆盖本地库、GitLab mock、Dockhand
-  mock、Jenkins mock、Beszel mock、Registry V2 mock、多 profile（`--profile=na/sz/mon` 独立
-  键名与实例切换）、`pull` 的 `envPrefix` 映射、`DOCKHAND_*` / `JENKINS_*` / `BESZEL_*` /
-  `REGISTRY_*` 映射（`_HOST` 为 host[:port]）、Dockhand / Jenkins / Beszel / registry 纯函数
-  （URL 归一/路径/解析/错误提示），以及 Rust legacy 对拍；
-- `FLOWLET_RUST_CRED=$PWD/src-tauri/target/debug/flowlet-cred npm run cred:compat`：
-  Node CLI 与 Rust legacy 在同一序列下输出/文件字节级一致；
+- `npm run cred:typecheck` / `npm run cred:test`：验证本地库、dotenv/元数据、权限与原子写、
+  各 provider mock、多 profile、login/pull 与错误处理；
+- `node --test packages/flowlet-core/src/web/__tests__/registry.test.ts` 和相关 provider 测试：
+  验证地址规范化、认证、HTTP/业务错误与字段映射；
+- `npm run node:typecheck`、相关存储/鉴权测试：验证密文 CRUD、权限隔离、撤销与加密密钥稳定性；
 - 端到端（headless + mock GitLab 10.8.7）：`list → save（校验后加密落库）→ test → export →
   delete`，确认 SQLite 中搜不到明文 token、`secret.key` 权限 600、非法 token 不入库、
   未鉴权导出返回 401；再执行 `flowlet pull`，确认本机 `.env` 写入
@@ -935,5 +888,5 @@ Web Host 的「服务凭据」页提供「本机接入」抽屉（桌面模式�
 ## 原生 A2A 客户端（Node CLI）
 
 客户端命令、会话记录、安全边界与完整示例见 [a2a-cli.md](a2a-cli.md)。
-该功能仅增加 Node CLI 命令，不修改 legacy Rust CLI；既有凭据格式、login/pull 和服务端表结构不变。
+该功能由 Node CLI 提供；既有凭据格式、login/pull 和服务端表结构不变。
 CLI 与 Skills 下载包包含该能力，已安装机器重新运行安装脚本更新，无需重新授权或重建凭据库。

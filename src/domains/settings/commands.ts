@@ -1,4 +1,4 @@
-import { invokeCommand, toAppError } from "../../platform/tauri/client";
+import { invokeCommand, toAppError } from "../../platform/host/client";
 import { isWebHost } from "../../platform/web/mode";
 import type { LogCaptureConfig, UpstreamProxyConfig, UsageCostDisplayConfig } from "./types";
 import type { DatabaseCompactionResult, ModelPriceCurrencyEntry, ModelPriceInfo, ModelPriceTierInfo, StorageUsageSummary } from "./types";

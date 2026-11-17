@@ -1,5 +1,15 @@
 # Flowlet 技术架构迁移方案：Rust / Tauri → Electron + Node/TS
 
+> **已归档（2026-11-17）— 历史资料，不作为当前开发、构建、发布或配置指引。**
+> 当前仅维护 Electron + Node/TS 与 Web/Docker；Rust/Tauri 及其回滚、移动与旧对拍链路已移除。
+> 下文保留当时的正文、命令、路径与测量结论供追溯，不表示这些代码或操作仍可用。
+> 当前入口：[架构](architecture.md)、[Electron 桌面](desktop-electron.md)、
+> [Docker](docker.md)、[发布构建](release-builds.md)。
+
+> **当前平台范围（2026-11-17）**：仅保留 Electron 桌面、Tauri 桌面回滚及 Web/Docker。
+> 本文中的 Android/iOS、移动只读客户端、扫码配对、移动构建和迁移建议仅为历史记录，
+> 已失效，不代表当前支持或待办；桌面设备 S3/LAN 同步与账号工作区继续保留。
+
 > 状态：**执行中**——Docker/Web Host 已完成切换（Node Host 生产运行），桌面 Electron 阶段
 > 自 2026-11-10 起开工。本文是决策文档与阶段状态记录；施工细节见
 > [`commands-and-schema.md`](./migration/commands-and-schema.md)、
@@ -19,7 +29,7 @@
 
 - Electron 宿主 + 桌面独有命令都放在 `packages/flowlet-desktop/` 与 `packages/flowlet-core/src/desktop/`；
 - 前端 React 页面零重写：新增 `desktop` 构建模式，命令通道改走本机 HTTP（同一份 `POST /api/commands/{command}`）；
-- **Tauri/Rust 版本保留为回滚路径**，本轮不删除 `src-tauri/**`、不删除 Android 工程；
+- **Tauri/Rust 桌面版本保留为回滚路径**，桌面回滚实现不得删除；移动工程与发布链路已停止维护并移除；
 - 桌面命令面覆盖度用 `node scripts/desktop-command-parity.mjs` 追踪（Rust `generate_handler!`
   对 `web/commands.ts` + `desktop/*.ts`），任何阶段都必须能报出「还差哪几条」。
 
@@ -47,7 +57,7 @@
 > `npm run desktop:dist` 产出 AppImage/deb，`release/linux-unpacked` 直接启动并截图通过。
 >
 > 已知缺口（转入后续阶段）：Windows Job Object 子进程树强杀回收、Windows toast/AUMID、
-> Linux 八向缩放原生吸附、Android 端、macOS/Windows 真机验证、Electron devDependencies 的
+> Linux 八向缩放原生吸附、macOS/Windows 真机验证、Electron devDependencies 的
 > 仓库级 `npm install`（package-lock 需重生成）、SyncTab 的 `@tauri-apps/plugin-dialog`
 > 兼容 shim（已用窄白名单 shim 覆盖 dialog open/save）。
 

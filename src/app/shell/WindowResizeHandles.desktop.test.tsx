@@ -17,7 +17,7 @@ async function loadResizeHandles() {
 }
 
 /**
- * Electron desktop（HG-2 降级）：缩放手柄不再调用 Tauri `startResizeDragging`，
+ * Electron desktop（HG-2 降级）：缩放手柄不再进入系统缩放模态，
  * 而是把方向 + 初始屏幕坐标交给 preload 桥的 `resizeBegin`（主进程 setBounds 跟随）。
  */
 describe("WindowResizeHandles in Electron desktop mode", () => {

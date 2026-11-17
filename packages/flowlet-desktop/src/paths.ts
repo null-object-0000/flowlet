@@ -1,10 +1,10 @@
 // 桌面数据目录与运行时资源解析。
 //
-// 目标：与 Rust/Tauri 版本使用同一份数据，用户升级后不丢账号/日志/登录态。
+// 目标：与历史桌面版本使用同一份数据，用户升级后不丢账号/日志/登录态。
 // 权威行为：
-// - `src-tauri/src/lib.rs::app_database_path`：SQLite 始终在 exe 同级目录；
-// - `src-tauri/src/core/webview_profile.rs`：便携版（exe 旁 `portable.tag`）WebView
-//   数据根为 `exe/data/webview`，安装版为 Tauri `app_local_data_dir`（Windows
+// - SQLite 优先在 exe 同级目录；无写权限时回退本机应用数据目录；
+// - 便携版（exe 旁 `portable.tag`）WebView
+//   数据根为 `exe/data/webview`，安装版为本机应用数据目录（Windows
 //   `%LOCALAPPDATA%`，Linux `$XDG_DATA_HOME`，macOS `~/Library/Application Support`）；
 // - `scripts/build-portable.mjs`：复制 config 并写入 `portable.tag`。
 //
@@ -76,8 +76,8 @@ function isWritableDirectory(dir: string): boolean {
   }
 }
 
-/** Tauri `app_local_data_dir` 的等价目录（Windows 用 LOCALAPPDATA 而非 APPDATA）。 */
-export function tauriLocalDataDir(): string {
+/** 兼容历史版本的本机应用数据目录（Windows 用 LOCALAPPDATA 而非 APPDATA）。 */
+export function desktopLocalDataDir(): string {
   if (process.platform === "win32") {
     const local = process.env.LOCALAPPDATA;
     if (local) return join(local, APP_IDENTIFIER);
@@ -94,7 +94,9 @@ function ensureBundledResources(dataDir: string, runtimeRoot: string): void {
   for (const name of BUNDLED_DATA_FILES) {
     const target = join(dataDir, name);
     if (existsSync(target)) continue;
-    const source = join(runtimeRoot, name);
+    const source = name === "models-cn.json" || name === "models-dev.json"
+      ? join(runtimeRoot, "resources", "catalogs", name)
+      : join(runtimeRoot, name);
     if (!existsSync(source)) continue;
     copyFileSync(source, target);
   }
@@ -121,7 +123,7 @@ export function resolveDesktopPaths(options: ResolveDesktopPathsOptions = {}): D
     if (!isWritableDirectory(dataDir)) {
       // 安装到 Program Files / /usr/bin 时 exe 目录不可写。Rust 版同样会失败，
       // 但 Electron 安装版不能因此无法启动：降级到本机应用数据目录并告警。
-      const fallback = tauriLocalDataDir();
+      const fallback = desktopLocalDataDir();
       mkdirSync(fallback, { recursive: true });
       console.warn(`[flowlet-desktop] exe 目录不可写，数据目录降级到 ${fallback}`);
       dataDir = fallback;
@@ -141,7 +143,7 @@ export function resolveDesktopPaths(options: ResolveDesktopPathsOptions = {}): D
     : packaged
       ? portable
         ? join(dataDir, "data", "webview")
-        : tauriLocalDataDir()
+        : desktopLocalDataDir()
       : join(dataDir, "webview");
   mkdirSync(webviewRoot, { recursive: true });
 
@@ -191,7 +193,7 @@ function migrateLegacyDatabase(dbPath: string): void {
   }
 }
 
-/** 在 app ready 前调用：把 Chromium/主窗口状态放回 Tauri 相同位置。 */
+/** 在 app ready 前调用：把 Chromium/主窗口状态保留在历史数据位置。 */
 export function applyElectronStoragePaths(paths: DesktopPaths): void {
   // 主 WebView 与 Rust `main-webview` 对齐；sessionData 让 persist: partition 落到
   // webviewRoot/Partitions 下（目录名与 Rust 不同，但同样 per-account 隔离）。

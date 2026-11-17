@@ -1,5 +1,15 @@
 # Flowlet Tauri(Rust) → Electron(Node/TS) 迁移：命令面与 SQLite Schema 清点
 
+> **已归档（2026-11-17）— 历史资料，不作为当前开发、构建、发布或配置指引。**
+> 当前仅维护 Electron + Node/TS 与 Web/Docker；Rust/Tauri 及其回滚、移动与旧对拍链路已移除。
+> 下文保留当时的正文、命令、路径与测量结论供追溯，不表示这些代码或操作仍可用。
+> 当前入口：[架构](../architecture.md)、[Electron 桌面](../desktop-electron.md)、
+> [Docker](../docker.md)、[发布构建](../release-builds.md)。
+
+> **当前平台范围（2026-11-17）**：仅保留 Electron 桌面、Tauri 桌面回滚及 Web/Docker。
+> 本文中的 Android/iOS、移动只读客户端、扫码配对、移动构建和迁移建议仅为历史记录，
+> 已失效，不代表当前支持或待办；桌面设备 S3/LAN 同步与账号工作区继续保留。
+
 > **性质**：只读勘察结论，作为重写排期与任务拆分的输入。
 > **基线**：仓库当前工作区（`src-tauri/src/lib.rs` 中 `invoke_handler` 注册表为命令权威来源）。
 > **范围**：`src-tauri/src/commands/*.rs`（约 5,049 行）、`src-tauri/src/mobile_commands.rs`、`src-tauri/src/lib.rs`、`src-tauri/src/core/storage*.rs`、`src-tauri/src/core/request_capture.rs`；不含代理转发协议细节、不含 `src-tauri/src/core/web/*` 的 HTTP 路由实现（仅在 §5.3 标注其命令白名单规模）。

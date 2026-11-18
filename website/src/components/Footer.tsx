@@ -1,7 +1,6 @@
 import { useI18n } from "../i18n/I18nContext";
+import { projectLinks } from "../projectLinks";
 import styles from "./Footer.module.css";
-
-const GITHUB = "https://github.com/null-object-0000/flowlet";
 
 export function Footer() {
   const { lang, t } = useI18n();
@@ -10,17 +9,18 @@ export function Footer() {
     {
       title: t.footer.product,
       links: [
-        { label: "Releases", href: `${GITHUB}/releases` },
-        { label: "README", href: GITHUB },
-        { label: "Roadmap", href: `${GITHUB}/blob/main/docs/roadmap.md` },
+        { label: t.hero.primary, href: projectLinks.releases },
+        { label: t.hero.selfHost, href: projectLinks.docker },
+        { label: t.footer.android, href: projectLinks.android },
+        { label: t.nav.ecosystem, href: projectLinks.compatibility },
       ],
     },
     {
       title: t.footer.project,
       links: [
-        { label: "GitHub", href: GITHUB },
-        { label: "Issues", href: `${GITHUB}/issues` },
-        { label: "MIT License", href: `${GITHUB}/blob/main/LICENSE` },
+        { label: "GitHub", href: projectLinks.repository },
+        { label: "Issues", href: `${projectLinks.repository}/issues` },
+        { label: "MIT License", href: `${projectLinks.repository}/blob/main/LICENSE` },
       ],
     },
   ];

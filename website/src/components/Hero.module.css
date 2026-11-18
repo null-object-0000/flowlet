@@ -5,8 +5,13 @@
 .eyebrow::before { width: 8px; height: 8px; border-radius: 50%; content: ""; background: var(--flowlet-color-primary); box-shadow: 0 0 0 6px rgba(23,105,255,.09); }
 .copy h1 { max-width: 650px; margin: 0; font-size: clamp(46px,5vw,66px); line-height: 1.05; letter-spacing: -.052em; font-weight: 800; text-wrap: balance; }
 .copy > p { max-width: 620px; margin: 24px 0 28px; color: var(--flowlet-color-text-secondary); font-size: 17px; line-height: 1.75; }
-.actions { display: flex; flex-wrap: wrap; gap: 12px; }
-.notes { margin-top: 23px; display: flex; flex-wrap: wrap; gap: 18px; color: var(--flowlet-color-text-tertiary); font-size: 12px; }
+.actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.actions a { min-height: 42px; padding: 9px 13px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid transparent; border-radius: var(--flowlet-radius-sm); font-size: 14px; font-weight: 650; }
+.actions .primaryAction { color: var(--flowlet-color-surface); background: var(--flowlet-color-primary-strong); }
+.actions .secondaryAction { color: var(--flowlet-color-text); border-color: var(--flowlet-color-border-strong); background: var(--flowlet-color-surface); }
+.actions a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.actions .demoAction { color: var(--flowlet-color-text-secondary); }
+.notes { margin-top: 23px; display: flex; flex-wrap: wrap; gap: 18px; color: var(--flowlet-color-text-secondary); font-size: 12px; }
 .notes span::before { margin-right: 6px; color: var(--flowlet-color-success); content: "✓"; font-weight: 800; }
 .flowCard { padding: 24px; border: 1px solid var(--flowlet-color-border-strong); border-radius: 26px; background: var(--flowlet-color-surface-glass); box-shadow: var(--flowlet-shadow-card); backdrop-filter: blur(10px); font-family: var(--flowlet-font-family); }
 .flowTitle { margin-bottom: 18px; display: flex; align-items: center; justify-content: space-between; gap: 14px; }

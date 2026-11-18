@@ -29,7 +29,7 @@ type DemoPage = "overview" | "models" | "requests" | "sessions" | "usage" | "ins
 export function AppMockup() {
   const { lang } = useI18n();
   const zh = lang === "zh";
-  const [activePage, setActivePage] = useState<DemoPage>("overview");
+  const [activePage, setActivePage] = useState<DemoPage>("requests");
 
   const navGroups: DesktopNavGroup[] = [
     { id: "workspace", label: zh ? "工作台" : "Workspace", items: [
@@ -49,7 +49,7 @@ export function AppMockup() {
   const pageMeta: Record<DemoPage, { title: string; subtitle: string }> = {
     overview: { title: zh ? "运行概览" : "Overview", subtitle: zh ? "本地模型服务状态" : "Local model service" },
     models: { title: zh ? "模型服务" : "Model services", subtitle: zh ? "开放模型与路由候选" : "Exposed models and routes" },
-    requests: { title: zh ? "请求日志" : "Request log", subtitle: zh ? "真实上游请求与响应" : "Actual upstream requests" },
+    requests: { title: zh ? "请求日志" : "Request log", subtitle: zh ? "示例请求与上游结果" : "Sample requests and upstream results" },
     sessions: { title: zh ? "会话管理" : "Sessions", subtitle: zh ? "Agent 原生会话与活动" : "Native agent sessions" },
     usage: { title: zh ? "用量统计" : "Usage", subtitle: zh ? "Token 与费用统计" : "Token and cost totals" },
     insights: { title: zh ? "用量洞察" : "Usage insights", subtitle: zh ? "Token、性能与费用" : "Tokens, performance and cost" },

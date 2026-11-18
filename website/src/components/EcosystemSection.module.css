@@ -20,3 +20,6 @@
   .card { padding: 20px; }
   .chips > span { min-width: 0; }
 }
+
+.compatibility { margin: 24px 0 0; text-align: center; }
+.compatibility a { text-decoration: underline; text-underline-offset: 3px; }

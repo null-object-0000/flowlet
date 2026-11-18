@@ -3,6 +3,7 @@ import { IconDownload, IconGithubLogo, IconLanguage, IconMoon, IconSun } from "@
 import { useLocation, useNavigate } from "react-router-dom";
 import { LANGS, useI18n } from "../i18n/I18nContext";
 import { useTheme } from "../styles/ThemeContext";
+import { projectLinks } from "../projectLinks";
 import styles from "./Nav.module.css";
 
 export function Nav() {
@@ -14,10 +15,9 @@ export function Nav() {
   const otherLang = LANGS.find((l) => l !== lang) ?? "en";
 
   const anchors = [
-    { href: "#why", label: t.nav.why },
-    { href: "#how", label: t.nav.how },
     { href: "#demo", label: t.nav.demo },
     { href: "#trace", label: t.nav.trace },
+    { href: "#ecosystem", label: t.nav.ecosystem },
     { href: "#start", label: t.nav.start },
   ];
 
@@ -62,7 +62,7 @@ export function Nav() {
             icon={<IconGithubLogo />}
             theme="borderless"
             className={styles.githubButton}
-            onClick={() => window.open("https://github.com/null-object-0000/flowlet", "_blank", "noopener,noreferrer")}
+            onClick={() => window.open(projectLinks.repository, "_blank", "noopener,noreferrer")}
           >
             {t.nav.github}
           </Button>
@@ -71,7 +71,8 @@ export function Nav() {
             theme="solid"
             type="primary"
             className={styles.downloadButton}
-            onClick={() => window.open("https://github.com/null-object-0000/flowlet/releases", "_blank", "noopener,noreferrer")}
+            aria-label={t.hero.primary}
+            onClick={() => window.open(projectLinks.releases, "_blank", "noopener,noreferrer")}
           >
             <span className={styles.downloadLabel}>{t.nav.download}</span>
           </Button>

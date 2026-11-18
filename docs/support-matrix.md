@@ -1,7 +1,6 @@
 # Flowlet 当前支持矩阵
 
-> 状态日期：2026-08-10
-> 本文描述当前工作区已经实现或已经确认的能力，不把路线图能力写成已支持。
+> 本文描述仓库当前实现的兼容性边界，不把路线图能力写成已支持；已发行版本以对应版本文档为准。
 
 本文统一说明 Flowlet 当前对渠道、模型和 AI Agent 的支持情况。判断某项能力时，
 必须区分以下三层：
@@ -37,7 +36,7 @@
 | Responses ↔ Chat Completions 转换 | — | Flowlet 明确不做跨协议转换 |
 | Gemini-compatible | — | 尚未提供正式入口 |
 
-Responses 是独立协议（`ProtocolType::Responses`），不是 OpenAI 通配路由的副产品：
+Responses 是独立协议（`responses`），不是 OpenAI 通配路由的副产品：
 路由候选按 `client_protocol = "responses"` 匹配，未声明该协议的渠道（如 Kimi）
 不会产生候选；上游端点从渠道 OpenAI Base URL 派生（`{base}/v1/responses`，
 裸根入口 `/responses` 则拼出 `{base}/responses`），鉴权复用 `openai_auth`。
@@ -45,7 +44,7 @@ Responses 是独立协议（`ProtocolType::Responses`），不是 OpenAI 通配�
 
 ## 3. 渠道支持
 
-Flowlet 当前有七种渠道模板：LongCat、DeepSeek、Kimi、Qwen、Z.AI、OpenRouter 和自定义渠道。
+渠道注册以 [plugin-registry.json](../plugin-registry.json) 为准，端点与默认协议见 [config.json](../config.json)。
 千问按量付费与 Token Plan 共用 `qwen` 渠道模板，但使用不同的 API Key 和 Base URL，
 因此在矩阵中分开列出。
 
@@ -60,6 +59,8 @@ Flowlet 当前有七种渠道模板：LongCat、DeepSeek、Kimi、Qwen、Z.AI、
 | Qwen Token Plan | ✅ | ✅ | — | ✅ | — | ✅ 控制台抓取套餐额度 | ✅ 官方明确支持 | ✅（仅无状态透传） |
 | Z.AI | ✅（路径无 `/v1`：`/api/paas/v4/chat/completions`） | ✅ | — | ✅（端点 `/api/paas/v4/models`） | — | — 官方暂无公开余额接口，先只支持 API 模式 | — 官方文档未确认 | —（不生成 responses 路由） |
 | OpenRouter | ✅ | ✅（Anthropic Skin） | — | ✅ | — | ✅ API Key 用量与 Credits | ✅ 官方 `/api/v1/responses`（无状态） | ✅ |
+| ChatGPT API | ✅ | — | — | ✅ | — | — | ✅ | ✅（仅无状态透传） |
+| VibeToken | ✅ | — | — | ✅ | — | ✅ API 余额 | ✅ | ✅（仅无状态透传） |
 | 自定义渠道 | 取决于已填写的 OpenAI Base URL | 取决于已填写的 Anthropic Base URL | — | ✅ 使用标准 OpenAI `/models` | — | — | 取决于上游，当前无自动检测 | ✅（填写 OpenAI Base URL 即生成路由，上游是否支持由用户保证） |
 
 上游 Responses API 的当前结论：
@@ -107,36 +108,9 @@ Flowlet 当前有七种渠道模板：LongCat、DeepSeek、Kimi、Qwen、Z.AI、
 
 ## 4. 模型支持
 
-Flowlet 当前总共支持 23 个规范化模型。这个列表是全局白名单，不是按渠道切分的
-固定路由表。
+完整模型白名单及别名以 [model-catalog.json](../model-catalog.json) 为准。目录定义模型身份，不代表每个账号或端点都可调用目录中的模型。实际可用范围取决于账号返回的模型、用户勾选开放的资源和客户端所用协议。
 
-| 官方归属 | 规范化模型 ID | Responses 说明 |
-|----------|---------------|----------------|
-| LongCat | `LongCat-2.0` | ✅ 上游确认 |
-| DeepSeek | `deepseek-v4-pro` | ◐ Flowlet 会生成候选；上游模型级可用性需实测 |
-| DeepSeek | `deepseek-v4-flash` | ✅ 上游确认 |
-| DeepSeek | `deepseek-v4.1-flash` | ✅ 上游确认（官方 API 名 `deepseek-flash` 归一命中） |
-| DeepSeek | `deepseek-v4-flash-vision-exp` | ◐ 视觉实验模型；上游模型级可用性需实测 |
-| Kimi | `kimi-k3` | — 上游暂不支持 |
-| Kimi | `kimi-k2.7-code` | — 上游暂不支持 |
-| Qwen | `qwen3.8-max` | ✅ 上游确认 |
-| Qwen | `qwen3.8-flash` | ✅ 上游确认 |
-| Qwen | `qwen3.7-max` | ✅ 上游确认 |
-| Qwen | `qwen3.7-plus` | ✅ 上游确认 |
-| Qwen | `qwen3.7-flash` | ✅ 上游确认 |
-| Qwen | `qwen3.6-plus` | ✅ 上游确认 |
-| Qwen | `qwen3.6-flash` | ✅ 上游确认 |
-| Z.AI | `glm-5.3` | — 上游文档未确认支持 |
-| Z.AI | `glm-5.3-flash` | — 上游文档未确认支持 |
-| Z.AI | `glm-5.2` | — 上游文档未确认支持 |
-| Z.AI | `glm-4.7` | — 上游文档未确认支持 |
-| Z.AI | `glm-4.5-air` | — 上游文档未确认支持 |
-| OpenRouter | `ox-alpha` | — 上游文档未确认支持 |
-| OpenRouter | `nemotron-3.5-lightning` | — 上游文档未确认支持 |
-| OpenRouter | `nemotron-3-super-120b-a12b` | — 上游文档未确认支持 |
-| OpenRouter | `nemotron-3-ultra-550b-a55b` | — 上游文档未确认支持 |
-
-以上 23 个规范模型 ID 即 Flowlet 的完整白名单。Flowlet 不再提供聚合模型或虚拟模型别名：Agent 接入时直接选择其中一个规范模型，同一规范模型的多账号/多变体形成候选池。
+Flowlet 不再提供聚合对外模型名；同一规范模型的多账号、多上游变体可组成候选池。
 
 ### 4.1 模型身份与承载渠道
 
@@ -182,7 +156,8 @@ Flowlet 不做模型级拦截。
 
 ### 5.1 一等接入矩阵
 
-概览页当前提供六类一等 Agent 入口。
+桌面本机模式提供下列一等接入。Agent 的注册与能力声明见 [plugin-registry.json](../plugin-registry.json)。
+Web Host 和桌面客户端模式不提供本机 Agent 配置写入；外部 [A2A](a2a-gateway.md) Agent 属于独立的网关接入。
 
 | Agent | 安装探测 | 一键写入/恢复 | 接入协议 | 请求归属 | 原生会话与时间线 | 其他能力 |
 |-------|----------|---------------|----------|----------|------------------|----------|
@@ -304,9 +279,10 @@ Cline、Continue、Open WebUI、Gemini CLI 等目前没有完整的一等安装�
 相关事实来源：
 
 - 渠道模板与能力：`config.json`
-- 前端模型白名单与档位：`src/domains/channel/types.ts`
+- 模型身份与别名：[model-catalog.json](../model-catalog.json)
+- 渠道与 Agent 注册：[plugin-registry.json](../plugin-registry.json)
 - Node Host 模型白名单与路由生成：`packages/flowlet-core/src/config/index.ts`
-- 代理入口与透明转发：`packages/flowlet-core/src/proxy/index.ts`
+- 代理入口与模型转发：`packages/flowlet-core/src/proxy/index.ts`
 - Agent 一等入口：`src/features/agent-access/OverviewAgentAccessCard.tsx`
 - Agent 环境探测：`packages/flowlet-core/src/agent/environment.ts`
 - Agent 全局配置：`packages/flowlet-core/src/agent/adapters/index.ts`

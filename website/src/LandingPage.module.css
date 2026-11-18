@@ -7,3 +7,11 @@
 .page main {
   display: block;
 }
+
+.page main > section[id] {
+  scroll-margin-top: 72px;
+}
+
+@media (max-width: 820px) {
+  .page main > section[id] { scroll-margin-top: 60px; }
+}

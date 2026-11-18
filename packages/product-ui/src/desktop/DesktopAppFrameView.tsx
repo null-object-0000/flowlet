@@ -63,10 +63,11 @@ export function DesktopSidebarView({
 }
 
 export function DesktopAppFrameView({ sidebar, children, embedded = false }: { sidebar: ReactNode; children: ReactNode; embedded?: boolean }) {
+  const Content = embedded ? "div" : "main";
   return (
     <div className={`${styles.shell} ${embedded ? styles.embedded : ""}`}>
       <aside className={styles.sidebar}>{sidebar}</aside>
-      <main className={styles.content}>{children}</main>
+      <Content className={styles.content}>{children}</Content>
     </div>
   );
 }

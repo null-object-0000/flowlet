@@ -14,7 +14,7 @@
 .step div { min-width: 0; display: grid; gap: 3px; }.step strong { font-size: 15px; line-height: 21px; }.step small { overflow: hidden; min-width: 0; color: #b5c4d8; font-size: 14px; line-height: 20px; text-overflow: ellipsis; white-space: nowrap; }
 .request { box-shadow: 0 22px 60px rgba(0,0,0,.25); }
 .requestHead { padding-bottom: 15px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #24334a; }
-.requestHead strong { font-size: 15px; line-height: 21px; }.requestHead span { display: flex; align-items: center; gap: 7px; color: #82e8bd; font-size: 14px; line-height: 20px; }.requestHead i { width: 7px; height: 7px; border-radius: 50%; background: #48cf9c; }
+.requestHead strong { font-size: 15px; line-height: 21px; }.requestHead span { display: flex; align-items: center; gap: 7px; color: #ffb4a9; font-size: 14px; line-height: 20px; }.requestHead i { width: 7px; height: 7px; border-radius: 50%; background: #ff9c8f; }
 .rows { margin-top: 7px; }.rows > div { min-height: 44px; padding: 11px 0; display: grid; grid-template-columns: 1fr 1.35fr; align-items: center; gap: 16px; border-bottom: 1px solid #2a3a51; font-size: 14px; line-height: 20px; }.rows > div > span { color: #b1c0d3; }.rows strong { overflow: hidden; min-width: 0; color: #f4f8ff; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .timeline { margin-top: 18px; display: flex; align-items: center; }.timeline span { position: relative; height: 2px; flex: 1; background: #33527e; }.timeline span::before { position: absolute; left: 0; top: -4px; width: 10px; height: 10px; border-radius: 50%; content: ""; background: #65a1ff; box-shadow: 0 0 0 4px rgba(101,161,255,.08); }.timeline span:last-child { flex: 0; }
 @media (max-width: 760px) {

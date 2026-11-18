@@ -14,7 +14,7 @@ export function RequestLogsDemoView({ zh, density = "default" }: { zh: boolean; 
   }), [fixture.rows, search, status]);
   return <DemoPageScaffold
     title={zh ? "请求日志" : "Request log"}
-    subtitle={zh ? "查看代理服务的实时请求、模型路由和 Token 消耗" : "Inspect live proxy requests, model routes and token usage"}
+    subtitle={zh ? "查看示例请求、模型路由和 Token 消耗" : "Inspect sample requests, model routes and token usage"}
     controls={<DemoRefreshControl zh={zh} range={zh ? "今天" : "Today"} />}
   >
     <RequestLogsView

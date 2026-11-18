@@ -5,6 +5,5 @@ export const projectLinks = {
   repository,
   releases: `${repository}/releases`,
   docker: `${docs}/docker.md`,
-  android: "https://www.pgyer.com/flowlet-android",
   compatibility: `${docs}/support-matrix.md`,
 } as const;

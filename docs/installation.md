@@ -1,8 +1,8 @@
 # Flowlet 安装与使用手册
 
-Flowlet 桌面端支持 Windows、macOS 和 Linux；Android APK 是实验性的移动辅助端，
-不能替代桌面端的本地代理与账号管理能力。请只从
+Flowlet 桌面端支持 Windows、macOS 和 Linux，请从
 [Flowlet GitHub Releases](https://github.com/null-object-0000/flowlet/releases) 下载。
+在服务器上自托管请看 [Docker 快速开始](docker.md)。
 
 ## 选择安装包
 
@@ -12,7 +12,6 @@ Flowlet 桌面端支持 Windows、macOS 和 Linux；Android APK 是实验性的�
 | macOS Apple Silicon | `darwin_aarch64.dmg` | 适用于 M1、M2、M3、M4 等 Apple 芯片 Mac |
 | macOS Intel | `darwin_x64.dmg` | 适用于 Intel 芯片 Mac |
 | Linux x64 | `linux_amd64.AppImage` | 免安装运行；也提供 Debian DEB |
-| Android arm64 | `arm64.apk` | 实验性移动辅助端 |
 
 ## Windows
 
@@ -80,12 +79,6 @@ sudo apt install ./Flowlet_<版本号>_linux_amd64.deb
 ```
 
 Linux 产物由 CI 自动构建，目前尚未完成作者完整真机回归。
-
-## Android 移动辅助端
-
-下载 arm64 APK 后，按照 Android 系统提示允许当前文件来源安装应用。移动端用于通过自有
-S3 或局域网查看多设备用量、会话和 Agent 状态，并执行部分轻量操作；渠道账号、本地代理
-和完整配置仍需在桌面端管理。
 
 ## 首次使用
 

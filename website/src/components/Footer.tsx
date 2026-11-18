@@ -11,7 +11,6 @@ export function Footer() {
       links: [
         { label: t.hero.primary, href: projectLinks.releases },
         { label: t.hero.selfHost, href: projectLinks.docker },
-        { label: t.footer.android, href: projectLinks.android },
         { label: t.nav.ecosystem, href: projectLinks.compatibility },
       ],
     },

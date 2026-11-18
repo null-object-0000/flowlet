@@ -36,10 +36,6 @@ export const zh = {
     ],
   },
   demo: {
-    desktopTab: "桌面控制台",
-    mobileTab: "移动辅助端",
-    mobileTitle: "从手机查看多台设备的使用情况。",
-    mobileSubtitle: "演示使用示例数据。切换下方菜单，体验移动端如何汇总多台设备的用量、设备与会话信息。",
     eyebrow: "交互式产品预览",
     title: "先看一次请求是怎么失败的。",
     subtitle: "演示只使用示例数据，不会发起真实请求。在「请求日志」选择「失败」，查看出错的模型、渠道和账号；也可以切到会话与用量页面。",
@@ -96,7 +92,6 @@ export const zh = {
     ctaDesc: "在本机一键接入 Agent，下载桌面版；在服务器运行一个统一入口，按 Docker 文档部署。",
   },
   footer: {
-    android: "Android 辅助端（实验性）",
     tagline: "多个 AI Agent，共用一个可控、可追溯的模型入口。",
     product: "产品",
     project: "项目",

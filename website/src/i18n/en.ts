@@ -38,10 +38,6 @@ export const en: Messages = {
     ],
   },
   demo: {
-    desktopTab: "Desktop console",
-    mobileTab: "Mobile companion",
-    mobileTitle: "Check every device from your phone.",
-    mobileSubtitle: "This preview uses sample data. Explore usage, devices, and sessions across multiple devices.",
     eyebrow: "Interactive product preview",
     title: "Start with a failed request.",
     subtitle: "The demo uses sample data and sends no live requests. In Request log, select Failed to see the model, provider, and account involved, or switch to Sessions and Usage.",
@@ -98,7 +94,6 @@ export const en: Messages = {
     ctaDesc: "Download the desktop app for local agent setup, or follow the Docker guide to run a shared endpoint on your server.",
   },
   footer: {
-    android: "Android companion (experimental)",
     tagline: "One traceable model endpoint for your AI agents.",
     product: "Product",
     project: "Project",

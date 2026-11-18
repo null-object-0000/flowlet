@@ -17,7 +17,6 @@
 | --- | --- |
 | 在自己的电脑上使用，并让 Flowlet 管理本机 Agent 配置 | 下载 [Windows、macOS 或 Linux 桌面版](https://github.com/null-object-0000/flowlet/releases)。安装包和首次启动说明见[安装手册](docs/installation.md)。 |
 | 在服务器上提供模型入口，用浏览器管理 | 按 [Docker 部署文档](docs/docker.md)启动独立 Web Host。也可以用桌面端[客户端模式](docs/desktop-electron.md)连接已有 Web Host；远程管理不会写入本机 Agent 配置。 |
-| 在 Android 上查看同步数据 | 使用实验性的 [Android 辅助端](docs/installation.md#android-移动辅助端)。它不替代桌面端。 |
 
 ## 接入第一个 Agent
 
@@ -43,7 +42,7 @@ Flowlet 不做跨协议转换。OpenAI Chat Completions、Anthropic Messages、�
 <details>
 <summary>从源码运行</summary>
 
-桌面开发使用 Node.js 24+ 和 npm；构建实验性 Android 辅助端另需 Rust、Java 和 Android SDK/NDK。
+桌面开发使用 Node.js 24+ 和 npm。
 
 ```bash
 git clone https://github.com/null-object-0000/flowlet.git
